@@ -24,5 +24,6 @@ public class OnlineServicesEOS : ModuleRules
 		bLegacyPublicIncludePaths = false;
 
 		PublicDependencyModuleNames.Add("Core");
+		PublicDependencyModuleNames.Add("DummyHeaders");
 	}
 }
