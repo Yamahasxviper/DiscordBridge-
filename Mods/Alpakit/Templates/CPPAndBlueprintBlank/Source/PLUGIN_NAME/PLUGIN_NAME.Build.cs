@@ -8,8 +8,6 @@ public class PLUGIN_NAME : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 		CppStandard = CppStandardVersion.Cpp20;
-		DefaultBuildSettings = BuildSettingsVersion.Latest;
-		bLegacyPublicIncludePaths = false;
 
 		// FactoryGame transitive dependencies
 		// Not all of these are required, but including the extra ones saves you from having to add them later.

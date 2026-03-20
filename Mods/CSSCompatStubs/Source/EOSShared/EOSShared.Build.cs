@@ -29,6 +29,5 @@ public class EOSShared : ModuleRules
 		bLegacyPublicIncludePaths = false;
 
 		PublicDependencyModuleNames.Add("Core");
-		PublicDependencyModuleNames.Add("DummyHeaders");
 	}
 }

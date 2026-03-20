@@ -22,6 +22,5 @@ public class OnlineServicesEOSGS : ModuleRules
 		bLegacyPublicIncludePaths = false;
 
 		PublicDependencyModuleNames.Add("Core");
-		PublicDependencyModuleNames.Add("DummyHeaders");
 	}
 }
