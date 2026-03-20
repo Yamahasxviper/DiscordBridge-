@@ -228,6 +228,61 @@ public class MyMod : ModuleRules
 
 ---
 
+## Native hooking in `CSSCompatStubs` modules
+
+`CSSCompatStubs` modules load at `PostConfigInit` — earlier than any
+`Default`-phase mod — which makes them the right place for
+**server-wide compatibility hooks** that must be in place before the game
+creates its first game-level objects.
+
+The `EOSShared` stub module uses SML's `SUBSCRIBE_METHOD` macro to cancel
+`UFGLocalPlayer::RequestPublicPlayerAddress()` on dedicated servers, preventing
+a persistent in-flight HTTP request to `ipify.org` that causes log noise at
+server shutdown.
+
+### Key native-hooking patterns used
+
+| Situation | Macro / API |
+|-----------|-------------|
+| Hook a non-virtual private method | `SUBSCRIBE_METHOD(ClassName::MethodName, Handler)` |
+| Suppress a **void** function | `Scope.Cancel()` in the before-hook |
+| Override a **non-void** function's return value | `Scope.Override(NewValue)` in the before-hook |
+| Clean up at shutdown | `UNSUBSCRIBE_METHOD(ClassName::MethodName, Handle)` |
+
+> **Important:** Use `Scope.Cancel()` (not `Scope.Override()`) for void
+> functions.  `Scope.Override(value)` is only valid when the hooked function
+> has a non-void return type.  See the full reference in
+> [12-NativeHooking.md](12-NativeHooking.md).
+
+### Granting access to private methods (AccessTransformers)
+
+`SUBSCRIBE_METHOD` must be able to form a pointer-to-member for the target
+function.  If the function is `private`, add a `Friend` declaration in the
+mod's `Config/AccessTransformers.ini`:
+
+```ini
+[AccessTransformers]
+Friend=(Class="UTargetClass", FriendClass="FYourModuleClass")
+```
+
+`CSSCompatStubs` stores its own entry at
+`Mods/CSSCompatStubs/Config/AccessTransformers.ini`.
+
+### Adding hooks to other CSSCompatStubs modules
+
+Only `EOSShared` currently carries a native hook because its `PostConfigInit`
+loading phase makes it the ideal early hook point.  If you need to suppress
+additional EOS-related calls, follow the same pattern:
+
+1. Add `"SML"`, `"FactoryGame"`, and `"DummyHeaders"` to the stub module's
+   `Build.cs`.
+2. Declare a custom `IModuleInterface` subclass in the public header.
+3. Implement `StartupModule()` / `ShutdownModule()` in the private `.cpp`.
+4. Add any required `Friend` entries to
+   `Mods/CSSCompatStubs/Config/AccessTransformers.ini`.
+
+---
+
 ## Packaging and releasing
 
 Alpakit produces the distributable artifact.  In the Unreal Editor:
