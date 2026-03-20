@@ -18,6 +18,11 @@ using UnrealBuildTool;
 // TargetDenyList: ["Game"] in CSSCompatStubs.uplugin ensures this stub is
 // compiled only for Server targets. On Game targets, UBT uses the real
 // CSS UE EOSShared engine plugin instead.
+//
+// In addition to satisfying the compile-time dependency, this module installs
+// a native hook (via SML's NativeHookManager) that suppresses
+// UFGLocalPlayer::RequestPublicPlayerAddress on dedicated servers.
+// See Private/EOSSharedModule.cpp for details.
 
 public class EOSShared : ModuleRules
 {
@@ -28,6 +33,19 @@ public class EOSShared : ModuleRules
 		CppStandard = CppStandardVersion.Cpp20;
 		bLegacyPublicIncludePaths = false;
 
-		PublicDependencyModuleNames.Add("Core");
+		PublicDependencyModuleNames.AddRange(new string[]
+		{
+			"Core",
+			// Required by all Alpakit C++ mods – provides stubs for engine headers
+			// that CSS custom UnrealEngine does not ship in its Alpakit packages.
+			"DummyHeaders",
+			// FactoryGame – provides UFGLocalPlayer whose RequestPublicPlayerAddress
+			// method is hooked in StartupModule to suppress the ipify.org request on
+			// dedicated servers.
+			"FactoryGame",
+			// SML runtime – required for NativeHookManager (SUBSCRIBE_METHOD /
+			// UNSUBSCRIBE_METHOD macros) used in StartupModule / ShutdownModule.
+			"SML",
+		});
 	}
 }

@@ -2,8 +2,6 @@
 
 #include "DiscordBridge.h"
 #include "Modules/ModuleManager.h"
-#include "Patching/NativeHookManager.h"
-#include "FGLocalPlayer.h"
 
 DEFINE_LOG_CATEGORY(LogDiscordBridge);
 
@@ -39,41 +37,15 @@ void FDiscordBridgeModule::StartupModule()
 	//   3. Name-based bans: checked immediately at PostLogin.
 
 	// ── ipify.org public-IP request suppression ────────────────────────────────
-	// UFGLocalPlayer::PlayerAdded() calls RequestPublicPlayerAddress(), which
-	// fires an HTTP GET to https://api.ipify.org/?format=json to look up the
-	// machine's public IP for the client watermark UI.  On a dedicated server
-	// there is no watermark, but the game still creates a UFGLocalPlayer for the
-	// EOS service account, so the request is made unconditionally.  Because the
-	// response never arrives (the server has no listener waiting for it), the
-	// request stays in-flight for the entire session.  At shutdown, this causes:
+	// The UFGLocalPlayer::RequestPublicPlayerAddress hook that was previously
+	// installed here has been moved to CSSCompatStubs/EOSShared (see
+	// Mods/CSSCompatStubs/Source/EOSShared/Private/EOSSharedModule.cpp).
 	//
-	//   LogHttp Warning: [FHttpManager::Shutdown] Unbinding delegates for 1
-	//       outstanding Http Requests:
-	//       verb=[GET] url=[https://api.ipify.org/?format=json]
-	//   LogHttp Warning: Sleeping 0.500s to wait for 1 outstanding Http Requests.
-	//
-	// RequestPublicPlayerAddress() is a private, non-virtual method of
-	// UFGLocalPlayer.  The friend declaration in AccessTransformers.ini:
-	//
-	//   Friend=(Class="UFGLocalPlayer", FriendClass="FDiscordBridgeModule")
-	//
-	// gives FDiscordBridgeModule access to private members of UFGLocalPlayer,
-	// allowing SUBSCRIBE_METHOD to form a pointer to the function and patch it
-	// directly.  This is more targeted than the previous approach of intercepting
-	// every IHttpRequest::ProcessRequest() call and filtering by URL.
-	if ( IsRunningDedicatedServer() )
-	{
-		SUBSCRIBE_METHOD( UFGLocalPlayer::RequestPublicPlayerAddress,
-			[]( auto& Scope, UFGLocalPlayer* Self )
-			{
-				// On a dedicated server the watermark UI is absent; suppress
-				// the ipify request entirely to avoid log noise at shutdown.
-				Scope.Override();
-				UE_LOG( LogDiscordBridge, Log,
-					TEXT( "DiscordBridge: Suppressed RequestPublicPlayerAddress on "
-					      "dedicated server (watermark feature is client-only)." ) );
-			} );
-	}
+	// CSSCompatStubs loads at PostConfigInit — before DiscordBridge's Default
+	// loading phase — so the suppression is active before the engine creates the
+	// EOS service-account UFGLocalPlayer instance.  Moving the hook to
+	// CSSCompatStubs makes it a general-purpose server-compat patch that benefits
+	// any server mod depending on CSSCompatStubs, not just DiscordBridge.
 }
 
 void FDiscordBridgeModule::ShutdownModule()

@@ -2,10 +2,36 @@
 
 #pragma once
 
-// Compatibility stub for the EOSShared module.
+// Compatibility stub + server-side hook module for EOSShared.
 //
-// The real EOSShared plugin provides Epic Online Services SDK shared helpers
-// used by OnlineIntegration for advanced client-side EOS logging.
-// CSS custom UnrealEngine does not ship EOSShared in its dedicated-server
-// binary. This header satisfies UBT's include-path resolution on server targets
-// without requiring any EOS SDK types.
+// On dedicated-server Alpakit builds, CSS custom UnrealEngine omits the real
+// EOSShared plugin. This stub satisfies the compile-time dependency while also
+// installing a native hook (via SML's NativeHookManager) that suppresses
+// UFGLocalPlayer::RequestPublicPlayerAddress on dedicated servers.
+//
+// See Private/EOSSharedModule.cpp for the hook implementation.
+
+#include "Modules/ModuleManager.h"
+
+/**
+ * Server-side compatibility module for EOSShared.
+ *
+ * Loaded only on WindowsServer / LinuxServer targets (TargetDenyList: [Game]
+ * in CSSCompatStubs.uplugin). During StartupModule it hooks the private,
+ * non-virtual UFGLocalPlayer::RequestPublicPlayerAddress method and calls
+ * Scope.Cancel() to prevent the ipify.org HTTP request that the game fires
+ * unconditionally for the EOS service-account local player on every server
+ * start-up.
+ */
+class FEOSSharedCompatModule : public IModuleInterface
+{
+public:
+	// Begin IModuleInterface
+	virtual void StartupModule() override;
+	virtual void ShutdownModule() override;
+	// End IModuleInterface
+
+private:
+	/** Handle returned by SUBSCRIBE_METHOD; used for clean unsubscription at shutdown. */
+	FDelegateHandle PublicIpHookHandle;
+};
