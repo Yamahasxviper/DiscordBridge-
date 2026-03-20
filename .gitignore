@@ -30,6 +30,9 @@ Mods/**/Metadata/Crypto.json
 !Mods/SML/
 !Mods/SMLEditor/
 !Mods/ExampleMod/
+!Mods/CSSCompatStubs/
+!Mods/DiscordBridge/
+!Mods/SMLWebSocket/
 
 # Mods binaries
 Mods/**/Binaries/*
