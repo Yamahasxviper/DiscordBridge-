@@ -738,6 +738,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			Config.bBanCommandsEnabled    = GetIniBoolOrDefault  (BanCfg, TEXT("BanCommandsEnabled"),  Config.bBanCommandsEnabled);
 			Config.BanKickDiscordMessage  = GetIniStringOrDefault(BanCfg, TEXT("BanKickDiscordMessage"), Config.BanKickDiscordMessage);
 			Config.BanKickReason          = GetIniStringOrFallback(BanCfg, TEXT("BanKickReason"),       Config.BanKickReason);
+			Config.BanLoginRejectDiscordMessage = GetIniStringOrDefault(BanCfg, TEXT("BanLoginRejectDiscordMessage"), Config.BanLoginRejectDiscordMessage);
 			Config.BanScanIntervalSeconds = GetIniFloatOrDefault  (BanCfg, TEXT("BanScanIntervalSeconds"), Config.BanScanIntervalSeconds);
 			Config.InGameBanCommandPrefix = GetIniStringOrDefault(BanCfg, TEXT("InGameBanCommandPrefix"), Config.InGameBanCommandPrefix);
 			Config.KickCommandRoleId      = GetIniStringOrDefault(BanCfg, TEXT("KickCommandRoleId"),   Config.KickCommandRoleId);
@@ -767,6 +768,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			Config.bBanCommandsEnabled    = GetRawBoolOrDefault  (BanBackupValues, TEXT("BanCommandsEnabled"),    Config.bBanCommandsEnabled);
 			Config.BanKickDiscordMessage  = GetRawStringOrDefault(BanBackupValues, TEXT("BanKickDiscordMessage"),  Config.BanKickDiscordMessage);
 			Config.BanKickReason          = GetRawStringOrFallback(BanBackupValues, TEXT("BanKickReason"),          Config.BanKickReason);
+			Config.BanLoginRejectDiscordMessage = GetRawStringOrDefault(BanBackupValues, TEXT("BanLoginRejectDiscordMessage"), Config.BanLoginRejectDiscordMessage);
 			Config.BanScanIntervalSeconds = GetRawFloatOrDefault  (BanBackupValues, TEXT("BanScanIntervalSeconds"), Config.BanScanIntervalSeconds);
 			Config.InGameBanCommandPrefix = GetRawStringOrDefault(BanBackupValues, TEXT("InGameBanCommandPrefix"), Config.InGameBanCommandPrefix);
 			Config.KickCommandRoleId      = GetRawStringOrDefault(BanBackupValues, TEXT("KickCommandRoleId"),      Config.KickCommandRoleId);
@@ -811,6 +813,9 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				TEXT("BanKickDiscordMessage=:hammer: **%PlayerName%** is banned from this server and was kicked.\n")
 				TEXT("; Reason shown in-game to the player when kicked for being banned.\n")
 				TEXT("BanKickReason=\n")
+				TEXT("; Message posted to Discord when a banned player is rejected at pre-login (platform-ID ban).\n")
+				TEXT("; Placeholders: %PlatformId%, %PlatformType%. Leave empty to disable.\n")
+				TEXT("BanLoginRejectDiscordMessage=:no_entry: A banned player (%PlatformType% `%PlatformId%`) tried to connect and was rejected.\n")
 				TEXT("; How often (seconds) to scan connected players for bans. 0 = disabled. Default: 300 (5 min).\n")
 				TEXT("BanScanIntervalSeconds=300\n")
 				TEXT("; Prefix for ban commands in the in-game chat. Default: !ban\n")
@@ -848,6 +853,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 					Patch(TEXT("BanCommandsEnabled"),    Config.bBanCommandsEnabled ? TEXT("True") : TEXT("False"));
 					Patch(TEXT("BanKickDiscordMessage"), Config.BanKickDiscordMessage);
 					Patch(TEXT("BanKickReason"),         Config.BanKickReason);
+					Patch(TEXT("BanLoginRejectDiscordMessage"), Config.BanLoginRejectDiscordMessage);
 					Patch(TEXT("BanScanIntervalSeconds"), *FString::SanitizeFloat(Config.BanScanIntervalSeconds));
 					Patch(TEXT("InGameBanCommandPrefix"), Config.InGameBanCommandPrefix);
 					Patch(TEXT("KickCommandRoleId"),     Config.KickCommandRoleId);
@@ -1238,6 +1244,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			+ TEXT("BanCommandsEnabled=") + (Config.bBanCommandsEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
 			+ TEXT("BanKickDiscordMessage=") + Config.BanKickDiscordMessage + TEXT("\n")
 			+ TEXT("BanKickReason=") + Config.BanKickReason + TEXT("\n")
+			+ TEXT("BanLoginRejectDiscordMessage=") + Config.BanLoginRejectDiscordMessage + TEXT("\n")
 			+ TEXT("BanScanIntervalSeconds=") + FString::SanitizeFloat(Config.BanScanIntervalSeconds) + TEXT("\n")
 			+ TEXT("InGameBanCommandPrefix=") + Config.InGameBanCommandPrefix + TEXT("\n")
 			+ TEXT("KickCommandRoleId=") + Config.KickCommandRoleId + TEXT("\n")
