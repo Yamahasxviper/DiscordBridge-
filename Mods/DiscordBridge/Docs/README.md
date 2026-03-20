@@ -18,6 +18,7 @@ Welcome to the DiscordBridge documentation. Use the links below to jump straight
 | [Server Control Commands](11-ServerControlCommands.md) | Admin-only `!admin stop` / `!admin restart` / `!admin ticket-panel` commands |
 | [Discord Commands Reference](discord-commands.md) | **All commands in one place** — every Discord and in-game command with descriptions, parameters, and usage notes |
 | [Native Hooking Reference](12-NativeHooking.md) | SML C++ native hook macros, `TCallScope` API, virtual-function hooks, and worked examples (developers) |
+| [Third-Party Libraries](13-ThirdPartyLibraries.md) | Wrapping a third-party C++ library as an Alpakit module — directory layout, `.uplugin`, `Build.cs`, and OpenSSL worked example (developers) |
 
 ---
 
