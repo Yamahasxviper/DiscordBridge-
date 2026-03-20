@@ -1,0 +1,65 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0.0",
+	"SemVersion": "1.0.0",
+	"GameVersion": ">=416835",
+	"FriendlyName": "CSS Compat Stubs",
+	"Description": "Server-side compatibility stubs for CSS custom UnrealEngine modules that are absent from dedicated-server builds. CSS's custom UnrealEngine ships server binaries without several EOS-related plugins that are compile-time dependencies of other CSS plugins (e.g. OnlineIntegration). This mod provides compile-time stub modules for each stripped module so that Alpakit can build DiscordBridge (and any other mod that depends on OnlineIntegration) for WindowsServer and LinuxServer targets without linker errors. All stub modules carry TargetDenyList:[Game] so they are compiled only for Server targets; on Game targets the real CSS UE modules are used instead. RequiredOnRemote is false — players do not need to install this mod.",
+	"Category": "Networking",
+	"CreatedBy": "Coffee Stain Studios",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"RequiredOnRemote": false,
+	"SupportedTargetPlatforms": [
+		"Win64",
+		"Linux"
+	],
+	"Modules": [
+		{
+			"Name": "EOSShared",
+			"Type": "Runtime",
+			"LoadingPhase": "PostConfigInit",
+			"TargetDenyList": [
+				"Game"
+			]
+		},
+		{
+			"Name": "EOSSDK",
+			"Type": "Runtime",
+			"LoadingPhase": "PostConfigInit",
+			"TargetDenyList": [
+				"Game"
+			]
+		},
+		{
+			"Name": "OnlineServicesEOS",
+			"Type": "Runtime",
+			"LoadingPhase": "PostConfigInit",
+			"TargetDenyList": [
+				"Game"
+			]
+		},
+		{
+			"Name": "OnlineServicesEOSGS",
+			"Type": "Runtime",
+			"LoadingPhase": "PostConfigInit",
+			"TargetDenyList": [
+				"Game"
+			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "SML",
+			"Enabled": true,
+			"SemVersion": "^3.11.3"
+		}
+	]
+}

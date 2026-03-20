@@ -1,0 +1,62 @@
+// Copyright Coffee Stain Studios. All Rights Reserved.
+
+#include "SMLWebSocket.h"
+#include "Modules/ModuleManager.h"
+
+DEFINE_LOG_CATEGORY(LogSMLWebSocket);
+
+// OpenSSL global init/cleanup — on all three Alpakit build targets:
+//   Windows       (Win64, TargetType.Game)    – Windows listen-server / game client
+//   WindowsServer (Win64, TargetType.Server)  – Windows dedicated server
+//   LinuxServer   (Linux, TargetType.Server)  – Linux dedicated server
+//
+// On Windows (MSVC), UE's Slate/InputCore declares `namespace UI {}` at global
+// scope.  OpenSSL's ossl_typ.h also declares `typedef struct ui_st UI` at global
+// scope, which produces error C2365 on MSVC.  The push_macro/define/pop_macro
+// trick redirects the OpenSSL typedef to UI_OSSLRenamed while the headers are
+// included, avoiding the namespace collision.
+//
+// On Linux (GCC/Clang) there is no `namespace UI {}` at global scope, so the
+// push/pop_macro sequence is a harmless no-op.
+//
+// THIRD_PARTY_INCLUDES_START/END suppress MSVC warnings (e.g. C4191, C4996)
+// that are emitted by OpenSSL's own headers and would otherwise be treated as
+// errors under UBT's /WX flag.
+#if PLATFORM_WINDOWS || PLATFORM_LINUX
+THIRD_PARTY_INCLUDES_START
+#pragma push_macro("UI")
+#define UI UI_OSSLRenamed
+#include "openssl/ssl.h"
+#include "openssl/err.h"
+#include "openssl/crypto.h"
+#pragma pop_macro("UI")
+THIRD_PARTY_INCLUDES_END
+#endif
+
+void FSMLWebSocketModule::StartupModule()
+{
+#if PLATFORM_WINDOWS || PLATFORM_LINUX
+	// OpenSSL 1.1.0+ auto-initializes; for older versions we call the explicit init.
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+	SSL_library_init();
+	SSL_load_error_strings();
+	OpenSSL_add_all_algorithms();
+#else
+	// Explicit opt-in init (safe to call multiple times; reference-counted internally).
+	OPENSSL_init_ssl(OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS, nullptr);
+#endif
+#endif // PLATFORM_WINDOWS || PLATFORM_LINUX
+}
+
+void FSMLWebSocketModule::ShutdownModule()
+{
+#if PLATFORM_WINDOWS || PLATFORM_LINUX
+	// OpenSSL 1.1.0+ handles cleanup automatically; nothing to do here.
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+	ERR_free_strings();
+	EVP_cleanup();
+#endif
+#endif // PLATFORM_WINDOWS || PLATFORM_LINUX
+}
+
+IMPLEMENT_MODULE(FSMLWebSocketModule, SMLWebSocket)
