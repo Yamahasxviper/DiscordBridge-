@@ -1,5 +1,5 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
-
+#pragma warning disable CS0162 // Unreachable code detected (platform conditions replaced with literals for modding)
 using UnrealBuildTool;
 
 public class OnlineIntegration : ModuleRules

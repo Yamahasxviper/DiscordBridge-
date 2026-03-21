@@ -1,3 +1,4 @@
+#pragma warning disable CS0162 // Unreachable code detected (platform conditions replaced with literals for modding)
 using UnrealBuildTool;
 
 public class FactoryDedicatedClient : ModuleRules
