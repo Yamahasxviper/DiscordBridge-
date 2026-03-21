@@ -246,6 +246,13 @@
 			"Enabled": false
 		},
 		{
+			"Name": "EOSShared",
+			"Enabled": true,
+			"TargetDenyList": [
+				"Server"
+			]
+		},
+		{
 			"Name": "OculusVR",
 			"Enabled": false
 		},
