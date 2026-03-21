@@ -5,7 +5,7 @@
 	"SemVersion": "1.0.0",
 	"GameVersion": ">=416835",
 	"FriendlyName": "CSS Compat Stubs",
-	"Description": "Server-side compatibility stubs for CSS custom UnrealEngine modules that are absent from dedicated-server builds. CSS's custom UnrealEngine ships server binaries without several EOS-related plugins that are compile-time dependencies of other CSS plugins (e.g. OnlineIntegration). This mod provides compile-time stub modules for each stripped module so that Alpakit can build DiscordBridge (and any other mod that depends on OnlineIntegration) for WindowsServer and LinuxServer targets without linker errors. All stub modules carry TargetDenyList:[Game] so they are compiled only for Server targets; on Game targets the real CSS UE modules are used instead. RequiredOnRemote is false — players do not need to install this mod.",
+	"Description": "Compatibility stubs for CSS custom UnrealEngine modules that are absent from dedicated-server builds and missing source in the Editor. CSS's custom UnrealEngine ships server binaries and Editor IntelliSense data without several EOS-related plugins that are compile-time dependencies of other CSS plugins (e.g. OnlineIntegration). This mod provides compile-time stub modules for each stripped module so that Alpakit can build DiscordBridge (and any other mod that depends on OnlineIntegration) for WindowsServer and LinuxServer targets without linker errors, and prevents IntelliSense errors in the Editor. All stub modules carry TargetDenyList:[Game] so they are compiled only for Server and Editor targets; on Game targets the real CSS UE modules are used instead. RequiredOnRemote is false — players do not need to install this mod.",
 	"Category": "Networking",
 	"CreatedBy": "Coffee Stain Studios",
 	"CreatedByURL": "",

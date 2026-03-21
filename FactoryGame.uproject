@@ -249,7 +249,8 @@
 			"Name": "EOSShared",
 			"Enabled": true,
 			"TargetDenyList": [
-				"Server"
+				"Server",
+				"Editor"
 			]
 		},
 		{
