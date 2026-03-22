@@ -1,9 +1,15 @@
 # TicketSystem – Standalone Discord Support-Ticket Panel
 
 The **TicketSystem** mod adds a button-based Discord support-ticket panel to
-your Satisfactory dedicated server.  It works **on top of** the
-[DiscordBridge](../DiscordBridge/README.md) mod, which provides the Discord
-bot connection.
+your Satisfactory dedicated server.  It is a **fully standalone mod** – it has
+no compile-time dependency on DiscordBridge or any other specific Discord mod.
+Instead, it exposes an `IDiscordBridgeProvider` interface (defined in
+`Source/TicketSystem/Public/IDiscordBridgeProvider.h`) that any mod can
+implement to power the ticket system.
+
+[DiscordBridge](../DiscordBridge/README.md) is the reference implementation: it
+implements `IDiscordBridgeProvider` and calls `UTicketSubsystem::SetProvider(this)`
+during its own `Initialize()` so both mods work together out of the box.
 
 Members click a button to open a **private ticket channel** visible only to
 them and the configured admin/support role.  No commands required for members –
@@ -16,10 +22,11 @@ everything is driven by button clicks and a short reason modal.
 | Mod | Version |
 |-----|---------|
 | SML | `^3.11.3` |
-| DiscordBridge | any (same repo) |
 
-DiscordBridge must be installed and configured with a valid `BotToken` before
-TicketSystem will function.
+A mod that implements `IDiscordBridgeProvider` (such as DiscordBridge) must be
+installed and running for TicketSystem to send or receive Discord events.
+DiscordBridge must be configured with a valid `BotToken` before tickets can be
+created or closed.
 
 **Required bot permissions** (grant via the Discord Developer Portal or server
 settings):
@@ -179,18 +186,58 @@ After saving and restarting, type `!ticket-panel` in Discord (holding the
 
 ---
 
-## Interaction with DiscordBridge
+## Interaction with a provider (DiscordBridge or custom)
 
-TicketSystem hooks into DiscordBridge via two native multicast delegates:
+TicketSystem communicates with the Discord bot exclusively through the
+`IDiscordBridgeProvider` interface defined in
+`Source/TicketSystem/Public/IDiscordBridgeProvider.h`.  The provider is
+injected at runtime by calling `UTicketSubsystem::SetProvider(this)`; no
+compile-time dependency on any specific Discord mod is required.
 
-| Delegate | Purpose |
-|----------|---------|
-| `OnDiscordInteractionReceived` | Receives button clicks and modal submits |
-| `OnDiscordRawMessageReceived` | Receives raw MESSAGE_CREATE for `!ticket-panel` command |
+The interface exposes:
 
-TicketSystem uses DiscordBridge's REST helpers for all Discord API calls:
-`RespondToInteraction`, `DeleteDiscordChannel`, `CreateDiscordGuildTextChannel`,
-`SendMessageBodyToChannel`, and `SendDiscordChannelMessage`.
+| Method | Purpose |
+|--------|---------|
+| `SubscribeInteraction()` / `UnsubscribeInteraction()` | Receive button clicks and modal submits (`INTERACTION_CREATE`) |
+| `SubscribeRawMessage()` / `UnsubscribeRawMessage()` | Receive raw `MESSAGE_CREATE` events (for the `!ticket-panel` command) |
+| `RespondToInteraction()` | Acknowledge button clicks / show modals |
+| `RespondWithModal()` | Show a reason modal popup (Discord response type 9) |
+| `CreateDiscordGuildTextChannel()` | Create a private ticket channel |
+| `DeleteDiscordChannel()` | Close/delete a ticket channel |
+| `SendMessageBodyToChannel()` | Post the welcome message and close button |
+| `SendDiscordChannelMessage()` | Notify the admin channel of a new ticket |
+| `GetBotToken()` / `GetGuildId()` / `GetGuildOwnerId()` | Bot / guild metadata |
+
+DiscordBridge is the reference provider implementation – it calls
+`UTicketSubsystem::SetProvider(this)` during its `Initialize()` and
+`SetProvider(nullptr)` during `Deinitialize()`.
+
+### Writing your own provider
+
+Any future mod that wants to power TicketSystem should:
+
+1. Add `"TicketSystem"` as a dependency in its `.uplugin` and `Build.cs`.
+2. Inherit `IDiscordBridgeProvider` in its main subsystem class.
+3. Implement all pure-virtual methods in the interface.
+4. In `Initialize()` look up `UTicketSubsystem` and call `SetProvider(this)`.
+5. In `Deinitialize()` call `SetProvider(nullptr)` then release the pointer.
+
+```cpp
+// Example sketch (adapt to your own subsystem)
+void UMyDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+    Super::Initialize(Collection);
+    if (UTicketSubsystem* Tickets = GetGameInstance()->GetSubsystem<UTicketSubsystem>())
+        Tickets->SetProvider(this);
+}
+
+void UMyDiscordSubsystem::Deinitialize()
+{
+    if (UTicketSubsystem* Tickets = GetGameInstance()->GetSubsystem<UTicketSubsystem>())
+        Tickets->SetProvider(nullptr);
+    Super::Deinitialize();
+}
+```
 
 ---
 

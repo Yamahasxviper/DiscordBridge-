@@ -2,14 +2,19 @@
 
 ← [Back to index](README.md)
 
-The **TicketSystem** mod adds a button-based Discord support-ticket panel on top
-of DiscordBridge.  Members click a button to open a **private ticket channel**
-visible only to them and a configured admin/support role.  No commands are
-required for regular members – everything is driven by button clicks and a short
-reason modal.
+The **TicketSystem** mod adds a button-based Discord support-ticket panel to
+your Satisfactory dedicated server.  It is a **fully standalone mod** – it has
+no compile-time dependency on DiscordBridge.  **DiscordBridge powers
+TicketSystem** by implementing the `IDiscordBridgeProvider` interface that
+TicketSystem exposes.
 
-TicketSystem is a separate, optional mod.  DiscordBridge exposes the integration
-points it needs; no changes to DiscordBridge's own config file are required.
+Members click a button to open a **private ticket channel** visible only to
+them and a configured admin/support role.  No commands are required for regular
+members – everything is driven by button clicks and a short reason modal.
+
+TicketSystem is a separate, optional mod.  Installing it alongside DiscordBridge
+enables the full ticket workflow; no changes to `DefaultDiscordBridge.ini` are
+needed.
 
 ---
 
@@ -17,7 +22,8 @@ points it needs; no changes to DiscordBridge's own config file are required.
 
 | Mod | Notes |
 |-----|-------|
-| DiscordBridge | Must be installed and have a valid `BotToken` configured |
+| **TicketSystem** | The standalone ticket mod (this mod) |
+| **DiscordBridge** | Provides the Discord bot connection and implements `IDiscordBridgeProvider` |
 | SML | `^3.11.3` |
 
 The Discord bot must also have the following permissions (in addition to the
@@ -110,18 +116,22 @@ combined count of enabled built-in types and custom reasons must not exceed 25.
 
 ---
 
-## How TicketSystem integrates with DiscordBridge
+## How DiscordBridge powers TicketSystem
 
-TicketSystem subscribes to two native multicast delegates that DiscordBridge
-exposes for extension modules:
+TicketSystem exposes an `IDiscordBridgeProvider` interface
+(`Source/TicketSystem/Public/IDiscordBridgeProvider.h`).  DiscordBridge
+implements this interface and calls `UTicketSubsystem::SetProvider(this)` during
+its own `Initialize()`.  TicketSystem then uses the provider for all Discord
+communication; it has no direct knowledge of DiscordBridge internals.
 
-| Delegate | Event | Purpose |
-|----------|-------|---------|
-| `OnDiscordInteractionReceived` | `INTERACTION_CREATE` | Receives button clicks and modal submits |
-| `OnDiscordRawMessageReceived` | `MESSAGE_CREATE` | Receives all messages so `!ticket-panel` is seen regardless of channel |
+**Events DiscordBridge delivers to TicketSystem via the interface:**
 
-It also calls DiscordBridge's public REST helpers to perform all Discord API
-operations:
+| Method | Event | Purpose |
+|--------|-------|---------|
+| `SubscribeInteraction()` | `INTERACTION_CREATE` | Receives button clicks and modal submits |
+| `SubscribeRawMessage()` | `MESSAGE_CREATE` | Receives all messages so `!ticket-panel` is seen regardless of channel |
+
+**REST helpers DiscordBridge provides through the interface:**
 
 | Method | Used for |
 |--------|----------|
@@ -129,7 +139,8 @@ operations:
 | `DeleteDiscordChannel()` | Close/delete a ticket channel |
 | `SendMessageBodyToChannel()` | Post the welcome message and close button |
 | `SendDiscordChannelMessage()` | Notify the admin channel of a new ticket |
-| `RespondToInteraction()` | Acknowledge button clicks and show modals |
+| `RespondToInteraction()` | Acknowledge button clicks (types 4, 5, 6) |
+| `RespondWithModal()` | Show a reason modal popup (type 9) |
 
 No changes to `DefaultDiscordBridge.ini` are needed.
 
