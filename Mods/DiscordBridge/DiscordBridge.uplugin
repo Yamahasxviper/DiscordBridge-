@@ -34,6 +34,12 @@
 			"Name": "SMLWebSocket",
 			"Enabled": true,
 			"SemVersion": "^1.0.0"
+		},
+		{
+			"Name": "TicketSystem",
+			"Enabled": true,
+			"Optional": true,
+			"SemVersion": "^1.0.0"
 		}
 	]
 }
