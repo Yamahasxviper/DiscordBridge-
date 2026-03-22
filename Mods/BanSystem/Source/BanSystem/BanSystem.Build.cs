@@ -24,8 +24,6 @@ public class BanSystem : ModuleRules
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
-            "Slate",
-            "SlateCore",
         });
     }
 }

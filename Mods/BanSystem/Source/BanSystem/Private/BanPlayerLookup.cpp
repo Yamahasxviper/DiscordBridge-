@@ -54,9 +54,12 @@ bool FBanPlayerLookup::FindPlayerByName(
 
         if (bMatches)
         {
+            AFGPlayerState* FGState = Cast<AFGPlayerState>(Controller->PlayerState);
+            if (!FGState) continue;
+
             FCandidate& C  = Candidates.AddDefaulted_GetRef();
             C.PlayerName   = PlayerName;
-            C.UniqueId     = CastChecked<AFGPlayerState>(Controller->PlayerState)->GetUniqueNetId();
+            C.UniqueId     = FGState->GetUniqueNetId();
         }
     }
 
@@ -113,7 +116,9 @@ TArray<TPair<FString, FResolvedBanId>> FBanPlayerLookup::GetAllConnectedPlayers(
         if (!Controller || !Controller->PlayerState) continue;
 
         FString        Name   = Controller->PlayerState->GetPlayerName();
-        FResolvedBanId Ids    = FBanIdResolver::Resolve(CastChecked<AFGPlayerState>(Controller->PlayerState)->GetUniqueNetId());
+        AFGPlayerState* FGState = Cast<AFGPlayerState>(Controller->PlayerState);
+        if (!FGState) continue;
+        FResolvedBanId Ids    = FBanIdResolver::Resolve(FGState->GetUniqueNetId());
         Result.Emplace(MoveTemp(Name), MoveTemp(Ids));
     }
     return Result;
