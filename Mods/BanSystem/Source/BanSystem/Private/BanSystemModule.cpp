@@ -68,7 +68,10 @@ void FBanSystemModule::StartupModule()
             UGameInstance* GI = Self->GetGameInstance();
             if (!GI) return;
 
-            const FUniqueNetIdRepl UniqueId = CastChecked<AFGPlayerState>(NewPlayer->PlayerState)->GetUniqueNetId();
+            AFGPlayerState* FGState = Cast<AFGPlayerState>(NewPlayer->PlayerState);
+            if (!FGState) return;
+
+            const FUniqueNetIdRepl UniqueId = FGState->GetUniqueNetId();
             if (!UniqueId.IsValid()) return;
 
             // Resolve platform-specific IDs from the connecting player's

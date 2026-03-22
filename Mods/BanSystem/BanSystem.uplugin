@@ -19,7 +19,7 @@
 	"Modules": [
 		{
 			"Name": "BanSystem",
-			"Type": "Runtime",
+			"Type": "ServerOnly",
 			"LoadingPhase": "PostDefault"
 		}
 	],
