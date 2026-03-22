@@ -5,10 +5,9 @@
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Dom/JsonObject.h"
+#include "IDiscordBridgeProvider.h"
 #include "TicketConfig.h"
 #include "TicketSubsystem.generated.h"
-
-class UDiscordBridgeSubsystem;
 
 /**
  * UTicketSubsystem
@@ -54,6 +53,13 @@ public:
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
+
+	/**
+	 * Inject (or clear) the Discord provider used to send and receive Discord
+	 * events.  Called by DiscordBridge during its own Initialize() and
+	 * Deinitialize().  Pass nullptr to detach the current provider.
+	 */
+	void SetProvider(IDiscordBridgeProvider* InProvider);
 
 private:
 	// ── Interaction routing ───────────────────────────────────────────────────
@@ -156,15 +162,15 @@ private:
 	/** Build and return the close-ticket button JSON message body. */
 	static TSharedPtr<FJsonObject> MakeCloseButtonMessage(const FString& OpenerUserId);
 
-	/** Return a pointer to UDiscordBridgeSubsystem (cached after first lookup). */
-	UDiscordBridgeSubsystem* GetBridge() const;
+	/** Return a pointer to IDiscordBridgeProvider (set via SetProvider()). */
+	IDiscordBridgeProvider* GetBridge() const;
 
 	// ── State ─────────────────────────────────────────────────────────────────
 
 	/** Loaded config (populated in Initialize()). */
 	FTicketConfig Config;
 
-	/** Delegate handle for the DiscordBridge interaction delegate subscription. */
+	/** Delegate handle for the interaction delegate subscription. */
 	FDelegateHandle InteractionDelegateHandle;
 
 	/** Delegate handle for the raw gateway message subscription. */
@@ -182,4 +188,7 @@ private:
 	 * Used to prevent duplicate tickets (one active ticket per user at a time).
 	 */
 	TMap<FString, FString> OpenerToTicketChannel;
+
+	/** Injected Discord provider.  nullptr until SetProvider() is called by DiscordBridge. */
+	IDiscordBridgeProvider* CachedProvider = nullptr;
 };

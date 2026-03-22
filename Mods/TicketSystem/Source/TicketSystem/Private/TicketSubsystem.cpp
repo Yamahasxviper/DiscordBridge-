@@ -2,7 +2,6 @@
 
 #include "TicketSubsystem.h"
 
-#include "DiscordBridgeSubsystem.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonReader.h"
@@ -36,42 +35,17 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 
-	// Ensure DiscordBridgeSubsystem is initialised first.
-	Collection.InitializeDependency<UDiscordBridgeSubsystem>();
-
 	// Load ticket configuration.
 	Config = FTicketConfig::Load();
 
-	// Subscribe to the DiscordBridge interaction delegate.
-	if (UDiscordBridgeSubsystem* Bridge = GetBridge())
-	{
-		InteractionDelegateHandle = Bridge->OnDiscordInteractionReceived.AddUObject(
-			this, &UTicketSubsystem::OnInteractionReceived);
-
-		RawMessageDelegateHandle = Bridge->OnDiscordRawMessageReceived.AddUObject(
-			this, &UTicketSubsystem::OnRawDiscordMessage);
-
-		UE_LOG(LogTicketSystem, Log,
-		       TEXT("TicketSystem: Initialized. Subscribed to DiscordBridge interactions."));
-	}
-	else
-	{
-		UE_LOG(LogTicketSystem, Warning,
-		       TEXT("TicketSystem: UDiscordBridgeSubsystem not found. "
-		            "Ticket interactions will not be processed."));
-	}
+	UE_LOG(LogTicketSystem, Log,
+	       TEXT("TicketSystem: Initialized. Waiting for Discord provider to be injected via SetProvider()."));
 }
 
 void UTicketSubsystem::Deinitialize()
 {
-	// Unsubscribe from the DiscordBridge delegate.
-	if (UDiscordBridgeSubsystem* Bridge = GetBridge())
-	{
-		Bridge->OnDiscordInteractionReceived.Remove(InteractionDelegateHandle);
-		Bridge->OnDiscordRawMessageReceived.Remove(RawMessageDelegateHandle);
-	}
-	InteractionDelegateHandle.Reset();
-	RawMessageDelegateHandle.Reset();
+	// Detach from the provider (unsubscribes delegates, clears CachedProvider).
+	SetProvider(nullptr);
 
 	TicketChannelToOpener.Empty();
 	OpenerToTicketChannel.Empty();
@@ -80,16 +54,63 @@ void UTicketSubsystem::Deinitialize()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: get DiscordBridgeSubsystem
+// Helper: get the Discord provider
 // ─────────────────────────────────────────────────────────────────────────────
 
-UDiscordBridgeSubsystem* UTicketSubsystem::GetBridge() const
+IDiscordBridgeProvider* UTicketSubsystem::GetBridge() const
 {
-	if (const UGameInstance* GI = GetGameInstance())
+	return CachedProvider;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SetProvider – inject (or clear) the Discord bridge provider
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UTicketSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
+{
+	// Unsubscribe from the current provider before switching.
+	if (CachedProvider && CachedProvider != InProvider)
 	{
-		return GI->GetSubsystem<UDiscordBridgeSubsystem>();
+		CachedProvider->UnsubscribeInteraction(InteractionDelegateHandle);
+		CachedProvider->UnsubscribeRawMessage(RawMessageDelegateHandle);
+		InteractionDelegateHandle.Reset();
+		RawMessageDelegateHandle.Reset();
 	}
-	return nullptr;
+
+	CachedProvider = InProvider;
+
+	if (CachedProvider)
+	{
+		// Use weak-object captures so the lambda is safe if this subsystem is
+		// garbage-collected before the provider removes the subscription.
+		TWeakObjectPtr<UTicketSubsystem> WeakThis(this);
+
+		InteractionDelegateHandle = CachedProvider->SubscribeInteraction(
+			[WeakThis](const TSharedPtr<FJsonObject>& DataObj)
+			{
+				if (UTicketSubsystem* Ts = WeakThis.Get())
+				{
+					Ts->OnInteractionReceived(DataObj);
+				}
+			});
+
+		RawMessageDelegateHandle = CachedProvider->SubscribeRawMessage(
+			[WeakThis](const TSharedPtr<FJsonObject>& MsgObj)
+			{
+				if (UTicketSubsystem* Ts = WeakThis.Get())
+				{
+					Ts->OnRawDiscordMessage(MsgObj);
+				}
+			});
+
+		UE_LOG(LogTicketSystem, Log,
+		       TEXT("TicketSystem: Discord provider set. Subscribed to interaction and message events."));
+	}
+	else
+	{
+		UE_LOG(LogTicketSystem, Log,
+		       TEXT("TicketSystem: Discord provider cleared."));
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -290,7 +311,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 	       TEXT("TicketSystem: Ticket button '%s' clicked by '%s' (%s)"),
 	       *CustomId, *DiscordUsername, *DiscordUserId);
 
-	UDiscordBridgeSubsystem* Bridge = GetBridge();
+	IDiscordBridgeProvider* Bridge = GetBridge();
 	if (!Bridge)
 	{
 		return;
@@ -450,7 +471,7 @@ void UTicketSubsystem::ShowTicketReasonModal(
 	const FString& Title,
 	const FString& Placeholder)
 {
-	const UDiscordBridgeSubsystem* Bridge = GetBridge();
+	const IDiscordBridgeProvider* Bridge = GetBridge();
 	if (!Bridge || Bridge->GetBotToken().IsEmpty()
 	    || InteractionId.IsEmpty() || InteractionToken.IsEmpty())
 	{
@@ -539,7 +560,7 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 	       TEXT("TicketSystem: Ticket modal '%s' submitted by '%s' (%s)"),
 	       *ModalCustomId, *DiscordUsername, *DiscordUserId);
 
-	UDiscordBridgeSubsystem* Bridge = GetBridge();
+	IDiscordBridgeProvider* Bridge = GetBridge();
 	if (!Bridge)
 	{
 		return;
@@ -688,7 +709,7 @@ void UTicketSubsystem::CreateTicketChannel(
 	const FString& DisplayLabel,
 	const FString& DisplayDesc)
 {
-	UDiscordBridgeSubsystem* Bridge = GetBridge();
+	IDiscordBridgeProvider* Bridge = GetBridge();
 	if (!Bridge)
 	{
 		return;
@@ -830,7 +851,7 @@ void UTicketSubsystem::CreateTicketChannel(
 			}
 
 			// Post the welcome message (plain text).
-			if (UDiscordBridgeSubsystem* B = GetBridge())
+			if (IDiscordBridgeProvider* B = GetBridge())
 			{
 				TSharedPtr<FJsonObject> WelcomeMsg = MakeShared<FJsonObject>();
 				WelcomeMsg->SetStringField(TEXT("content"), WelcomeContent);
@@ -873,7 +894,7 @@ void UTicketSubsystem::PostTicketPanel(
 	const FString& PanelChannelId,
 	const FString& ResponseChannelId)
 {
-	UDiscordBridgeSubsystem* Bridge = GetBridge();
+	IDiscordBridgeProvider* Bridge = GetBridge();
 	if (!Bridge)
 	{
 		return;
