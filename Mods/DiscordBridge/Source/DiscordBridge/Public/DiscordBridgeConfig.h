@@ -291,6 +291,60 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 */
 	FString BanKickReason{ TEXT("You are banned from this server.") };
 
+	// ── BanSystem Mod Integration ─────────────────────────────────────────────
+
+	/**
+	 * Message posted to Discord when the BanSystem mod bans a player by Steam64 ID
+	 * (via /steamban or /banbyname in-game chat commands).
+	 * Leave empty to disable the notification.
+	 *
+	 * Available placeholders:
+	 *   %PlayerId%  – the Steam64 ID of the banned player
+	 *   %Reason%    – the ban reason string
+	 *   %BannedBy%  – the name of the admin who issued the ban
+	 */
+	FString BanSystemSteamBanDiscordMessage{
+		TEXT(":hammer: **BanSystem** - Steam ID `%PlayerId%` was banned by **%BannedBy%** - Reason: %Reason%")
+	};
+
+	/**
+	 * Message posted to Discord when the BanSystem mod unbans a player by Steam64 ID
+	 * (via /steamunban in-game chat command).
+	 * Leave empty to disable the notification.
+	 *
+	 * Available placeholder:
+	 *   %PlayerId%  – the Steam64 ID of the unbanned player
+	 */
+	FString BanSystemSteamUnbanDiscordMessage{
+		TEXT(":white_check_mark: **BanSystem** - Steam ID `%PlayerId%` has been unbanned.")
+	};
+
+	/**
+	 * Message posted to Discord when the BanSystem mod bans a player by EOS Product User ID
+	 * (via /eosban or /banbyname in-game chat commands).
+	 * Leave empty to disable the notification.
+	 *
+	 * Available placeholders:
+	 *   %PlayerId%  – the EOS Product User ID of the banned player
+	 *   %Reason%    – the ban reason string
+	 *   %BannedBy%  – the name of the admin who issued the ban
+	 */
+	FString BanSystemEOSBanDiscordMessage{
+		TEXT(":hammer: **BanSystem** - EOS ID `%PlayerId%` was banned by **%BannedBy%** - Reason: %Reason%")
+	};
+
+	/**
+	 * Message posted to Discord when the BanSystem mod unbans a player by EOS Product User ID
+	 * (via /eosunban in-game chat command).
+	 * Leave empty to disable the notification.
+	 *
+	 * Available placeholder:
+	 *   %PlayerId%  – the EOS Product User ID of the unbanned player
+	 */
+	FString BanSystemEOSUnbanDiscordMessage{
+		TEXT(":white_check_mark: **BanSystem** - EOS ID `%PlayerId%` has been unbanned.")
+	};
+
 	// ── In-game commands ──────────────────────────────────────────────────────
 
 	/**

@@ -12,10 +12,17 @@
 #include "GameFramework/PlayerController.h"
 #include "Dom/JsonObject.h"
 #include "IDiscordBridgeProvider.h"
+#include "BanTypes.h"
 #include "DiscordBridgeSubsystem.generated.h"
 
 // Forward-declared so the header does not pull in TicketSystem's full header chain.
 class UTicketSubsystem;
+
+// Forward-declared so the header does not pull in BanSystem's full header chain.
+// The UFUNCTION handlers require BanTypes.h (for FBanEntry) but only forward
+// declarations are needed for the subsystem types.
+class USteamBanSubsystem;
+class UEOSBanSubsystem;
 
 // ── Delegate declarations ─────────────────────────────────────────────────────
 
@@ -546,6 +553,36 @@ private:
 	/** Handle a ban management command typed in the Satisfactory in-game chat. */
 	void HandleInGameBanCommand(const FString& SubCommand);
 
+	// ── BanSystem Mod Integration ─────────────────────────────────────────────
+
+	/**
+	 * Called when the BanSystem mod bans a player by Steam64 ID.
+	 * Posts a Discord notification using BanSystemSteamBanDiscordMessage.
+	 */
+	UFUNCTION()
+	void OnBanSystemSteamPlayerBanned(const FString& Steam64Id, const FBanEntry& Entry);
+
+	/**
+	 * Called when the BanSystem mod unbans a player by Steam64 ID.
+	 * Posts a Discord notification using BanSystemSteamUnbanDiscordMessage.
+	 */
+	UFUNCTION()
+	void OnBanSystemSteamPlayerUnbanned(const FString& Steam64Id);
+
+	/**
+	 * Called when the BanSystem mod bans a player by EOS Product User ID.
+	 * Posts a Discord notification using BanSystemEOSBanDiscordMessage.
+	 */
+	UFUNCTION()
+	void OnBanSystemEOSPlayerBanned(const FString& EOSProductUserId, const FBanEntry& Entry);
+
+	/**
+	 * Called when the BanSystem mod unbans a player by EOS Product User ID.
+	 * Posts a Discord notification using BanSystemEOSUnbanDiscordMessage.
+	 */
+	UFUNCTION()
+	void OnBanSystemEOSPlayerUnbanned(const FString& EOSProductUserId);
+
 	/** Broadcast a status/feedback message to all connected players via the game chat. */
 	void SendGameChatStatusMessage(const FString& Message);
 
@@ -607,4 +644,18 @@ private:
 	 * root while still nulling automatically if the object is ever destroyed.
 	 */
 	TWeakObjectPtr<UTicketSubsystem> CachedTicketSubsystem;
+
+	// ── BanSystem Mod Integration ─────────────────────────────────────────────
+
+	/**
+	 * Weak reference to USteamBanSubsystem; populated during Initialize() if
+	 * BanSystem is installed.  Used to unbind delegates in Deinitialize().
+	 */
+	TWeakObjectPtr<USteamBanSubsystem> CachedSteamBanSubsystem;
+
+	/**
+	 * Weak reference to UEOSBanSubsystem; populated during Initialize() if
+	 * BanSystem is installed.  Used to unbind delegates in Deinitialize().
+	 */
+	TWeakObjectPtr<UEOSBanSubsystem> CachedEOSBanSubsystem;
 };
