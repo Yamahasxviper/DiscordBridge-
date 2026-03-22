@@ -308,6 +308,8 @@ For the full CI/CD release workflow used by this repository see
 | `fatal error: <some engine header> not found` | Missing `DummyHeaders` dependency | Add `"DummyHeaders"` to `PublicDependencyModuleNames` |
 | `SIGSEGV at 0x0000000006000001` at runtime | EOS SDK call before `mIsOnline=true` or `GetNumLocalPlayers()>0` | Use `OnlineIntegration` helpers (`UCommonUserSubsystem::GetNumLocalPlayers()`, `UOnlineIntegrationControllerComponent`) with the required guards |
 | Discord bridge fails to connect, WebSocket errors in log | `SMLWebSocket` not installed | Install `SMLWebSocket` alongside the mod |
+| `Plugin 'EOSShared' … does not contain the 'EOSShared' module` (FactoryEditor IntelliSense) | `ReliableMessaging → SocketSubsystemEOS → EOSShared` dependency chain enables `SocketSubsystemEOS` for the Editor target; CSS UE does not compile the `EOSShared` module for Editor | Fixed in `FactoryGame.uproject`: `SocketSubsystemEOS` is denied for `Server` and `Editor` targets, matching the existing `EOSShared` deny-list pattern |
+| `Unable to instantiate module 'SubversionSourceControl'` (UnrealEditor IntelliSense) | CSS engine ships `SubversionSourceControl.uplugin` but not the required SVN binaries; the module's Build.cs constructor throws on the missing path | This is a CSS engine bug that cannot be fixed from project files. The project already sets `"Enabled": false` for this plugin (which prevents it from affecting the game build), but the standalone `UnrealEditor` target processed during IntelliSense generation ignores project-level overrides. The warning is harmless — it does not prevent compilation. |
 
 ---
 
