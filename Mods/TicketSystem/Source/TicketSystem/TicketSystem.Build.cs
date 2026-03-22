@@ -21,17 +21,6 @@ public class TicketSystem : ModuleRules
 			"DummyHeaders",
 			// SML runtime – ensures correct module load ordering.
 			"SML",
-			// SSL-backed WebSocket client. DiscordBridgeSubsystem.h includes
-			// SMLWebSocketClient.h in its public header, so this module must be
-			// declared explicitly here to guarantee UBT can resolve that include.
-			"SMLWebSocket",
-			// DiscordBridge – provides UDiscordBridgeSubsystem, the Discord Gateway
-			// connection, and all REST helper methods (RespondToInteraction,
-			// DeleteDiscordChannel, CreateDiscordGuildTextChannel, etc.) that the
-			// ticket system relies on.
-			"DiscordBridge",
-			// Unreal HTTP module – confirmed present in Satisfactory's custom UE build.
-			"HTTP",
 			// JSON serialisation (FJsonObject / TJsonReader / TJsonWriter).
 			"Json",
 		});

@@ -11,7 +11,11 @@
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerController.h"
 #include "Dom/JsonObject.h"
+#include "IDiscordBridgeProvider.h"
 #include "DiscordBridgeSubsystem.generated.h"
+
+// Forward-declared so the header does not pull in TicketSystem's full header chain.
+class UTicketSubsystem;
 
 // ── Delegate declarations ─────────────────────────────────────────────────────
 
@@ -129,7 +133,8 @@ namespace EDiscordGatewayIntent
  *     SendGameMessageToDiscord() from your chat hooks.
  */
 UCLASS(BlueprintType)
-class DISCORDBRIDGE_API UDiscordBridgeSubsystem : public UGameInstanceSubsystem
+class DISCORDBRIDGE_API UDiscordBridgeSubsystem : public UGameInstanceSubsystem,
+                                                  public IDiscordBridgeProvider
 {
 	GENERATED_BODY()
 
@@ -219,18 +224,18 @@ public:
 	/** Returns the Discord bot token used for REST API authentication.
 	 *  Empty when the token is not yet configured. */
 	UFUNCTION(BlueprintPure, Category="Discord Bridge")
-	const FString& GetBotToken() const;
+	virtual const FString& GetBotToken() const override;
 
 	/** Returns the Discord guild (server) ID received from the READY event.
 	 *  Empty until the Gateway handshake is complete. */
 	UFUNCTION(BlueprintPure, Category="Discord Bridge")
-	const FString& GetGuildId() const;
+	virtual const FString& GetGuildId() const override;
 
 	/** Returns the Discord user ID of the guild owner.
 	 *  Populated after the first GUILD_CREATE event is received; may be empty
 	 *  on servers that only receive READY without a full GUILD_CREATE. */
 	UFUNCTION(BlueprintPure, Category="Discord Bridge")
-	const FString& GetGuildOwnerId() const;
+	virtual const FString& GetGuildOwnerId() const override;
 
 	/**
 	 * Post a plain-text message to any Discord channel via the REST API.
@@ -240,8 +245,8 @@ public:
 	 * @param TargetChannelId  Snowflake ID of the destination channel.
 	 * @param Message          Plain-text content (Discord markdown supported).
 	 */
-	void SendDiscordChannelMessage(const FString& TargetChannelId,
-	                               const FString& Message);
+	virtual void SendDiscordChannelMessage(const FString& TargetChannelId,
+	                                       const FString& Message) override;
 
 	/**
 	 * Respond to a Discord interaction (button click or modal submit) via the
@@ -258,11 +263,17 @@ public:
 	 * @param bEphemeral       When true the response is only visible to the
 	 *                         user who triggered the interaction.
 	 */
-	void RespondToInteraction(const FString& InteractionId,
-	                          const FString& InteractionToken,
-	                          int32 ResponseType,
-	                          const FString& Content,
-	                          bool bEphemeral);
+	virtual void RespondToInteraction(const FString& InteractionId,
+	                                  const FString& InteractionToken,
+	                                  int32 ResponseType,
+	                                  const FString& Content,
+	                                  bool bEphemeral) override;
+
+	virtual void RespondWithModal(const FString& InteractionId,
+	                              const FString& InteractionToken,
+	                              const FString& ModalCustomId,
+	                              const FString& Title,
+	                              const FString& Placeholder) override;
 
 	/**
 	 * Send a pre-built JSON message body (content + optional components) to a
@@ -272,8 +283,8 @@ public:
 	 * @param TargetChannelId  Snowflake ID of the destination channel.
 	 * @param MessageBody      Fully constructed Discord message JSON object.
 	 */
-	void SendMessageBodyToChannel(const FString& TargetChannelId,
-	                              const TSharedPtr<FJsonObject>& MessageBody);
+	virtual void SendMessageBodyToChannel(const FString& TargetChannelId,
+	                                      const TSharedPtr<FJsonObject>& MessageBody) override;
 
 	/**
 	 * Delete a Discord channel via the REST API.
@@ -281,7 +292,7 @@ public:
 	 *
 	 * @param ChannelId  Snowflake ID of the channel to delete.
 	 */
-	void DeleteDiscordChannel(const FString& ChannelId);
+	virtual void DeleteDiscordChannel(const FString& ChannelId) override;
 
 	/**
 	 * Create a new guild text channel via the Discord REST API and invoke the
@@ -292,10 +303,10 @@ public:
 	 * @param PermissionOverwrites  JSON array of permission-overwrite objects.
 	 * @param OnCreated          Called on the game thread with the new channel ID.
 	 */
-	void CreateDiscordGuildTextChannel(const FString& ChannelName,
-	                                   const FString& CategoryId,
-	                                   const TArray<TSharedPtr<FJsonValue>>& PermissionOverwrites,
-	                                   TFunction<void(const FString& NewChannelId)> OnCreated);
+	virtual void CreateDiscordGuildTextChannel(const FString& ChannelName,
+	                                           const FString& CategoryId,
+	                                           const TArray<TSharedPtr<FJsonValue>>& PermissionOverwrites,
+	                                           TFunction<void(const FString& NewChannelId)> OnCreated) override;
 
 	/**
 	 * Called by OnGameChatMessageAdded every time a player-chat message lands
@@ -307,6 +318,18 @@ public:
 	 * @param MessageText Plain text of the chat message.
 	 */
 	void HandleIncomingChatMessage(const FString& PlayerName, const FString& MessageText);
+
+	// ── IDiscordBridgeProvider ────────────────────────────────────────────────
+	// Subscribe/unsubscribe methods wrap the native multicast delegates above,
+	// exposing them through the provider interface used by TicketSystem.
+
+	virtual FDelegateHandle SubscribeInteraction(
+		TFunction<void(const TSharedPtr<FJsonObject>&)> Callback) override;
+	virtual void UnsubscribeInteraction(FDelegateHandle Handle) override;
+
+	virtual FDelegateHandle SubscribeRawMessage(
+		TFunction<void(const TSharedPtr<FJsonObject>&)> Callback) override;
+	virtual void UnsubscribeRawMessage(FDelegateHandle Handle) override;
 
 private:
 	// ── WebSocket event handlers (called on the game thread) ──────────────────
@@ -577,4 +600,11 @@ private:
 	 * kicked even if they are not listed in ServerWhitelist.json.
 	 */
 	TSet<FString> WhitelistRoleMemberNames;
+
+	/**
+	 * Weak reference to the TicketSubsystem; populated during Initialize() if
+	 * TicketSystem is installed.  Using TWeakObjectPtr avoids adding a hard GC
+	 * root while still nulling automatically if the object is ever destroyed.
+	 */
+	TWeakObjectPtr<UTicketSubsystem> CachedTicketSubsystem;
 };
