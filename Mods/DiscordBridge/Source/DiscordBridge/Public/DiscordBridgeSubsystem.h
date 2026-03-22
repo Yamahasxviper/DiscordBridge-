@@ -13,6 +13,7 @@
 #include "Dom/JsonObject.h"
 #include "IDiscordBridgeProvider.h"
 #include "IBanNotificationProvider.h"
+#include "IBanDiscordCommandProvider.h"
 #include "DiscordBridgeSubsystem.generated.h"
 
 // Forward-declared so the header does not pull in TicketSystem's full header chain.
@@ -22,6 +23,7 @@ class UTicketSubsystem;
 // The IBanNotificationProvider interface (above) already includes BanTypes.h.
 class USteamBanSubsystem;
 class UEOSBanSubsystem;
+class UBanDiscordSubsystem;
 
 // ── Delegate declarations ─────────────────────────────────────────────────────
 
@@ -141,7 +143,8 @@ namespace EDiscordGatewayIntent
 UCLASS(BlueprintType)
 class DISCORDBRIDGE_API UDiscordBridgeSubsystem : public UGameInstanceSubsystem,
                                                   public IDiscordBridgeProvider,
-                                                  public IBanNotificationProvider
+                                                  public IBanNotificationProvider,
+                                                  public IBanDiscordCommandProvider
 {
 	GENERATED_BODY()
 
@@ -550,9 +553,6 @@ private:
 	/** Handle a whitelist management command typed in the Satisfactory in-game chat. */
 	void HandleInGameWhitelistCommand(const FString& SubCommand);
 
-	/** Handle a ban management command typed in the Satisfactory in-game chat. */
-	void HandleInGameBanCommand(const FString& SubCommand);
-
 	// ── IBanNotificationProvider ──────────────────────────────────────────────
 	// Implemented here so that when BanSystem is installed, ban/unban events
 	// issued by its in-game commands are forwarded to Discord as notifications.
@@ -573,17 +573,16 @@ private:
 	/** Posts BanSystemEOSUnbanDiscordMessage when BanSystem unbans an EOS player. */
 	virtual void OnEOSPlayerUnbanned(const FString& EOSProductUserId) override;
 
+	// ── IBanDiscordCommandProvider ─────────────────────────────────────────────
+	// Implemented here so that UBanDiscordSubsystem can send Discord messages
+	// when processing ban-by-name commands routed from Discord.
+
+	/** Forwards a ban-response message to the given Discord channel. */
+	virtual void SendBanDiscordMessage(const FString& ChannelId,
+	                                   const FString& Message) override;
+
 	/** Broadcast a status/feedback message to all connected players via the game chat. */
 	void SendGameChatStatusMessage(const FString& Message);
-
-	/**
-	 * Scans connected players and kicks any whose name matches PlayerName
-	 * (case-insensitive) using the configured BanKickReason.
-	 * When PlayerName is empty all connected players that are on the ban list
-	 * are kicked, which is useful when the ban system is toggled on at runtime.
-	 * Returns the number of players kicked.
-	 */
-	int32 KickConnectedBannedPlayers(const FString& PlayerName = TEXT(""));
 
 	/**
 	 * Assign or revoke a Discord role from a guild member via the REST API.
@@ -648,4 +647,11 @@ private:
 	 * BanSystem is installed.  Used to unbind delegates in Deinitialize().
 	 */
 	TWeakObjectPtr<UEOSBanSubsystem> CachedEOSBanSubsystem;
+
+	/**
+	 * Weak reference to UBanDiscordSubsystem; populated during Initialize() if
+	 * BanSystem is installed.  Used to inject ourselves as the Discord command
+	 * provider and to clear it in Deinitialize().
+	 */
+	TWeakObjectPtr<UBanDiscordSubsystem> CachedBanDiscordSubsystem;
 };
