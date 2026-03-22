@@ -50,9 +50,9 @@ public class FactorySharedTarget : TargetRules
 		ExtraModuleNames.AddRange(new[] {
 			"FactoryGame"
 		});
-		if (UseChecksInShippingOverride || LinkTypeOverride != TargetLinkType.Default)
+		if (LinkTypeOverride != TargetLinkType.Default)
 		{
-			Logger.LogInformation($"{Target.Name}: Building with command line overrides: ChecksInShipping: {bUseChecksInShipping} (default: false); LinkType: {LinkType} (default: {defaultLinkTypeForPlatform})");
+			Logger.LogInformation($"{Target.Name}: Building with command line overrides: LinkType: {LinkType} (default: {defaultLinkTypeForPlatform})");
 		}
 	}
 }
