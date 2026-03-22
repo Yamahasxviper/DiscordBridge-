@@ -118,10 +118,11 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		}
 	}
 
-	// Subscribe to BanSystem events (if installed) and forward ban/unban
-	// notifications to Discord.  BanSystem is an optional dependency: DiscordBridge
-	// works without it, but when present it mirrors every platform ban/unban as a
-	// Discord message using the configurable BanSystemSteam*/BanSystemEOS* templates.
+	// Register ourselves as the notification provider for BanSystem (if installed)
+	// so that ban/unban events issued by its in-game commands are forwarded to
+	// Discord.  BanSystem is an optional dependency: DiscordBridge works without
+	// it, but when present it mirrors every platform ban/unban as a Discord
+	// message using the configurable BanSystemSteam*/BanSystemEOS* templates.
 	if (FModuleManager::Get().IsModuleLoaded(TEXT("BanSystem")))
 	{
 		if (UGameInstance* GI = GetGameInstance())
@@ -132,21 +133,15 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 			if (USteamBanSubsystem* SteamBans = GI->GetSubsystem<USteamBanSubsystem>())
 			{
 				CachedSteamBanSubsystem = SteamBans;
-				SteamBans->OnPlayerBanned.AddDynamic(
-					this, &UDiscordBridgeSubsystem::OnBanSystemSteamPlayerBanned);
-				SteamBans->OnPlayerUnbanned.AddDynamic(
-					this, &UDiscordBridgeSubsystem::OnBanSystemSteamPlayerUnbanned);
-				UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Subscribed to BanSystem Steam ban events."));
+				SteamBans->SetNotificationProvider(this);
+				UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Registered as BanSystem Steam notification provider."));
 			}
 
 			if (UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>())
 			{
 				CachedEOSBanSubsystem = EOSBans;
-				EOSBans->OnPlayerBanned.AddDynamic(
-					this, &UDiscordBridgeSubsystem::OnBanSystemEOSPlayerBanned);
-				EOSBans->OnPlayerUnbanned.AddDynamic(
-					this, &UDiscordBridgeSubsystem::OnBanSystemEOSPlayerUnbanned);
-				UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Subscribed to BanSystem EOS ban events."));
+				EOSBans->SetNotificationProvider(this);
+				UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Registered as BanSystem EOS notification provider."));
 			}
 		}
 	}
@@ -161,23 +156,17 @@ void UDiscordBridgeSubsystem::Deinitialize()
 	}
 	CachedTicketSubsystem.Reset();
 
-	// Detach from BanSystem event delegates so no stale callbacks fire
-	// after this subsystem is destroyed.
+	// Clear ourselves as the BanSystem notification provider so no stale
+	// callbacks fire after this subsystem is destroyed.
 	if (USteamBanSubsystem* SteamBans = CachedSteamBanSubsystem.Get())
 	{
-		SteamBans->OnPlayerBanned.RemoveDynamic(
-			this, &UDiscordBridgeSubsystem::OnBanSystemSteamPlayerBanned);
-		SteamBans->OnPlayerUnbanned.RemoveDynamic(
-			this, &UDiscordBridgeSubsystem::OnBanSystemSteamPlayerUnbanned);
+		SteamBans->SetNotificationProvider(nullptr);
 	}
 	CachedSteamBanSubsystem.Reset();
 
 	if (UEOSBanSubsystem* EOSBans = CachedEOSBanSubsystem.Get())
 	{
-		EOSBans->OnPlayerBanned.RemoveDynamic(
-			this, &UDiscordBridgeSubsystem::OnBanSystemEOSPlayerBanned);
-		EOSBans->OnPlayerUnbanned.RemoveDynamic(
-			this, &UDiscordBridgeSubsystem::OnBanSystemEOSPlayerUnbanned);
+		EOSBans->SetNotificationProvider(nullptr);
 	}
 	CachedEOSBanSubsystem.Reset();
 
@@ -2818,11 +2807,12 @@ void UDiscordBridgeSubsystem::HandleInGameBanCommand(const FString& SubCommand)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BanSystem Mod Integration – delegate handlers
+// IBanNotificationProvider – implementation
+// Forwards ban/unban events from the BanSystem mod to Discord.
 // ─────────────────────────────────────────────────────────────────────────────
 
-void UDiscordBridgeSubsystem::OnBanSystemSteamPlayerBanned(const FString& Steam64Id,
-                                                            const FBanEntry& Entry)
+void UDiscordBridgeSubsystem::OnSteamPlayerBanned(const FString& Steam64Id,
+                                                   const FBanEntry& Entry)
 {
 	if (Config.BanSystemSteamBanDiscordMessage.IsEmpty())
 	{
@@ -2845,7 +2835,7 @@ void UDiscordBridgeSubsystem::OnBanSystemSteamPlayerBanned(const FString& Steam6
 	       *Steam64Id);
 }
 
-void UDiscordBridgeSubsystem::OnBanSystemSteamPlayerUnbanned(const FString& Steam64Id)
+void UDiscordBridgeSubsystem::OnSteamPlayerUnbanned(const FString& Steam64Id)
 {
 	if (Config.BanSystemSteamUnbanDiscordMessage.IsEmpty())
 	{
@@ -2866,8 +2856,8 @@ void UDiscordBridgeSubsystem::OnBanSystemSteamPlayerUnbanned(const FString& Stea
 	       *Steam64Id);
 }
 
-void UDiscordBridgeSubsystem::OnBanSystemEOSPlayerBanned(const FString& EOSProductUserId,
-                                                          const FBanEntry& Entry)
+void UDiscordBridgeSubsystem::OnEOSPlayerBanned(const FString& EOSProductUserId,
+                                                 const FBanEntry& Entry)
 {
 	if (Config.BanSystemEOSBanDiscordMessage.IsEmpty())
 	{
@@ -2890,7 +2880,7 @@ void UDiscordBridgeSubsystem::OnBanSystemEOSPlayerBanned(const FString& EOSProdu
 	       *EOSProductUserId);
 }
 
-void UDiscordBridgeSubsystem::OnBanSystemEOSPlayerUnbanned(const FString& EOSProductUserId)
+void UDiscordBridgeSubsystem::OnEOSPlayerUnbanned(const FString& EOSProductUserId)
 {
 	if (Config.BanSystemEOSUnbanDiscordMessage.IsEmpty())
 	{

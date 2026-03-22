@@ -12,15 +12,14 @@
 #include "GameFramework/PlayerController.h"
 #include "Dom/JsonObject.h"
 #include "IDiscordBridgeProvider.h"
-#include "BanTypes.h"
+#include "IBanNotificationProvider.h"
 #include "DiscordBridgeSubsystem.generated.h"
 
 // Forward-declared so the header does not pull in TicketSystem's full header chain.
 class UTicketSubsystem;
 
-// Forward-declared so the header does not pull in BanSystem's full header chain.
-// The UFUNCTION handlers require BanTypes.h (for FBanEntry) but only forward
-// declarations are needed for the subsystem types.
+// Forward-declared so the header does not pull in BanSystem subsystem headers.
+// The IBanNotificationProvider interface (above) already includes BanTypes.h.
 class USteamBanSubsystem;
 class UEOSBanSubsystem;
 
@@ -141,7 +140,8 @@ namespace EDiscordGatewayIntent
  */
 UCLASS(BlueprintType)
 class DISCORDBRIDGE_API UDiscordBridgeSubsystem : public UGameInstanceSubsystem,
-                                                  public IDiscordBridgeProvider
+                                                  public IDiscordBridgeProvider,
+                                                  public IBanNotificationProvider
 {
 	GENERATED_BODY()
 
@@ -553,35 +553,25 @@ private:
 	/** Handle a ban management command typed in the Satisfactory in-game chat. */
 	void HandleInGameBanCommand(const FString& SubCommand);
 
-	// ── BanSystem Mod Integration ─────────────────────────────────────────────
+	// ── IBanNotificationProvider ──────────────────────────────────────────────
+	// Implemented here so that when BanSystem is installed, ban/unban events
+	// issued by its in-game commands are forwarded to Discord as notifications.
+	// DiscordBridge registers itself with each ban subsystem via
+	// SetNotificationProvider(this) in Initialize() and clears it in Deinitialize().
 
-	/**
-	 * Called when the BanSystem mod bans a player by Steam64 ID.
-	 * Posts a Discord notification using BanSystemSteamBanDiscordMessage.
-	 */
-	UFUNCTION()
-	void OnBanSystemSteamPlayerBanned(const FString& Steam64Id, const FBanEntry& Entry);
+	/** Posts BanSystemSteamBanDiscordMessage when BanSystem bans a Steam player. */
+	virtual void OnSteamPlayerBanned(const FString& Steam64Id,
+	                                 const FBanEntry& Entry) override;
 
-	/**
-	 * Called when the BanSystem mod unbans a player by Steam64 ID.
-	 * Posts a Discord notification using BanSystemSteamUnbanDiscordMessage.
-	 */
-	UFUNCTION()
-	void OnBanSystemSteamPlayerUnbanned(const FString& Steam64Id);
+	/** Posts BanSystemSteamUnbanDiscordMessage when BanSystem unbans a Steam player. */
+	virtual void OnSteamPlayerUnbanned(const FString& Steam64Id) override;
 
-	/**
-	 * Called when the BanSystem mod bans a player by EOS Product User ID.
-	 * Posts a Discord notification using BanSystemEOSBanDiscordMessage.
-	 */
-	UFUNCTION()
-	void OnBanSystemEOSPlayerBanned(const FString& EOSProductUserId, const FBanEntry& Entry);
+	/** Posts BanSystemEOSBanDiscordMessage when BanSystem bans an EOS player. */
+	virtual void OnEOSPlayerBanned(const FString& EOSProductUserId,
+	                               const FBanEntry& Entry) override;
 
-	/**
-	 * Called when the BanSystem mod unbans a player by EOS Product User ID.
-	 * Posts a Discord notification using BanSystemEOSUnbanDiscordMessage.
-	 */
-	UFUNCTION()
-	void OnBanSystemEOSPlayerUnbanned(const FString& EOSProductUserId);
+	/** Posts BanSystemEOSUnbanDiscordMessage when BanSystem unbans an EOS player. */
+	virtual void OnEOSPlayerUnbanned(const FString& EOSProductUserId) override;
 
 	/** Broadcast a status/feedback message to all connected players via the game chat. */
 	void SendGameChatStatusMessage(const FString& Message);

@@ -99,6 +99,12 @@ bool UEOSBanSubsystem::BanPlayer(const FString& EOSProductUserId,
         *Entry.PlayerId, *BannedBy, *Entry.Reason, *Entry.GetExpiryString());
 
     OnPlayerBanned.Broadcast(Entry.PlayerId, Entry);
+
+    if (NotificationProvider)
+    {
+        NotificationProvider->OnEOSPlayerBanned(Entry.PlayerId, Entry);
+    }
+
     return true;
 }
 
@@ -110,6 +116,12 @@ bool UEOSBanSubsystem::UnbanPlayer(const FString& EOSProductUserId)
         SaveBans();
         UE_LOG(LogEOSBanSystem, Log, TEXT("EOS player %s unbanned."), *Key);
         OnPlayerUnbanned.Broadcast(Key);
+
+        if (NotificationProvider)
+        {
+            NotificationProvider->OnEOSPlayerUnbanned(Key);
+        }
+
         return true;
     }
     UE_LOG(LogEOSBanSystem, Warning,
@@ -183,6 +195,17 @@ void UEOSBanSubsystem::ReloadBans()
     LoadBans();
     UE_LOG(LogEOSBanSystem, Log,
         TEXT("EOS ban list reloaded — %d ban(s)."), BanMap.Num());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Notification Provider
+// ─────────────────────────────────────────────────────────────────────────────
+void UEOSBanSubsystem::SetNotificationProvider(IBanNotificationProvider* Provider)
+{
+    NotificationProvider = Provider;
+    UE_LOG(LogEOSBanSystem, Log,
+        TEXT("EOS ban notification provider %s."),
+        Provider ? TEXT("registered") : TEXT("cleared"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
