@@ -16,6 +16,37 @@ DECLARE_LOG_CATEGORY_EXTERN(LogTicketSystem, Log, All);
  */
 struct TICKETSYSTEM_API FTicketConfig
 {
+	// ── Standalone Discord connectivity ────────────────────────────────────────
+
+	/**
+	 * Discord bot token used when running TicketSystem without DiscordBridge.
+	 * Create a bot at https://discord.com/developers/applications, copy its
+	 * token, and paste it here.  Leave empty when DiscordBridge is installed
+	 * (DiscordBridge will inject itself as the provider instead).
+	 *
+	 * Required bot permissions:
+	 *   Manage Channels – create and delete ticket channels
+	 *   View Channel    – read channels
+	 *   Send Messages   – post welcome and close-button messages
+	 *
+	 * Required Gateway intents (Discord Developer Portal → Bot → Privileged):
+	 *   Server Members Intent  (needed for role info in MESSAGE_CREATE)
+	 *   Message Content Intent (needed to read the !ticket-panel command)
+	 */
+	FString BotToken;
+
+	/**
+	 * Discord guild (server) ID where the bot operates.
+	 * Leave empty to auto-detect from the READY event (recommended).
+	 * Set this only if the bot does not receive a READY payload with guild info,
+	 * which is rare and usually indicates a misconfigured intent.
+	 *
+	 * How to get the guild ID: enable Developer Mode in Discord
+	 * (User Settings → Advanced → Developer Mode), right-click your server
+	 * icon, and choose "Copy Server ID".
+	 */
+	FString GuildId;
+
 	// ── Ticket channel ─────────────────────────────────────────────────────────
 
 	/**

@@ -21,6 +21,11 @@ public class TicketSystem : ModuleRules
 			"DummyHeaders",
 			// SML runtime – ensures correct module load ordering.
 			"SML",
+			// Custom WebSocket client with SSL support for the standalone Discord
+			// Gateway connection (UTicketDiscordProvider).
+			"SMLWebSocket",
+			// HTTP client used by the standalone Discord REST API calls.
+			"HTTP",
 			// JSON serialisation (FJsonObject / TJsonReader / TJsonWriter).
 			"Json",
 		});

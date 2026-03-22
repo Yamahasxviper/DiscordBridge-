@@ -106,6 +106,8 @@ FTicketConfig FTicketConfig::Load()
 		FConfigFile Cfg;
 		Cfg.Read(PrimaryPath);
 
+		Config.BotToken                 = GetIniString(Cfg, TEXT("BotToken"));
+		Config.GuildId                  = GetIniString(Cfg, TEXT("GuildId"));
 		Config.TicketChannelId          = GetIniString(Cfg, TEXT("TicketChannelId"));
 		Config.bTicketWhitelistEnabled  = GetIniBool  (Cfg, TEXT("TicketWhitelistEnabled"), true);
 		Config.bTicketHelpEnabled       = GetIniBool  (Cfg, TEXT("TicketHelpEnabled"),      true);
@@ -129,6 +131,8 @@ FTicketConfig FTicketConfig::Load()
 			FConfigFile BackupCfg;
 			BackupCfg.Read(BackupPath);
 
+			Config.BotToken                = GetIniString(BackupCfg, TEXT("BotToken"));
+			Config.GuildId                 = GetIniString(BackupCfg, TEXT("GuildId"));
 			Config.TicketChannelId         = GetIniString(BackupCfg, TEXT("TicketChannelId"));
 			Config.bTicketWhitelistEnabled = GetIniBool  (BackupCfg, TEXT("TicketWhitelistEnabled"), true);
 			Config.bTicketHelpEnabled      = GetIniBool  (BackupCfg, TEXT("TicketHelpEnabled"),      true);
@@ -157,6 +161,8 @@ FTicketConfig FTicketConfig::Load()
 	{
 		FString BackupContent;
 		BackupContent += TEXT("[TicketSystem]\n");
+		BackupContent += FString::Printf(TEXT("BotToken=%s\n"),               *Config.BotToken);
+		BackupContent += FString::Printf(TEXT("GuildId=%s\n"),                *Config.GuildId);
 		BackupContent += FString::Printf(TEXT("TicketChannelId=%s\n"),        *Config.TicketChannelId);
 		BackupContent += FString::Printf(TEXT("TicketWhitelistEnabled=%s\n"), Config.bTicketWhitelistEnabled ? TEXT("True") : TEXT("False"));
 		BackupContent += FString::Printf(TEXT("TicketHelpEnabled=%s\n"),      Config.bTicketHelpEnabled      ? TEXT("True") : TEXT("False"));

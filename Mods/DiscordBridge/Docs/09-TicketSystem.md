@@ -3,18 +3,29 @@
 ← [Back to index](README.md)
 
 The **TicketSystem** mod adds a button-based Discord support-ticket panel to
-your Satisfactory dedicated server.  It is a **fully standalone mod** – it has
-no compile-time dependency on DiscordBridge.  **DiscordBridge powers
-TicketSystem** by implementing the `IDiscordBridgeProvider` interface that
-TicketSystem exposes.
+your Satisfactory dedicated server.  It is a **fully standalone mod** – it can
+run with its own dedicated Discord bot, or pair with DiscordBridge to use
+DiscordBridge's existing bot connection.
 
 Members click a button to open a **private ticket channel** visible only to
 them and a configured admin/support role.  No commands are required for regular
 members – everything is driven by button clicks and a short reason modal.
 
-TicketSystem is a separate, optional mod.  Installing it alongside DiscordBridge
-enables the full ticket workflow; no changes to `DefaultDiscordBridge.ini` are
-needed.
+---
+
+## Modes of operation
+
+### Standalone mode (no DiscordBridge required)
+
+Set `BotToken` in `DefaultTickets.ini` with a bot token dedicated to the ticket
+system.  DiscordBridge is **not** required.
+
+### Paired mode (DiscordBridge installed)
+
+Leave `BotToken` empty in `DefaultTickets.ini`.  DiscordBridge powers the
+ticket panel through its own bot connection.  When both mods are installed,
+DiscordBridge always takes priority regardless of whether `BotToken` is set in
+the ticket config.
 
 ---
 
@@ -22,11 +33,11 @@ needed.
 
 | Mod | Notes |
 |-----|-------|
-| **TicketSystem** | The standalone ticket mod (this mod) |
-| **DiscordBridge** | Provides the Discord bot connection and implements `IDiscordBridgeProvider` |
-| SML | `^3.11.3` |
+| **SML** | `^3.11.3` |
+| **SMLWebSocket** | `^1.0.0` – provides the Discord Gateway WebSocket client |
+| **DiscordBridge** | Optional – only needed in paired mode |
 
-The Discord bot must also have the following permissions (in addition to the
+The Discord bot must also have the following permissions (in addition to any
 standard DiscordBridge permissions):
 
 | Permission | Why |
@@ -35,28 +46,36 @@ standard DiscordBridge permissions):
 | **View Channel** | Read channels in the server |
 | **Send Messages** | Post welcome and close-button messages |
 
+For **standalone mode**, the following Gateway intents must be enabled in the
+[Discord Developer Portal](https://discord.com/developers/applications) under
+**Bot → Privileged Gateway Intents**:
+
+| Intent | Why |
+|--------|-----|
+| Server Members Intent | Role info in MESSAGE_CREATE |
+| Message Content Intent | Read the `!ticket-panel` command |
+
 ---
 
 ## Quick setup
 
+### Paired mode (DiscordBridge)
+
 1. Install both DiscordBridge and TicketSystem on the dedicated server.
 2. Open `<ServerRoot>/FactoryGame/Mods/TicketSystem/Config/DefaultTickets.ini`.
-3. Set **`TicketNotifyRoleId`** to your admin/support role ID.  
-   This role is @mentioned inside every new ticket channel and receives
-   view/write access.  Members holding this role can also post the ticket panel
-   by typing `!ticket-panel` in any Discord channel.
-4. Set **`TicketPanelChannelId`** to the channel where members will click
-   buttons to open tickets (a read-only "open-a-ticket" channel works well).
-5. *(Optional)* Set `TicketCategoryId` to group ticket channels in one category.
-6. *(Optional)* Add custom ticket reason buttons:
-   ```ini
-   TicketReason=Bug Report|Report a bug or technical issue with the server
-   TicketReason=Suggestion|Submit a feature request
-   TicketReason=Appeal|Appeal a ban or other moderation action
-   ```
-7. Restart the server.
-8. Type `!ticket-panel` in any Discord channel while holding the
-   `TicketNotifyRoleId` role.  The bot posts the button panel.
+3. Set **`TicketNotifyRoleId`** to your admin/support role ID.
+4. Set **`TicketPanelChannelId`** to the "open-a-ticket" channel ID.
+5. *(Optional)* Set `TicketCategoryId` and add `TicketReason=` entries.
+6. Restart the server.
+7. Type `!ticket-panel` in Discord while holding `TicketNotifyRoleId`.
+
+### Standalone mode
+
+1. Create a new bot at <https://discord.com/developers/applications>.
+2. Enable **Server Members Intent** and **Message Content Intent** under **Bot → Privileged Gateway Intents**.
+3. Invite the bot with **Manage Channels**, **View Channel**, **Send Messages**.
+4. Copy the bot token and set **`BotToken=`** in `DefaultTickets.ini`.
+5. Follow steps 3–7 from the paired setup above (skip step 1).
 
 ---
 
@@ -105,6 +124,8 @@ combined count of enabled built-in types and custom reasons must not exceed 25.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
+| `BotToken` | *(empty)* | Discord bot token for standalone mode. |
+| `GuildId` | *(empty)* | Guild ID override (auto-detected if empty). |
 | `TicketChannelId` | *(empty)* | Channel(s) for admin notifications (comma-separated). |
 | `TicketWhitelistEnabled` | `True` | Show Whitelist Request button. |
 | `TicketHelpEnabled` | `True` | Show Help / Support button. |
@@ -116,13 +137,14 @@ combined count of enabled built-in types and custom reasons must not exceed 25.
 
 ---
 
-## How DiscordBridge powers TicketSystem
+## How DiscordBridge powers TicketSystem (paired mode)
 
 TicketSystem exposes an `IDiscordBridgeProvider` interface
 (`Source/TicketSystem/Public/IDiscordBridgeProvider.h`).  DiscordBridge
 implements this interface and calls `UTicketSubsystem::SetProvider(this)` during
-its own `Initialize()`.  TicketSystem then uses the provider for all Discord
-communication; it has no direct knowledge of DiscordBridge internals.
+its own `Initialize()`.  When it does, TicketSystem automatically disconnects
+its built-in provider (if `BotToken` was set) and switches to DiscordBridge's
+connection.  TicketSystem has no direct knowledge of DiscordBridge internals.
 
 **Events DiscordBridge delivers to TicketSystem via the interface:**
 
