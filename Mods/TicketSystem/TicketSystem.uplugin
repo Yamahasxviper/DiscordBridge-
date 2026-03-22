@@ -33,11 +33,6 @@
 			"Name": "SML",
 			"Enabled": true,
 			"SemVersion": "^3.11.3"
-		},
-		{
-			"Name": "SMLWebSocket",
-			"Enabled": true,
-			"SemVersion": "^1.0.0"
 		}
 	]
 }
