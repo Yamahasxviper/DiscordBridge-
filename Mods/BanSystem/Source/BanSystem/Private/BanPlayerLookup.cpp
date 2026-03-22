@@ -4,6 +4,7 @@
 
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
+#include "FGPlayerState.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogBanPlayerLookup, Log, All);
 
@@ -55,7 +56,7 @@ bool FBanPlayerLookup::FindPlayerByName(
         {
             FCandidate& C  = Candidates.AddDefaulted_GetRef();
             C.PlayerName   = PlayerName;
-            C.UniqueId     = Controller->PlayerState->GetUniqueNetId();
+            C.UniqueId     = CastChecked<AFGPlayerState>(Controller->PlayerState)->GetUniqueNetId();
         }
     }
 
@@ -112,7 +113,7 @@ TArray<TPair<FString, FResolvedBanId>> FBanPlayerLookup::GetAllConnectedPlayers(
         if (!Controller || !Controller->PlayerState) continue;
 
         FString        Name   = Controller->PlayerState->GetPlayerName();
-        FResolvedBanId Ids    = FBanIdResolver::Resolve(Controller->PlayerState->GetUniqueNetId());
+        FResolvedBanId Ids    = FBanIdResolver::Resolve(CastChecked<AFGPlayerState>(Controller->PlayerState)->GetUniqueNetId());
         Result.Emplace(MoveTemp(Name), MoveTemp(Ids));
     }
     return Result;
