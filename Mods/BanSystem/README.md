@@ -80,17 +80,59 @@ Bans are persisted as JSON in the server's save directory:
 
 ---
 
-## How Ban Enforcement Works
+## How Satisfactory Handles ID Lookups for Steam and Epic Games
 
-When a player successfully connects, the `AFGGameMode::PostLogin` hook fires.  
-The hook checks the player's `UniqueNetId` string against each ban list **independently**:
+Satisfactory uses the CSS custom UE5 engine with the `OnlineServices v2` layer.
+Each player's identity is represented by a `FUniqueNetIdRepl` passed to the
+server during login. The **BanIdResolver** decodes this into usable IDs.
 
-1. **Steam subsystem** checks if the ID matches a Steam64 entry in `SteamBans.json`.
-2. **EOS subsystem** checks if the ID matches an EOS PUID entry in `EOSBans.json`.
+### Steam players
 
-If a match is found the player is kicked immediately with the ban reason prefixed by `[Steam Ban]` or `[EOS Ban]`.
+When a player connects through Steam:
 
-> **Note:** The effectiveness of the PostLogin hook depends on what the active online service populates in `APlayerState::GetUniqueNetId()`. On a dedicated server using the CSS custom online integration the raw player identity string should still be available through this standard UE API.
+1. The CSS Steam online service authenticates the player.
+2. `FUniqueNetIdRepl::GetType()` returns the `FName` **"Steam"**.
+3. `FUniqueNetIdRepl::ToString()` returns the raw **17-digit Steam 64-bit
+   decimal ID** (e.g. `76561198000000000`).
+4. This is the ID stored in `SteamBans.json` and checked against
+   `USteamBanSubsystem`.
+
+### EOS / Epic Games players
+
+When a player connects through Epic Online Services (EOS):
+
+1. The CSS EOS online service assigns each player an **EOS Product User ID
+   (PUID)** — a 32-character lowercase hex string (e.g.
+   `00020aed06f0a6958c3c067fb4b73d51`).
+2. The PUID is **not** directly available from `ToString()` on the
+   `FUniqueNetId`. Instead it is extracted using the CSS FactoryGame helper
+   `EOSId::GetProductUserId(const FUniqueNetId&, FString&)`, which understands
+   the internal `UE::Online::FAccountId` representation used by the v2 API.
+3. This PUID is the ID stored in `EOSBans.json` and checked against
+   `UEOSBanSubsystem`.
+
+### Dual-platform players (Steam + linked Epic)
+
+CSS Satisfactory supports crossplay by linking a Steam account to an Epic
+account. Such players have **both** a Steam64 ID **and** an EOS PUID active
+simultaneously. The `BanIdResolver` extracts both:
+
+```
+Player connects via Steam with linked Epic account
+ │
+ ├─ GetType() == "Steam"  →  Steam64Id = "76561198000000000"
+ └─ EOSId::GetProductUserId() succeeds  →  PUID = "00020aed06f0a6958c3c067fb4b73d51"
+```
+
+Both IDs are checked independently. A player can be banned by their Steam ID,
+their EOS PUID, or both.
+
+### LAN / Offline players
+
+Players on the "Null" online service (LAN, offline sessions) have neither a
+valid Steam type nor a resolvable EOS PUID. The resolver returns an invalid
+`FResolvedBanId` and ban enforcement is skipped — which is the correct
+behaviour for offline play.
 
 ---
 
@@ -102,38 +144,58 @@ Add `"BanSystem"` to your mod's `PublicDependencyModuleNames` in `Build.cs`:
 PublicDependencyModuleNames.AddRange(new string[] { "BanSystem" });
 ```
 
-Then use either subsystem anywhere you have a `UGameInstance*`:
+### ID Resolution
+
+```cpp
+#include "BanIdResolver.h"
+
+// Resolve all platform IDs for a connecting player
+FResolvedBanId Ids = FBanIdResolver::Resolve(PlayerState->GetUniqueNetId());
+
+if (Ids.HasSteamId())
+    UE_LOG(MyLog, Log, TEXT("Steam64: %s"), *Ids.Steam64Id);
+
+if (Ids.HasEOSPuid())
+    UE_LOG(MyLog, Log, TEXT("PUID: %s"), *Ids.EOSProductUserId);
+
+// Or extract one platform at a time:
+FString SteamId;
+if (FBanIdResolver::TryGetSteam64Id(UniqueNetId, SteamId))
+    // ...
+
+FString PUID;
+if (FBanIdResolver::TryGetEOSProductUserId(UniqueNetId, PUID))
+    // ...
+```
+
+### Ban Management
 
 ```cpp
 #include "Steam/SteamBanSubsystem.h"
 #include "EOS/EOSBanSubsystem.h"
 
-// Get subsystems
-USteamBanSubsystem* SteamBans = GetGameInstance()->GetSubsystem<USteamBanSubsystem>();
-UEOSBanSubsystem*   EOSBans   = GetGameInstance()->GetSubsystem<UEOSBanSubsystem>();
+USteamBanSubsystem* SteamBans = GI->GetSubsystem<USteamBanSubsystem>();
+UEOSBanSubsystem*   EOSBans   = GI->GetSubsystem<UEOSBanSubsystem>();
 
-// Ban a player (permanent)
+// Ban permanently
 SteamBans->BanPlayer(TEXT("76561198000000000"), TEXT("Cheating"), 0, TEXT("MyMod"));
 
 // Ban for 60 minutes
 EOSBans->BanPlayer(TEXT("00020aed06f0a6958c3c067fb4b73d51"), TEXT("Spam"), 60, TEXT("MyMod"));
 
-// Check ban status
+// Check
 FString Reason;
-if (SteamBans->IsPlayerBanned(TEXT("76561198000000000"), Reason))
-{
-    // player is banned, Reason is populated
-}
+if (SteamBans->IsPlayerBanned(TEXT("76561198000000000"), Reason)) { ... }
 
-// Listen for ban events
-SteamBans->OnPlayerBanned.AddDynamic(this, &UMyClass::OnSteamPlayerBanned);
-EOSBans->OnPlayerUnbanned.AddDynamic(this, &UMyClass::OnEOSPlayerUnbanned);
+// React to ban events
+SteamBans->OnPlayerBanned.AddDynamic(this, &UMyClass::HandleSteamBan);
+EOSBans->OnPlayerUnbanned.AddDynamic(this, &UMyClass::HandleEOSUnban);
 ```
 
 ### Blueprint Integration
 
-Both subsystems are fully Blueprint-accessible.  
-Use the **Get Game Instance → Get Subsystem (Steam Ban Subsystem)** node chain.
+Both subsystems and `FResolvedBanId` are fully Blueprint-accessible.
+Use **Get Game Instance → Get Subsystem** nodes.
 
 ---
 
