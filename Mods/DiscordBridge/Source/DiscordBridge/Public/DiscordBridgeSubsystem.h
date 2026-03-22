@@ -10,6 +10,7 @@
 #include "FGChatManager.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerController.h"
+#include "Dom/JsonObject.h"
 #include "DiscordBridgeSubsystem.generated.h"
 
 // ── Delegate declarations ─────────────────────────────────────────────────────
@@ -38,6 +39,29 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FDiscordConnectedDelegate);
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FDiscordDisconnectedDelegate,
                                             const FString&, Reason);
+
+/**
+ * Native multicast delegate fired on the game thread whenever Discord delivers
+ * an INTERACTION_CREATE gateway event (button clicks, modal submits, etc.).
+ * Other mods (e.g. TicketSystem) subscribe to this to handle their own
+ * interaction custom_ids without modifying DiscordBridge.
+ *
+ * @param DataObj  The full interaction payload JSON object.  Callers must not
+ *                 hold a reference to this past the current call stack frame.
+ */
+DECLARE_MULTICAST_DELEGATE_OneParam(FDiscordInteractionReceivedDelegate,
+                                    const TSharedPtr<FJsonObject>& /*DataObj*/);
+
+/**
+ * Native multicast delegate fired on the game thread for every MESSAGE_CREATE
+ * gateway event received from Discord.  Other mods can bind to this to
+ * inspect the full message JSON (content, channel_id, member roles, etc.)
+ * without depending on DiscordBridge's internal command parsing.
+ *
+ * @param MessageObj  The full MESSAGE_CREATE data JSON object.
+ */
+DECLARE_MULTICAST_DELEGATE_OneParam(FDiscordRawMessageReceivedDelegate,
+                                    const TSharedPtr<FJsonObject>& /*MessageObj*/);
 
 // ── Discord Gateway opcodes (Discord API reference §Gateway Opcodes) ──────────
 namespace EDiscordGatewayOpcode
@@ -134,6 +158,21 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Discord Bridge")
 	FDiscordDisconnectedDelegate OnDiscordDisconnected;
 
+	/**
+	 * Native multicast delegate fired whenever Discord delivers an
+	 * INTERACTION_CREATE gateway event (button clicks, modal submits).
+	 * Subscribe from other modules to handle custom interaction custom_ids
+	 * without modifying DiscordBridge directly.
+	 */
+	FDiscordInteractionReceivedDelegate OnDiscordInteractionReceived;
+
+	/**
+	 * Native multicast delegate fired on the game thread for every MESSAGE_CREATE
+	 * gateway event.  Use this to inspect the full Discord message JSON
+	 * (channel_id, member roles, etc.) from external modules.
+	 */
+	FDiscordRawMessageReceivedDelegate OnDiscordRawMessageReceived;
+
 	// ── Public API ────────────────────────────────────────────────────────────
 
 	/**
@@ -176,6 +215,87 @@ public:
 	 */
 	UFUNCTION(BlueprintPure, Category="Discord Bridge")
 	bool IsConnected() const { return bGatewayReady; }
+
+	/** Returns the Discord bot token used for REST API authentication.
+	 *  Empty when the token is not yet configured. */
+	UFUNCTION(BlueprintPure, Category="Discord Bridge")
+	const FString& GetBotToken() const;
+
+	/** Returns the Discord guild (server) ID received from the READY event.
+	 *  Empty until the Gateway handshake is complete. */
+	UFUNCTION(BlueprintPure, Category="Discord Bridge")
+	const FString& GetGuildId() const;
+
+	/** Returns the Discord user ID of the guild owner.
+	 *  Populated after the first GUILD_CREATE event is received; may be empty
+	 *  on servers that only receive READY without a full GUILD_CREATE. */
+	UFUNCTION(BlueprintPure, Category="Discord Bridge")
+	const FString& GetGuildOwnerId() const;
+
+	/**
+	 * Post a plain-text message to any Discord channel via the REST API.
+	 * Useful for other mods that need to send messages outside the main bridge
+	 * channel (e.g. posting to a dedicated ticket notification channel).
+	 *
+	 * @param TargetChannelId  Snowflake ID of the destination channel.
+	 * @param Message          Plain-text content (Discord markdown supported).
+	 */
+	void SendDiscordChannelMessage(const FString& TargetChannelId,
+	                               const FString& Message);
+
+	/**
+	 * Respond to a Discord interaction (button click or modal submit) via the
+	 * REST API.  Must be called within ~3 seconds of receiving the interaction
+	 * or Discord will show an error to the user.
+	 *
+	 * @param InteractionId    The interaction "id" field from the payload.
+	 * @param InteractionToken The interaction "token" field from the payload.
+	 * @param ResponseType     Discord callback type:
+	 *                           4 = CHANNEL_MESSAGE_WITH_SOURCE (send a message)
+	 *                           5 = DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
+	 *                           6 = DEFERRED_UPDATE_MESSAGE (ack silently)
+	 * @param Content          Message text (used when ResponseType == 4).
+	 * @param bEphemeral       When true the response is only visible to the
+	 *                         user who triggered the interaction.
+	 */
+	void RespondToInteraction(const FString& InteractionId,
+	                          const FString& InteractionToken,
+	                          int32 ResponseType,
+	                          const FString& Content,
+	                          bool bEphemeral);
+
+	/**
+	 * Send a pre-built JSON message body (content + optional components) to a
+	 * Discord channel via the REST API.  Use this when the message includes
+	 * action rows / buttons in addition to plain text.
+	 *
+	 * @param TargetChannelId  Snowflake ID of the destination channel.
+	 * @param MessageBody      Fully constructed Discord message JSON object.
+	 */
+	void SendMessageBodyToChannel(const FString& TargetChannelId,
+	                              const TSharedPtr<FJsonObject>& MessageBody);
+
+	/**
+	 * Delete a Discord channel via the REST API.
+	 * Used by the TicketSystem mod to close/delete ticket channels.
+	 *
+	 * @param ChannelId  Snowflake ID of the channel to delete.
+	 */
+	void DeleteDiscordChannel(const FString& ChannelId);
+
+	/**
+	 * Create a new guild text channel via the Discord REST API and invoke the
+	 * provided callback with the new channel's ID on success (empty on failure).
+	 *
+	 * @param ChannelName        Desired channel name (must conform to Discord naming rules).
+	 * @param CategoryId         Optional parent category snowflake ID.  Pass empty to skip.
+	 * @param PermissionOverwrites  JSON array of permission-overwrite objects.
+	 * @param OnCreated          Called on the game thread with the new channel ID.
+	 */
+	void CreateDiscordGuildTextChannel(const FString& ChannelName,
+	                                   const FString& CategoryId,
+	                                   const TArray<TSharedPtr<FJsonValue>>& PermissionOverwrites,
+	                                   TFunction<void(const FString& NewChannelId)> OnCreated);
 
 	/**
 	 * Called by OnGameChatMessageAdded every time a player-chat message lands
@@ -431,6 +551,11 @@ private:
 	 *  Populated from the first entry in the READY event's guilds array.
 	 *  Required for Discord REST role-management calls. */
 	FString GuildId;
+
+	/** Snowflake ID of the guild owner.
+	 *  Populated from the GUILD_CREATE event; empty until that event fires.
+	 *  Used by TicketSystem and other extensions to authorise guild-owner actions. */
+	FString GuildOwnerId;
 
 	// ── Discord role member cache (WhitelistRoleId) ───────────────────────────
 
