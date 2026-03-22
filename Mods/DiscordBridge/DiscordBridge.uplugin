@@ -38,6 +38,7 @@
 		{
 			"Name": "TicketSystem",
 			"Enabled": true,
+			"Optional": true,
 			"SemVersion": "^1.0.0"
 		},
 		{
