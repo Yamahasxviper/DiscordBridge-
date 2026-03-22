@@ -1,0 +1,39 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0.2",
+	"SemVersion": "1.0.2",
+	"GameVersion": ">=416835",
+	"FriendlyName": "Discord Bridge",
+	"Description": "Bridges Satisfactory game chat with a Discord channel using a bot token. Supports two-way chat with configurable display names. Requires Presence Intent, Server Members Intent, and Message Content Intent to be enabled on your Discord bot.",
+	"Category": "Networking",
+	"CreatedBy": "SML Community",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"RequiredOnRemote": false,
+	"Modules": [
+		{
+			"Name": "DiscordBridge",
+			"Type": "ServerOnly",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "SML",
+			"Enabled": true,
+			"SemVersion": "^3.11.3"
+		},
+		{
+			"Name": "SMLWebSocket",
+			"Enabled": true,
+			"SemVersion": "^1.0.0"
+		}
+	]
+}
