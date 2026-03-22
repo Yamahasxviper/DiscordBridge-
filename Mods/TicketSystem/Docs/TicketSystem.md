@@ -16,7 +16,7 @@ everything is driven by button clicks and a short reason modal.
 | Mod | Version |
 |-----|---------|
 | SML | `^3.11.3` |
-| DiscordBridge | any (same repo) |
+| DiscordBridge | `^1.0.2` |
 
 DiscordBridge must be installed and configured with a valid `BotToken` before
 TicketSystem will function.

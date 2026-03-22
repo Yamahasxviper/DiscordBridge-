@@ -3,6 +3,7 @@
 #include "TicketSubsystem.h"
 
 #include "DiscordBridgeSubsystem.h"
+#include "Modules/ModuleManager.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonReader.h"
@@ -28,8 +29,29 @@ bool UTicketSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 	{
 		return false;
 	}
+
 	// Only create on dedicated servers – mirrors UDiscordBridgeSubsystem behaviour.
-	return IsRunningDedicatedServer();
+	if (!IsRunningDedicatedServer())
+	{
+		return false;
+	}
+
+	// Dependency check: DiscordBridge module must be loaded.
+	// TicketSystem has no Discord integration without it, so skip creating the
+	// subsystem entirely rather than silently doing nothing at runtime.
+	// Under normal circumstances the SML plugin loader enforces the
+	// DiscordBridge dependency declared in TicketSystem.uplugin, so this
+	// guard only fires when the mod is installed manually without DiscordBridge.
+	if (!FModuleManager::Get().IsModuleLoaded(TEXT("DiscordBridge")))
+	{
+		UE_LOG(LogTicketSystem, Error,
+		       TEXT("TicketSystem: DiscordBridge module is not loaded. "
+		            "Install DiscordBridge (>= 1.0.2) alongside TicketSystem. "
+		            "TicketSystem will not be created."));
+		return false;
+	}
+
+	return true;
 }
 
 void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -56,9 +78,10 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	}
 	else
 	{
-		UE_LOG(LogTicketSystem, Warning,
+		UE_LOG(LogTicketSystem, Error,
 		       TEXT("TicketSystem: UDiscordBridgeSubsystem not found. "
-		            "Ticket interactions will not be processed."));
+		            "Ensure DiscordBridge (>= 1.0.2) is installed and configured with "
+		            "a valid BotToken. Ticket interactions will not be processed."));
 	}
 }
 
