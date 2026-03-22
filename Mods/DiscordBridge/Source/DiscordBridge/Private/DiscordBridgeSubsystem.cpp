@@ -183,6 +183,7 @@ void UDiscordBridgeSubsystem::Disconnect()
 	LastSequenceNumber       = -1;
 	BotUserId.Empty();
 	GuildId.Empty();
+	GuildOwnerId.Empty();
 
 	if (WebSocketClient)
 	{
@@ -424,6 +425,21 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 	{
 		HandleMessageCreate(DataObj);
 	}
+	else if (EventType == TEXT("GUILD_CREATE"))
+	{
+		// Capture the guild owner ID so extension modules (e.g. TicketSystem)
+		// can authorise guild-owner actions.
+		DataObj->TryGetStringField(TEXT("owner_id"), GuildOwnerId);
+	}
+	else if (EventType == TEXT("INTERACTION_CREATE"))
+	{
+		// Fire the native delegate so extension modules can handle button clicks
+		// and modal submits without modifying DiscordBridge directly.
+		if (OnDiscordInteractionReceived.IsBound())
+		{
+			OnDiscordInteractionReceived.Broadcast(DataObj);
+		}
+	}
 	else if (EventType == TEXT("GUILD_MEMBER_ADD") ||
 	         EventType == TEXT("GUILD_MEMBER_UPDATE"))
 	{
@@ -463,6 +479,7 @@ void UDiscordBridgeSubsystem::HandleReconnect()
 	LastSequenceNumber   = -1;
 	BotUserId.Empty();
 	GuildId.Empty();
+	GuildOwnerId.Empty();
 
 	// Restart the WebSocket connection by calling Connect() on the existing
 	// client.  Do NOT call Close() here: Close() → EnqueueClose() sets
@@ -563,6 +580,14 @@ void UDiscordBridgeSubsystem::HandleReady(const TSharedPtr<FJsonObject>& DataObj
 
 void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>& DataObj)
 {
+	// Forward the full message JSON to any external subscribers (e.g. TicketSystem).
+	// This is done before channel filtering so subscribers can process messages
+	// from any channel (e.g. the !ticket-panel command from an admin channel).
+	if (OnDiscordRawMessageReceived.IsBound())
+	{
+		OnDiscordRawMessageReceived.Broadcast(DataObj);
+	}
+
 	// Accept messages from the main channel OR the dedicated whitelist channel.
 	FString MsgChannelId;
 	if (!DataObj->TryGetStringField(TEXT("channel_id"), MsgChannelId))
@@ -837,6 +862,7 @@ void UDiscordBridgeSubsystem::SendHeartbeat()
 		LastSequenceNumber = -1;
 		BotUserId.Empty();
 		GuildId.Empty();
+		GuildOwnerId.Empty();
 
 		if (WebSocketClient)
 		{
@@ -950,7 +976,274 @@ void UDiscordBridgeSubsystem::SendMessageToChannel(const FString& TargetChannelI
 	Request->ProcessRequest();
 }
 
-void UDiscordBridgeSubsystem::SendGatewayPayload(const TSharedPtr<FJsonObject>& Payload)
+// ─────────────────────────────────────────────────────────────────────────────
+// Extension API – getters and REST helpers used by external modules
+// ─────────────────────────────────────────────────────────────────────────────
+
+const FString& UDiscordBridgeSubsystem::GetBotToken() const
+{
+	return Config.BotToken;
+}
+
+const FString& UDiscordBridgeSubsystem::GetGuildId() const
+{
+	return GuildId;
+}
+
+const FString& UDiscordBridgeSubsystem::GetGuildOwnerId() const
+{
+	return GuildOwnerId;
+}
+
+void UDiscordBridgeSubsystem::SendDiscordChannelMessage(const FString& TargetChannelId,
+                                                        const FString& Message)
+{
+	SendMessageToChannel(TargetChannelId, Message);
+}
+
+void UDiscordBridgeSubsystem::RespondToInteraction(const FString& InteractionId,
+                                                   const FString& InteractionToken,
+                                                   int32 ResponseType,
+                                                   const FString& Content,
+                                                   bool bEphemeral)
+{
+	if (Config.BotToken.IsEmpty() || InteractionId.IsEmpty() || InteractionToken.IsEmpty())
+	{
+		return;
+	}
+
+	TSharedPtr<FJsonObject> ResponseData = MakeShared<FJsonObject>();
+	if (ResponseType == 4 && !Content.IsEmpty())
+	{
+		ResponseData->SetStringField(TEXT("content"), Content);
+		if (bEphemeral)
+		{
+			// Discord flags bitmask: 64 = EPHEMERAL
+			ResponseData->SetNumberField(TEXT("flags"), 64);
+		}
+	}
+
+	TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetNumberField(TEXT("type"), ResponseType);
+	if (ResponseData->Values.Num() > 0)
+	{
+		Body->SetObjectField(TEXT("data"), ResponseData);
+	}
+
+	FString BodyString;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
+	FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+
+	const FString Url = FString::Printf(
+		TEXT("%s/interactions/%s/%s/callback"),
+		*DiscordApiBase, *InteractionId, *InteractionToken);
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
+		FHttpModule::Get().CreateRequest();
+
+	Request->SetURL(Url);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
+	Request->SetHeader(TEXT("Authorization"),
+	                   FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+	Request->SetContentAsString(BodyString);
+
+	Request->OnProcessRequestComplete().BindLambda(
+		[InteractionId](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
+		{
+			if (!bConnected || !Resp.IsValid())
+			{
+				UE_LOG(LogTemp, Warning,
+				       TEXT("DiscordBridge: Interaction callback request failed (id=%s)."),
+				       *InteractionId);
+				return;
+			}
+			if (Resp->GetResponseCode() != 200 && Resp->GetResponseCode() != 204)
+			{
+				UE_LOG(LogTemp, Warning,
+				       TEXT("DiscordBridge: Interaction callback returned HTTP %d: %s"),
+				       Resp->GetResponseCode(), *Resp->GetContentAsString());
+			}
+		});
+
+	Request->ProcessRequest();
+}
+
+void UDiscordBridgeSubsystem::SendMessageBodyToChannel(const FString& TargetChannelId,
+                                                       const TSharedPtr<FJsonObject>& MessageBody)
+{
+	if (Config.BotToken.IsEmpty() || TargetChannelId.IsEmpty() || !MessageBody.IsValid())
+	{
+		return;
+	}
+
+	FString BodyString;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
+	FJsonSerializer::Serialize(MessageBody.ToSharedRef(), Writer);
+
+	const FString Url = FString::Printf(
+		TEXT("%s/channels/%s/messages"), *DiscordApiBase, *TargetChannelId);
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
+		FHttpModule::Get().CreateRequest();
+
+	Request->SetURL(Url);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
+	Request->SetHeader(TEXT("Authorization"),
+	                   FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+	Request->SetContentAsString(BodyString);
+
+	Request->OnProcessRequestComplete().BindLambda(
+		[TargetChannelId](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
+		{
+			if (!bConnected || !Resp.IsValid())
+			{
+				UE_LOG(LogTemp, Warning,
+				       TEXT("DiscordBridge: SendMessageBodyToChannel request failed (channel=%s)."),
+				       *TargetChannelId);
+				return;
+			}
+			if (Resp->GetResponseCode() < 200 || Resp->GetResponseCode() >= 300)
+			{
+				UE_LOG(LogTemp, Warning,
+				       TEXT("DiscordBridge: SendMessageBodyToChannel returned HTTP %d (channel=%s): %s"),
+				       Resp->GetResponseCode(), *TargetChannelId,
+				       *Resp->GetContentAsString());
+			}
+		});
+
+	Request->ProcessRequest();
+}
+
+void UDiscordBridgeSubsystem::DeleteDiscordChannel(const FString& ChannelId)
+{
+	if (Config.BotToken.IsEmpty() || ChannelId.IsEmpty())
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Log,
+	       TEXT("DiscordBridge: Deleting channel %s."), *ChannelId);
+
+	const FString Url = FString::Printf(
+		TEXT("%s/channels/%s"), *DiscordApiBase, *ChannelId);
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
+		FHttpModule::Get().CreateRequest();
+
+	Request->SetURL(Url);
+	Request->SetVerb(TEXT("DELETE"));
+	Request->SetHeader(TEXT("Authorization"),
+	                   FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+
+	Request->OnProcessRequestComplete().BindLambda(
+		[ChannelId](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
+		{
+			if (!bConnected || !Resp.IsValid())
+			{
+				UE_LOG(LogTemp, Warning,
+				       TEXT("DiscordBridge: DeleteDiscordChannel request failed (channel=%s)."),
+				       *ChannelId);
+				return;
+			}
+			if (Resp->GetResponseCode() < 200 || Resp->GetResponseCode() >= 300)
+			{
+				UE_LOG(LogTemp, Warning,
+				       TEXT("DiscordBridge: DeleteDiscordChannel returned HTTP %d (channel=%s): %s"),
+				       Resp->GetResponseCode(), *ChannelId, *Resp->GetContentAsString());
+			}
+			else
+			{
+				UE_LOG(LogTemp, Log,
+				       TEXT("DiscordBridge: Channel %s deleted successfully."), *ChannelId);
+			}
+		});
+
+	Request->ProcessRequest();
+}
+
+void UDiscordBridgeSubsystem::CreateDiscordGuildTextChannel(
+	const FString& ChannelName,
+	const FString& CategoryId,
+	const TArray<TSharedPtr<FJsonValue>>& PermissionOverwrites,
+	TFunction<void(const FString& NewChannelId)> OnCreated)
+{
+	if (Config.BotToken.IsEmpty() || GuildId.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning,
+		       TEXT("DiscordBridge: CreateDiscordGuildTextChannel – BotToken or GuildId empty."));
+		if (OnCreated)
+		{
+			OnCreated(TEXT(""));
+		}
+		return;
+	}
+
+	TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetStringField(TEXT("name"), ChannelName);
+	Body->SetNumberField(TEXT("type"), 0); // GUILD_TEXT
+	Body->SetArrayField(TEXT("permission_overwrites"), PermissionOverwrites);
+	if (!CategoryId.IsEmpty())
+	{
+		Body->SetStringField(TEXT("parent_id"), CategoryId);
+	}
+
+	FString BodyString;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
+	FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+
+	const FString Url = FString::Printf(
+		TEXT("%s/guilds/%s/channels"), *DiscordApiBase, *GuildId);
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
+		FHttpModule::Get().CreateRequest();
+
+	Request->SetURL(Url);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
+	Request->SetHeader(TEXT("Authorization"),
+	                   FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+	Request->SetContentAsString(BodyString);
+
+	Request->OnProcessRequestComplete().BindWeakLambda(
+		this,
+		[OnCreated = MoveTemp(OnCreated), ChannelName]
+		(FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected) mutable
+		{
+			if (!bConnected || !Resp.IsValid() ||
+			    (Resp->GetResponseCode() != 200 && Resp->GetResponseCode() != 201))
+			{
+				UE_LOG(LogTemp, Warning,
+				       TEXT("DiscordBridge: CreateDiscordGuildTextChannel failed for '%s'. HTTP %d."),
+				       *ChannelName,
+				       (Resp.IsValid() ? Resp->GetResponseCode() : 0));
+				if (OnCreated)
+				{
+					OnCreated(TEXT(""));
+				}
+				return;
+			}
+
+			TSharedPtr<FJsonObject> ChannelObj;
+			TSharedRef<TJsonReader<>> Reader =
+				TJsonReaderFactory<>::Create(Resp->GetContentAsString());
+			FString NewChannelId;
+			if (FJsonSerializer::Deserialize(Reader, ChannelObj) && ChannelObj.IsValid())
+			{
+				ChannelObj->TryGetStringField(TEXT("id"), NewChannelId);
+			}
+
+			if (OnCreated)
+			{
+				OnCreated(NewChannelId);
+			}
+		});
+
+	Request->ProcessRequest();
+}
+
+
 {
 	if (!WebSocketClient || !WebSocketClient->IsConnected())
 	{

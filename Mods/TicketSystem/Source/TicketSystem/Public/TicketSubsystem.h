@@ -1,0 +1,185 @@
+// Copyright Coffee Stain Studios. All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Dom/JsonObject.h"
+#include "TicketConfig.h"
+#include "TicketSubsystem.generated.h"
+
+class UDiscordBridgeSubsystem;
+
+/**
+ * UTicketSubsystem
+ *
+ * A GameInstance-level subsystem that adds a button-based Discord support-ticket
+ * panel to the DiscordBridge mod.
+ *
+ * How it works
+ * ────────────
+ *  1. On Initialize() the subsystem loads DefaultTickets.ini and subscribes to
+ *     UDiscordBridgeSubsystem::OnDiscordInteractionReceived.
+ *  2. When a Discord member clicks a ticket button (or submits a ticket reason
+ *     modal) the interaction payload is dispatched here via the delegate.
+ *  3. The subsystem creates a private guild text channel visible only to the
+ *     ticket opener and the admin/support role (TicketNotifyRoleId), posts a
+ *     welcome message and a Close Ticket button, and optionally notifies the
+ *     admin channel (TicketChannelId).
+ *  4. When either the ticket opener or an admin clicks Close Ticket, the channel
+ *     is deleted via the DiscordBridge REST helper DeleteDiscordChannel().
+ *
+ * Admin command
+ * ─────────────
+ *  Typing "!ticket-panel" in any Discord channel while holding the
+ *  TicketNotifyRoleId role posts the panel to TicketPanelChannelId.
+ *  The message includes one button per enabled ticket type plus any custom
+ *  TicketReason= entries from DefaultTickets.ini.
+ *
+ * Required bot permissions
+ * ─────────────────────────
+ *  Manage Channels – create and delete ticket channels
+ *  View Channel    – read channels
+ *  Send Messages   – post the welcome and close-button messages
+ */
+UCLASS()
+class TICKETSYSTEM_API UTicketSubsystem : public UGameInstanceSubsystem
+{
+	GENERATED_BODY()
+
+public:
+	// ── USubsystem ────────────────────────────────────────────────────────────
+
+	/** Only create on dedicated servers / listen servers (not in the editor). */
+	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Deinitialize() override;
+
+private:
+	// ── Interaction routing ───────────────────────────────────────────────────
+
+	/**
+	 * Bound to UDiscordBridgeSubsystem::OnDiscordInteractionReceived.
+	 * Routes button clicks (type 3) and modal submits (type 5) to the
+	 * appropriate internal handler.
+	 */
+	void OnInteractionReceived(const TSharedPtr<FJsonObject>& DataObj);
+
+	/**
+	 * Handle a MESSAGE_COMPONENT interaction (button click, type 3).
+	 * Dispatches to the ticket-open or ticket-close logic based on the
+	 * interaction's custom_id.
+	 */
+	void HandleTicketButtonInteraction(const FString& InteractionId,
+	                                   const FString& InteractionToken,
+	                                   const FString& CustomId,
+	                                   const FString& DiscordUserId,
+	                                   const FString& DiscordUsername,
+	                                   const TArray<FString>& MemberRoles,
+	                                   const FString& SourceChannelId);
+
+	/**
+	 * Respond to a ticket button interaction by showing a Discord modal (popup
+	 * form) that lets the user provide a reason before the ticket channel is
+	 * created.
+	 *
+	 * @param ModalCustomId  The custom_id for the modal (e.g. "ticket_modal:wl").
+	 * @param Title          The modal window title (max 45 chars).
+	 * @param Placeholder    Placeholder text shown inside the text input.
+	 */
+	void ShowTicketReasonModal(const FString& InteractionId,
+	                           const FString& InteractionToken,
+	                           const FString& ModalCustomId,
+	                           const FString& Title,
+	                           const FString& Placeholder);
+
+	/**
+	 * Handle a MODAL_SUBMIT interaction (type 5) from a ticket reason modal.
+	 * Extracts the user-supplied text, checks for duplicate tickets, and calls
+	 * CreateTicketChannel().
+	 */
+	void HandleTicketModalSubmit(const FString& InteractionId,
+	                             const FString& InteractionToken,
+	                             const FString& ModalCustomId,
+	                             const TSharedPtr<FJsonObject>& DataObj,
+	                             const FString& DiscordUserId,
+	                             const FString& DiscordUsername);
+
+	/**
+	 * Create a private Discord text channel for a support ticket.
+	 * Uses DiscordBridge's CreateDiscordGuildTextChannel() helper.
+	 *
+	 * @param OpenerUserId    Discord user ID of the member who opened the ticket.
+	 * @param OpenerUsername  Display name of the member.
+	 * @param TicketType      One of "whitelist", "help", "report", or a custom slug.
+	 * @param ExtraInfo       Optional reason text entered by the member in the modal.
+	 * @param DisplayLabel    Human-readable label for custom ticket types.
+	 * @param DisplayDesc     Description for custom ticket types shown in the welcome message.
+	 */
+	void CreateTicketChannel(const FString& OpenerUserId,
+	                         const FString& OpenerUsername,
+	                         const FString& TicketType,
+	                         const FString& ExtraInfo,
+	                         const FString& DisplayLabel,
+	                         const FString& DisplayDesc);
+
+	/**
+	 * Post the ticket panel (a message with clickable buttons) to the configured
+	 * TicketPanelChannelId channel.
+	 * Called when a member holding TicketNotifyRoleId types "!ticket-panel".
+	 *
+	 * @param PanelChannelId     Destination channel for the panel message.
+	 * @param ResponseChannelId  Channel where the command confirmation is sent.
+	 */
+	void PostTicketPanel(const FString& PanelChannelId,
+	                     const FString& ResponseChannelId);
+
+	// ── Message routing ───────────────────────────────────────────────────────
+
+	/**
+	 * Bound to UDiscordBridgeSubsystem::OnDiscordRawMessageReceived.
+	 * Checks whether the message content is the "!ticket-panel" command and,
+	 * if the sender holds TicketNotifyRoleId, posts the ticket panel.
+	 *
+	 * @param MessageObj  The full MESSAGE_CREATE data JSON object.
+	 */
+	void OnRawDiscordMessage(const TSharedPtr<FJsonObject>& MessageObj);
+
+	// ── Internal helpers ──────────────────────────────────────────────────────
+
+	/**
+	 * Sanitize a Discord username into a valid channel-name segment.
+	 * Produces only lowercase letters, digits, and dashes; clamped to 40 chars.
+	 */
+	static FString SanitizeUsernameForChannel(const FString& Username);
+
+	/** Build and return the close-ticket button JSON message body. */
+	static TSharedPtr<FJsonObject> MakeCloseButtonMessage(const FString& OpenerUserId);
+
+	/** Return a pointer to UDiscordBridgeSubsystem (cached after first lookup). */
+	UDiscordBridgeSubsystem* GetBridge() const;
+
+	// ── State ─────────────────────────────────────────────────────────────────
+
+	/** Loaded config (populated in Initialize()). */
+	FTicketConfig Config;
+
+	/** Delegate handle for the DiscordBridge interaction delegate subscription. */
+	FDelegateHandle InteractionDelegateHandle;
+
+	/** Delegate handle for the raw gateway message subscription. */
+	FDelegateHandle RawMessageDelegateHandle;
+
+	/**
+	 * Maps each active ticket channel ID to the Discord user ID of its opener.
+	 * Used to verify the Close Ticket authorisation and to clean up on deletion.
+	 */
+	TMap<FString, FString> TicketChannelToOpener;
+
+	/**
+	 * Reverse of TicketChannelToOpener: maps each opener's Discord user ID to
+	 * the active ticket channel they currently have open.
+	 * Used to prevent duplicate tickets (one active ticket per user at a time).
+	 */
+	TMap<FString, FString> OpenerToTicketChannel;
+};
