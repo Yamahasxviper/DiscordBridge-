@@ -125,6 +125,25 @@ is configured through a single INI file with no external service or dashboard re
 
 ---
 
+## TicketSystem (optional add-on mod)
+
+The **TicketSystem** mod extends DiscordBridge with a button-based Discord
+support-ticket panel.
+
+- Members click a button to open a **private ticket channel** visible only to
+  them and an admin/support role.
+- A reason modal (popup) collects context before the channel is created.
+- Built-in ticket types: Whitelist Request, Help / Support, Report a Player.
+- Unlimited custom ticket reasons configurable via `TicketReason=Label|Desc`.
+- Admins post the panel by typing `!ticket-panel` in any Discord channel.
+- Either party can click **Close Ticket** to delete the channel when done.
+- No changes to `DefaultDiscordBridge.ini` are needed; TicketSystem reads its
+  own `DefaultTickets.ini`.
+
+→ See [TicketSystem](09-TicketSystem.md)
+
+---
+
 ## Requirements
 
 | Dependency | Minimum version |
