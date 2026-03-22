@@ -87,6 +87,26 @@ public:
 	                                  bool bEphemeral) = 0;
 
 	/**
+	 * Respond to a Discord button-click interaction by showing a modal popup
+	 * (Discord response type 9 = MODAL) via the REST API.  Must be called
+	 * within ~3 seconds of receiving the interaction.
+	 *
+	 * @param InteractionId    The interaction "id" field from the payload.
+	 * @param InteractionToken The interaction "token" field from the payload.
+	 * @param ModalCustomId    The custom_id to assign to the modal itself
+	 *                         (e.g. "ticket_modal:wl").  Returned verbatim in
+	 *                         the subsequent MODAL_SUBMIT interaction.
+	 * @param Title            Modal window title (max 45 characters).
+	 * @param Placeholder      Placeholder text shown inside the paragraph-style
+	 *                         text input component.
+	 */
+	virtual void RespondWithModal(const FString& InteractionId,
+	                              const FString& InteractionToken,
+	                              const FString& ModalCustomId,
+	                              const FString& Title,
+	                              const FString& Placeholder) = 0;
+
+	/**
 	 * Post a plain-text message to any Discord channel via the REST API.
 	 *
 	 * @param TargetChannelId  Snowflake ID of the destination channel.

@@ -21,8 +21,6 @@ public class TicketSystem : ModuleRules
 			"DummyHeaders",
 			// SML runtime – ensures correct module load ordering.
 			"SML",
-			// Unreal HTTP module – confirmed present in Satisfactory's custom UE build.
-			"HTTP",
 			// JSON serialisation (FJsonObject / TJsonReader / TJsonWriter).
 			"Json",
 		});

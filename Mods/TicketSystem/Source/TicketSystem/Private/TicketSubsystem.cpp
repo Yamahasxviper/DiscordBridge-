@@ -7,15 +7,9 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
-#include "HttpModule.h"
-#include "Interfaces/IHttpRequest.h"
-#include "Interfaces/IHttpResponse.h"
 #include "Engine/GameInstance.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogTicketSystem, Log, All);
-
-// Discord REST API base URL (same version as DiscordBridge)
-static const FString TicketDiscordApiBase = TEXT("https://discord.com/api/v10");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // USubsystem lifetime
@@ -471,77 +465,13 @@ void UTicketSubsystem::ShowTicketReasonModal(
 	const FString& Title,
 	const FString& Placeholder)
 {
-	const IDiscordBridgeProvider* Bridge = GetBridge();
-	if (!Bridge || Bridge->GetBotToken().IsEmpty()
-	    || InteractionId.IsEmpty() || InteractionToken.IsEmpty())
+	IDiscordBridgeProvider* Bridge = GetBridge();
+	if (!Bridge || InteractionId.IsEmpty() || InteractionToken.IsEmpty())
 	{
 		return;
 	}
 
-	const FString BotToken = Bridge->GetBotToken();
-
-	// Build the text input component.
-	TSharedPtr<FJsonObject> TextInput = MakeShared<FJsonObject>();
-	TextInput->SetNumberField(TEXT("type"),        4); // TEXT_INPUT
-	TextInput->SetStringField(TEXT("custom_id"),   TEXT("ticket_reason"));
-	TextInput->SetNumberField(TEXT("style"),       2); // PARAGRAPH (multi-line)
-	TextInput->SetStringField(TEXT("label"),       TEXT("Reason"));
-	TextInput->SetStringField(TEXT("placeholder"), Placeholder);
-	TextInput->SetBoolField  (TEXT("required"),    false);
-	TextInput->SetNumberField(TEXT("max_length"),  1000);
-
-	TSharedPtr<FJsonObject> ActionRow = MakeShared<FJsonObject>();
-	ActionRow->SetNumberField(TEXT("type"), 1); // ACTION_ROW
-	ActionRow->SetArrayField(TEXT("components"),
-		TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(TextInput) });
-
-	TSharedPtr<FJsonObject> ModalData = MakeShared<FJsonObject>();
-	ModalData->SetStringField(TEXT("custom_id"),  ModalCustomId);
-	ModalData->SetStringField(TEXT("title"),      Title);
-	ModalData->SetArrayField (TEXT("components"),
-		TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(ActionRow) });
-
-	TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
-	Body->SetNumberField(TEXT("type"), 9); // MODAL
-	Body->SetObjectField(TEXT("data"), ModalData);
-
-	FString BodyString;
-	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
-	FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
-
-	const FString Url = FString::Printf(
-		TEXT("%s/interactions/%s/%s/callback"),
-		*TicketDiscordApiBase, *InteractionId, *InteractionToken);
-
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
-		FHttpModule::Get().CreateRequest();
-
-	Request->SetURL(Url);
-	Request->SetVerb(TEXT("POST"));
-	Request->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
-	Request->SetHeader(TEXT("Authorization"),
-	                   FString::Printf(TEXT("Bot %s"), *BotToken));
-	Request->SetContentAsString(BodyString);
-
-	Request->OnProcessRequestComplete().BindLambda(
-		[InteractionId](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
-		{
-			if (!bConnected || !Resp.IsValid())
-			{
-				UE_LOG(LogTicketSystem, Warning,
-				       TEXT("TicketSystem: ShowTicketReasonModal request failed (id=%s)."),
-				       *InteractionId);
-				return;
-			}
-			if (Resp->GetResponseCode() != 200 && Resp->GetResponseCode() != 204)
-			{
-				UE_LOG(LogTicketSystem, Warning,
-				       TEXT("TicketSystem: ShowTicketReasonModal returned HTTP %d: %s"),
-				       Resp->GetResponseCode(), *Resp->GetContentAsString());
-			}
-		});
-
-	Request->ProcessRequest();
+	Bridge->RespondWithModal(InteractionId, InteractionToken, ModalCustomId, Title, Placeholder);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -757,7 +687,6 @@ void UTicketSubsystem::CreateTicketChannel(
 	}
 
 	// Capture everything the async callback needs.
-	const FString BotTokenCopy       = Bridge->GetBotToken();
 	const FString NotifyRoleIdCopy   = Config.TicketNotifyRoleId;
 	const FString TicketChannelCopy  = Config.TicketChannelId;
 	const FString OpenerUserIdCopy   = OpenerUserId;
@@ -771,7 +700,7 @@ void UTicketSubsystem::CreateTicketChannel(
 		ChannelName,
 		Config.TicketCategoryId,
 		Overwrites,
-		[this, BotTokenCopy, NotifyRoleIdCopy, TicketChannelCopy,
+		[this, NotifyRoleIdCopy, TicketChannelCopy,
 		 OpenerUserIdCopy, OpenerUsernameCopy, TicketTypeCopy,
 		 ExtraInfoCopy, DisplayLabelCopy, DisplayDescCopy]
 		(const FString& NewChannelId)

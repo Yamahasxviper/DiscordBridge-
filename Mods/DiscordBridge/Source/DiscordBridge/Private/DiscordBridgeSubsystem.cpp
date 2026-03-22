@@ -1094,6 +1094,81 @@ void UDiscordBridgeSubsystem::RespondToInteraction(const FString& InteractionId,
 	Request->ProcessRequest();
 }
 
+void UDiscordBridgeSubsystem::RespondWithModal(const FString& InteractionId,
+                                               const FString& InteractionToken,
+                                               const FString& ModalCustomId,
+                                               const FString& Title,
+                                               const FString& Placeholder)
+{
+	if (Config.BotToken.IsEmpty() || InteractionId.IsEmpty() || InteractionToken.IsEmpty())
+	{
+		return;
+	}
+
+	// Build the single paragraph text-input component.
+	TSharedPtr<FJsonObject> TextInput = MakeShared<FJsonObject>();
+	TextInput->SetNumberField(TEXT("type"),        4); // TEXT_INPUT
+	TextInput->SetStringField(TEXT("custom_id"),   TEXT("ticket_reason"));
+	TextInput->SetNumberField(TEXT("style"),       2); // PARAGRAPH (multi-line)
+	TextInput->SetStringField(TEXT("label"),       TEXT("Reason"));
+	TextInput->SetStringField(TEXT("placeholder"), Placeholder);
+	TextInput->SetBoolField  (TEXT("required"),    false);
+	TextInput->SetNumberField(TEXT("max_length"),  1000);
+
+	TSharedPtr<FJsonObject> ActionRow = MakeShared<FJsonObject>();
+	ActionRow->SetNumberField(TEXT("type"), 1); // ACTION_ROW
+	ActionRow->SetArrayField(TEXT("components"),
+		TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(TextInput) });
+
+	TSharedPtr<FJsonObject> ModalData = MakeShared<FJsonObject>();
+	ModalData->SetStringField(TEXT("custom_id"),  ModalCustomId);
+	ModalData->SetStringField(TEXT("title"),      Title);
+	ModalData->SetArrayField (TEXT("components"),
+		TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(ActionRow) });
+
+	TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetNumberField(TEXT("type"), 9); // MODAL
+	Body->SetObjectField(TEXT("data"), ModalData);
+
+	FString BodyString;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
+	FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+
+	const FString Url = FString::Printf(
+		TEXT("%s/interactions/%s/%s/callback"),
+		*DiscordApiBase, *InteractionId, *InteractionToken);
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
+		FHttpModule::Get().CreateRequest();
+
+	Request->SetURL(Url);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
+	Request->SetHeader(TEXT("Authorization"),
+	                   FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+	Request->SetContentAsString(BodyString);
+
+	Request->OnProcessRequestComplete().BindLambda(
+		[InteractionId](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
+		{
+			if (!bConnected || !Resp.IsValid())
+			{
+				UE_LOG(LogTemp, Warning,
+				       TEXT("DiscordBridge: RespondWithModal request failed (id=%s)."),
+				       *InteractionId);
+				return;
+			}
+			if (Resp->GetResponseCode() != 200 && Resp->GetResponseCode() != 204)
+			{
+				UE_LOG(LogTemp, Warning,
+				       TEXT("DiscordBridge: RespondWithModal returned HTTP %d: %s"),
+				       Resp->GetResponseCode(), *Resp->GetContentAsString());
+			}
+		});
+
+	Request->ProcessRequest();
+}
+
 void UDiscordBridgeSubsystem::SendMessageBodyToChannel(const FString& TargetChannelId,
                                                        const TSharedPtr<FJsonObject>& MessageBody)
 {

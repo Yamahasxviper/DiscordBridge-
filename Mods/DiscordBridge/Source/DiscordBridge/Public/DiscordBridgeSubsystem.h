@@ -269,6 +269,12 @@ public:
 	                                  const FString& Content,
 	                                  bool bEphemeral) override;
 
+	virtual void RespondWithModal(const FString& InteractionId,
+	                              const FString& InteractionToken,
+	                              const FString& ModalCustomId,
+	                              const FString& Title,
+	                              const FString& Placeholder) override;
+
 	/**
 	 * Send a pre-built JSON message body (content + optional components) to a
 	 * Discord channel via the REST API.  Use this when the message includes
