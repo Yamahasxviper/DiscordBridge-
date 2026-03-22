@@ -9,7 +9,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "Engine/GameInstance.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogTicketSystem, Log, All);
+DEFINE_LOG_CATEGORY(LogTicketSystem);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // USubsystem lifetime
