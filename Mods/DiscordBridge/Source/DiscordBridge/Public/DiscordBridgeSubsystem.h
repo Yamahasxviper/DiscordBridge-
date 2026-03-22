@@ -13,7 +13,6 @@
 #include "Dom/JsonObject.h"
 #include "IDiscordBridgeProvider.h"
 #include "IBanNotificationProvider.h"
-#include "IBanDiscordCommandProvider.h"
 #include "DiscordBridgeSubsystem.generated.h"
 
 // Forward-declared so the header does not pull in TicketSystem's full header chain.
@@ -23,9 +22,6 @@ class UTicketSubsystem;
 // The IBanNotificationProvider interface (above) already includes BanTypes.h.
 class USteamBanSubsystem;
 class UEOSBanSubsystem;
-
-// Forward-declared so the header does not pull in BanSystem's Discord subsystem header.
-class UBanDiscordSubsystem;
 
 // ── Delegate declarations ─────────────────────────────────────────────────────
 
@@ -145,8 +141,7 @@ namespace EDiscordGatewayIntent
 UCLASS(BlueprintType)
 class DISCORDBRIDGE_API UDiscordBridgeSubsystem : public UGameInstanceSubsystem,
                                                   public IDiscordBridgeProvider,
-                                                  public IBanNotificationProvider,
-                                                  public IBanDiscordCommandProvider
+                                                  public IBanNotificationProvider
 {
 	GENERATED_BODY()
 
@@ -578,26 +573,6 @@ private:
 	/** Posts BanSystemEOSUnbanDiscordMessage when BanSystem unbans an EOS player. */
 	virtual void OnEOSPlayerUnbanned(const FString& EOSProductUserId) override;
 
-	// ── IBanDiscordCommandProvider ────────────────────────────────────────────
-	// Implemented here to allow UBanDiscordSubsystem (in BanSystem) to receive
-	// Discord message events and send responses without any compile-time
-	// dependency on DiscordBridge.  UBanDiscordSubsystem calls
-	// SetCommandProvider(this) in Initialize() and SetCommandProvider(nullptr)
-	// in Deinitialize().
-	//
-	// NOTE: SendDiscordChannelMessage() and GetGuildOwnerId() are already
-	// declared above (satisfying IDiscordBridgeProvider).  Because
-	// IBanDiscordCommandProvider declares the same signatures, the single
-	// implementations above satisfy BOTH interfaces — no additional overrides
-	// are needed for those two methods here.
-
-	/** Subscribe to Discord MESSAGE_CREATE events (raw message JSON). */
-	virtual FDelegateHandle SubscribeDiscordMessages(
-		TFunction<void(const TSharedPtr<FJsonObject>&)> Callback) override;
-
-	/** Cancel a Discord message subscription previously created by SubscribeDiscordMessages(). */
-	virtual void UnsubscribeDiscordMessages(FDelegateHandle Handle) override;
-
 	/** Broadcast a status/feedback message to all connected players via the game chat. */
 	void SendGameChatStatusMessage(const FString& Message);
 
@@ -673,10 +648,4 @@ private:
 	 * BanSystem is installed.  Used to unbind delegates in Deinitialize().
 	 */
 	TWeakObjectPtr<UEOSBanSubsystem> CachedEOSBanSubsystem;
-
-	/**
-	 * Weak reference to UBanDiscordSubsystem; populated during Initialize() if
-	 * BanSystem is installed.  Used to clear the command provider in Deinitialize().
-	 */
-	TWeakObjectPtr<UBanDiscordSubsystem> CachedBanDiscordSubsystem;
 };

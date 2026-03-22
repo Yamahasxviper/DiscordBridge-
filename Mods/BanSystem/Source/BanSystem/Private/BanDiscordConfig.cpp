@@ -36,9 +36,21 @@ namespace
 		"[BanSystem]\r\n"
 		"# BanSystem - Discord Integration Configuration\r\n"
 		"# =============================================\r\n"
-		"# These settings control BanSystem's Discord command interface.\r\n"
-		"# Requires DiscordBridge (or another IBanDiscordCommandProvider mod) to be installed.\r\n"
+		"# BanSystem can connect to Discord on its own (standalone mode) or share the\r\n"
+		"# connection managed by DiscordBridge when both mods are installed.\r\n"
 		"# This file is NOT overwritten by mod updates, so your settings persist.\r\n"
+		"#\r\n"
+		"# -- STANDALONE BOT TOKEN (required for operation without DiscordBridge) ----\r\n"
+		"#\r\n"
+		"# Discord bot token for BanSystem's own standalone Discord connection.\r\n"
+		"# When set, BanSystem connects to Discord independently (no DiscordBridge needed).\r\n"
+		"# Treat this like a password - never share or commit it to source control.\r\n"
+		"# How to get it: Discord Developer Portal -> your application -> Bot -> Reset Token.\r\n"
+		"# Also enable the following intents on the Bot page:\r\n"
+		"#   - Server Members Intent (GUILD_MEMBERS)\r\n"
+		"#   - Message Content Intent (MESSAGE_CONTENT)\r\n"
+		"# Leave empty when using DiscordBridge (or another provider mod) instead.\r\n"
+		"BotToken=\r\n"
 		"#\r\n"
 		"# -- CHANNEL & AUTHORISATION ------------------------------------------\r\n"
 		"#\r\n"
@@ -134,6 +146,9 @@ FBanDiscordConfig FBanDiscordConfig::LoadOrCreate()
 
 	FBanDiscordConfig Out;
 
+	// Standalone bot token (empty = wait for external provider injection)
+	Out.BotToken = GetIniStringOrDefault(Cfg, TEXT("BotToken"), TEXT(""));
+
 	// Channel & authorisation
 	Out.DiscordChannelId    = GetIniStringOrDefault(Cfg, TEXT("DiscordChannelId"),    TEXT(""));
 	Out.DiscordCommandRoleId = GetIniStringOrDefault(Cfg, TEXT("DiscordCommandRoleId"), TEXT(""));
@@ -166,7 +181,8 @@ FBanDiscordConfig FBanDiscordConfig::LoadOrCreate()
 		TEXT(":white_check_mark: **BanSystem** - EOS ID `%PlayerId%` has been unbanned."));
 
 	UE_LOG(LogTemp, Log,
-	       TEXT("BanSystem: Discord config loaded (DiscordChannelId=%s)."),
+	       TEXT("BanSystem: Discord config loaded (BotToken=%s, DiscordChannelId=%s)."),
+	       Out.BotToken.IsEmpty() ? TEXT("<empty – waiting for external provider>") : TEXT("<set>"),
 	       Out.DiscordChannelId.IsEmpty() ? TEXT("<empty – commands disabled>") : *Out.DiscordChannelId);
 
 	return Out;

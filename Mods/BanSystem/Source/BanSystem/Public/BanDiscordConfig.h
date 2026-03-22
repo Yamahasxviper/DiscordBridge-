@@ -21,17 +21,35 @@
  *
  * To enable Discord ban commands:
  *   1. Open  <ServerRoot>/FactoryGame/Mods/BanSystem/Config/DefaultBanSystem.ini
- *   2. Set   DiscordChannelId  – snowflake ID of the channel where ban commands
+ *   2. Set   BotToken        – Discord bot token (Bot → Token in the Developer Portal).
+ *            Treat this value as a password; do not share it.
+ *            Required for standalone operation.  Leave empty when using DiscordBridge
+ *            (or another IBanDiscordCommandProvider mod) to share its connection instead.
+ *   3. Set   DiscordChannelId  – snowflake ID of the channel where ban commands
  *            are issued (same channel used in DiscordBridge, or a dedicated one).
- *   3. Set   DiscordCommandRoleId  – snowflake ID of the Discord role whose
+ *   4. Set   DiscordCommandRoleId  – snowflake ID of the Discord role whose
  *            members are allowed to run !steamban, !eosban, etc.
- *   4. Restart the server.
- *
- * The bot token is provided by DiscordBridge and does NOT need to be repeated
- * here — BanSystem uses the shared bot connection managed by DiscordBridge.
+ *   5. Restart the server.
  */
 struct BANSYSTEM_API FBanDiscordConfig
 {
+	// ── Standalone Discord connection ─────────────────────────────────────────
+
+	/**
+	 * Discord bot token for BanSystem's own standalone Discord connection.
+	 *
+	 * When non-empty, BanSystem manages its own Discord Gateway connection and
+	 * REST API calls independently of DiscordBridge or any other mod.
+	 * Set this to the token from the Discord Developer Portal (Bot → Token).
+	 * Treat this value like a password — never share or commit it.
+	 *
+	 * If left empty, BanSystem waits for an external mod (such as DiscordBridge)
+	 * to inject a shared connection via SetCommandProvider().
+	 *
+	 * How to get it: Discord Developer Portal → your application → Bot → Reset Token.
+	 */
+	FString BotToken;
+
 	// ── Channel & authorisation ───────────────────────────────────────────────
 
 	/**

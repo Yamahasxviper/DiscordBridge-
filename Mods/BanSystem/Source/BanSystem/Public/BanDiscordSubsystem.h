@@ -4,35 +4,41 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Containers/Ticker.h"
 #include "IBanDiscordCommandProvider.h"
 #include "BanDiscordConfig.h"
+#include "SMLWebSocketClient.h"
 #include "BanDiscordSubsystem.generated.h"
 
 /**
  * UBanDiscordSubsystem
  *
- * Optional GameInstance-level subsystem that enables BanSystem's ban commands
+ * GameInstance-level subsystem that enables BanSystem's ban commands
  * (steamban, eosban, steamunban, eosunban, steambanlist, eosbanlist, banbyname,
  * playerids) to be run from Discord.
  *
- * This subsystem depends on an IBanDiscordCommandProvider being injected by
- * DiscordBridge (or another mod).  Without a provider it loads its config and
- * waits silently — no Discord functionality is available until a provider
- * registers via SetCommandProvider().
+ * STANDALONE MODE (recommended)
+ * ──────────────────────────────
+ * Set BotToken in Mods/BanSystem/Config/DefaultBanSystem.ini.
+ * BanSystem connects to Discord Gateway independently via SMLWebSocket and
+ * handles all bot activity itself — no DiscordBridge or any other mod required.
+ *
+ * SHARED CONNECTION MODE (optional)
+ * ───────────────────────────────────
+ * Leave BotToken empty and let an external mod (e.g. DiscordBridge) call
+ * SetCommandProvider(provider) to share its existing Discord connection.
+ * In this mode the subsystem starts up but waits silently until a provider
+ * is injected.
  *
  * Config
  * ──────
  *   <ServerRoot>/FactoryGame/Mods/BanSystem/Config/DefaultBanSystem.ini
- *   Key settings: DiscordChannelId, DiscordCommandRoleId, and per-command prefixes.
+ *   Key settings: BotToken, DiscordChannelId, DiscordCommandRoleId, command prefixes.
  *   See BanDiscordConfig.h for the full list.
- *
- * Integration (for DiscordBridge or any IBanDiscordCommandProvider):
- *   1. Implement IBanDiscordCommandProvider.
- *   2. In Initialize(), call UBanDiscordSubsystem::SetCommandProvider(this).
- *   3. In Deinitialize(), call UBanDiscordSubsystem::SetCommandProvider(nullptr).
  */
 UCLASS()
-class BANSYSTEM_API UBanDiscordSubsystem : public UGameInstanceSubsystem
+class BANSYSTEM_API UBanDiscordSubsystem : public UGameInstanceSubsystem,
+                                           public IBanDiscordCommandProvider
 {
 	GENERATED_BODY()
 
@@ -42,19 +48,39 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
-	// ── Provider registration ─────────────────────────────────────────────────
+	// ── External provider registration ───────────────────────────────────────
+	//
+	// External mods (e.g. DiscordBridge) may call SetCommandProvider(provider)
+	// to override or supplement the built-in standalone connection.  Passing
+	// nullptr falls back to the built-in standalone connection when BotToken is
+	// configured, or disables all Discord functionality when it is not.
+	//
+	// This method is intentionally NOT part of IBanDiscordCommandProvider —
+	// it is for the receiving end, not the providing end.
 
 	/**
-	 * Register a Discord command provider (typically UDiscordBridgeSubsystem).
-	 * Calling with nullptr detaches the current provider.
-	 *
-	 * Only one provider can be active at a time.  Registering a new provider
-	 * replaces the previous one; the old subscription is cancelled first.
-	 *
-	 * BanSystem has no compile-time knowledge of the provider; this is the
-	 * only coupling point between the two mods.
+	 * Inject an external Discord command provider.
+	 * The external provider's connection will be used instead of the built-in
+	 * standalone connection for as long as it remains registered.
+	 * Pass nullptr to remove the external provider.
 	 */
 	void SetCommandProvider(IBanDiscordCommandProvider* InProvider);
+
+	// ── IBanDiscordCommandProvider (standalone implementation) ────────────────
+	//
+	// These implement the interface against BanSystem's own Gateway connection.
+	// When an external provider is active, subscriptions and sends are forwarded
+	// to that provider instead.
+
+	virtual FDelegateHandle SubscribeDiscordMessages(
+		TFunction<void(const TSharedPtr<FJsonObject>&)> Callback) override;
+
+	virtual void UnsubscribeDiscordMessages(FDelegateHandle Handle) override;
+
+	virtual void SendDiscordChannelMessage(const FString& ChannelId,
+	                                       const FString& Message) override;
+
+	virtual const FString& GetGuildOwnerId() const override;
 
 private:
 	// ── Discord message handling ──────────────────────────────────────────────
@@ -106,26 +132,105 @@ private:
 
 	// ── Helpers ───────────────────────────────────────────────────────────────
 
-	/** Send a response message via the provider (no-op when provider is null). */
-	void Reply(const FString& ChannelId, const FString& Message) const;
+	/** Send a response message (no-op when neither standalone nor external provider). */
+	void Reply(const FString& ChannelId, const FString& Message);
 
 	/** Format ban duration for user-facing messages. */
 	static FString FormatDuration(int32 DurationMinutes);
 
-	/**
-	 * Parse   "<ID|Name> [minutes] [reason...]"  into its components.
-	 * OutArgs[0] is the ID/name; the remainder are optional duration + reason.
-	 */
+	/** Split "arg0 arg1 arg2…" into an array of tokens. */
 	static TArray<FString> SplitArgs(const FString& Input);
+
+	// ── Standalone Discord Gateway ────────────────────────────────────────────
+	// Used only when BotToken is configured and no external provider is active.
+
+	/** Connect to the Discord Gateway.  No-op when already connected or no BotToken. */
+	void Connect();
+
+	/** Disconnect from the Discord Gateway and cancel heartbeat. */
+	void Disconnect();
+
+	/** Send a JSON payload as a WebSocket text frame. */
+	void SendGatewayPayload(const TSharedPtr<FJsonObject>& Payload);
+
+	/** op=2 Identify */
+	void SendIdentify();
+
+	/** op=1 Heartbeat */
+	void SendHeartbeat();
+
+	/** Send a plain-text REST message to a Discord channel using our own BotToken. */
+	void SendMessageToChannelInternal(const FString& ChannelId, const FString& Message);
+
+	// ── Gateway event handlers ────────────────────────────────────────────────
+
+	UFUNCTION()
+	void OnWebSocketConnected();
+
+	UFUNCTION()
+	void OnWebSocketMessage(const FString& RawJson);
+
+	UFUNCTION()
+	void OnWebSocketClosed(int32 StatusCode, const FString& Reason);
+
+	UFUNCTION()
+	void OnWebSocketError(const FString& ErrorMessage);
+
+	void HandleGatewayPayload(const FString& RawJson);
+	void HandleHello(const TSharedPtr<FJsonObject>& DataObj);
+	void HandleDispatch(const FString& EventType, int32 Sequence,
+	                    const TSharedPtr<FJsonObject>& DataObj);
+	void HandleHeartbeatAck();
+	void HandleReady(const TSharedPtr<FJsonObject>& DataObj);
+	void HandleMessageCreate(const TSharedPtr<FJsonObject>& DataObj);
+	void HandleGuildCreate(const TSharedPtr<FJsonObject>& DataObj);
+
+	/** Timer callback — fires SendHeartbeat() at the Discord-requested interval. */
+	bool HeartbeatTick(float DeltaTime);
 
 	// ── State ─────────────────────────────────────────────────────────────────
 
-	/** Active Discord provider; nullptr when no provider is registered. */
-	IBanDiscordCommandProvider* CommandProvider = nullptr;
+	/** Active external provider; nullptr = use built-in standalone connection. */
+	IBanDiscordCommandProvider* ExternalProvider = nullptr;
 
-	/** Handle from SubscribeDiscordMessages() — used to unsubscribe cleanly. */
-	FDelegateHandle MessageSubscriptionHandle;
+	/** Handle from the external provider's SubscribeDiscordMessages() call. */
+	FDelegateHandle ExternalMessageSubscriptionHandle;
 
-	/** Loaded configuration (channel, role, prefixes, message formats). */
+	/**
+	 * Internal multicast delegate — fired for each Discord MESSAGE_CREATE event
+	 * when using the built-in standalone connection.
+	 */
+	DECLARE_MULTICAST_DELEGATE_OneParam(FOnRawDiscordMessage, const TSharedPtr<FJsonObject>&);
+	FOnRawDiscordMessage OnRawDiscordMessage;
+
+	/** Loaded configuration (bot token, channel, role, prefixes, formats). */
 	FBanDiscordConfig Config;
+
+	// ── Standalone Gateway state ──────────────────────────────────────────────
+
+	/** WebSocket client for the standalone Discord Gateway connection. */
+	UPROPERTY()
+	USMLWebSocketClient* WebSocketClient{nullptr};
+
+	/** true after the READY dispatch has been received. */
+	bool bGatewayReady{false};
+
+	/** true when we sent a heartbeat and are waiting for the op=11 ack. */
+	bool bPendingHeartbeatAck{false};
+
+	/** Last received sequence number (used in heartbeats). */
+	int32 LastSequenceNumber{-1};
+
+	/** Snowflake ID of this bot user; used to ignore self-sent messages. */
+	FString BotUserId;
+
+	/** Snowflake ID of the guild owner; populated from GUILD_CREATE. */
+	FString GuildOwnerId;
+
+	/** Heartbeat ticker handle. */
+	FTSTicker::FDelegateHandle HeartbeatTickerHandle;
+	float HeartbeatIntervalSeconds{0.0f};
+
+	static const FString DiscordGatewayUrl;
+	static const FString DiscordApiBase;
 };

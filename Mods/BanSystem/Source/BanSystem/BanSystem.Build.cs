@@ -20,6 +20,10 @@ public class BanSystem : ModuleRules
             "DummyHeaders",
             "FactoryGame",
             "SML",
+            // HTTP — for the standalone Discord REST API (channel messages).
+            "HTTP",
+            // SMLWebSocket — for the standalone Discord Gateway (WebSocket) connection.
+            "SMLWebSocket",
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]

@@ -4,7 +4,6 @@
 #include "TicketSubsystem.h"
 #include "Steam/SteamBanSubsystem.h"
 #include "EOS/EOSBanSubsystem.h"
-#include "BanDiscordSubsystem.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -130,7 +129,6 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		{
 			Collection.InitializeDependency<USteamBanSubsystem>();
 			Collection.InitializeDependency<UEOSBanSubsystem>();
-			Collection.InitializeDependency<UBanDiscordSubsystem>();
 
 			if (USteamBanSubsystem* SteamBans = GI->GetSubsystem<USteamBanSubsystem>())
 			{
@@ -144,15 +142,6 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				CachedEOSBanSubsystem = EOSBans;
 				EOSBans->SetNotificationProvider(this);
 				UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Registered as BanSystem EOS notification provider."));
-			}
-
-			// Inject ourselves as the Discord command provider into UBanDiscordSubsystem
-			// so that BanSystem's Discord ban commands (!steamban, !eosban, etc.) work.
-			if (UBanDiscordSubsystem* BanDiscord = GI->GetSubsystem<UBanDiscordSubsystem>())
-			{
-				CachedBanDiscordSubsystem = BanDiscord;
-				BanDiscord->SetCommandProvider(this);
-				UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Registered as BanSystem Discord command provider."));
 			}
 		}
 	}
@@ -180,14 +169,6 @@ void UDiscordBridgeSubsystem::Deinitialize()
 		EOSBans->SetNotificationProvider(nullptr);
 	}
 	CachedEOSBanSubsystem.Reset();
-
-	// Clear ourselves as the BanSystem Discord command provider so no stale
-	// Discord message subscriptions fire after this subsystem is destroyed.
-	if (UBanDiscordSubsystem* BanDiscord = CachedBanDiscordSubsystem.Get())
-	{
-		BanDiscord->SetCommandProvider(nullptr);
-	}
-	CachedBanDiscordSubsystem.Reset();
 
 	// Stop the chat-manager bind ticker if it is still running.
 	FTSTicker::GetCoreTicker().RemoveTicker(ChatManagerBindTickHandle);
@@ -2947,25 +2928,4 @@ return OnDiscordRawMessageReceived.AddLambda(MoveTemp(Callback));
 void UDiscordBridgeSubsystem::UnsubscribeRawMessage(FDelegateHandle Handle)
 {
 OnDiscordRawMessageReceived.Remove(Handle);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// IBanDiscordCommandProvider — implemented here so UBanDiscordSubsystem in the
-// BanSystem mod can subscribe to MESSAGE_CREATE events and send channel
-// messages without a compile-time dependency on DiscordBridge.
-// SubscribeDiscordMessages / UnsubscribeDiscordMessages delegate to the same
-// OnDiscordRawMessageReceived multicast that IDiscordBridgeProvider exposes via
-// SubscribeRawMessage / UnsubscribeRawMessage, keeping a single subscription
-// list for all consumers of raw Discord messages.
-// ─────────────────────────────────────────────────────────────────────────────
-
-FDelegateHandle UDiscordBridgeSubsystem::SubscribeDiscordMessages(
-	TFunction<void(const TSharedPtr<FJsonObject>&)> Callback)
-{
-	return OnDiscordRawMessageReceived.AddLambda(MoveTemp(Callback));
-}
-
-void UDiscordBridgeSubsystem::UnsubscribeDiscordMessages(FDelegateHandle Handle)
-{
-	OnDiscordRawMessageReceived.Remove(Handle);
 }

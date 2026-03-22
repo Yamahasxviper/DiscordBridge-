@@ -8,8 +8,23 @@
 #include "Engine/GameInstance.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "HttpModule.h"
+#include "Interfaces/IHttpResponse.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogBanDiscord, Log, All);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+const FString UBanDiscordSubsystem::DiscordGatewayUrl =
+	TEXT("wss://gateway.discord.gg/?v=10&encoding=json");
+
+const FString UBanDiscordSubsystem::DiscordApiBase =
+	TEXT("https://discord.com/api/v10");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // USubsystem lifetime
@@ -29,42 +44,75 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		            "Discord ban commands disabled until a channel ID is set in "
 		            "Mods/BanSystem/Config/DefaultBanSystem.ini."));
 	}
+
+	// Standalone mode: connect to Discord Gateway with our own bot token when one
+	// is provided and no external provider has been injected yet.
+	if (!Config.BotToken.IsEmpty() && ExternalProvider == nullptr)
+	{
+		Connect();
+	}
+	else if (Config.BotToken.IsEmpty())
+	{
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: BotToken not configured — running in "
+		            "shared-connection mode.  Waiting for an external provider "
+		            "(e.g. DiscordBridge) to call SetCommandProvider()."));
+	}
 }
 
 void UBanDiscordSubsystem::Deinitialize()
 {
-	// Remove any active provider (and its message subscription) before shutdown.
+	// Remove any external provider subscription.
 	SetCommandProvider(nullptr);
+
+	// Disconnect the standalone Gateway connection.
+	Disconnect();
+
 	Super::Deinitialize();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Provider registration
+// External provider registration
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::SetCommandProvider(IBanDiscordCommandProvider* InProvider)
 {
-	// Unsubscribe from the old provider if there is one.
-	if (CommandProvider && CommandProvider != InProvider)
+	// Unsubscribe from the old external provider.
+	if (ExternalProvider && ExternalProvider != InProvider)
 	{
-		CommandProvider->UnsubscribeDiscordMessages(MessageSubscriptionHandle);
-		MessageSubscriptionHandle.Reset();
+		ExternalProvider->UnsubscribeDiscordMessages(ExternalMessageSubscriptionHandle);
+		ExternalMessageSubscriptionHandle.Reset();
 		UE_LOG(LogBanDiscord, Log,
-		       TEXT("BanDiscordSubsystem: Disconnected from previous Discord provider."));
+		       TEXT("BanDiscordSubsystem: Disconnected from external Discord provider."));
 	}
 
-	CommandProvider = InProvider;
+	ExternalProvider = InProvider;
 
-	if (!CommandProvider)
+	if (!ExternalProvider)
 	{
 		UE_LOG(LogBanDiscord, Log,
-		       TEXT("BanDiscordSubsystem: Discord command provider cleared."));
+		       TEXT("BanDiscordSubsystem: External provider cleared."));
+
+		// If we have a standalone bot token, reconnect the built-in Gateway.
+		if (!Config.BotToken.IsEmpty() && !bGatewayReady)
+		{
+			Connect();
+		}
 		return;
 	}
 
-	// Subscribe to Discord messages via the new provider.
+	// Pause the built-in standalone connection — the external provider takes over.
+	if (WebSocketClient)
+	{
+		Disconnect();
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: Paused standalone Gateway — "
+		            "external provider will handle Discord connectivity."));
+	}
+
+	// Subscribe to raw message events from the external provider.
 	TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
-	MessageSubscriptionHandle = CommandProvider->SubscribeDiscordMessages(
+	ExternalMessageSubscriptionHandle = ExternalProvider->SubscribeDiscordMessages(
 		[WeakThis](const TSharedPtr<FJsonObject>& MsgObj)
 		{
 			if (UBanDiscordSubsystem* Self = WeakThis.Get())
@@ -74,9 +122,426 @@ void UBanDiscordSubsystem::SetCommandProvider(IBanDiscordCommandProvider* InProv
 		});
 
 	UE_LOG(LogBanDiscord, Log,
-	       TEXT("BanDiscordSubsystem: Discord command provider registered. "
+	       TEXT("BanDiscordSubsystem: External provider registered. "
 	            "Listening on channel '%s'."),
 	       *Config.DiscordChannelId);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IBanDiscordCommandProvider — standalone implementation
+// ─────────────────────────────────────────────────────────────────────────────
+
+FDelegateHandle UBanDiscordSubsystem::SubscribeDiscordMessages(
+	TFunction<void(const TSharedPtr<FJsonObject>&)> Callback)
+{
+	// When an external provider is active, delegate to it.
+	if (ExternalProvider)
+	{
+		return ExternalProvider->SubscribeDiscordMessages(MoveTemp(Callback));
+	}
+	// Otherwise subscribe to the built-in multicast.
+	return OnRawDiscordMessage.AddLambda(MoveTemp(Callback));
+}
+
+void UBanDiscordSubsystem::UnsubscribeDiscordMessages(FDelegateHandle Handle)
+{
+	if (ExternalProvider)
+	{
+		ExternalProvider->UnsubscribeDiscordMessages(Handle);
+		return;
+	}
+	OnRawDiscordMessage.Remove(Handle);
+}
+
+void UBanDiscordSubsystem::SendDiscordChannelMessage(const FString& ChannelId,
+                                                      const FString& Message)
+{
+	if (ExternalProvider)
+	{
+		ExternalProvider->SendDiscordChannelMessage(ChannelId, Message);
+		return;
+	}
+	SendMessageToChannelInternal(ChannelId, Message);
+}
+
+const FString& UBanDiscordSubsystem::GetGuildOwnerId() const
+{
+	if (ExternalProvider)
+	{
+		return ExternalProvider->GetGuildOwnerId();
+	}
+	return GuildOwnerId;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Standalone Gateway — connection lifecycle
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::Connect()
+{
+	if (Config.BotToken.IsEmpty())
+	{
+		return;
+	}
+
+	if (!WebSocketClient)
+	{
+		WebSocketClient = USMLWebSocketClient::CreateWebSocketClient(this);
+		WebSocketClient->bAutoReconnect = true;
+
+		WebSocketClient->OnConnected.AddDynamic(
+			this, &UBanDiscordSubsystem::OnWebSocketConnected);
+		WebSocketClient->OnMessage.AddDynamic(
+			this, &UBanDiscordSubsystem::OnWebSocketMessage);
+		WebSocketClient->OnClosed.AddDynamic(
+			this, &UBanDiscordSubsystem::OnWebSocketClosed);
+		WebSocketClient->OnError.AddDynamic(
+			this, &UBanDiscordSubsystem::OnWebSocketError);
+	}
+
+	WebSocketClient->Connect(DiscordGatewayUrl, {}, {});
+	UE_LOG(LogBanDiscord, Log, TEXT("BanDiscordSubsystem: Connecting to Discord Gateway..."));
+}
+
+void UBanDiscordSubsystem::Disconnect()
+{
+	// Stop heartbeat timer.
+	if (HeartbeatTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
+		HeartbeatTickerHandle.Reset();
+	}
+
+	if (WebSocketClient)
+	{
+		WebSocketClient->Close();
+		WebSocketClient = nullptr;
+	}
+
+	bGatewayReady        = false;
+	bPendingHeartbeatAck = false;
+	LastSequenceNumber   = -1;
+	BotUserId.Empty();
+	GuildOwnerId.Empty();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Standalone Gateway — WebSocket event handlers
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::OnWebSocketConnected()
+{
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: WebSocket connected to Discord Gateway."));
+}
+
+void UBanDiscordSubsystem::OnWebSocketMessage(const FString& RawJson)
+{
+	HandleGatewayPayload(RawJson);
+}
+
+void UBanDiscordSubsystem::OnWebSocketClosed(int32 StatusCode, const FString& Reason)
+{
+	UE_LOG(LogBanDiscord, Warning,
+	       TEXT("BanDiscordSubsystem: Gateway connection closed (%d: %s)."),
+	       StatusCode, *Reason);
+
+	bGatewayReady        = false;
+	bPendingHeartbeatAck = false;
+
+	if (HeartbeatTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
+		HeartbeatTickerHandle.Reset();
+	}
+}
+
+void UBanDiscordSubsystem::OnWebSocketError(const FString& ErrorMessage)
+{
+	UE_LOG(LogBanDiscord, Warning,
+	       TEXT("BanDiscordSubsystem: Gateway WebSocket error: %s"), *ErrorMessage);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Standalone Gateway — protocol handling
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleGatewayPayload(const FString& RawJson)
+{
+	TSharedPtr<FJsonObject> Root;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(RawJson);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		return;
+	}
+
+	int32 Opcode = 0;
+	if (!Root->TryGetNumberField(TEXT("op"), Opcode))
+	{
+		return;
+	}
+
+	switch (Opcode)
+	{
+	case 10: // Hello
+	{
+		const TSharedPtr<FJsonObject>* DataObj = nullptr;
+		if (Root->TryGetObjectField(TEXT("d"), DataObj) && DataObj)
+		{
+			HandleHello(*DataObj);
+		}
+		break;
+	}
+	case 0: // Dispatch
+	{
+		FString EventType;
+		Root->TryGetStringField(TEXT("t"), EventType);
+		int32 Seq = 0;
+		Root->TryGetNumberField(TEXT("s"), Seq);
+		if (Seq > 0)
+		{
+			LastSequenceNumber = Seq;
+		}
+		const TSharedPtr<FJsonObject>* DataObj = nullptr;
+		if (Root->TryGetObjectField(TEXT("d"), DataObj) && DataObj)
+		{
+			HandleDispatch(EventType, Seq, *DataObj);
+		}
+		break;
+	}
+	case 11: // HeartbeatAck
+		HandleHeartbeatAck();
+		break;
+	case 7: // Reconnect
+		if (WebSocketClient)
+		{
+			WebSocketClient->Connect(DiscordGatewayUrl, {}, {});
+		}
+		break;
+	case 9: // Invalid Session
+		// Re-identify with fresh state.
+		bGatewayReady        = false;
+		LastSequenceNumber   = -1;
+		BotUserId.Empty();
+		FPlatformProcess::Sleep(5.0f);
+		SendIdentify();
+		break;
+	default:
+		break;
+	}
+}
+
+void UBanDiscordSubsystem::HandleHello(const TSharedPtr<FJsonObject>& DataObj)
+{
+	double HeartbeatMs = 41250.0;
+	DataObj->TryGetNumberField(TEXT("heartbeat_interval"), HeartbeatMs);
+	HeartbeatIntervalSeconds = static_cast<float>(HeartbeatMs) / 1000.0f;
+
+	// Start the heartbeat ticker.
+	if (HeartbeatTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
+	}
+	HeartbeatTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateUObject(this, &UBanDiscordSubsystem::HeartbeatTick),
+		HeartbeatIntervalSeconds);
+	bPendingHeartbeatAck = false;
+
+	SendIdentify();
+
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: Gateway Hello received — "
+	            "heartbeat interval %.1f s, Identify sent."),
+	       HeartbeatIntervalSeconds);
+}
+
+void UBanDiscordSubsystem::HandleDispatch(const FString& EventType, int32 Sequence,
+                                           const TSharedPtr<FJsonObject>& DataObj)
+{
+	if (EventType == TEXT("READY"))
+	{
+		HandleReady(DataObj);
+	}
+	else if (EventType == TEXT("MESSAGE_CREATE"))
+	{
+		HandleMessageCreate(DataObj);
+	}
+	else if (EventType == TEXT("GUILD_CREATE"))
+	{
+		HandleGuildCreate(DataObj);
+	}
+}
+
+void UBanDiscordSubsystem::HandleHeartbeatAck()
+{
+	bPendingHeartbeatAck = false;
+}
+
+void UBanDiscordSubsystem::HandleReady(const TSharedPtr<FJsonObject>& DataObj)
+{
+	const TSharedPtr<FJsonObject>* UserObj = nullptr;
+	if (DataObj->TryGetObjectField(TEXT("user"), UserObj) && UserObj)
+	{
+		(*UserObj)->TryGetStringField(TEXT("id"), BotUserId);
+	}
+
+	bGatewayReady = true;
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: Gateway READY — bot user ID: %s"), *BotUserId);
+}
+
+void UBanDiscordSubsystem::HandleGuildCreate(const TSharedPtr<FJsonObject>& DataObj)
+{
+	DataObj->TryGetStringField(TEXT("owner_id"), GuildOwnerId);
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: GUILD_CREATE received — guild owner ID: %s"),
+	       *GuildOwnerId);
+}
+
+void UBanDiscordSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>& DataObj)
+{
+	// Broadcast to internal subscribers (the command handler below).
+	if (OnRawDiscordMessage.IsBound())
+	{
+		OnRawDiscordMessage.Broadcast(DataObj);
+	}
+}
+
+void UBanDiscordSubsystem::SendIdentify()
+{
+#if PLATFORM_WINDOWS
+	static const FString Os = TEXT("windows");
+#elif PLATFORM_LINUX
+	static const FString Os = TEXT("linux");
+#else
+	static const FString Os = TEXT("unknown");
+#endif
+
+	TSharedPtr<FJsonObject> Props = MakeShared<FJsonObject>();
+	Props->SetStringField(TEXT("os"),      Os);
+	Props->SetStringField(TEXT("browser"), TEXT("satisfactory_ban_system"));
+	Props->SetStringField(TEXT("device"),  TEXT("satisfactory_ban_system"));
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("token"),   Config.BotToken);
+	// Intents: GUILDS(1) | GUILD_MEMBERS(2) | GUILD_MESSAGES(512) | MESSAGE_CONTENT(32768) = 33283
+	Data->SetNumberField(TEXT("intents"), 33283);
+	Data->SetObjectField(TEXT("properties"), Props);
+
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetNumberField(TEXT("op"), 2); // Identify
+	Payload->SetObjectField(TEXT("d"),  Data);
+
+	SendGatewayPayload(Payload);
+}
+
+void UBanDiscordSubsystem::SendHeartbeat()
+{
+	if (bPendingHeartbeatAck)
+	{
+		// Zombie connection — force reconnect.
+		UE_LOG(LogBanDiscord, Warning,
+		       TEXT("BanDiscordSubsystem: Heartbeat not acknowledged — "
+		            "reconnecting to Discord Gateway."));
+		if (HeartbeatTickerHandle.IsValid())
+		{
+			FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
+			HeartbeatTickerHandle.Reset();
+		}
+		bPendingHeartbeatAck = false;
+		bGatewayReady        = false;
+		LastSequenceNumber   = -1;
+		BotUserId.Empty();
+		GuildOwnerId.Empty();
+		if (WebSocketClient)
+		{
+			WebSocketClient->Connect(DiscordGatewayUrl, {}, {});
+		}
+		return;
+	}
+
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetNumberField(TEXT("op"), 1); // Heartbeat
+	if (LastSequenceNumber >= 0)
+	{
+		Payload->SetNumberField(TEXT("d"), LastSequenceNumber);
+	}
+	else
+	{
+		Payload->SetField(TEXT("d"), MakeShared<FJsonValueNull>());
+	}
+
+	SendGatewayPayload(Payload);
+	bPendingHeartbeatAck = true;
+}
+
+bool UBanDiscordSubsystem::HeartbeatTick(float DeltaTime)
+{
+	SendHeartbeat();
+	return true; // Keep ticking.
+}
+
+void UBanDiscordSubsystem::SendGatewayPayload(const TSharedPtr<FJsonObject>& Payload)
+{
+	if (!WebSocketClient || !WebSocketClient->IsConnected())
+	{
+		return;
+	}
+
+	FString JsonString;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonString);
+	FJsonSerializer::Serialize(Payload.ToSharedRef(), Writer);
+
+	WebSocketClient->SendText(JsonString);
+}
+
+void UBanDiscordSubsystem::SendMessageToChannelInternal(const FString& ChannelId,
+                                                         const FString& Message)
+{
+	if (Config.BotToken.IsEmpty() || ChannelId.IsEmpty())
+	{
+		return;
+	}
+
+	TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetStringField(TEXT("content"), Message);
+
+	FString BodyString;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
+	FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+
+	const FString Url = FString::Printf(
+		TEXT("%s/channels/%s/messages"), *DiscordApiBase, *ChannelId);
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
+		FHttpModule::Get().CreateRequest();
+	Request->SetURL(Url);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
+	Request->SetHeader(TEXT("Authorization"),
+	                   FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+	Request->SetContentAsString(BodyString);
+
+	Request->OnProcessRequestComplete().BindWeakLambda(
+		this,
+		[Message](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
+		{
+			if (!bConnected || !Resp.IsValid())
+			{
+				UE_LOG(LogBanDiscord, Warning,
+				       TEXT("BanDiscordSubsystem: HTTP request failed for message '%s'."),
+				       *Message);
+				return;
+			}
+			if (Resp->GetResponseCode() < 200 || Resp->GetResponseCode() >= 300)
+			{
+				UE_LOG(LogBanDiscord, Warning,
+				       TEXT("BanDiscordSubsystem: Discord REST API returned %d: %s"),
+				       Resp->GetResponseCode(), *Resp->GetContentAsString());
+			}
+		});
+
+	Request->ProcessRequest();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -241,13 +706,8 @@ void UBanDiscordSubsystem::OnDiscordMessageReceived(const TSharedPtr<FJsonObject
 bool UBanDiscordSubsystem::HasCommandPermission(const TSharedPtr<FJsonObject>& MessageObj,
                                                  const FString&                  AuthorId) const
 {
-	if (!CommandProvider)
-	{
-		return false;
-	}
-
 	// Guild owner always has permission.
-	const FString& OwnerId = CommandProvider->GetGuildOwnerId();
+	const FString& OwnerId = GetGuildOwnerId();
 	if (!OwnerId.IsEmpty() && AuthorId == OwnerId)
 	{
 		return true;
@@ -857,11 +1317,14 @@ void UBanDiscordSubsystem::HandlePlayerIdsCommand(const FString& Args,
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-void UBanDiscordSubsystem::Reply(const FString& ChannelId, const FString& Message) const
+void UBanDiscordSubsystem::Reply(const FString& ChannelId, const FString& Message)
 {
-	if (CommandProvider && !ChannelId.IsEmpty())
+	if (!ChannelId.IsEmpty())
 	{
-		CommandProvider->SendDiscordChannelMessage(ChannelId, Message);
+		// SendDiscordChannelMessage is a virtual method on this subsystem — it
+		// routes to the external provider when one is active, otherwise uses the
+		// built-in standalone HTTP implementation.
+		SendDiscordChannelMessage(ChannelId, Message);
 	}
 }
 
