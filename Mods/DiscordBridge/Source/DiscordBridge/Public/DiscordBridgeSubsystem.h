@@ -544,12 +544,6 @@ private:
 	void HandleWhitelistCommand(const FString& SubCommand, const FString& DiscordUsername,
 	                            const FString& ResponseChannelId);
 
-	/** Handle a ban management command received from Discord.
-	 *  @param ResponseChannelId  The channel to send the response to.
-	 *                            When empty, falls back to the main ChannelId. */
-	void HandleBanCommand(const FString& SubCommand, const FString& DiscordUsername,
-	                      const FString& ResponseChannelId);
-
 	/** Handle a whitelist management command typed in the Satisfactory in-game chat. */
 	void HandleInGameWhitelistCommand(const FString& SubCommand);
 
@@ -575,11 +569,17 @@ private:
 
 	// ── IBanDiscordCommandProvider ─────────────────────────────────────────────
 	// Implemented here so that UBanDiscordSubsystem can send Discord messages
-	// when processing ban-by-name commands routed from Discord.
+	// and manage Discord roles when processing ban commands routed from Discord.
 
 	/** Forwards a ban-response message to the given Discord channel. */
 	virtual void SendBanDiscordMessage(const FString& ChannelId,
 	                                   const FString& Message) override;
+
+	/**
+	 * Grant or revoke the configured BanCommandRoleId from a Discord user.
+	 * Returns false and is a no-op when BanCommandRoleId is not configured.
+	 */
+	virtual bool ManageBanDiscordRole(const FString& TargetUserId, bool bGrant) override;
 
 	/** Broadcast a status/feedback message to all connected players via the game chat. */
 	void SendGameChatStatusMessage(const FString& Message);

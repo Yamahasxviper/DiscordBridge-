@@ -236,60 +236,20 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	// ── Ban system ────────────────────────────────────────────────────────────
 
 	/**
-	 * When true, the ban system is active on every server start, overriding any
-	 * runtime change made via !ban on / !ban off Discord commands.
-	 * Default: true (ban list is enforced; set to false to disable enforcement).
-	 */
-	bool bBanSystemEnabled{ true };
-
-	/**
-	 * When true (default), Discord `!ban` commands and in-game `!ban` chat commands
-	 * are enabled.  Set to false to disable the entire ban command interface while
-	 * still enforcing bans on join (bBanSystemEnabled is unaffected).
-	 *
-	 * This is the "on/off from config" toggle for the command interface:
-	 *   bBanCommandsEnabled=True   → admins can run !ban commands (subject to BanCommandRoleId)
-	 *   bBanCommandsEnabled=False  → !ban commands are silently ignored; bans still enforced
-	 *
-	 * Default: true.
-	 */
-	bool bBanCommandsEnabled{ true };
-
-	/**
 	 * Prefix that triggers ban management commands from Discord.
 	 * Set to an empty string to disable Discord-based ban management.
 	 * Default: "!ban"
 	 *
+	 * All ban commands are handled by the BanSystem mod (UBanDiscordSubsystem).
 	 * Supported commands (type in the bridged Discord channel):
-	 *   !ban add <name>    – ban a player by in-game name
-	 *   !ban remove <name> – unban a player by in-game name
-	 *   !ban list          – list all banned players
-	 *   !ban status        – show current enabled/disabled state
-	 *   !ban on            – enable the ban system
-	 *   !ban off           – disable the ban system
+	 *   !ban add <name> [duration_minutes] [reason] – ban a connected player by name
+	 *   !ban remove <name>                          – unban an online player by name
+	 *   !ban list                                   – show all active Steam + EOS bans
+	 *   !ban status                                 – show ban count summary
+	 *   !ban role add <discord_id>                  – grant ban-admin Discord role
+	 *   !ban role remove <discord_id>               – revoke ban-admin Discord role
 	 */
 	FString BanCommandPrefix{ TEXT("!ban") };
-
-	/**
-	 * Message posted to the main Discord channel whenever a banned player tries
-	 * to join.  Leave empty to disable the notification.
-	 *
-	 * Available placeholder:
-	 *   %PlayerName%  – in-game name of the player who was kicked.
-	 *
-	 * Example:
-	 *   BanKickDiscordMessage=:hammer: **%PlayerName%** is banned and was kicked.
-	 */
-	FString BanKickDiscordMessage{
-		TEXT(":hammer: **%PlayerName%** is banned from this server and was kicked.")
-	};
-
-	/**
-	 * Reason shown in-game to the player when they are kicked for being banned.
-	 * This is the text the player sees in the "Disconnected" screen.
-	 * Default: "You are banned from this server."
-	 */
-	FString BanKickReason{ TEXT("You are banned from this server.") };
 
 	// ── BanSystem Mod Integration ─────────────────────────────────────────────
 
@@ -362,22 +322,6 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 *   !whitelist status        – show current enabled/disabled state
 	 */
 	FString InGameWhitelistCommandPrefix{ TEXT("!whitelist") };
-
-	/**
-	 * Prefix that triggers ban management commands when typed in the
-	 * Satisfactory in-game chat.  Set to an empty string to disable in-game
-	 * ban commands.
-	 * Default: "!ban"
-	 *
-	 * Supported commands (type in the Satisfactory in-game chat):
-	 *   !ban add <name>    – ban a player by in-game name
-	 *   !ban remove <name> – unban a player by in-game name
-	 *   !ban list          – list all banned players
-	 *   !ban status        – show current enabled/disabled state
-	 *   !ban on            – enable the ban system
-	 *   !ban off           – disable the ban system
-	 */
-	FString InGameBanCommandPrefix{ TEXT("!ban") };
 
 	// ── Player count presence ─────────────────────────────────────────────────
 

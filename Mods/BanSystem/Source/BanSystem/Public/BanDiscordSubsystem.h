@@ -10,14 +10,22 @@
 /**
  * UBanDiscordSubsystem
  *
- * GameInstance-level subsystem that handles Discord-sourced ban-by-name
- * commands on behalf of the BanSystem mod.
+ * GameInstance-level subsystem that is the single owner of ALL Discord-facing
+ * ban management for the BanSystem mod.
  *
  * When DiscordBridge is installed it injects itself as the active
- * IBanDiscordCommandProvider and routes `!ban add/remove` Discord messages
- * here.  BanSystem uses FBanPlayerLookup to resolve the player's platform IDs
- * (Steam64 and/or EOS PUID) from their in-game display name and then bans
- * or unbans through USteamBanSubsystem and UEOSBanSubsystem.
+ * IBanDiscordCommandProvider.  DiscordBridge then routes every incoming
+ * `!ban` Discord message here via HandleDiscordCommand().  BanSystem processes
+ * the sub-command, interacts with USteamBanSubsystem / UEOSBanSubsystem as
+ * needed, and replies through the provider.
+ *
+ * Supported sub-commands (everything after the `!ban` prefix):
+ *   add <name> [duration_minutes] [reason...]  — ban a connected player by name
+ *   remove <name>                              — unban an online player by name
+ *   list                                       — show all active Steam + EOS bans
+ *   status                                     — show ban count summary
+ *   role add <discord_user_id>                 — grant the ban-admin Discord role
+ *   role remove <discord_user_id>              — revoke the ban-admin Discord role
  *
  * BanSystem has zero compile-time knowledge of DiscordBridge.  All Discord
  * communication is tunnelled through IBanDiscordCommandProvider so the two
@@ -30,8 +38,7 @@
  *        BDS->SetProvider(this);          // in Initialize()
  *        BDS->SetProvider(nullptr);       // in Deinitialize()
  *   3. Forward Discord messages:
- *        BDS->HandleDiscordBanByNameCommand(NameAndArgs, AdminName, ChannelId);
- *        BDS->HandleDiscordUnbanByNameCommand(PlayerName, AdminName, ChannelId);
+ *        BDS->HandleDiscordCommand(SubCommand, AdminName, ChannelId);
  */
 UCLASS()
 class BANSYSTEM_API UBanDiscordSubsystem : public UGameInstanceSubsystem
@@ -54,54 +61,40 @@ public:
 	 */
 	void SetProvider(IBanDiscordCommandProvider* InProvider);
 
-	// ── Discord command entry points ───────────────────────────────────────────
+	// ── Main Discord command entry point ───────────────────────────────────────
 
 	/**
-	 * Handle a Discord "!ban add" command by banning a connected player by name
-	 * across all available platforms (Steam + EOS) simultaneously.
+	 * Handle any Discord `!ban` sub-command.
 	 *
-	 * Parses NameAndArgs as:
-	 *   <PlayerName> [duration_minutes] [reason...]
+	 * Called by DiscordBridgeSubsystem after it has stripped the `!ban` prefix
+	 * and verified that the sender holds the required BanCommandRoleId.
 	 *
-	 * duration_minutes = 0 (or omitted) for a permanent ban.
-	 *
-	 * Examples:
-	 *   HandleDiscordBanByNameCommand("SomePlayer",                "AdminUser", ChannelId)
-	 *   HandleDiscordBanByNameCommand("SomePlayer 60 Spamming",   "AdminUser", ChannelId)
-	 *
-	 * @param NameAndArgs  Everything after "add " — player name plus optional duration/reason.
-	 * @param AdminName    Discord display name of the admin issuing the command.
-	 * @param ChannelId    Discord channel snowflake to post the response to.
-	 */
-	void HandleDiscordBanByNameCommand(const FString& NameAndArgs,
-	                                   const FString& AdminName,
-	                                   const FString& ChannelId);
-
-	/**
-	 * Handle a Discord "!ban remove" command by unbanning a currently-connected
-	 * player by name.
-	 *
-	 * Because BanSystem stores bans by platform ID (not by display name),
-	 * unban-by-name only works for players who are currently online so their
-	 * IDs can be resolved.  For offline players the response will direct the
-	 * admin to use the in-game /steamunban or /eosunban commands by raw ID.
-	 *
-	 * @param PlayerName  In-game display name of the player to unban.
+	 * @param SubCommand  Everything after the `!ban` prefix (trimmed).
 	 * @param AdminName   Discord display name of the admin issuing the command.
 	 * @param ChannelId   Discord channel snowflake to post the response to.
 	 */
-	void HandleDiscordUnbanByNameCommand(const FString& PlayerName,
-	                                     const FString& AdminName,
-	                                     const FString& ChannelId);
+	void HandleDiscordCommand(const FString& SubCommand,
+	                          const FString& AdminName,
+	                          const FString& ChannelId);
 
 private:
+	// ── Sub-command handlers ───────────────────────────────────────────────────
+
+	void HandleBanAdd   (const FString& Arg, const FString& AdminName, const FString& ChannelId);
+	void HandleBanRemove(const FString& Arg, const FString& AdminName, const FString& ChannelId);
+	void HandleBanList  (const FString& ChannelId);
+	void HandleBanStatus(const FString& ChannelId);
+	void HandleBanRole  (const FString& Arg, const FString& ChannelId);
+
+	// ── Helpers ────────────────────────────────────────────────────────────────
+
 	/** Active provider — raw pointer, owner clears via SetProvider(nullptr). */
 	IBanDiscordCommandProvider* Provider = nullptr;
 
-	/** Helper: post a message to Discord (no-op when Provider is null). */
+	/** Post a message to Discord (no-op when Provider is null). */
 	void Reply(const FString& ChannelId, const FString& Message) const;
 
-	/** Helper: parse "<name>" or "<name> <duration> <reason...>" */
+	/** Parse "<name>" or "<name> <duration> <reason...>" */
 	static void ParseNameDurationReason(const FString& Input,
 	                                    FString& OutName,
 	                                    int32&   OutDurationMinutes,

@@ -32,4 +32,16 @@ public:
 	 * @param Message    Plain-text content (Discord markdown supported).
 	 */
 	virtual void SendBanDiscordMessage(const FString& ChannelId, const FString& Message) = 0;
+
+	/**
+	 * Grant or revoke the configured ban-admin Discord role from a guild member.
+	 *
+	 * When BanCommandRoleId is not configured in DefaultDiscordBridge.ini the
+	 * call is a no-op and the method returns false.
+	 *
+	 * @param TargetUserId  Discord user snowflake to modify.
+	 * @param bGrant        true = grant the role, false = revoke it.
+	 * @return true when the role ID is configured and the REST call was dispatched.
+	 */
+	virtual bool ManageBanDiscordRole(const FString& TargetUserId, bool bGrant) = 0;
 };

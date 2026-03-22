@@ -41,26 +41,79 @@ void UBanDiscordSubsystem::SetProvider(IBanDiscordCommandProvider* InProvider)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Discord command handling — ban by player name
+// Main command dispatcher
 // ─────────────────────────────────────────────────────────────────────────────
 
-void UBanDiscordSubsystem::HandleDiscordBanByNameCommand(const FString& NameAndArgs,
-                                                          const FString& AdminName,
-                                                          const FString& ChannelId)
+void UBanDiscordSubsystem::HandleDiscordCommand(const FString& SubCommand,
+                                                 const FString& AdminName,
+                                                 const FString& ChannelId)
 {
 	UE_LOG(LogBanDiscord, Log,
-	       TEXT("BanDiscordSubsystem: ban-by-name from '%s': '%s'"), *AdminName, *NameAndArgs);
+	       TEXT("BanDiscordSubsystem: command from '%s': '%s'"), *AdminName, *SubCommand);
 
+	FString Verb, Arg;
+	if (!SubCommand.TrimStartAndEnd().Split(TEXT(" "), &Verb, &Arg, ESearchCase::IgnoreCase))
+	{
+		Verb = SubCommand.TrimStartAndEnd();
+		Arg  = TEXT("");
+	}
+	Verb = Verb.TrimStartAndEnd().ToLower();
+	Arg  = Arg.TrimStartAndEnd();
+
+	if (Verb == TEXT("add"))
+	{
+		HandleBanAdd(Arg, AdminName, ChannelId);
+	}
+	else if (Verb == TEXT("remove"))
+	{
+		HandleBanRemove(Arg, AdminName, ChannelId);
+	}
+	else if (Verb == TEXT("list"))
+	{
+		HandleBanList(ChannelId);
+	}
+	else if (Verb == TEXT("status"))
+	{
+		HandleBanStatus(ChannelId);
+	}
+	else if (Verb == TEXT("role"))
+	{
+		HandleBanRole(Arg, ChannelId);
+	}
+	else
+	{
+		Reply(ChannelId,
+		      TEXT(":question: Unknown ban command.\n"
+		           "**Available commands:**\n"
+		           "• `!ban add <PlayerName> [duration_minutes] [reason]` — ban a connected player\n"
+		           "• `!ban remove <PlayerName>` — unban an online player by name\n"
+		           "• `!ban list` — show all active Steam + EOS bans\n"
+		           "• `!ban status` — show ban count summary\n"
+		           "• `!ban role add <discord_user_id>` — grant ban-admin role\n"
+		           "• `!ban role remove <discord_user_id>` — revoke ban-admin role\n"
+		           "\n"
+		           ":information_source: For offline unban use `/steamunban <id>` or `/eosunban <id>` in-game."));
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !ban add
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleBanAdd(const FString& Arg,
+                                         const FString& AdminName,
+                                         const FString& ChannelId)
+{
 	FString PlayerNameQuery;
 	int32   DurationMinutes = 0;
 	FString Reason;
-	ParseNameDurationReason(NameAndArgs, PlayerNameQuery, DurationMinutes, Reason);
+	ParseNameDurationReason(Arg, PlayerNameQuery, DurationMinutes, Reason);
 
 	if (PlayerNameQuery.IsEmpty())
 	{
 		Reply(ChannelId, TEXT(":warning: Usage: `!ban add <PlayerName> [duration_minutes] [reason...]`\n"
 		                      "Example: `!ban add SomePlayer 60 Spamming`\n"
-		                      "Use duration 0 (or omit) for a permanent ban."));
+		                      "Use duration `0` (or omit) for a permanent ban."));
 		return;
 	}
 
@@ -71,20 +124,19 @@ void UBanDiscordSubsystem::HandleDiscordBanByNameCommand(const FString& NameAndA
 		return;
 	}
 
-	FResolvedBanId   Ids;
-	FString          ExactName;
-	TArray<FString>  Ambiguous;
+	FResolvedBanId  Ids;
+	FString         ExactName;
+	TArray<FString> Ambiguous;
 
 	if (!FBanPlayerLookup::FindPlayerByName(World, PlayerNameQuery, Ids, ExactName, Ambiguous))
 	{
 		if (Ambiguous.Num() > 1)
 		{
-			const FString AmbigList = FString::Join(Ambiguous, TEXT(", "));
 			Reply(ChannelId,
 			      FString::Printf(
-			          TEXT(":warning: Multiple players match **%s**: %s\n"
+			          TEXT(":warning: Multiple online players match **%s**: %s\n"
 			               "Please use a more specific name."),
-			          *PlayerNameQuery, *AmbigList));
+			          *PlayerNameQuery, *FString::Join(Ambiguous, TEXT(", "))));
 		}
 		else
 		{
@@ -98,29 +150,24 @@ void UBanDiscordSubsystem::HandleDiscordBanByNameCommand(const FString& NameAndA
 		return;
 	}
 
-	const FString DurStr  = (DurationMinutes > 0)
-	                            ? FString::Printf(TEXT("for %d minute(s)"), DurationMinutes)
-	                            : TEXT("permanently");
+	const FString DurStr = (DurationMinutes > 0)
+	                           ? FString::Printf(TEXT("for %d minute(s)"), DurationMinutes)
+	                           : TEXT("permanently");
 	int32 BanCount = 0;
-
 	UGameInstance* GI = GetGameInstance();
 
-	// ── Steam ban ─────────────────────────────────────────────────────────────
 	if (Ids.HasSteamId())
 	{
-		USteamBanSubsystem* SteamBans = GI ? GI->GetSubsystem<USteamBanSubsystem>() : nullptr;
-		if (SteamBans)
+		if (USteamBanSubsystem* SteamBans = GI ? GI->GetSubsystem<USteamBanSubsystem>() : nullptr)
 		{
 			SteamBans->BanPlayer(Ids.Steam64Id, Reason, DurationMinutes, AdminName);
 			++BanCount;
 		}
 	}
 
-	// ── EOS ban ───────────────────────────────────────────────────────────────
 	if (Ids.HasEOSPuid())
 	{
-		UEOSBanSubsystem* EOSBans = GI ? GI->GetSubsystem<UEOSBanSubsystem>() : nullptr;
-		if (EOSBans)
+		if (UEOSBanSubsystem* EOSBans = GI ? GI->GetSubsystem<UEOSBanSubsystem>() : nullptr)
 		{
 			EOSBans->BanPlayer(Ids.EOSProductUserId, Reason, DurationMinutes, AdminName);
 			++BanCount;
@@ -130,10 +177,8 @@ void UBanDiscordSubsystem::HandleDiscordBanByNameCommand(const FString& NameAndA
 	if (BanCount == 0)
 	{
 		Reply(ChannelId,
-		      FString::Printf(
-		          TEXT(":x: Player **%s** was found but could not be banned "
-		               "(no ban subsystem available)."),
-		          *ExactName));
+		      FString::Printf(TEXT(":x: Player **%s** was found but no ban subsystem is available."),
+		                      *ExactName));
 		return;
 	}
 
@@ -142,26 +187,22 @@ void UBanDiscordSubsystem::HandleDiscordBanByNameCommand(const FString& NameAndA
 	    : FString::Printf(TEXT(" Reason: %s"), *Reason);
 
 	Reply(ChannelId,
-	      FString::Printf(
-	          TEXT(":hammer: **%s** has been banned %s on %d platform(s).%s"),
-	          *ExactName, *DurStr, BanCount, *ReasonNote));
+	      FString::Printf(TEXT(":hammer: **%s** has been banned %s on %d platform(s).%s"),
+	                      *ExactName, *DurStr, BanCount, *ReasonNote));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Discord command handling — unban by player name
+// !ban remove
 // ─────────────────────────────────────────────────────────────────────────────
 
-void UBanDiscordSubsystem::HandleDiscordUnbanByNameCommand(const FString& PlayerName,
-                                                            const FString& AdminName,
-                                                            const FString& ChannelId)
+void UBanDiscordSubsystem::HandleBanRemove(const FString& Arg,
+                                            const FString& AdminName,
+                                            const FString& ChannelId)
 {
-	UE_LOG(LogBanDiscord, Log,
-	       TEXT("BanDiscordSubsystem: unban-by-name from '%s': '%s'"), *AdminName, *PlayerName);
-
-	if (PlayerName.IsEmpty())
+	if (Arg.IsEmpty())
 	{
 		Reply(ChannelId, TEXT(":warning: Usage: `!ban remove <PlayerName>`\n"
-		                      "Note: the player must be currently online for name-based unban. "
+		                      ":information_source: The player must be currently online for name-based unban. "
 		                      "For offline unban use `/steamunban <id>` or `/eosunban <id>` in-game."));
 		return;
 	}
@@ -173,20 +214,19 @@ void UBanDiscordSubsystem::HandleDiscordUnbanByNameCommand(const FString& Player
 		return;
 	}
 
-	FResolvedBanId   Ids;
-	FString          ExactName;
-	TArray<FString>  Ambiguous;
+	FResolvedBanId  Ids;
+	FString         ExactName;
+	TArray<FString> Ambiguous;
 
-	if (!FBanPlayerLookup::FindPlayerByName(World, PlayerName, Ids, ExactName, Ambiguous))
+	if (!FBanPlayerLookup::FindPlayerByName(World, Arg, Ids, ExactName, Ambiguous))
 	{
 		if (Ambiguous.Num() > 1)
 		{
-			const FString AmbigList = FString::Join(Ambiguous, TEXT(", "));
 			Reply(ChannelId,
 			      FString::Printf(
 			          TEXT(":warning: Multiple online players match **%s**: %s\n"
 			               "Please use a more specific name."),
-			          *PlayerName, *AmbigList));
+			          *Arg, *FString::Join(Ambiguous, TEXT(", "))));
 		}
 		else
 		{
@@ -196,7 +236,7 @@ void UBanDiscordSubsystem::HandleDiscordUnbanByNameCommand(const FString& Player
 			               "Unban by name requires the player to be currently connected.\n"
 			               "For offline unban use `/steamunban <Steam64Id>` or `/eosunban <EOSPuid>` in-game.\n"
 			               "Use `/playerids` in-game to look up a player's raw ID."),
-			          *PlayerName));
+			          *Arg));
 		}
 		return;
 	}
@@ -204,39 +244,177 @@ void UBanDiscordSubsystem::HandleDiscordUnbanByNameCommand(const FString& Player
 	UGameInstance* GI = GetGameInstance();
 	int32 UnbanCount = 0;
 
-	// ── Steam unban ───────────────────────────────────────────────────────────
 	if (Ids.HasSteamId())
 	{
-		USteamBanSubsystem* SteamBans = GI ? GI->GetSubsystem<USteamBanSubsystem>() : nullptr;
-		if (SteamBans && SteamBans->UnbanPlayer(Ids.Steam64Id))
+		if (USteamBanSubsystem* SteamBans = GI ? GI->GetSubsystem<USteamBanSubsystem>() : nullptr)
 		{
-			++UnbanCount;
+			if (SteamBans->UnbanPlayer(Ids.Steam64Id)) { ++UnbanCount; }
 		}
 	}
 
-	// ── EOS unban ─────────────────────────────────────────────────────────────
 	if (Ids.HasEOSPuid())
 	{
-		UEOSBanSubsystem* EOSBans = GI ? GI->GetSubsystem<UEOSBanSubsystem>() : nullptr;
-		if (EOSBans && EOSBans->UnbanPlayer(Ids.EOSProductUserId))
+		if (UEOSBanSubsystem* EOSBans = GI ? GI->GetSubsystem<UEOSBanSubsystem>() : nullptr)
 		{
-			++UnbanCount;
+			if (EOSBans->UnbanPlayer(Ids.EOSProductUserId)) { ++UnbanCount; }
 		}
 	}
 
 	if (UnbanCount > 0)
 	{
 		Reply(ChannelId,
-		      FString::Printf(
-		          TEXT(":white_check_mark: **%s** has been unbanned on %d platform(s)."),
-		          *ExactName, UnbanCount));
+		      FString::Printf(TEXT(":white_check_mark: **%s** has been unbanned on %d platform(s)."),
+		                      *ExactName, UnbanCount));
 	}
 	else
 	{
 		Reply(ChannelId,
-		      FString::Printf(
-		          TEXT(":yellow_circle: **%s** is online but was not found in any ban list."),
-		          *ExactName));
+		      FString::Printf(TEXT(":yellow_circle: **%s** is online but was not found in any active ban list."),
+		                      *ExactName));
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !ban list
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleBanList(const FString& ChannelId)
+{
+	UGameInstance* GI = GetGameInstance();
+
+	TArray<FBanEntry> SteamBans;
+	if (USteamBanSubsystem* Sub = GI ? GI->GetSubsystem<USteamBanSubsystem>() : nullptr)
+	{
+		SteamBans = Sub->GetAllBans();
+	}
+
+	TArray<FBanEntry> EOSBans;
+	if (UEOSBanSubsystem* Sub = GI ? GI->GetSubsystem<UEOSBanSubsystem>() : nullptr)
+	{
+		EOSBans = Sub->GetAllBans();
+	}
+
+	if (SteamBans.Num() == 0 && EOSBans.Num() == 0)
+	{
+		Reply(ChannelId, TEXT(":scroll: No active bans."));
+		return;
+	}
+
+	FString Lines;
+
+	if (SteamBans.Num() > 0)
+	{
+		Lines += FString::Printf(TEXT("**Steam bans (%d):**\n"), SteamBans.Num());
+		for (const FBanEntry& E : SteamBans)
+		{
+			Lines += FString::Printf(TEXT("• `%s` — %s | Expires: %s | By: %s\n"),
+			                         *E.PlayerId, *E.Reason,
+			                         *E.GetExpiryString(), *E.BannedBy);
+		}
+	}
+
+	if (EOSBans.Num() > 0)
+	{
+		if (!Lines.IsEmpty()) { Lines += TEXT("\n"); }
+		Lines += FString::Printf(TEXT("**EOS bans (%d):**\n"), EOSBans.Num());
+		for (const FBanEntry& E : EOSBans)
+		{
+			Lines += FString::Printf(TEXT("• `%s` — %s | Expires: %s | By: %s\n"),
+			                         *E.PlayerId, *E.Reason,
+			                         *E.GetExpiryString(), *E.BannedBy);
+		}
+	}
+
+	// Discord messages have a 2000-character limit; truncate if needed.
+	if (Lines.Len() > 1900)
+	{
+		Lines = Lines.Left(1900) + TEXT("\n*(list truncated — use in-game /steambanlist or /eosbanlist for the full list)*");
+	}
+
+	Reply(ChannelId, Lines.TrimEnd());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !ban status
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleBanStatus(const FString& ChannelId)
+{
+	UGameInstance* GI = GetGameInstance();
+
+	const int32 SteamCount = (GI && GI->GetSubsystem<USteamBanSubsystem>())
+	                             ? GI->GetSubsystem<USteamBanSubsystem>()->GetBanCount()
+	                             : 0;
+	const int32 EOSCount   = (GI && GI->GetSubsystem<UEOSBanSubsystem>())
+	                             ? GI->GetSubsystem<UEOSBanSubsystem>()->GetBanCount()
+	                             : 0;
+
+	Reply(ChannelId,
+	      FString::Printf(
+	          TEXT(":hammer: **BanSystem status:**\n"
+	               "• Steam bans: **%d**\n"
+	               "• EOS bans:   **%d**\n"
+	               "\n"
+	               ":information_source: Ban enforcement is always active. "
+	               "Use `!ban list` to see full details."),
+	          SteamCount, EOSCount));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !ban role
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleBanRole(const FString& Arg, const FString& ChannelId)
+{
+	FString RoleVerb, TargetUserId;
+	if (!Arg.Split(TEXT(" "), &RoleVerb, &TargetUserId, ESearchCase::IgnoreCase))
+	{
+		RoleVerb     = Arg.TrimStartAndEnd();
+		TargetUserId = TEXT("");
+	}
+	RoleVerb     = RoleVerb.TrimStartAndEnd().ToLower();
+	TargetUserId = TargetUserId.TrimStartAndEnd();
+
+	if (TargetUserId.IsEmpty())
+	{
+		Reply(ChannelId, TEXT(":warning: Usage: `!ban role add <discord_user_id>` "
+		                      "or `!ban role remove <discord_user_id>`"));
+		return;
+	}
+
+	if (!Provider)
+	{
+		Reply(ChannelId, TEXT(":x: Discord provider is not available."));
+		return;
+	}
+
+	const bool bGrant = (RoleVerb == TEXT("add"));
+	if (RoleVerb != TEXT("add") && RoleVerb != TEXT("remove"))
+	{
+		Reply(ChannelId, TEXT(":question: Usage: `!ban role add <discord_user_id>` "
+		                      "or `!ban role remove <discord_user_id>`"));
+		return;
+	}
+
+	if (!Provider->ManageBanDiscordRole(TargetUserId, bGrant))
+	{
+		Reply(ChannelId,
+		      TEXT(":warning: `BanCommandRoleId` is not configured in `DefaultDiscordBridge.ini`. "
+		           "Set it to the snowflake ID of the ban-admin Discord role you want to grant/revoke."));
+		return;
+	}
+
+	if (bGrant)
+	{
+		Reply(ChannelId,
+		      FString::Printf(TEXT(":green_circle: Granting ban-admin role to Discord user `%s`…"),
+		                      *TargetUserId));
+	}
+	else
+	{
+		Reply(ChannelId,
+		      FString::Printf(TEXT(":red_circle: Revoking ban-admin role from Discord user `%s`…"),
+		                      *TargetUserId));
 	}
 }
 
@@ -267,23 +445,17 @@ void UBanDiscordSubsystem::ParseNameDurationReason(const FString& Input,
 		return;
 	}
 
-	// Split on first space to get the player name.
 	FString Rest;
 	if (!Trimmed.Split(TEXT(" "), &OutName, &Rest, ESearchCase::IgnoreCase))
 	{
-		// Only a name, no extra args.
 		OutName = Trimmed;
 		return;
 	}
 	OutName = OutName.TrimStartAndEnd();
 	Rest    = Rest.TrimStartAndEnd();
 
-	if (Rest.IsEmpty())
-	{
-		return;
-	}
+	if (Rest.IsEmpty()) { return; }
 
-	// Try to parse the second token as a duration (integer).
 	FString DurToken, ReasonRest;
 	if (!Rest.Split(TEXT(" "), &DurToken, &ReasonRest, ESearchCase::IgnoreCase))
 	{
@@ -299,7 +471,6 @@ void UBanDiscordSubsystem::ParseNameDurationReason(const FString& Input,
 	}
 	else
 	{
-		// Not numeric — treat the entire Rest as the reason (no explicit duration).
 		OutDurationMinutes = 0;
 		OutReason          = Rest;
 	}
