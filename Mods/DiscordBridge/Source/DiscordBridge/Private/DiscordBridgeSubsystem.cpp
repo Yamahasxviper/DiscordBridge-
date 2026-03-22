@@ -1343,7 +1343,7 @@ void UDiscordBridgeSubsystem::CreateDiscordGuildTextChannel(
 	Request->ProcessRequest();
 }
 
-
+void UDiscordBridgeSubsystem::SendGatewayPayload(const TSharedPtr<FJsonObject>& Payload)
 {
 	if (!WebSocketClient || !WebSocketClient->IsConnected())
 	{

@@ -7,8 +7,6 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogTicketSystem, Log, All);
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
