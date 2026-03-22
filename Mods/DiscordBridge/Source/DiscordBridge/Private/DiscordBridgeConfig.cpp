@@ -279,6 +279,10 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.BanKickReason                   = GetIniStringOrFallback(ConfigFile, TEXT("BanKickReason"),                   Config.BanKickReason);
 		Config.InGameWhitelistCommandPrefix    = GetIniStringOrDefault(ConfigFile, TEXT("InGameWhitelistCommandPrefix"),    Config.InGameWhitelistCommandPrefix);
 		Config.InGameBanCommandPrefix          = GetIniStringOrDefault(ConfigFile, TEXT("InGameBanCommandPrefix"),          Config.InGameBanCommandPrefix);
+		Config.BanSystemSteamBanDiscordMessage   = GetIniStringOrDefault(ConfigFile, TEXT("BanSystemSteamBanDiscordMessage"),   Config.BanSystemSteamBanDiscordMessage);
+		Config.BanSystemSteamUnbanDiscordMessage = GetIniStringOrDefault(ConfigFile, TEXT("BanSystemSteamUnbanDiscordMessage"), Config.BanSystemSteamUnbanDiscordMessage);
+		Config.BanSystemEOSBanDiscordMessage     = GetIniStringOrDefault(ConfigFile, TEXT("BanSystemEOSBanDiscordMessage"),     Config.BanSystemEOSBanDiscordMessage);
+		Config.BanSystemEOSUnbanDiscordMessage   = GetIniStringOrDefault(ConfigFile, TEXT("BanSystemEOSUnbanDiscordMessage"),   Config.BanSystemEOSUnbanDiscordMessage);
 
 		// Trim leading/trailing whitespace from credential fields to prevent
 		// subtle mismatches when operators accidentally include spaces.
@@ -596,6 +600,54 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("BanCommandsEnabled=True\n");
 				}
 
+				if (bFileHasBan &&
+				    !ConfigFile.GetString(ConfigSection, TEXT("BanSystemSteamBanDiscordMessage"), TmpVal))
+				{
+					AppendContent2 +=
+						TEXT("\n")
+						TEXT("# BanSystemSteamBanDiscordMessage (added by mod update) ----------------\n")
+						TEXT("# Message posted to Discord when BanSystem bans a player by Steam64 ID.\n")
+						TEXT("# Placeholders: %PlayerId%, %Reason%, %BannedBy%\n")
+						TEXT("# Leave empty to disable this notification.\n")
+						TEXT("BanSystemSteamBanDiscordMessage=:hammer: **BanSystem** - Steam ID `%PlayerId%` was banned by **%BannedBy%** - Reason: %Reason%\n");
+				}
+
+				if (bFileHasBan &&
+				    !ConfigFile.GetString(ConfigSection, TEXT("BanSystemSteamUnbanDiscordMessage"), TmpVal))
+				{
+					AppendContent2 +=
+						TEXT("\n")
+						TEXT("# BanSystemSteamUnbanDiscordMessage (added by mod update) --------------\n")
+						TEXT("# Message posted to Discord when BanSystem unbans a player by Steam64 ID.\n")
+						TEXT("# Placeholder: %PlayerId%\n")
+						TEXT("# Leave empty to disable this notification.\n")
+						TEXT("BanSystemSteamUnbanDiscordMessage=:white_check_mark: **BanSystem** - Steam ID `%PlayerId%` has been unbanned.\n");
+				}
+
+				if (bFileHasBan &&
+				    !ConfigFile.GetString(ConfigSection, TEXT("BanSystemEOSBanDiscordMessage"), TmpVal))
+				{
+					AppendContent2 +=
+						TEXT("\n")
+						TEXT("# BanSystemEOSBanDiscordMessage (added by mod update) ------------------\n")
+						TEXT("# Message posted to Discord when BanSystem bans a player by EOS Product User ID.\n")
+						TEXT("# Placeholders: %PlayerId%, %Reason%, %BannedBy%\n")
+						TEXT("# Leave empty to disable this notification.\n")
+						TEXT("BanSystemEOSBanDiscordMessage=:hammer: **BanSystem** - EOS ID `%PlayerId%` was banned by **%BannedBy%** - Reason: %Reason%\n");
+				}
+
+				if (bFileHasBan &&
+				    !ConfigFile.GetString(ConfigSection, TEXT("BanSystemEOSUnbanDiscordMessage"), TmpVal))
+				{
+					AppendContent2 +=
+						TEXT("\n")
+						TEXT("# BanSystemEOSUnbanDiscordMessage (added by mod update) ----------------\n")
+						TEXT("# Message posted to Discord when BanSystem unbans a player by EOS Product User ID.\n")
+						TEXT("# Placeholder: %PlayerId%\n")
+						TEXT("# Leave empty to disable this notification.\n")
+						TEXT("BanSystemEOSUnbanDiscordMessage=:white_check_mark: **BanSystem** - EOS ID `%PlayerId%` has been unbanned.\n");
+				}
+
 				if (!ConfigFile.GetString(ConfigSection, TEXT("ServerStatusMessagesEnabled"), TmpVal))
 				{
 					AppendContent2 +=
@@ -750,7 +802,19 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("# Reason shown in-game to the player when kicked for being banned.\n")
 			TEXT("BanKickReason=\n")
 			TEXT("# Prefix for ban commands in the in-game chat. Default: !ban\n")
-			TEXT("InGameBanCommandPrefix=!ban\n");
+			TEXT("InGameBanCommandPrefix=!ban\n")
+			TEXT("\n")
+			TEXT("# -- BANSYSTEM MOD INTEGRATION -----------------------------------------------\n")
+			TEXT("# Messages posted to Discord when the BanSystem mod issues or removes a ban\n")
+			TEXT("# via its in-game chat commands (/steamban, /steamunban, /eosban, /eosunban,\n")
+			TEXT("# /banbyname).  If BanSystem is not installed these settings are ignored.\n")
+			TEXT("# Leave any message empty to disable that specific Discord notification.\n")
+			TEXT("# Placeholders for ban messages:   %PlayerId%, %Reason%, %BannedBy%\n")
+			TEXT("# Placeholder  for unban messages: %PlayerId%\n")
+			TEXT("BanSystemSteamBanDiscordMessage=:hammer: **BanSystem** - Steam ID `%PlayerId%` was banned by **%BannedBy%** - Reason: %Reason%\n")
+			TEXT("BanSystemSteamUnbanDiscordMessage=:white_check_mark: **BanSystem** - Steam ID `%PlayerId%` has been unbanned.\n")
+			TEXT("BanSystemEOSBanDiscordMessage=:hammer: **BanSystem** - EOS ID `%PlayerId%` was banned by **%BannedBy%** - Reason: %Reason%\n")
+			TEXT("BanSystemEOSUnbanDiscordMessage=:white_check_mark: **BanSystem** - EOS ID `%PlayerId%` has been unbanned.\n");
 
 		// Ensure the Config directory exists before writing.
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(ModFilePath));
@@ -838,6 +902,10 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.BanKickReason                    = GetRawStringOrFallback(BackupValues, TEXT("BanKickReason"),                    Config.BanKickReason);
 		Config.InGameWhitelistCommandPrefix     = GetRawStringOrDefault(BackupValues, TEXT("InGameWhitelistCommandPrefix"),     Config.InGameWhitelistCommandPrefix);
 		Config.InGameBanCommandPrefix           = GetRawStringOrDefault(BackupValues, TEXT("InGameBanCommandPrefix"),           Config.InGameBanCommandPrefix);
+		Config.BanSystemSteamBanDiscordMessage   = GetRawStringOrDefault(BackupValues, TEXT("BanSystemSteamBanDiscordMessage"),   Config.BanSystemSteamBanDiscordMessage);
+		Config.BanSystemSteamUnbanDiscordMessage = GetRawStringOrDefault(BackupValues, TEXT("BanSystemSteamUnbanDiscordMessage"), Config.BanSystemSteamUnbanDiscordMessage);
+		Config.BanSystemEOSBanDiscordMessage     = GetRawStringOrDefault(BackupValues, TEXT("BanSystemEOSBanDiscordMessage"),     Config.BanSystemEOSBanDiscordMessage);
+		Config.BanSystemEOSUnbanDiscordMessage   = GetRawStringOrDefault(BackupValues, TEXT("BanSystemEOSUnbanDiscordMessage"),   Config.BanSystemEOSUnbanDiscordMessage);
 
 		// Only log the "restored from backup" message when credentials were
 		// actually recovered (i.e. previously blank in primary but now non-empty
@@ -927,6 +995,10 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("BanKickDiscordMessage"),         Config.BanKickDiscordMessage);
 				PatchLine(TEXT("BanKickReason"),                 Config.BanKickReason);
 				PatchLine(TEXT("InGameBanCommandPrefix"),        Config.InGameBanCommandPrefix);
+				PatchLine(TEXT("BanSystemSteamBanDiscordMessage"),   Config.BanSystemSteamBanDiscordMessage);
+				PatchLine(TEXT("BanSystemSteamUnbanDiscordMessage"), Config.BanSystemSteamUnbanDiscordMessage);
+				PatchLine(TEXT("BanSystemEOSBanDiscordMessage"),     Config.BanSystemEOSBanDiscordMessage);
+				PatchLine(TEXT("BanSystemEOSUnbanDiscordMessage"),   Config.BanSystemEOSUnbanDiscordMessage);
 
 				if (FFileHelper::SaveStringToFile(PrimaryContent, *ModFilePath))
 				{
@@ -990,7 +1062,11 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			+ TEXT("BanCommandsEnabled=") + (Config.bBanCommandsEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
 			+ TEXT("BanKickDiscordMessage=") + Config.BanKickDiscordMessage + TEXT("\n")
 			+ TEXT("BanKickReason=") + Config.BanKickReason + TEXT("\n")
-			+ TEXT("InGameBanCommandPrefix=") + Config.InGameBanCommandPrefix + TEXT("\n");
+			+ TEXT("InGameBanCommandPrefix=") + Config.InGameBanCommandPrefix + TEXT("\n")
+			+ TEXT("BanSystemSteamBanDiscordMessage=") + Config.BanSystemSteamBanDiscordMessage + TEXT("\n")
+			+ TEXT("BanSystemSteamUnbanDiscordMessage=") + Config.BanSystemSteamUnbanDiscordMessage + TEXT("\n")
+			+ TEXT("BanSystemEOSBanDiscordMessage=") + Config.BanSystemEOSBanDiscordMessage + TEXT("\n")
+			+ TEXT("BanSystemEOSUnbanDiscordMessage=") + Config.BanSystemEOSUnbanDiscordMessage + TEXT("\n");
 
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupFilePath));
 

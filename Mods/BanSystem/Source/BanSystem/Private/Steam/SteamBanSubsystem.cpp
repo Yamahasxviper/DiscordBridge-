@@ -99,6 +99,12 @@ bool USteamBanSubsystem::BanPlayer(const FString& Steam64Id,
         *Steam64Id, *BannedBy, *Entry.Reason, *Entry.GetExpiryString());
 
     OnPlayerBanned.Broadcast(Steam64Id, Entry);
+
+    if (NotificationProvider)
+    {
+        NotificationProvider->OnSteamPlayerBanned(Steam64Id, Entry);
+    }
+
     return true;
 }
 
@@ -109,6 +115,12 @@ bool USteamBanSubsystem::UnbanPlayer(const FString& Steam64Id)
         SaveBans();
         UE_LOG(LogSteamBanSystem, Log, TEXT("Steam player %s unbanned."), *Steam64Id);
         OnPlayerUnbanned.Broadcast(Steam64Id);
+
+        if (NotificationProvider)
+        {
+            NotificationProvider->OnSteamPlayerUnbanned(Steam64Id);
+        }
+
         return true;
     }
     UE_LOG(LogSteamBanSystem, Warning,
@@ -182,6 +194,17 @@ void USteamBanSubsystem::ReloadBans()
     LoadBans();
     UE_LOG(LogSteamBanSystem, Log,
         TEXT("Steam ban list reloaded — %d ban(s)."), BanMap.Num());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Notification Provider
+// ─────────────────────────────────────────────────────────────────────────────
+void USteamBanSubsystem::SetNotificationProvider(IBanNotificationProvider* Provider)
+{
+    NotificationProvider = Provider;
+    UE_LOG(LogSteamBanSystem, Log,
+        TEXT("Steam ban notification provider %s."),
+        Provider ? TEXT("registered") : TEXT("cleared"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

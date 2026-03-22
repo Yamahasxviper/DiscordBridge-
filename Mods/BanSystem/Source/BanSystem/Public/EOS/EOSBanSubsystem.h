@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "BanTypes.h"
+#include "IBanNotificationProvider.h"
 #include "EOSBanSubsystem.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogEOSBanSystem, Log, All);
@@ -91,6 +92,22 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Ban System|EOS")
     void ReloadBans();
 
+    // ── Notification Provider ─────────────────────────────────────────────────
+
+    /**
+     * Register a notification provider to be called whenever an EOS ban or
+     * unban is issued.  Pass nullptr to detach the current provider.
+     *
+     * This is the preferred integration point for external mods (e.g.
+     * DiscordBridge): the provider implements IBanNotificationProvider and
+     * registers itself here.  BanSystem has no compile-time knowledge of the
+     * provider; the coupling is entirely one-directional.
+     *
+     * Only one provider can be active at a time.  Registering a new provider
+     * replaces the previous one without notification.
+     */
+    void SetNotificationProvider(IBanNotificationProvider* Provider);
+
     // ── Validation Helpers (callable from other mods) ─────────────────────
 
     /**
@@ -114,4 +131,9 @@ private:
 
     /** In-memory ban map: EOSProductUserId → FBanEntry */
     TMap<FString, FBanEntry> BanMap;
+
+    /** Optional notification provider — called after every ban/unban.
+     *  Raw pointer; the owner is responsible for calling
+     *  SetNotificationProvider(nullptr) before destroying the provider. */
+    IBanNotificationProvider* NotificationProvider = nullptr;
 };
