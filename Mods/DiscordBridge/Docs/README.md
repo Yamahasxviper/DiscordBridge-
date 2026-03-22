@@ -13,6 +13,7 @@ Welcome to the DiscordBridge documentation. Use the links below to jump straight
 | [Server Status & Behaviour](06-ServerStatus.md) | Online/offline announcements and bot-message filtering |
 | [Player Count Presence](07-PlayerCountPresence.md) | Bot status showing live player count |
 | [Troubleshooting](08-Troubleshooting.md) | Fixes for common problems |
+| [TicketSystem](09-TicketSystem.md) | Optional button-based Discord support-ticket panel |
 
 ---
 
