@@ -1,6 +1,7 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 
 #include "EOS/EOSBanSubsystem.h"
+#include "BanDiscordConfig.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformFileManager.h"
@@ -9,6 +10,8 @@
 #include "Serialization/JsonSerializer.h"
 
 DEFINE_LOG_CATEGORY(LogEOSBanSystem);
+
+IBanDiscordNotificationProvider* UEOSBanSubsystem::NotificationProvider = nullptr;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Helpers
@@ -68,6 +71,14 @@ void UEOSBanSubsystem::Deinitialize()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Discord Notification Provider
+// ─────────────────────────────────────────────────────────────────────────────
+void UEOSBanSubsystem::SetNotificationProvider(IBanDiscordNotificationProvider* InProvider)
+{
+    NotificationProvider = InProvider;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Ban Management
 // ─────────────────────────────────────────────────────────────────────────────
 bool UEOSBanSubsystem::BanPlayer(const FString& EOSProductUserId,
@@ -99,6 +110,20 @@ bool UEOSBanSubsystem::BanPlayer(const FString& EOSProductUserId,
         *Entry.PlayerId, *BannedBy, *Entry.Reason, *Entry.GetExpiryString());
 
     OnPlayerBanned.Broadcast(Entry.PlayerId, Entry);
+
+    if (NotificationProvider)
+    {
+        const UBanDiscordConfig* Config = GetDefault<UBanDiscordConfig>();
+        if (Config && !Config->BanNotificationChannelId.IsEmpty())
+        {
+            FString Message = Config->EOSBanMessage
+                .Replace(TEXT("%PlayerId%"), *Entry.PlayerId)
+                .Replace(TEXT("%Reason%"),   *Entry.Reason)
+                .Replace(TEXT("%BannedBy%"), *BannedBy);
+            NotificationProvider->SendBanDiscordMessage(Config->BanNotificationChannelId, Message);
+        }
+    }
+
     return true;
 }
 
@@ -110,6 +135,18 @@ bool UEOSBanSubsystem::UnbanPlayer(const FString& EOSProductUserId)
         SaveBans();
         UE_LOG(LogEOSBanSystem, Log, TEXT("EOS player %s unbanned."), *Key);
         OnPlayerUnbanned.Broadcast(Key);
+
+        if (NotificationProvider)
+        {
+            const UBanDiscordConfig* Config = GetDefault<UBanDiscordConfig>();
+            if (Config && !Config->BanNotificationChannelId.IsEmpty())
+            {
+                FString Message = Config->EOSUnbanMessage
+                    .Replace(TEXT("%PlayerId%"), *Key);
+                NotificationProvider->SendBanDiscordMessage(Config->BanNotificationChannelId, Message);
+            }
+        }
+
         return true;
     }
     UE_LOG(LogEOSBanSystem, Warning,

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "BanTypes.h"
+#include "IBanDiscordNotificationProvider.h"
 #include "SteamBanSubsystem.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogSteamBanSystem, Log, All);
@@ -96,6 +97,19 @@ public:
     UFUNCTION(BlueprintPure, Category = "Ban System|Steam")
     static bool IsValidSteam64Id(const FString& Id);
 
+    // ── Discord Notification Provider ─────────────────────────────────────────
+    /**
+     * Register (or clear) the Discord notification backend at runtime.
+     *
+     * DiscordBridge calls this in its own Initialize() / Deinitialize().
+     * The pointer is NOT owned — the provider must outlive the subsystem, or
+     * must pass nullptr before it is destroyed.
+     *
+     * When no provider is registered ban/unban events are still fully
+     * functional; Discord messages are simply skipped.
+     */
+    static void SetNotificationProvider(IBanDiscordNotificationProvider* InProvider);
+
     // ── Delegates ─────────────────────────────────────────────────────────
     UPROPERTY(BlueprintAssignable, Category = "Ban System|Steam")
     FOnSteamPlayerBanned OnPlayerBanned;
@@ -110,4 +124,6 @@ private:
 
     /** In-memory ban map: Steam64Id → FBanEntry */
     TMap<FString, FBanEntry> BanMap;
+
+    static IBanDiscordNotificationProvider* NotificationProvider;
 };

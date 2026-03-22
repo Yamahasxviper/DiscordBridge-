@@ -1,6 +1,7 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 
 #include "Steam/SteamBanSubsystem.h"
+#include "BanDiscordConfig.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformFileManager.h"
@@ -9,6 +10,8 @@
 #include "Serialization/JsonSerializer.h"
 
 DEFINE_LOG_CATEGORY(LogSteamBanSystem);
+
+IBanDiscordNotificationProvider* USteamBanSubsystem::NotificationProvider = nullptr;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Helpers
@@ -68,6 +71,14 @@ void USteamBanSubsystem::Deinitialize()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Discord Notification Provider
+// ─────────────────────────────────────────────────────────────────────────────
+void USteamBanSubsystem::SetNotificationProvider(IBanDiscordNotificationProvider* InProvider)
+{
+    NotificationProvider = InProvider;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Ban Management
 // ─────────────────────────────────────────────────────────────────────────────
 bool USteamBanSubsystem::BanPlayer(const FString& Steam64Id,
@@ -99,6 +110,20 @@ bool USteamBanSubsystem::BanPlayer(const FString& Steam64Id,
         *Steam64Id, *BannedBy, *Entry.Reason, *Entry.GetExpiryString());
 
     OnPlayerBanned.Broadcast(Steam64Id, Entry);
+
+    if (NotificationProvider)
+    {
+        const UBanDiscordConfig* Config = GetDefault<UBanDiscordConfig>();
+        if (Config && !Config->BanNotificationChannelId.IsEmpty())
+        {
+            FString Message = Config->SteamBanMessage
+                .Replace(TEXT("%PlayerId%"), *Steam64Id)
+                .Replace(TEXT("%Reason%"),   *Entry.Reason)
+                .Replace(TEXT("%BannedBy%"), *BannedBy);
+            NotificationProvider->SendBanDiscordMessage(Config->BanNotificationChannelId, Message);
+        }
+    }
+
     return true;
 }
 
@@ -109,6 +134,18 @@ bool USteamBanSubsystem::UnbanPlayer(const FString& Steam64Id)
         SaveBans();
         UE_LOG(LogSteamBanSystem, Log, TEXT("Steam player %s unbanned."), *Steam64Id);
         OnPlayerUnbanned.Broadcast(Steam64Id);
+
+        if (NotificationProvider)
+        {
+            const UBanDiscordConfig* Config = GetDefault<UBanDiscordConfig>();
+            if (Config && !Config->BanNotificationChannelId.IsEmpty())
+            {
+                FString Message = Config->SteamUnbanMessage
+                    .Replace(TEXT("%PlayerId%"), *Steam64Id);
+                NotificationProvider->SendBanDiscordMessage(Config->BanNotificationChannelId, Message);
+            }
+        }
+
         return true;
     }
     UE_LOG(LogSteamBanSystem, Warning,
