@@ -83,14 +83,40 @@ If more than one online player's name matches the query, the command lists all a
 
 ---
 
-## Storage
+## Storage & Server-Restart Persistence
 
-Bans are persisted as JSON in the server's save directory:
+**Yes — bans survive server restarts.**
+
+Bans are persisted as JSON in the server's save directory immediately after
+every ban or unban action.  On the next startup the files are loaded back
+automatically, so all active bans are enforced before the first player can
+connect.
 
 ```
 <ProjectSaved>/BanSystem/SteamBans.json
 <ProjectSaved>/BanSystem/EOSBans.json
 ```
+
+On a typical dedicated-server installation `<ProjectSaved>` resolves to:
+
+| OS | Path |
+|---|---|
+| Windows | `C:\SatisfactoryServer\FactoryGame\Saved\` |
+| Linux | `~/.config/Epic/FactoryGame/Saved/` (or the server's working directory) |
+
+These directories are **not** cleared on server restart, so the JSON files
+persist across updates and reboots.
+
+### Startup behaviour
+
+When the subsystems initialise on server start they:
+
+1. Load all records from the JSON file.
+2. **Immediately prune any timed bans whose expiry has already passed** — so
+   players whose ban expired while the server was offline are never incorrectly
+   kicked.
+3. Save the pruned list back to disk.
+4. Log the number of **active** bans.
 
 ### Example `SteamBans.json`
 ```json
