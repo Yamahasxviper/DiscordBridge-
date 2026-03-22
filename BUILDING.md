@@ -15,9 +15,53 @@ the build environment without having to inspect individual files.
 | **UnrealBuildTool (UBT)** | C++ compiler driver invoked by Alpakit to compile mod DLLs |
 | **UnrealEngine-CSS** | Coffee Stain Studios' custom fork of Unreal Engine 5.3, used as the compile target |
 | **Visual Studio / Rider** | IDE for editing and building; target is **Development Editor** |
+| **`GenerateProjectFiles.bat`** | Helper script (project root) that generates Visual Studio project files using the registered CSS engine |
 
 The **FactoryGame Unreal project** (`FactoryGame.uproject`) is the host project.
 All mods live under `Mods/` and are loaded by Alpakit as UE plugins.
+
+---
+
+## Generating Visual Studio project files
+
+Project files (`.sln` / `.vcxproj`) are **not stored in git** — they must be
+regenerated from the `.uproject` after each clone or plugin change.
+
+### Quick start — `GenerateProjectFiles.bat`
+
+Double-click **`GenerateProjectFiles.bat`** in the repository root.  It reads
+the CSS engine installation path from the Windows registry (registered by the
+engine's own `SetupScripts\Register.bat`) and runs UBT automatically.
+
+To also include Alpakit's C# project files in the solution, open a command
+prompt and run:
+
+```bat
+GenerateProjectFiles.bat -dotnet
+```
+
+### Manual command-line approach
+
+If you prefer to call UBT directly, locate `UnrealBuildTool.exe` inside the
+CSS engine folder and run:
+
+```powershell
+UnrealBuildTool.exe -projectfiles -project="<path-to-repo>\FactoryGame.uproject" -game -rocket -progress
+```
+
+Add `-dotnet` to include C# projects (required to browse Alpakit's C# source).
+
+### Right-click context menu
+
+Right-click `FactoryGame.uproject` in Windows Explorer and choose **Generate
+Visual Studio project files**.  This requires the CSS engine to be registered
+in the Windows registry — run `SetupScripts\Register.bat` from the engine
+installation folder if the option is missing or fails.
+
+### After generation
+
+Open `FactoryGame.sln` in Visual Studio or Rider, set the solution
+configuration to **Development Editor**, and build.
 
 ---
 

@@ -38,15 +38,33 @@ Server Mods/ directory
 
 2. Clone this repository into your Unreal project's `Mods/` directory.
 
-3. To get Alpakit's C# files to show up in the Visual Studio project, pass the
-   `-dotnet` argument when generating project files (command-line approach only):
+3. **Generate Visual Studio project files** using one of the following methods:
 
+   **Option A — helper script (recommended):**
+   Double-click `GenerateProjectFiles.bat` in the repository root.  It reads
+   the CSS engine path from the Windows registry (set by the engine's own
+   `SetupScripts\Register.bat`) and runs UBT for you.
+
+   To also include Alpakit's C# files in the solution, run from a command
+   prompt:
    ```powershell
-   UnrealBuildTool.exe -projectfiles -project="FactoryGame.uproject" -dotnet
+   GenerateProjectFiles.bat -dotnet
    ```
 
-4. Open the generated `.sln` in Visual Studio or Rider, set the build target to
-   **Development Editor**, and build.
+   **Option B — command line (advanced):**
+   ```powershell
+   UnrealBuildTool.exe -projectfiles -project="FactoryGame.uproject" -game -rocket -progress
+   ```
+   Pass `-dotnet` as an additional argument to include Alpakit's C# projects.
+
+   **Option C — right-click context menu:**
+   Right-click `FactoryGame.uproject` in Windows Explorer and choose
+   *Generate Visual Studio project files*.  This requires the CSS engine to be
+   registered in the Windows registry (the engine installer's
+   `SetupScripts\Register.bat` does this automatically).
+
+4. Open the generated `FactoryGame.sln` in Visual Studio or Rider, set the
+   build target to **Development Editor**, and build.
 
 ---
 
