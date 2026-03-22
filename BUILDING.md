@@ -74,8 +74,8 @@ Windows, WindowsServer, LinuxServer
 | `GameplayEvents` | CSS plugin (`Plugins/GameplayEvents/`) | Tag-based in-game event bus |
 | `ReliableMessaging` | CSS plugin (`Plugins/ReliableMessaging/`) | Client→server relay channel |
 | `OnlineIntegration` | CSS plugin (`Plugins/Online/OnlineIntegration/`) | CSS-native online services |
-| `OnlineServicesInterface` | UE built-in (v2 OSS) | `FOnlineIdRegistryRegistry` declaration |
-| `OnlineServicesCommon` | UE built-in (v2 OSS) | `FOnlineIdRegistryRegistry::Get()` definition |
+| `OnlineServicesInterface` | UE built-in (v2 OSS) | `FOnlineIdRegistryRegistry` declaration (private dep) |
+| `OnlineServicesCommon` | UE built-in (v2 OSS) | `FOnlineIdRegistryRegistry::Get()` definition (private dep) |
 
 **Plugin dependencies (declared in `DiscordBridge.uplugin`):**
 
@@ -122,15 +122,16 @@ transitive dependencies reference these modules.
 
 **Build targets (`Config/Alpakit.ini`):** `Windows, WindowsServer, LinuxServer`
 
-**Stub modules** (all have `TargetDenyList: ["Game"]` — compiled for Server
+**Stub modules** (`EOSShared` uses `LoadingPhase: PostDefault`; all others use
+`PostConfigInit`. All have `TargetDenyList: ["Game"]` — compiled for Server
 and Editor targets; on Game targets the real CSS UE modules are used):
 
-| Stub module | Replaces |
-|-------------|---------|
-| `EOSShared` | CSS UE engine plugin absent on dedicated server and without source in Editor |
-| `EOSSDK` | Epic Online Services SDK headers/libs absent on server |
-| `OnlineServicesEOS` | UE v2 OSS EOS backend absent on server |
-| `OnlineServicesEOSGS` | UE v2 OSS EOS Game Services backend absent on server |
+| Stub module | Loading phase | Replaces |
+|-------------|--------------|---------|
+| `EOSShared` | `PostDefault` | CSS UE engine plugin absent on dedicated server and without source in Editor. Also installs a native hook via SML's `SUBSCRIBE_METHOD` to suppress the ipify.org public-IP request on server — loaded at `PostDefault` so SML's funchook is ready. |
+| `EOSSDK` | `PostConfigInit` | Epic Online Services SDK headers/libs absent on server |
+| `OnlineServicesEOS` | `PostConfigInit` | UE v2 OSS EOS backend absent on server |
+| `OnlineServicesEOSGS` | `PostConfigInit` | UE v2 OSS EOS Game Services backend absent on server |
 
 ---
 
