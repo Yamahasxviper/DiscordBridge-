@@ -1,6 +1,7 @@
 // Copyright Coffee Stain Studios. All Rights Reserved.
 
 #include "DiscordBridgeSubsystem.h"
+#include "TicketSubsystem.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -97,10 +98,34 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	       TEXT("DiscordBridge: DiscordToGameFormat  = \"%s\""), *Config.DiscordToGameFormat);
 
 	Connect();
+
+	// Inject ourselves as the Discord provider into TicketSubsystem (if installed).
+	// TicketSystem is an optional dependency: DiscordBridge works without it, but
+	// when present it powers the ticket panel.  Any mod that implements
+	// IDiscordBridgeProvider can do the same by calling SetProvider on the subsystem.
+	if (FModuleManager::Get().IsModuleLoaded(TEXT("TicketSystem")))
+	{
+		Collection.InitializeDependency<UTicketSubsystem>();
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UTicketSubsystem* Tickets = GI->GetSubsystem<UTicketSubsystem>())
+			{
+				CachedTicketSubsystem = Tickets;
+				Tickets->SetProvider(this);
+			}
+		}
+	}
 }
 
 void UDiscordBridgeSubsystem::Deinitialize()
 {
+	// Detach from TicketSubsystem so it stops processing interactions after we shut down.
+	if (UTicketSubsystem* Tickets = CachedTicketSubsystem.Get())
+	{
+		Tickets->SetProvider(nullptr);
+	}
+	CachedTicketSubsystem.Reset();
+
 	// Stop the chat-manager bind ticker if it is still running.
 	FTSTicker::GetCoreTicker().RemoveTicker(ChatManagerBindTickHandle);
 	ChatManagerBindTickHandle.Reset();
@@ -2660,4 +2685,33 @@ void UDiscordBridgeSubsystem::HandleInGameBanCommand(const FString& SubCommand)
 	}
 
 	SendGameChatStatusMessage(Response);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IDiscordBridgeProvider – subscribe / unsubscribe helpers
+// These wrap the native multicast delegates so external modules (TicketSystem
+// and any other future mod built against the IDiscordBridgeProvider interface)
+// can subscribe without including DiscordBridgeSubsystem.h directly.
+// ─────────────────────────────────────────────────────────────────────────────
+
+FDelegateHandle UDiscordBridgeSubsystem::SubscribeInteraction(
+TFunction<void(const TSharedPtr<FJsonObject>&)> Callback)
+{
+return OnDiscordInteractionReceived.AddLambda(MoveTemp(Callback));
+}
+
+void UDiscordBridgeSubsystem::UnsubscribeInteraction(FDelegateHandle Handle)
+{
+OnDiscordInteractionReceived.Remove(Handle);
+}
+
+FDelegateHandle UDiscordBridgeSubsystem::SubscribeRawMessage(
+TFunction<void(const TSharedPtr<FJsonObject>&)> Callback)
+{
+return OnDiscordRawMessageReceived.AddLambda(MoveTemp(Callback));
+}
+
+void UDiscordBridgeSubsystem::UnsubscribeRawMessage(FDelegateHandle Handle)
+{
+OnDiscordRawMessageReceived.Remove(Handle);
 }

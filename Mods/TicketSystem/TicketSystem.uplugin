@@ -5,7 +5,7 @@
 	"SemVersion": "1.0.0",
 	"GameVersion": ">=416835",
 	"FriendlyName": "Ticket System",
-	"Description": "Server-only mod. Adds a button-based Discord support-ticket panel to the DiscordBridge mod. Members click a button to open a private ticket channel visible only to them and the configured admin/support role. RequiredOnRemote is false – players do not need to install this mod.",
+	"Description": "Standalone server-only mod. Adds a button-based Discord support-ticket panel. Any mod that implements IDiscordBridgeProvider can power the ticket system by calling UTicketSubsystem::SetProvider(). Members click a button to open a private ticket channel visible only to them and the configured admin/support role. RequiredOnRemote is false – players do not need to install this mod.",
 	"Category": "Networking",
 	"CreatedBy": "SML Community",
 	"CreatedByURL": "",

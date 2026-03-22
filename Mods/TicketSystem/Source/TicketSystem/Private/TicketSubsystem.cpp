@@ -27,7 +27,7 @@ bool UTicketSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 	{
 		return false;
 	}
-	// Only create on dedicated servers – mirrors UDiscordBridgeSubsystem behaviour.
+	// Only create on dedicated servers.
 	return IsRunningDedicatedServer();
 }
 

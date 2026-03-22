@@ -12,8 +12,10 @@
 #include "GameFramework/PlayerController.h"
 #include "Dom/JsonObject.h"
 #include "IDiscordBridgeProvider.h"
-#include "TicketSubsystem.h"
 #include "DiscordBridgeSubsystem.generated.h"
+
+// Forward-declared so the header does not pull in TicketSystem's full header chain.
+class UTicketSubsystem;
 
 // ── Delegate declarations ─────────────────────────────────────────────────────
 
@@ -593,7 +595,10 @@ private:
 	 */
 	TSet<FString> WhitelistRoleMemberNames;
 
-	/** Pointer to the TicketSubsystem; populated during Initialize(). */
-	UPROPERTY()
-	UTicketSubsystem* CachedTicketSubsystem = nullptr;
+	/**
+	 * Weak reference to the TicketSubsystem; populated during Initialize() if
+	 * TicketSystem is installed.  Using TWeakObjectPtr avoids adding a hard GC
+	 * root while still nulling automatically if the object is ever destroyed.
+	 */
+	TWeakObjectPtr<UTicketSubsystem> CachedTicketSubsystem;
 };
