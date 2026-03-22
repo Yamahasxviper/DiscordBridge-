@@ -27,6 +27,15 @@ using UnrealBuildTool;
 // a native hook (via SML's NativeHookManager) that suppresses
 // UFGLocalPlayer::RequestPublicPlayerAddress on dedicated servers.
 // See Private/EOSSharedModule.cpp for details.
+//
+// Loading phase
+// -------------
+// This module uses SUBSCRIBE_METHOD from SML's NativeHookManager.  To ensure
+// SML's funchook infrastructure is fully available, EOSShared is loaded at
+// PostDefault — the same phase as SML — so UE's module loader guarantees SML
+// initialises before EOSShared within that phase (dependency ordering).
+// UFGLocalPlayer instances are only created during world initialisation, which
+// occurs after all StartupModules complete, so PostDefault is early enough.
 
 public class EOSShared : ModuleRules
 {

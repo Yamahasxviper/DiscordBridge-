@@ -58,19 +58,27 @@ public class DiscordBridge : ModuleRules
 			// This avoids any dependency on "OnlineSubsystem" (v1 OSS) whose header
 			// availability in the custom CSS engine build is not guaranteed for mods.
 			"OnlineIntegration",
+		});
+
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
 			// UE Online Services v2 interface layer – provides the declaration of
 			// FOnlineIdRegistryRegistry and related Online Services types used in
 			// LocalUserInfo.h (FLocalUserNetIdBundle::SetAssociatedAccountId).
-			// Although OnlineIntegration lists this as a PublicDependencyModule, UBT
-			// does not propagate it transitively to mod DLLs in this build configuration,
-			// so it must be declared explicitly here to satisfy the compiler.
+			// Kept as a private dependency because it is used only in .cpp files
+			// (not in any public DiscordBridge header), and CSS custom UE dedicated-
+			// server packages do not always include this as a public header export.
+			// OnlineIntegration lists OnlineServicesInterface as a PublicDependency,
+			// so its headers are already in scope for private compilation via the
+			// OnlineIntegration transitive chain.
 			"OnlineServicesInterface",
-			// UE Online Services v2 common layer – required to resolve the **definition**
-			// (not just the declaration) of FOnlineIdRegistryRegistry::Get(), which is the
-			// global singleton implemented in OnlineServicesCommon, not in the interface
-			// module.  OnlineIntegration.Build.cs lists OnlineServicesCommon as a Private
-			// dependency so it is NOT propagated transitively to mod DLLs; declaring it
-			// here explicitly satisfies the linker when building the DiscordBridge .so.
+			// UE Online Services v2 common layer – required to resolve the definition
+			// of FOnlineIdRegistryRegistry::Get(), the global singleton implemented in
+			// OnlineServicesCommon (not in the interface module).
+			// OnlineIntegration.Build.cs lists OnlineServicesCommon as a Private dep,
+			// so it is NOT propagated to mod DLLs transitively; declaring it here as
+			// a private dep satisfies the linker when building the DiscordBridge .so
+			// without exposing the module headers to dependents of DiscordBridge.
 			"OnlineServicesCommon",
 		});
 	}

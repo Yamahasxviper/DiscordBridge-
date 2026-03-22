@@ -36,9 +36,11 @@ void FEOSSharedCompatModule::StartupModule()
 	// Mods/DiscordBridge/Docs/12-NativeHooking.md §TCallScope API.
 	// (Scope.Override() is only valid for non-void return types.)
 	//
-	// CSSCompatStubs loads at PostConfigInit — before any Default-phase mod
-	// (including DiscordBridge) — so the hook is in place before the engine
-	// creates the EOS service-account UFGLocalPlayer instance.
+	// CSSCompatStubs loads at PostDefault — after SML — so SUBSCRIBE_METHOD
+	// (which uses SML's NativeHookManager / funchook) is available, and the
+	// hook is still installed before the engine creates any local-player
+	// objects (UFGLocalPlayer is created during world initialisation, which
+	// happens after all module StartupModules have completed).
 	if (IsRunningDedicatedServer())
 	{
 		PublicIpHookHandle = SUBSCRIBE_METHOD(UFGLocalPlayer::RequestPublicPlayerAddress,

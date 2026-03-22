@@ -25,7 +25,7 @@
 		{
 			"Name": "EOSShared",
 			"Type": "Runtime",
-			"LoadingPhase": "PostConfigInit",
+			"LoadingPhase": "PostDefault",
 			"TargetDenyList": [
 				"Game"
 			]

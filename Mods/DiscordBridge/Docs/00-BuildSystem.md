@@ -230,10 +230,12 @@ public class MyMod : ModuleRules
 
 ## Native hooking in `CSSCompatStubs` modules
 
-`CSSCompatStubs` modules load at `PostConfigInit` — earlier than any
-`Default`-phase mod — which makes them the right place for
-**server-wide compatibility hooks** that must be in place before the game
-creates its first game-level objects.
+`CSSCompatStubs/EOSShared` loads at `PostDefault` — the same phase as SML —
+which guarantees that SML's NativeHookManager / funchook infrastructure is
+fully initialised before `SUBSCRIBE_METHOD` is called.  `UFGLocalPlayer`
+instances are created during world initialisation, which occurs after all
+module `StartupModule` calls complete, so `PostDefault` is early enough for
+**server-wide compatibility hooks**.
 
 The `EOSShared` stub module uses SML's `SUBSCRIBE_METHOD` macro to cancel
 `UFGLocalPlayer::RequestPublicPlayerAddress()` on dedicated servers, preventing
@@ -270,8 +272,7 @@ Friend=(Class="UTargetClass", FriendClass="FYourModuleClass")
 
 ### Adding hooks to other CSSCompatStubs modules
 
-Only `EOSShared` currently carries a native hook because its `PostConfigInit`
-loading phase makes it the ideal early hook point.  If you need to suppress
+Only `EOSShared` currently carries a native hook.  If you need to suppress
 additional EOS-related calls, follow the same pattern:
 
 1. Add `"SML"`, `"FactoryGame"`, and `"DummyHeaders"` to the stub module's
@@ -308,6 +309,8 @@ For the full CI/CD release workflow used by this repository see
 | `fatal error: <some engine header> not found` | Missing `DummyHeaders` dependency | Add `"DummyHeaders"` to `PublicDependencyModuleNames` |
 | `SIGSEGV at 0x0000000006000001` at runtime | EOS SDK call before `mIsOnline=true` or `GetNumLocalPlayers()>0` | Use `OnlineIntegration` helpers (`UCommonUserSubsystem::GetNumLocalPlayers()`, `UOnlineIntegrationControllerComponent`) with the required guards |
 | Discord bridge fails to connect, WebSocket errors in log | `SMLWebSocket` not installed | Install `SMLWebSocket` alongside the mod |
+| All three mods fail to precompile for dedicated server | `OnlineServicesInterface` / `OnlineServicesCommon` listed as **public** deps in a mod `Build.cs`; CSS custom UE server packages do not always expose these as standalone public header trees | Declare them as **private** dependencies instead — they are only used in `.cpp` files, and their symbols reach the linker transitively through `OnlineIntegration` |
+| Mods crash or fail to load during Alpakit cook for server | `CSSCompatStubs/EOSShared` was loaded at `PostConfigInit` before SML initialises | `EOSShared` now loads at `PostDefault` (same phase as SML); no action needed if using the current source |
 
 ---
 
