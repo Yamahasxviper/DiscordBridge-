@@ -123,11 +123,11 @@ transitive dependencies reference these modules.
 **Build targets (`Config/Alpakit.ini`):** `Windows, WindowsServer, LinuxServer`
 
 **Stub modules** (all have `TargetDenyList: ["Game"]` — compiled for Server
-targets only; on Game targets the real CSS UE modules are used):
+and Editor targets; on Game targets the real CSS UE modules are used):
 
 | Stub module | Replaces |
 |-------------|---------|
-| `EOSShared` | CSS UE engine plugin absent on dedicated server |
+| `EOSShared` | CSS UE engine plugin absent on dedicated server and without source in Editor |
 | `EOSSDK` | Epic Online Services SDK headers/libs absent on server |
 | `OnlineServicesEOS` | UE v2 OSS EOS backend absent on server |
 | `OnlineServicesEOSGS` | UE v2 OSS EOS Game Services backend absent on server |

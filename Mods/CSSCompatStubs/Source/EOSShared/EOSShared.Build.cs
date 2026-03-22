@@ -3,21 +3,25 @@
 using UnrealBuildTool;
 
 // Stub module that satisfies the "EOSShared" dependency declared in
-// OnlineIntegration.Build.cs on dedicated-server Alpakit builds.
+// OnlineIntegration.Build.cs on dedicated-server Alpakit builds and
+// prevents IntelliSense errors in the Editor.
 //
 // Background
 // ----------
-// CSS custom UnrealEngine omits EOSShared from its dedicated-server binary.
-// FactoryGame.Build.cs documents this explicitly:
+// CSS custom UnrealEngine omits EOSShared from its dedicated-server binary
+// and does not ship module source for the Editor. FactoryGame.Build.cs
+// documents this explicitly:
 //   "Exclude EOSShared on dedicated server, it is not enabled as a plugin
 //    for the dedicated server so we cannot depend on it"
 //
 // Without this stub, every WindowsServer / LinuxServer Alpakit build of
-// DiscordBridge fails with "cannot find module EOSShared".
+// DiscordBridge fails with "cannot find module EOSShared", and VS Code /
+// Rider throw "Plugin EOSShared does not contain the EOSShared module"
+// when generating IntelliSense include data for FactoryEditor.
 //
 // TargetDenyList: ["Game"] in CSSCompatStubs.uplugin ensures this stub is
-// compiled only for Server targets. On Game targets, UBT uses the real
-// CSS UE EOSShared engine plugin instead.
+// compiled only for Server and Editor targets. On Game targets, UBT uses the
+// real CSS UE EOSShared engine plugin instead.
 //
 // In addition to satisfying the compile-time dependency, this module installs
 // a native hook (via SML's NativeHookManager) that suppresses
