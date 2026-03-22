@@ -131,6 +131,7 @@ and Editor targets; on Game targets the real CSS UE modules are used):
 | `EOSSDK` | Epic Online Services SDK headers/libs absent on server |
 | `OnlineServicesEOS` | UE v2 OSS EOS backend absent on server |
 | `OnlineServicesEOSGS` | UE v2 OSS EOS Game Services backend absent on server |
+| `SocketSubsystemEOS` | EOS P2P socket subsystem absent on dedicated server and denied for Editor (`FactoryGame.uproject`) to stop the `SocketSubsystemEOS → EOSShared` plugin-validation chain |
 
 ---
 
