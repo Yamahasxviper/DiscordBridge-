@@ -56,8 +56,9 @@ void USteamBanSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     LoadBans();
+    PruneExpiredBans();
     UE_LOG(LogSteamBanSystem, Log,
-        TEXT("Steam ban subsystem initialised — %d ban(s) loaded from disk."),
+        TEXT("Steam ban subsystem initialised — %d active ban(s) loaded from disk."),
         BanMap.Num());
 }
 
