@@ -26,21 +26,39 @@ The two systems **share no state, no logic, and no storage** — they are comple
 ### Steam Commands
 | Command | Description |
 |---|---|
-| `/steamban <Steam64Id> [minutes] [reason...]` | Ban by Steam 64-bit ID. Omit or use `0` minutes for permanent. |
+| `/steamban <Steam64Id\|PlayerName> [minutes] [reason...]` | Ban by Steam 64-bit ID **or player name**. Omit or use `0` minutes for permanent. |
 | `/steamunban <Steam64Id>` | Remove a Steam ban. |
 | `/steambanlist` | List all active Steam bans. |
 
 ### EOS Commands
 | Command | Description |
 |---|---|
-| `/eosban <EOSProductUserId> [minutes] [reason...]` | Ban by EOS Product User ID (32-char hex). Omit or use `0` minutes for permanent. |
+| `/eosban <EOSProductUserId\|PlayerName> [minutes] [reason...]` | Ban by EOS Product User ID (32-char hex) **or player name**. Omit or use `0` minutes for permanent. |
 | `/eosunban <EOSProductUserId>` | Remove an EOS ban. |
 | `/eosbanlist` | List all active EOS bans. |
 
+### Name-Based Commands (recommended for live moderation)
+| Command | Description |
+|---|---|
+| `/banbyname <PlayerName> [minutes] [reason...]` | Ban a connected player by name across **all** available platforms (Steam + EOS simultaneously). |
+| `/playerids [PlayerName]` | Show the platform IDs of all connected players, or a specific player, so you can record them for offline unban. |
+
 Commands work from the **in-game chat** (admin players) and the **server console** (`bOnlyUsableByPlayer = false`).
+
+### Player Name Lookup
+
+When a player **name** is supplied to `/steamban`, `/eosban`, or `/banbyname`, the system:
+
+1. Iterates all currently-connected `PlayerController`s on the server.
+2. Finds the player whose `GetPlayerName()` **contains** the query (case-insensitive).
+3. Resolves their Steam64 ID and/or EOS PUID via `FBanIdResolver`.
+4. Applies the ban using the resolved ID.
+
+If more than one online player's name matches the query, the command lists all ambiguous matches and asks you to be more specific.
 
 ### Examples
 ```
+# Ban by raw ID (as before)
 /steamban 76561198000000000 0 Cheating
 /steamban 76561198000000000 1440 Toxic behaviour (24h)
 /steamunban 76561198000000000
@@ -49,6 +67,18 @@ Commands work from the **in-game chat** (admin players) and the **server console
 /eosban 00020aed06f0a6958c3c067fb4b73d51 Evading previous ban
 /eosunban 00020aed06f0a6958c3c067fb4b73d51
 /eosbanlist
+
+# Ban by player name — /steamban and /eosban accept names as fallback
+/steamban SomePlayer 60 Spamming
+/eosban SomePlayer 0 Cheating
+
+# Preferred: /banbyname bans on ALL platforms at once
+/banbyname SomePlayer Cheating
+/banbyname SomePlayer 1440 Temporary mute
+
+# Show all connected player IDs (useful before the player disconnects)
+/playerids
+/playerids SomePlayer
 ```
 
 ---
@@ -166,6 +196,37 @@ if (FBanIdResolver::TryGetSteam64Id(UniqueNetId, SteamId))
 FString PUID;
 if (FBanIdResolver::TryGetEOSProductUserId(UniqueNetId, PUID))
     // ...
+```
+
+### Player Name Lookup
+
+```cpp
+#include "BanPlayerLookup.h"
+
+// Resolve IDs for a connected player by name
+FResolvedBanId   Ids;
+FString          FoundName;
+TArray<FString>  Ambiguous;
+
+if (FBanPlayerLookup::FindPlayerByName(World, TEXT("SomePlayer"), Ids, FoundName, Ambiguous))
+{
+    // Ids.Steam64Id / Ids.EOSProductUserId are now populated
+    UE_LOG(MyLog, Log, TEXT("Found '%s' — Steam=%s  EOS=%s"),
+        *FoundName, *Ids.Steam64Id, *Ids.EOSProductUserId);
+}
+else if (Ambiguous.Num() > 1)
+{
+    // Multiple players matched — show the list to the admin
+    UE_LOG(MyLog, Warning, TEXT("Ambiguous: %s"),
+        *FString::Join(Ambiguous, TEXT(", ")));
+}
+
+// Get all connected players and their IDs:
+for (const auto& Pair : FBanPlayerLookup::GetAllConnectedPlayers(World))
+{
+    UE_LOG(MyLog, Log, TEXT("%s → Steam=%s  EOS=%s"),
+        *Pair.Key, *Pair.Value.Steam64Id, *Pair.Value.EOSProductUserId);
+}
 ```
 
 ### Ban Management
