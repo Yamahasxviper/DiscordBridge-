@@ -9,6 +9,7 @@
 // FactoryGame
 #include "FGGameMode.h"
 #include "FGGameSession.h"
+#include "FGPlayerState.h"
 
 // BanSystem
 #include "BanIdResolver.h"
@@ -67,7 +68,7 @@ void FBanSystemModule::StartupModule()
             UGameInstance* GI = Self->GetGameInstance();
             if (!GI) return;
 
-            const FUniqueNetIdRepl UniqueId = NewPlayer->PlayerState->GetUniqueNetId();
+            const FUniqueNetIdRepl UniqueId = CastChecked<AFGPlayerState>(NewPlayer->PlayerState)->GetUniqueNetId();
             if (!UniqueId.IsValid()) return;
 
             // Resolve platform-specific IDs from the connecting player's
