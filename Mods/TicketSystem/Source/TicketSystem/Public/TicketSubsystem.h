@@ -9,6 +9,10 @@
 #include "TicketConfig.h"
 #include "TicketSubsystem.generated.h"
 
+// Forward-declared so the header does not pull in TicketDiscordProvider's full
+// header chain unless a translation unit explicitly needs it.
+class UTicketDiscordProvider;
+
 /**
  * UTicketSubsystem
  *
@@ -194,6 +198,14 @@ private:
 	 */
 	TMap<FString, FString> OpenerToTicketChannel;
 
-	/** Injected Discord provider.  nullptr until SetProvider() is called by DiscordBridge. */
+	/** Injected Discord provider.  nullptr until SetProvider() is called. */
 	IDiscordBridgeProvider* CachedProvider = nullptr;
+
+	/**
+	 * Built-in standalone provider created by Initialize() when BotToken is
+	 * set in DefaultTickets.ini.  Automatically disconnected if an external
+	 * provider (e.g. DiscordBridge) calls SetProvider() later.
+	 */
+	UPROPERTY()
+	UTicketDiscordProvider* InternalProvider = nullptr;
 };
