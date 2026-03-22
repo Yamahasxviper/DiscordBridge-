@@ -13,6 +13,7 @@
 
 // BanSystem
 #include "BanIdResolver.h"
+#include "BanDiscordSubsystem.h"
 #include "Steam/SteamBanSubsystem.h"
 #include "EOS/EOSBanSubsystem.h"
 #include "Commands/BanCommands.h"
@@ -99,16 +100,36 @@ void FBanSystemModule::StartupModule()
                             TEXT("Kicking Steam-banned player %s — Reason: %s"),
                             *ResolvedId.Steam64Id, *Reason);
 
+                        // Determine kick message (config override or default)
+                        FString KickMsg;
+                        UBanDiscordSubsystem* BanDiscord = GI->GetSubsystem<UBanDiscordSubsystem>();
+                        if (BanDiscord && !BanDiscord->GetConfig().SteamBanKickReason.IsEmpty())
+                        {
+                            KickMsg = BanDiscord->GetConfig().SteamBanKickReason;
+                        }
+                        else
+                        {
+                            KickMsg = FString::Printf(TEXT("[Steam Ban] %s"), *Reason);
+                        }
+
                         if (AGameSession* Session = Self->GameSession)
                         {
-                            Session->KickPlayer(
-                                NewPlayer,
-                                FText::FromString(
-                                    FString::Printf(TEXT("[Steam Ban] %s"), *Reason)));
+                            Session->KickPlayer(NewPlayer, FText::FromString(KickMsg));
                         }
-                        // Player is being kicked for a Steam ban.
-                        // Still fall through to EOS check — the ban message has
-                        // already been delivered; the kick itself is asynchronous.
+
+                        // Post Discord notification if configured
+                        if (BanDiscord)
+                        {
+                            const FString& NotifyFmt = BanDiscord->GetConfig().BanKickDiscordMessage;
+                            const FString& ChannelId = BanDiscord->GetConfig().DiscordChannelId;
+                            if (!NotifyFmt.IsEmpty() && !ChannelId.IsEmpty())
+                            {
+                                FString Notice = NotifyFmt;
+                                Notice = Notice.Replace(TEXT("%PlayerId%"), *ResolvedId.Steam64Id);
+                                Notice = Notice.Replace(TEXT("%Reason%"),   *Reason);
+                                BanDiscord->SendDiscordChannelMessage(ChannelId, Notice);
+                            }
+                        }
                     }
                 }
             }
@@ -126,12 +147,35 @@ void FBanSystemModule::StartupModule()
                             TEXT("Kicking EOS-banned player %s — Reason: %s"),
                             *ResolvedId.EOSProductUserId, *Reason);
 
+                        // Determine kick message (config override or default)
+                        FString KickMsg;
+                        UBanDiscordSubsystem* BanDiscord = GI->GetSubsystem<UBanDiscordSubsystem>();
+                        if (BanDiscord && !BanDiscord->GetConfig().EOSBanKickReason.IsEmpty())
+                        {
+                            KickMsg = BanDiscord->GetConfig().EOSBanKickReason;
+                        }
+                        else
+                        {
+                            KickMsg = FString::Printf(TEXT("[EOS Ban] %s"), *Reason);
+                        }
+
                         if (AGameSession* Session = Self->GameSession)
                         {
-                            Session->KickPlayer(
-                                NewPlayer,
-                                FText::FromString(
-                                    FString::Printf(TEXT("[EOS Ban] %s"), *Reason)));
+                            Session->KickPlayer(NewPlayer, FText::FromString(KickMsg));
+                        }
+
+                        // Post Discord notification if configured
+                        if (BanDiscord)
+                        {
+                            const FString& NotifyFmt = BanDiscord->GetConfig().BanKickDiscordMessage;
+                            const FString& ChannelId = BanDiscord->GetConfig().DiscordChannelId;
+                            if (!NotifyFmt.IsEmpty() && !ChannelId.IsEmpty())
+                            {
+                                FString Notice = NotifyFmt;
+                                Notice = Notice.Replace(TEXT("%PlayerId%"), *ResolvedId.EOSProductUserId);
+                                Notice = Notice.Replace(TEXT("%Reason%"),   *Reason);
+                                BanDiscord->SendDiscordChannelMessage(ChannelId, Notice);
+                            }
                         }
                     }
                 }

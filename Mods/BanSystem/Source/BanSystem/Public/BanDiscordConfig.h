@@ -148,6 +148,34 @@ struct BANSYSTEM_API FBanDiscordConfig
 		TEXT(":white_check_mark: **BanSystem** - EOS ID `%PlayerId%` has been unbanned.")
 	};
 
+	// ── Join-kick enforcement messages ───────────────────────────────────────
+
+	/**
+	 * Text shown in-game to the player in the disconnected screen when they are
+	 * kicked because they are on the Steam ban list.
+	 * Leave empty to use the default "[Steam Ban] <reason>" format.
+	 */
+	FString SteamBanKickReason;
+
+	/**
+	 * Text shown in-game to the player in the disconnected screen when they are
+	 * kicked because they are on the EOS ban list.
+	 * Leave empty to use the default "[EOS Ban] <reason>" format.
+	 */
+	FString EOSBanKickReason;
+
+	/**
+	 * Message posted to Discord when a banned player is kicked on join.
+	 * Leave empty to disable this notification.
+	 *
+	 * Available placeholders:
+	 *   %PlayerId%  – the Steam64 ID or EOS PUID of the kicked player
+	 *   %Reason%    – the ban reason string
+	 */
+	FString BanKickDiscordMessage{
+		TEXT(":hammer: **BanSystem** - Player `%PlayerId%` tried to join but is banned. Reason: %Reason%")
+	};
+
 	// ── Lifecycle ─────────────────────────────────────────────────────────────
 
 	/**

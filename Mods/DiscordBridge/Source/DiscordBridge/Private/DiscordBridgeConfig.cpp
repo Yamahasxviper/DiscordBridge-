@@ -264,25 +264,13 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.PlayerCountUpdateIntervalSeconds = GetIniFloatOrDefault (ConfigFile, TEXT("PlayerCountUpdateIntervalSeconds"), Config.PlayerCountUpdateIntervalSeconds);
 		Config.PlayerCountActivityType         = GetIniIntOrDefault   (ConfigFile, TEXT("PlayerCountActivityType"),         Config.PlayerCountActivityType);
 		Config.WhitelistCommandRoleId          = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistCommandRoleId"),          Config.WhitelistCommandRoleId);
-		Config.BanCommandRoleId                = GetIniStringOrDefault(ConfigFile, TEXT("BanCommandRoleId"),                Config.BanCommandRoleId);
 		Config.WhitelistCommandPrefix          = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistCommandPrefix"),          Config.WhitelistCommandPrefix);
 		Config.WhitelistRoleId                 = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistRoleId"),                 Config.WhitelistRoleId);
 		Config.WhitelistChannelId              = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistChannelId"),              Config.WhitelistChannelId);
 		Config.WhitelistKickDiscordMessage     = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistKickDiscordMessage"),     Config.WhitelistKickDiscordMessage);
 		Config.WhitelistKickReason             = GetIniStringOrFallback(ConfigFile, TEXT("WhitelistKickReason"),             Config.WhitelistKickReason);
 		Config.bWhitelistEnabled               = GetIniBoolOrDefault  (ConfigFile, TEXT("WhitelistEnabled"),               Config.bWhitelistEnabled);
-		Config.bBanSystemEnabled               = GetIniBoolOrDefault  (ConfigFile, TEXT("BanSystemEnabled"),               Config.bBanSystemEnabled);
-		Config.BanCommandPrefix                = GetIniStringOrDefault(ConfigFile, TEXT("BanCommandPrefix"),                Config.BanCommandPrefix);
-		Config.BanChannelId                    = GetIniStringOrDefault(ConfigFile, TEXT("BanChannelId"),                    Config.BanChannelId);
-		Config.bBanCommandsEnabled             = GetIniBoolOrDefault  (ConfigFile, TEXT("BanCommandsEnabled"),             Config.bBanCommandsEnabled);
-		Config.BanKickDiscordMessage           = GetIniStringOrDefault(ConfigFile, TEXT("BanKickDiscordMessage"),           Config.BanKickDiscordMessage);
-		Config.BanKickReason                   = GetIniStringOrFallback(ConfigFile, TEXT("BanKickReason"),                   Config.BanKickReason);
 		Config.InGameWhitelistCommandPrefix    = GetIniStringOrDefault(ConfigFile, TEXT("InGameWhitelistCommandPrefix"),    Config.InGameWhitelistCommandPrefix);
-		Config.InGameBanCommandPrefix          = GetIniStringOrDefault(ConfigFile, TEXT("InGameBanCommandPrefix"),          Config.InGameBanCommandPrefix);
-		Config.BanSystemSteamBanDiscordMessage   = GetIniStringOrDefault(ConfigFile, TEXT("BanSystemSteamBanDiscordMessage"),   Config.BanSystemSteamBanDiscordMessage);
-		Config.BanSystemSteamUnbanDiscordMessage = GetIniStringOrDefault(ConfigFile, TEXT("BanSystemSteamUnbanDiscordMessage"), Config.BanSystemSteamUnbanDiscordMessage);
-		Config.BanSystemEOSBanDiscordMessage     = GetIniStringOrDefault(ConfigFile, TEXT("BanSystemEOSBanDiscordMessage"),     Config.BanSystemEOSBanDiscordMessage);
-		Config.BanSystemEOSUnbanDiscordMessage   = GetIniStringOrDefault(ConfigFile, TEXT("BanSystemEOSUnbanDiscordMessage"),   Config.BanSystemEOSUnbanDiscordMessage);
 
 		// Trim leading/trailing whitespace from credential fields to prevent
 		// subtle mismatches when operators accidentally include spaces.
@@ -325,18 +313,17 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		}
 		else
 		{
-			// Detect configs written before the whitelist / ban system was added
-			// (upgrade scenario).  If either section's key-value pair is absent
-			// from the file, append the missing sections so server operators can
+			// Detect configs written before the whitelist was added
+			// (upgrade scenario).  If the whitelist section's key-value pair is absent
+			// from the file, append the missing section so server operators can
 			// see and configure the new settings without losing their existing ones.
 			FString TmpVal;
 			const bool bFileHasWhitelist = ConfigFile.GetString(ConfigSection, TEXT("WhitelistEnabled"), TmpVal);
-			const bool bFileHasBan       = ConfigFile.GetString(ConfigSection, TEXT("BanSystemEnabled"), TmpVal);
 
-			if (!bFileHasWhitelist || !bFileHasBan)
+			if (!bFileHasWhitelist)
 			{
 				UE_LOG(LogTemp, Log,
-				       TEXT("DiscordBridge: Config at '%s' is missing whitelist/ban settings "
+				       TEXT("DiscordBridge: Config at '%s' is missing whitelist settings "
 				            "(older version detected). Appending new settings."),
 				       *ModFilePath);
 
@@ -351,14 +338,6 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("\n")
 						TEXT("# -- WHITELIST (added by mod update) -----------------------------------------\n")
 						TEXT("# Controls the built-in server whitelist, manageable via Discord commands.\n")
-						TEXT("#\n")
-						TEXT("# The whitelist and the ban system are COMPLETELY INDEPENDENT of each other.\n")
-						TEXT("# You can use either one, both, or neither:\n")
-						TEXT("#\n")
-						TEXT("#   Whitelist only:   WhitelistEnabled=True,  BanSystemEnabled=False\n")
-						TEXT("#   Ban system only:  WhitelistEnabled=False, BanSystemEnabled=True\n")
-						TEXT("#   Both:             WhitelistEnabled=True,  BanSystemEnabled=True\n")
-						TEXT("#   Neither:          WhitelistEnabled=False, BanSystemEnabled=False\n")
 						TEXT("#\n")
 						TEXT("# Whether the whitelist is active. Applied on every server restart.\n")
 						TEXT("# Default: False (all players can join).\n")
@@ -393,66 +372,23 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("InGameWhitelistCommandPrefix=!whitelist\n");
 				}
 
-				if (!bFileHasBan)
-				{
-					AppendContent +=
-						TEXT("\n")
-						TEXT("# -- BAN SYSTEM (added by mod update) ----------------------------------------\n")
-						TEXT("# Controls the built-in player ban system, manageable via Discord commands.\n")
-						TEXT("# Bans are stored in <ServerRoot>/FactoryGame/Saved/ServerBanlist.json.\n")
-						TEXT("#\n")
-						TEXT("# The ban system and the whitelist are COMPLETELY INDEPENDENT of each other.\n")
-						TEXT("#\n")
-						TEXT("# Whether the ban system is active. Applied on every server restart.\n")
-						TEXT("# Default: True (ban enforcement is on by default).\n")
-						TEXT("BanSystemEnabled=True\n")
-						TEXT("#\n")
-						TEXT("# Snowflake ID of the Discord role whose members may run !ban commands.\n")
-						TEXT("# Leave empty (default) to disable !ban commands for all Discord users.\n")
-						TEXT("BanCommandRoleId=\n")
-						TEXT("#\n")
-						TEXT("# Prefix that triggers ban commands in the bridged Discord channel.\n")
-						TEXT("# Set to empty to disable Discord-based ban management entirely.\n")
-						TEXT("BanCommandPrefix=!ban\n")
-						TEXT("#\n")
-						TEXT("# Snowflake ID of a dedicated Discord channel for ban management.\n")
-						TEXT("# Leave empty to disable the ban-only channel.\n")
-						TEXT("BanChannelId=\n")
-						TEXT("#\n")
-						TEXT("# Master on/off switch for the ban command interface.\n")
-						TEXT("# Default: True\n")
-						TEXT("BanCommandsEnabled=True\n")
-						TEXT("#\n")
-						TEXT("# Message posted to Discord when a banned player is kicked.\n")
-						TEXT("# Leave empty to disable this notification.\n")
-						TEXT("# Placeholder: %PlayerName% - in-game name of the kicked player.\n")
-						TEXT("BanKickDiscordMessage=:hammer: **%PlayerName%** is banned from this server and was kicked.\n")
-						TEXT("#\n")
-						TEXT("# Reason shown in-game to the player when they are kicked for being banned.\n")
-						TEXT("BanKickReason=You are banned from this server.\n")
-						TEXT("#\n")
-						TEXT("# Prefix that triggers ban commands in the in-game chat.\n")
-						TEXT("# Set to empty to disable in-game ban commands.\n")
-						TEXT("InGameBanCommandPrefix=!ban\n");
-				}
-
 				if (FFileHelper::SaveStringToFile(ExistingContent + AppendContent, *ModFilePath))
 				{
 					UE_LOG(LogTemp, Log,
-					       TEXT("DiscordBridge: Updated '%s' with whitelist/ban settings. "
+					       TEXT("DiscordBridge: Updated '%s' with whitelist settings. "
 					            "Review and configure them, then restart the server."),
 					       *ModFilePath);
 				}
 				else
 				{
 					UE_LOG(LogTemp, Warning,
-					       TEXT("DiscordBridge: Could not update '%s' with whitelist/ban settings."),
+					       TEXT("DiscordBridge: Could not update '%s' with whitelist settings."),
 					       *ModFilePath);
 				}
 			}
 
 			// Second pass: detect individual settings that were added in later updates
-			// but may be absent from configs that already have the whitelist/ban sections.
+			// but may be absent from configs that already have the whitelist section.
 			// Only appends the specific missing keys so no existing custom values are lost.
 			{
 				FString AppendContent2;
@@ -521,131 +457,6 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("# Prefix that triggers whitelist commands when typed in the in-game chat.\n")
 						TEXT("# Set to empty to disable in-game whitelist commands.\n")
 						TEXT("InGameWhitelistCommandPrefix=!whitelist\n");
-				}
-
-				if (bFileHasBan &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("BanCommandRoleId"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# BanCommandRoleId (added by mod update) --------------------------------\n")
-						TEXT("# Snowflake ID of the Discord role whose members may run !ban commands.\n")
-						TEXT("# Leave empty (default) to disable !ban commands for all Discord users.\n")
-						TEXT("BanCommandRoleId=\n");
-				}
-
-				if (bFileHasBan &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("BanCommandPrefix"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# BanCommandPrefix (added by mod update) --------------------------------\n")
-						TEXT("# Prefix that triggers ban commands in the bridged Discord channel.\n")
-						TEXT("# Set to empty to disable Discord-based ban management entirely.\n")
-						TEXT("BanCommandPrefix=!ban\n");
-				}
-
-				if (bFileHasBan &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("BanKickDiscordMessage"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# BanKickDiscordMessage (added by mod update) ----------------------------\n")
-						TEXT("# Message posted to Discord when a banned player is kicked.\n")
-						TEXT("# Leave empty to disable this notification.\n")
-						TEXT("# Placeholder: %PlayerName% - in-game name of the kicked player.\n")
-						TEXT("BanKickDiscordMessage=:hammer: **%PlayerName%** is banned from this server and was kicked.\n");
-				}
-
-				if (bFileHasBan &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("BanKickReason"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# BanKickReason (added by mod update) -----------------------------------------\n")
-						TEXT("# Reason shown in-game to the player when kicked for being banned.\n")
-						TEXT("BanKickReason=You are banned from this server.\n");
-				}
-
-				if (bFileHasBan &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("InGameBanCommandPrefix"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# InGameBanCommandPrefix (added by mod update) -------------------------\n")
-						TEXT("# Prefix that triggers ban commands when typed in the in-game chat.\n")
-						TEXT("# Set to empty to disable in-game ban commands.\n")
-						TEXT("InGameBanCommandPrefix=!ban\n");
-				}
-
-				if (bFileHasBan &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("BanChannelId"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# BanChannelId (added by mod update) -----------------------------------\n")
-						TEXT("# Snowflake ID of a dedicated Discord channel for ban management.\n")
-						TEXT("# Leave empty to disable the ban-only channel.\n")
-						TEXT("BanChannelId=\n");
-				}
-
-				if (bFileHasBan &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("BanCommandsEnabled"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# BanCommandsEnabled (added by mod update) ----------------------------\n")
-						TEXT("# When True (default), !ban Discord and in-game commands are enabled.\n")
-						TEXT("# Set to False to disable ban commands while still enforcing bans.\n")
-						TEXT("BanCommandsEnabled=True\n");
-				}
-
-				if (bFileHasBan &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("BanSystemSteamBanDiscordMessage"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# BanSystemSteamBanDiscordMessage (added by mod update) ----------------\n")
-						TEXT("# Message posted to Discord when BanSystem bans a player by Steam64 ID.\n")
-						TEXT("# Placeholders: %PlayerId%, %Reason%, %BannedBy%\n")
-						TEXT("# Leave empty to disable this notification.\n")
-						TEXT("BanSystemSteamBanDiscordMessage=:hammer: **BanSystem** - Steam ID `%PlayerId%` was banned by **%BannedBy%** - Reason: %Reason%\n");
-				}
-
-				if (bFileHasBan &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("BanSystemSteamUnbanDiscordMessage"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# BanSystemSteamUnbanDiscordMessage (added by mod update) --------------\n")
-						TEXT("# Message posted to Discord when BanSystem unbans a player by Steam64 ID.\n")
-						TEXT("# Placeholder: %PlayerId%\n")
-						TEXT("# Leave empty to disable this notification.\n")
-						TEXT("BanSystemSteamUnbanDiscordMessage=:white_check_mark: **BanSystem** - Steam ID `%PlayerId%` has been unbanned.\n");
-				}
-
-				if (bFileHasBan &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("BanSystemEOSBanDiscordMessage"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# BanSystemEOSBanDiscordMessage (added by mod update) ------------------\n")
-						TEXT("# Message posted to Discord when BanSystem bans a player by EOS Product User ID.\n")
-						TEXT("# Placeholders: %PlayerId%, %Reason%, %BannedBy%\n")
-						TEXT("# Leave empty to disable this notification.\n")
-						TEXT("BanSystemEOSBanDiscordMessage=:hammer: **BanSystem** - EOS ID `%PlayerId%` was banned by **%BannedBy%** - Reason: %Reason%\n");
-				}
-
-				if (bFileHasBan &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("BanSystemEOSUnbanDiscordMessage"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# BanSystemEOSUnbanDiscordMessage (added by mod update) ----------------\n")
-						TEXT("# Message posted to Discord when BanSystem unbans a player by EOS Product User ID.\n")
-						TEXT("# Placeholder: %PlayerId%\n")
-						TEXT("# Leave empty to disable this notification.\n")
-						TEXT("BanSystemEOSUnbanDiscordMessage=:white_check_mark: **BanSystem** - EOS ID `%PlayerId%` has been unbanned.\n");
 				}
 
 				if (!ConfigFile.GetString(ConfigSection, TEXT("ServerStatusMessagesEnabled"), TmpVal))
@@ -784,37 +595,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("# Reason shown in-game to the player when kicked for not being whitelisted.\n")
 			TEXT("WhitelistKickReason=\n")
 			TEXT("# Prefix for whitelist commands in the in-game chat. Default: !whitelist\n")
-			TEXT("InGameWhitelistCommandPrefix=!whitelist\n")
-			TEXT("\n")
-			TEXT("# -- BAN SYSTEM ---------------------------------------------------------------\n")
-			TEXT("# Whether the ban system is active. Default: True (ban list is enforced).\n")
-			TEXT("BanSystemEnabled=True\n")
-			TEXT("# Snowflake ID of the Discord role whose members may run !ban commands.\n")
-			TEXT("BanCommandRoleId=\n")
-			TEXT("# Prefix for ban commands in Discord. Default: !ban\n")
-			TEXT("BanCommandPrefix=!ban\n")
-			TEXT("# Snowflake ID of a dedicated Discord channel for ban management.\n")
-			TEXT("BanChannelId=\n")
-			TEXT("# Master on/off switch for ban commands. Default: True\n")
-			TEXT("BanCommandsEnabled=True\n")
-			TEXT("# Message posted to Discord when a banned player is kicked.\n")
-			TEXT("BanKickDiscordMessage=:hammer: **%PlayerName%** is banned from this server and was kicked.\n")
-			TEXT("# Reason shown in-game to the player when kicked for being banned.\n")
-			TEXT("BanKickReason=\n")
-			TEXT("# Prefix for ban commands in the in-game chat. Default: !ban\n")
-			TEXT("InGameBanCommandPrefix=!ban\n")
-			TEXT("\n")
-			TEXT("# -- BANSYSTEM MOD INTEGRATION -----------------------------------------------\n")
-			TEXT("# Messages posted to Discord when the BanSystem mod issues or removes a ban\n")
-			TEXT("# via its in-game chat commands (/steamban, /steamunban, /eosban, /eosunban,\n")
-			TEXT("# /banbyname).  If BanSystem is not installed these settings are ignored.\n")
-			TEXT("# Leave any message empty to disable that specific Discord notification.\n")
-			TEXT("# Placeholders for ban messages:   %PlayerId%, %Reason%, %BannedBy%\n")
-			TEXT("# Placeholder  for unban messages: %PlayerId%\n")
-			TEXT("BanSystemSteamBanDiscordMessage=:hammer: **BanSystem** - Steam ID `%PlayerId%` was banned by **%BannedBy%** - Reason: %Reason%\n")
-			TEXT("BanSystemSteamUnbanDiscordMessage=:white_check_mark: **BanSystem** - Steam ID `%PlayerId%` has been unbanned.\n")
-			TEXT("BanSystemEOSBanDiscordMessage=:hammer: **BanSystem** - EOS ID `%PlayerId%` was banned by **%BannedBy%** - Reason: %Reason%\n")
-			TEXT("BanSystemEOSUnbanDiscordMessage=:white_check_mark: **BanSystem** - EOS ID `%PlayerId%` has been unbanned.\n");
+			TEXT("InGameWhitelistCommandPrefix=!whitelist\n");
 
 		// Ensure the Config directory exists before writing.
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(ModFilePath));
@@ -887,25 +668,13 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.PlayerCountUpdateIntervalSeconds = GetRawFloatOrDefault (BackupValues, TEXT("PlayerCountUpdateIntervalSeconds"), Config.PlayerCountUpdateIntervalSeconds);
 		Config.PlayerCountActivityType          = GetRawIntOrDefault   (BackupValues, TEXT("PlayerCountActivityType"),          Config.PlayerCountActivityType);
 		Config.WhitelistCommandRoleId           = GetRawStringOrDefault(BackupValues, TEXT("WhitelistCommandRoleId"),           Config.WhitelistCommandRoleId);
-		Config.BanCommandRoleId                 = GetRawStringOrDefault(BackupValues, TEXT("BanCommandRoleId"),                 Config.BanCommandRoleId);
 		Config.WhitelistCommandPrefix           = GetRawStringOrDefault(BackupValues, TEXT("WhitelistCommandPrefix"),           Config.WhitelistCommandPrefix);
 		Config.WhitelistRoleId                  = GetRawStringOrDefault(BackupValues, TEXT("WhitelistRoleId"),                  Config.WhitelistRoleId);
 		Config.WhitelistChannelId               = GetRawStringOrDefault(BackupValues, TEXT("WhitelistChannelId"),               Config.WhitelistChannelId);
 		Config.WhitelistKickDiscordMessage      = GetRawStringOrDefault(BackupValues, TEXT("WhitelistKickDiscordMessage"),      Config.WhitelistKickDiscordMessage);
 		Config.WhitelistKickReason              = GetRawStringOrFallback(BackupValues, TEXT("WhitelistKickReason"),              Config.WhitelistKickReason);
 		Config.bWhitelistEnabled                = GetRawBoolOrDefault  (BackupValues, TEXT("WhitelistEnabled"),                Config.bWhitelistEnabled);
-		Config.bBanSystemEnabled                = GetRawBoolOrDefault  (BackupValues, TEXT("BanSystemEnabled"),                Config.bBanSystemEnabled);
-		Config.BanCommandPrefix                 = GetRawStringOrDefault(BackupValues, TEXT("BanCommandPrefix"),                 Config.BanCommandPrefix);
-		Config.BanChannelId                     = GetRawStringOrDefault(BackupValues, TEXT("BanChannelId"),                     Config.BanChannelId);
-		Config.bBanCommandsEnabled              = GetRawBoolOrDefault  (BackupValues, TEXT("BanCommandsEnabled"),              Config.bBanCommandsEnabled);
-		Config.BanKickDiscordMessage            = GetRawStringOrDefault(BackupValues, TEXT("BanKickDiscordMessage"),            Config.BanKickDiscordMessage);
-		Config.BanKickReason                    = GetRawStringOrFallback(BackupValues, TEXT("BanKickReason"),                    Config.BanKickReason);
 		Config.InGameWhitelistCommandPrefix     = GetRawStringOrDefault(BackupValues, TEXT("InGameWhitelistCommandPrefix"),     Config.InGameWhitelistCommandPrefix);
-		Config.InGameBanCommandPrefix           = GetRawStringOrDefault(BackupValues, TEXT("InGameBanCommandPrefix"),           Config.InGameBanCommandPrefix);
-		Config.BanSystemSteamBanDiscordMessage   = GetRawStringOrDefault(BackupValues, TEXT("BanSystemSteamBanDiscordMessage"),   Config.BanSystemSteamBanDiscordMessage);
-		Config.BanSystemSteamUnbanDiscordMessage = GetRawStringOrDefault(BackupValues, TEXT("BanSystemSteamUnbanDiscordMessage"), Config.BanSystemSteamUnbanDiscordMessage);
-		Config.BanSystemEOSBanDiscordMessage     = GetRawStringOrDefault(BackupValues, TEXT("BanSystemEOSBanDiscordMessage"),     Config.BanSystemEOSBanDiscordMessage);
-		Config.BanSystemEOSUnbanDiscordMessage   = GetRawStringOrDefault(BackupValues, TEXT("BanSystemEOSUnbanDiscordMessage"),   Config.BanSystemEOSUnbanDiscordMessage);
 
 		// Only log the "restored from backup" message when credentials were
 		// actually recovered (i.e. previously blank in primary but now non-empty
@@ -987,18 +756,6 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("WhitelistKickDiscordMessage"),   Config.WhitelistKickDiscordMessage);
 				PatchLine(TEXT("WhitelistKickReason"),           Config.WhitelistKickReason);
 				PatchLine(TEXT("InGameWhitelistCommandPrefix"),  Config.InGameWhitelistCommandPrefix);
-				PatchLine(TEXT("BanSystemEnabled"),              Config.bBanSystemEnabled ? TEXT("True") : TEXT("False"));
-				PatchLine(TEXT("BanCommandRoleId"),              Config.BanCommandRoleId);
-				PatchLine(TEXT("BanCommandPrefix"),              Config.BanCommandPrefix);
-				PatchLine(TEXT("BanChannelId"),                  Config.BanChannelId);
-				PatchLine(TEXT("BanCommandsEnabled"),            Config.bBanCommandsEnabled ? TEXT("True") : TEXT("False"));
-				PatchLine(TEXT("BanKickDiscordMessage"),         Config.BanKickDiscordMessage);
-				PatchLine(TEXT("BanKickReason"),                 Config.BanKickReason);
-				PatchLine(TEXT("InGameBanCommandPrefix"),        Config.InGameBanCommandPrefix);
-				PatchLine(TEXT("BanSystemSteamBanDiscordMessage"),   Config.BanSystemSteamBanDiscordMessage);
-				PatchLine(TEXT("BanSystemSteamUnbanDiscordMessage"), Config.BanSystemSteamUnbanDiscordMessage);
-				PatchLine(TEXT("BanSystemEOSBanDiscordMessage"),     Config.BanSystemEOSBanDiscordMessage);
-				PatchLine(TEXT("BanSystemEOSUnbanDiscordMessage"),   Config.BanSystemEOSUnbanDiscordMessage);
 
 				if (FFileHelper::SaveStringToFile(PrimaryContent, *ModFilePath))
 				{
@@ -1054,19 +811,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			+ TEXT("WhitelistChannelId=") + Config.WhitelistChannelId + TEXT("\n")
 			+ TEXT("WhitelistKickDiscordMessage=") + Config.WhitelistKickDiscordMessage + TEXT("\n")
 			+ TEXT("WhitelistKickReason=") + Config.WhitelistKickReason + TEXT("\n")
-			+ TEXT("InGameWhitelistCommandPrefix=") + Config.InGameWhitelistCommandPrefix + TEXT("\n")
-			+ TEXT("BanSystemEnabled=") + (Config.bBanSystemEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
-			+ TEXT("BanCommandRoleId=") + Config.BanCommandRoleId + TEXT("\n")
-			+ TEXT("BanCommandPrefix=") + Config.BanCommandPrefix + TEXT("\n")
-			+ TEXT("BanChannelId=") + Config.BanChannelId + TEXT("\n")
-			+ TEXT("BanCommandsEnabled=") + (Config.bBanCommandsEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
-			+ TEXT("BanKickDiscordMessage=") + Config.BanKickDiscordMessage + TEXT("\n")
-			+ TEXT("BanKickReason=") + Config.BanKickReason + TEXT("\n")
-			+ TEXT("InGameBanCommandPrefix=") + Config.InGameBanCommandPrefix + TEXT("\n")
-			+ TEXT("BanSystemSteamBanDiscordMessage=") + Config.BanSystemSteamBanDiscordMessage + TEXT("\n")
-			+ TEXT("BanSystemSteamUnbanDiscordMessage=") + Config.BanSystemSteamUnbanDiscordMessage + TEXT("\n")
-			+ TEXT("BanSystemEOSBanDiscordMessage=") + Config.BanSystemEOSBanDiscordMessage + TEXT("\n")
-			+ TEXT("BanSystemEOSUnbanDiscordMessage=") + Config.BanSystemEOSUnbanDiscordMessage + TEXT("\n");
+			+ TEXT("InGameWhitelistCommandPrefix=") + Config.InGameWhitelistCommandPrefix + TEXT("\n");
 
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupFilePath));
 

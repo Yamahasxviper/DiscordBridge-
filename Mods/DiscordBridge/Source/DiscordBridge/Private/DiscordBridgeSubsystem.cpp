@@ -1672,7 +1672,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 		if (bEnforcementActive)
 		{
 			UE_LOG(LogTemp, Warning,
-			       TEXT("DiscordBridge: player joined with an empty name – scheduling deferred whitelist/ban check."));
+			       TEXT("DiscordBridge: player joined with an empty name – scheduling deferred whitelist check."));
 
 			if (UWorld* World = GetWorld())
 			{
@@ -1703,7 +1703,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 
 						if (!RetryName.IsEmpty())
 						{
-							// Name is now available – run the whitelist/ban check and stop the timer.
+							// Name is now available – run the whitelist check and stop the timer.
 							if (W) { W->GetTimerManager().ClearTimer(*SharedHandle); }
 							OnPostLogin(WeakGM.Get(), WeakPC.Get());
 							return;
@@ -1715,10 +1715,10 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 							return; // Name not yet populated – try again next tick.
 						}
 
-						// All retries exhausted; kick to enforce whitelist/ban integrity (fail-closed).
+						// All retries exhausted; kick to enforce whitelist integrity (fail-closed).
 						if (W) { W->GetTimerManager().ClearTimer(*SharedHandle); }
 						UE_LOG(LogTemp, Warning,
-						       TEXT("DiscordBridge: player name still empty after deferred check – kicking to enforce whitelist/ban."));
+						       TEXT("DiscordBridge: player name still empty after deferred check – kicking to enforce whitelist."));
 
 						AGameModeBase* FallbackGM = WeakGM.IsValid() ? WeakGM.Get() : nullptr;
 						if (!FallbackGM && W)
@@ -2198,75 +2198,6 @@ void UDiscordBridgeSubsystem::SendGameChatStatusMessage(const FString& Message)
 	ChatManager->BroadcastChatMessage(ChatMsg);
 }
 
-int32 UDiscordBridgeSubsystem::KickConnectedBannedPlayers(const FString& PlayerName)
-{
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return 0;
-	}
-
-	AGameStateBase* GS = World->GetGameState<AGameStateBase>();
-	if (!GS)
-	{
-		return 0;
-	}
-
-	AGameModeBase* GM = World->GetAuthGameMode<AGameModeBase>();
-	if (!GM || !GM->GameSession)
-	{
-		return 0;
-	}
-
-	const FString KickReason = Config.BanKickReason.IsEmpty()
-		? TEXT("You are banned from this server.")
-		: Config.BanKickReason;
-
-	const bool bTargetSpecific = !PlayerName.IsEmpty();
-	const FString LowerTarget  = PlayerName.ToLower();
-
-	int32 KickedCount = 0;
-	for (APlayerState* PS : GS->PlayerArray)
-	{
-		if (!PS)
-		{
-			continue;
-		}
-
-		const FString ConnectedName = PS->GetPlayerName();
-		if (ConnectedName.IsEmpty())
-		{
-			continue;
-		}
-
-		// When a specific name was requested, only match that player.
-		// Otherwise kick anyone whose name is on the ban list.
-		const bool bMatch = bTargetSpecific
-			? (ConnectedName.ToLower() == LowerTarget)
-			: FBanManager::IsBanned(ConnectedName);
-
-		if (!bMatch)
-		{
-			continue;
-		}
-
-		APlayerController* PC = Cast<APlayerController>(PS->GetOwner());
-		if (!PC || PC->IsLocalController())
-		{
-			continue;
-		}
-
-		UE_LOG(LogTemp, Warning,
-		       TEXT("DiscordBridge BanSystem: kicking connected banned player '%s'"),
-		       *ConnectedName);
-
-		GM->GameSession->KickPlayer(PC, FText::FromString(KickReason));
-		++KickedCount;
-	}
-
-	return KickedCount;
-}
-
 void UDiscordBridgeSubsystem::HandleInGameWhitelistCommand(const FString& SubCommand)
 {
 	UE_LOG(LogTemp, Log,
@@ -2351,218 +2282,6 @@ void UDiscordBridgeSubsystem::HandleInGameWhitelistCommand(const FString& SubCom
 	}
 
 	SendGameChatStatusMessage(Response);
-}
-
-void UDiscordBridgeSubsystem::HandleInGameBanCommand(const FString& SubCommand)
-{
-	UE_LOG(LogTemp, Log,
-	       TEXT("DiscordBridge: In-game ban command: '%s'"), *SubCommand);
-
-	FString Response;
-
-	// Split sub-command into verb + optional argument.
-	FString Verb, Arg;
-	if (!SubCommand.Split(TEXT(" "), &Verb, &Arg, ESearchCase::IgnoreCase))
-	{
-		Verb = SubCommand.TrimStartAndEnd();
-		Arg  = TEXT("");
-	}
-	Verb = Verb.TrimStartAndEnd().ToLower();
-	Arg  = Arg.TrimStartAndEnd();
-
-	if (Verb == TEXT("on"))
-	{
-		FBanManager::SetEnabled(true);
-		const int32 Kicked = KickConnectedBannedPlayers();
-		FString KickedNote;
-		if (Kicked > 0)
-		{
-			KickedNote = FString::Printf(TEXT(" Kicked %d already-connected banned player(s)."), Kicked);
-		}
-		Response = FString::Printf(
-			TEXT("Ban system ENABLED. Banned players will be kicked on join.%s "
-			     "(Whitelist is %s — independent.)"),
-			*KickedNote,
-			FWhitelistManager::IsEnabled() ? TEXT("ENABLED") : TEXT("disabled"));
-	}
-	else if (Verb == TEXT("off"))
-	{
-		FBanManager::SetEnabled(false);
-		Response = FString::Printf(
-			TEXT("Ban system DISABLED. Banned players can join freely. "
-			     "(Whitelist is %s — independent.)"),
-			FWhitelistManager::IsEnabled() ? TEXT("ENABLED") : TEXT("disabled"));
-	}
-	else if (Verb == TEXT("add"))
-	{
-		if (Arg.IsEmpty())
-		{
-			Response = TEXT("Usage: !ban add <PlayerName>");
-		}
-		else if (FBanManager::BanPlayer(Arg))
-		{
-			if (FBanManager::IsEnabled())
-			{
-				const int32 Kicked = KickConnectedBannedPlayers(Arg);
-				Response = FString::Printf(
-					TEXT("%s has been banned from the server.%s"),
-					*Arg,
-					Kicked > 0 ? TEXT(" They have been kicked.") : TEXT(""));
-			}
-			else
-			{
-				Response = FString::Printf(
-					TEXT("%s has been added to the ban list. "
-					     "WARNING: ban system is disabled — run !ban on to enforce bans."),
-					*Arg);
-			}
-		}
-		else
-		{
-			Response = FString::Printf(TEXT("%s is already banned."), *Arg);
-		}
-	}
-	else if (Verb == TEXT("remove"))
-	{
-		if (Arg.IsEmpty())
-		{
-			Response = TEXT("Usage: !ban remove <PlayerName>");
-		}
-		else if (FBanManager::UnbanPlayer(Arg))
-		{
-			Response = FString::Printf(TEXT("%s has been unbanned."), *Arg);
-		}
-		else
-		{
-			Response = FString::Printf(TEXT("%s was not on the ban list."), *Arg);
-		}
-	}
-	else if (Verb == TEXT("list"))
-	{
-		const TArray<FString> All = FBanManager::GetAll();
-		const FString Status = FBanManager::IsEnabled() ? TEXT("ENABLED") : TEXT("disabled");
-		if (All.Num() == 0)
-		{
-			Response = FString::Printf(TEXT("Ban system is %s. No players banned."), *Status);
-		}
-		else
-		{
-			Response = FString::Printf(
-				TEXT("Ban system is %s. Banned players (%d): %s"),
-				*Status, All.Num(), *FString::Join(All, TEXT(", ")));
-		}
-	}
-	else if (Verb == TEXT("status"))
-	{
-		const FString BanState = FBanManager::IsEnabled()
-			? TEXT("ENABLED") : TEXT("disabled");
-		const FString WhitelistState = FWhitelistManager::IsEnabled()
-			? TEXT("ENABLED") : TEXT("disabled");
-		Response = FString::Printf(
-			TEXT("Ban system: %s | Whitelist: %s  (each system is independent)"),
-			*BanState, *WhitelistState);
-	}
-	else
-	{
-		Response = TEXT("Unknown ban command. Available: on, off, add <name>, remove <name>, list, status.");
-	}
-
-	SendGameChatStatusMessage(Response);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// IBanNotificationProvider – implementation
-// Forwards ban/unban events from the BanSystem mod to Discord.
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UDiscordBridgeSubsystem::OnSteamPlayerBanned(const FString& Steam64Id,
-                                                   const FBanEntry& Entry)
-{
-	if (Config.BanSystemSteamBanDiscordMessage.IsEmpty())
-	{
-		return;
-	}
-
-	FString Notice = Config.BanSystemSteamBanDiscordMessage;
-	Notice = Notice.Replace(TEXT("%PlayerId%"), *Steam64Id);
-	Notice = Notice.Replace(TEXT("%Reason%"),   *Entry.Reason);
-	Notice = Notice.Replace(TEXT("%BannedBy%"), *Entry.BannedBy);
-
-	SendMessageToChannel(Config.ChannelId, Notice);
-	if (!Config.BanChannelId.IsEmpty() && Config.BanChannelId != Config.ChannelId)
-	{
-		SendMessageToChannel(Config.BanChannelId, Notice);
-	}
-
-	UE_LOG(LogTemp, Log,
-	       TEXT("DiscordBridge: BanSystem Steam ban notification posted for ID %s."),
-	       *Steam64Id);
-}
-
-void UDiscordBridgeSubsystem::OnSteamPlayerUnbanned(const FString& Steam64Id)
-{
-	if (Config.BanSystemSteamUnbanDiscordMessage.IsEmpty())
-	{
-		return;
-	}
-
-	FString Notice = Config.BanSystemSteamUnbanDiscordMessage;
-	Notice = Notice.Replace(TEXT("%PlayerId%"), *Steam64Id);
-
-	SendMessageToChannel(Config.ChannelId, Notice);
-	if (!Config.BanChannelId.IsEmpty() && Config.BanChannelId != Config.ChannelId)
-	{
-		SendMessageToChannel(Config.BanChannelId, Notice);
-	}
-
-	UE_LOG(LogTemp, Log,
-	       TEXT("DiscordBridge: BanSystem Steam unban notification posted for ID %s."),
-	       *Steam64Id);
-}
-
-void UDiscordBridgeSubsystem::OnEOSPlayerBanned(const FString& EOSProductUserId,
-                                                 const FBanEntry& Entry)
-{
-	if (Config.BanSystemEOSBanDiscordMessage.IsEmpty())
-	{
-		return;
-	}
-
-	FString Notice = Config.BanSystemEOSBanDiscordMessage;
-	Notice = Notice.Replace(TEXT("%PlayerId%"), *EOSProductUserId);
-	Notice = Notice.Replace(TEXT("%Reason%"),   *Entry.Reason);
-	Notice = Notice.Replace(TEXT("%BannedBy%"), *Entry.BannedBy);
-
-	SendMessageToChannel(Config.ChannelId, Notice);
-	if (!Config.BanChannelId.IsEmpty() && Config.BanChannelId != Config.ChannelId)
-	{
-		SendMessageToChannel(Config.BanChannelId, Notice);
-	}
-
-	UE_LOG(LogTemp, Log,
-	       TEXT("DiscordBridge: BanSystem EOS ban notification posted for ID %s."),
-	       *EOSProductUserId);
-}
-
-void UDiscordBridgeSubsystem::OnEOSPlayerUnbanned(const FString& EOSProductUserId)
-{
-	if (Config.BanSystemEOSUnbanDiscordMessage.IsEmpty())
-	{
-		return;
-	}
-
-	FString Notice = Config.BanSystemEOSUnbanDiscordMessage;
-	Notice = Notice.Replace(TEXT("%PlayerId%"), *EOSProductUserId);
-
-	SendMessageToChannel(Config.ChannelId, Notice);
-	if (!Config.BanChannelId.IsEmpty() && Config.BanChannelId != Config.ChannelId)
-	{
-		SendMessageToChannel(Config.BanChannelId, Notice);
-	}
-
-	UE_LOG(LogTemp, Log,
-	       TEXT("DiscordBridge: BanSystem EOS unban notification posted for ID %s."),
-	       *EOSProductUserId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

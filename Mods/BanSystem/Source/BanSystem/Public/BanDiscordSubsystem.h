@@ -66,6 +66,9 @@ public:
 	 */
 	void SetCommandProvider(IBanDiscordCommandProvider* InProvider);
 
+	/** Returns the loaded configuration (read-only). */
+	const FBanDiscordConfig& GetConfig() const { return Config; }
+
 	// ── IBanDiscordCommandProvider (standalone implementation) ────────────────
 	//
 	// These implement the interface against BanSystem's own Gateway connection.
