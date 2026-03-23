@@ -16,6 +16,11 @@
 	"IsBetaVersion": false,
 	"IsExperimentalVersion": false,
 	"Installed": false,
+	"RequiredOnRemote": false,
+	"SupportedTargetPlatforms": [
+		"Win64",
+		"Linux"
+	],
 	"Modules": [
 		{
 			"Name": "BanSystem",
