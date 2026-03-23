@@ -1140,3 +1140,440 @@ public class MyMod : ModuleRules
 }
 ```
 
+---
+
+## 7. Custom Mods in This Repository
+
+These mods are developed in this repository and are available as dependencies for your own server-side Satisfactory mods. All four target **Win64 and Linux** dedicated-server platforms only; `RequiredOnRemote` is `false` for every mod so players never need to install them.
+
+---
+
+### SMLWebSocket
+
+*RFC 6455 WebSocket client with SSL/OpenSSL support for Alpakit-packaged mods.*
+
+**Module:** `SMLWebSocket` — `ServerOnly`, LoadingPhase: `Default`  
+**SemVersion:** `1.0.0`
+
+#### Why it is needed
+
+Satisfactory uses a custom Coffee Stain Studios Unreal Engine build that omits the engine's `WebSockets` module. `SMLWebSocket` fills that gap with a direct `FSocket` + OpenSSL implementation, enabling any mod to open a `wss://` connection (for example, to the Discord Gateway at `wss://gateway.discord.gg/`).
+
+#### Delegates
+
+| Delegate | Signature | When it fires |
+|----------|-----------|---------------|
+| `OnConnected` | `()` | Handshake succeeded; connection is ready |
+| `OnMessage` | `(FString Message)` | A UTF-8 text frame was received |
+| `OnBinaryMessage` | `(TArray<uint8> Data, bool bIsFinal)` | A binary frame (or fragment) was received |
+| `OnClosed` | `(int32 StatusCode, FString Reason)` | Connection closed (either side) |
+| `OnError` | `(FString ErrorMessage)` | Connection or protocol error |
+| `OnReconnecting` | `(int32 AttemptNumber, float DelaySeconds)` | About to retry after a non-user-initiated disconnect |
+
+#### Key properties
+
+| Property | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `bAutoReconnect` | `bool` | `true` | Reconnect automatically when the server drops the connection |
+| `ReconnectInitialDelaySeconds` | `float` | `2.0` | Initial back-off delay before the first retry |
+| `MaxReconnectDelaySeconds` | `float` | `30.0` | Cap on the exponential back-off |
+| `MaxReconnectAttempts` | `int32` | `0` | Maximum retries (0 = unlimited) |
+
+#### Depending on SMLWebSocket
+
+**`.uplugin`**
+
+```json
+{
+    "Name": "SMLWebSocket",
+    "Enabled": true,
+    "SemVersion": "^1.0.0"
+}
+```
+
+**`Build.cs`**
+
+```csharp
+PublicDependencyModuleNames.AddRange(new string[] { "SMLWebSocket" });
+```
+
+#### C++ usage example
+
+```cpp
+#include "SMLWebSocketClient.h"
+
+// Create in your subsystem's Initialize()
+WebSocket = USMLWebSocketClient::CreateWebSocketClient(this);
+WebSocket->bAutoReconnect = true;
+WebSocket->ReconnectInitialDelaySeconds = 2.0f;
+WebSocket->MaxReconnectDelaySeconds     = 30.0f;
+
+// Bind delegates
+WebSocket->OnConnected.AddDynamic(this, &UMySubsystem::HandleConnected);
+WebSocket->OnMessage.AddDynamic(this,   &UMySubsystem::HandleMessage);
+WebSocket->OnClosed.AddDynamic(this,    &UMySubsystem::HandleClosed);
+WebSocket->OnError.AddDynamic(this,     &UMySubsystem::HandleError);
+
+// Connect to the Discord Gateway
+// BotToken must be loaded from your config (INI) and should never be logged or
+// exposed in error messages to avoid leaking credentials.
+TMap<FString, FString> Headers;
+Headers.Add(TEXT("Authorization"), TEXT("Bot ") + BotToken);
+WebSocket->Connect(TEXT("wss://gateway.discord.gg/?v=10&encoding=json"), {}, Headers);
+
+// Send a text message
+WebSocket->SendText(TEXT("{\"op\":2,\"d\":{\"token\":\"Bot ...\"}}"));
+
+// Graceful shutdown in Deinitialize()
+if (WebSocket)
+{
+    WebSocket->Close(1000, TEXT("Server shutting down"));
+    WebSocket = nullptr;
+}
+```
+
+#### Dependencies
+
+| Dependency | Version | Purpose |
+|------------|---------|---------|
+| SML | `^3.11.3` | Module load ordering |
+
+---
+
+### DiscordBridge
+
+*Two-way bridge between Satisfactory's in-game chat and a Discord text channel.*
+
+**Module:** `DiscordBridge` — `ServerOnly`, LoadingPhase: `Default`  
+**SemVersion:** `1.0.2`
+
+#### Features
+
+- Two-way real-time chat relay (game ↔ Discord) with configurable format strings (`%PlayerName%`, `%Username%`, `%Message%`, `%ServerName%`)
+- Server online/offline status announcements (`ServerOnlineMessage` / `ServerOfflineMessage`)
+- Live player-count Discord presence (`PlayerCountPresenceFormat`, configurable update interval)
+- Whitelist management via Discord or in-game `!whitelist` commands, with optional Discord role integration
+- Optional integration with **BanSystem** — provides the bot connection for ban/unban Discord commands
+- Optional integration with **TicketSystem** — provides the bot connection for the button-based ticket panel
+
+#### Required bot intents
+
+Enable these in the [Discord Developer Portal](https://discord.com/developers/applications) under **Bot → Privileged Gateway Intents**:
+
+| Intent | Purpose |
+|--------|---------|
+| Server Members Intent | Role checks for whitelist and ban commands |
+| Message Content Intent | Read messages sent in the bridged channel |
+
+The bot also needs **Send Messages** and **Read Message History** permissions in the target channel, and **Manage Roles** when using `!whitelist role` commands.
+
+#### Configuration
+
+Primary config file (never overwritten by mod updates):
+
+```
+<ServerRoot>/FactoryGame/Mods/DiscordBridge/Config/DefaultDiscordBridge.ini
+```
+
+Auto-backup (auto-restored if the primary file is missing):
+
+```
+<ServerRoot>/FactoryGame/Saved/Config/DiscordBridge.ini
+```
+
+| Essential setting | Description |
+|-------------------|-------------|
+| `BotToken` | Discord bot token |
+| `ChannelId` | Snowflake ID of the bridged Discord text channel |
+| `ServerName` | Display name shown in outgoing Discord messages |
+
+#### Depending on DiscordBridge
+
+**`.uplugin`** (optional dependency)
+
+```json
+{
+    "Name": "DiscordBridge",
+    "Enabled": true,
+    "Optional": true,
+    "SemVersion": "^1.0.0"
+}
+```
+
+**`Build.cs`**
+
+```csharp
+PublicDependencyModuleNames.AddRange(new string[] { "DiscordBridge" });
+```
+
+Guard all call-sites with `FModuleManager::IsModuleLoaded("DiscordBridge")` when the dependency is optional.
+
+#### Dependencies
+
+| Dependency | Version | Notes |
+|------------|---------|-------|
+| SML | `^3.11.3` | Required |
+| SMLWebSocket | `^1.0.0` | Required — provides the Discord Gateway WebSocket client |
+| BanSystem | `^1.0.0` | Optional |
+| TicketSystem | `^1.0.0` | Optional |
+
+---
+
+### BanSystem
+
+*Standalone Steam + EOS ban system for Satisfactory dedicated servers.*
+
+**Module:** `BanSystem` — `ServerOnly`, LoadingPhase: `PostDefault`  
+**SemVersion:** `1.0.0`
+
+#### Features
+
+- Permanent and timed bans for **Steam 64-bit IDs** and **EOS Product User IDs** independently
+- Bans are enforced on join and survive server restarts (JSON storage)
+- In-game admin chat commands; also works from the server console
+- Blueprint-accessible and C++ linkable public API
+- Discord command integration — standalone (own `BotToken`) or paired (shares DiscordBridge's bot)
+
+#### In-game admin commands
+
+| Command | Description |
+|---------|-------------|
+| `/steamban <Steam64Id\|Name> [min] [reason]` | Permanent or timed Steam ban |
+| `/steamunban <Steam64Id>` | Remove a Steam ban |
+| `/steambanlist` | List all active Steam bans |
+| `/eosban <EOSProductUserId\|Name> [min] [reason]` | Permanent or timed EOS ban |
+| `/eosunban <EOSProductUserId>` | Remove an EOS ban |
+| `/eosbanlist` | List all active EOS bans |
+| `/banbyname <Name> [min] [reason]` | Ban a connected player on all platforms at once |
+| `/playerids [Name]` | Show platform IDs of all (or one) connected player(s) |
+
+#### Discord commands
+
+| Command | Description |
+|---------|-------------|
+| `!steamban` / `!steamunban` / `!steambanlist` | Steam ban management via Discord |
+| `!eosban` / `!eosunban` / `!eosbanlist` | EOS ban management via Discord |
+| `!banbyname` / `!playerids` | Cross-platform ban / ID lookup via Discord |
+
+All commands are gated by `DiscordCommandRoleId` in `DefaultBanSystem.ini`. The guild owner is always permitted.
+
+#### Discord modes of operation
+
+| Mode | How to activate |
+|------|----------------|
+| **Standalone** | Set `BotToken` in `DefaultBanSystem.ini`. BanSystem connects to Discord independently — no DiscordBridge required. |
+| **Paired** | Leave `BotToken` empty. When DiscordBridge is installed it provides the bot connection automatically with zero extra configuration. |
+
+#### Ban storage
+
+```
+<ServerRoot>/FactoryGame/Saved/BanSystem/SteamBans.json
+<ServerRoot>/FactoryGame/Saved/BanSystem/EOSBans.json
+```
+
+Files are loaded at startup. Expired timed bans are pruned automatically before the first player can connect.
+
+#### ID format reference
+
+| Platform | Format | Example |
+|----------|--------|---------|
+| Steam | 17-digit decimal starting with `7656119` | `76561198000000000` |
+| EOS PUID | 32 lowercase hex characters | `00020aed06f0a6958c3c067fb4b73d51` |
+
+Static validation helpers: `USteamBanSubsystem::IsValidSteam64Id(FString)` and `UEOSBanSubsystem::IsValidEOSProductUserId(FString)`.
+
+#### Depending on BanSystem
+
+**`.uplugin`** (optional dependency)
+
+```json
+{
+    "Name": "BanSystem",
+    "Enabled": true,
+    "Optional": true,
+    "SemVersion": "^1.0.0"
+}
+```
+
+**`Build.cs`**
+
+```csharp
+PublicDependencyModuleNames.AddRange(new string[] { "BanSystem" });
+```
+
+#### C++ API
+
+```cpp
+#include "Steam/SteamBanSubsystem.h"
+#include "EOS/EOSBanSubsystem.h"
+#include "BanIdResolver.h"
+#include "BanPlayerLookup.h"
+
+// Resolve both platform IDs from a connecting player
+FResolvedBanId Ids = FBanIdResolver::Resolve(PlayerState->GetUniqueNetId());
+if (Ids.HasSteamId())   UE_LOG(MyLog, Log, TEXT("Steam64: %s"), *Ids.Steam64Id);
+if (Ids.HasEOSPuid())   UE_LOG(MyLog, Log, TEXT("PUID:    %s"), *Ids.EOSProductUserId);
+
+// Ban / unban
+USteamBanSubsystem* Steam = GI->GetSubsystem<USteamBanSubsystem>();
+Steam->BanPlayer(TEXT("76561198000000000"), TEXT("Cheating"), 0, TEXT("MyMod")); // 0 = permanent
+
+UEOSBanSubsystem* EOS = GI->GetSubsystem<UEOSBanSubsystem>();
+EOS->BanPlayer(TEXT("00020aed06f0a6958c3c067fb4b73d51"), TEXT("Spam"), 60, TEXT("MyMod")); // 60 min
+
+// Check ban status
+FString Reason;
+if (Steam->IsPlayerBanned(TEXT("76561198000000000"), Reason)) { /* ... */ }
+
+// React to ban/unban events
+Steam->OnPlayerBanned.AddDynamic(this,   &UMyClass::HandleSteamBanned);
+EOS->OnPlayerUnbanned.AddDynamic(this,   &UMyClass::HandleEOSUnbanned);
+
+// Find a connected player by name
+FResolvedBanId Ids2; FString FoundName; TArray<FString> Ambiguous;
+if (FBanPlayerLookup::FindPlayerByName(World, TEXT("SomePlayer"), Ids2, FoundName, Ambiguous))
+{
+    // Ids2.Steam64Id / Ids2.EOSProductUserId are populated
+}
+```
+
+#### Dependencies
+
+| Dependency | Version | Notes |
+|------------|---------|-------|
+| SML | `^3.11.3` | Required |
+| SMLWebSocket | `^1.0.0` | Optional — only needed when `BotToken` is set for standalone Discord mode |
+
+---
+
+### TicketSystem
+
+*Button-based Discord support-ticket panel for Satisfactory dedicated servers.*
+
+**Module:** `TicketSystem` — `ServerOnly`, LoadingPhase: `Default`  
+**SemVersion:** `1.0.0`
+
+#### Features
+
+- Members click a button to open a private ticket channel; no slash commands needed
+- A reason modal collects context before the channel is created
+- Built-in ticket types: **Whitelist Request**, **Help / Support**, **Report a Player**
+- Unlimited custom ticket reasons (`TicketReason=Label|Desc` entries in the config)
+- Admin/support role @mentioned in every new ticket channel
+- **Close Ticket** button deletes the channel when the issue is resolved
+- Standalone mode (own `BotToken`) or paired mode (shares DiscordBridge's bot)
+
+#### Modes of operation
+
+| Mode | How to activate |
+|------|----------------|
+| **Standalone** | Set `BotToken` in `DefaultTickets.ini`. TicketSystem connects to Discord on its own — no DiscordBridge required. |
+| **Paired** | Leave `BotToken` empty. When DiscordBridge is also installed it calls `UTicketSubsystem::SetProvider(this)` and powers the panel through its own connection. DiscordBridge always takes priority; any `BotToken` set in `DefaultTickets.ini` is silently ignored when DiscordBridge is present. |
+
+#### Required bot permissions (standalone mode)
+
+| Permission | Purpose |
+|------------|---------|
+| Manage Channels | Create and delete private ticket channels |
+| View Channel | Read the channel list |
+| Send Messages | Post the ticket panel, welcome message, and close button |
+
+#### Configuration
+
+```
+<ServerRoot>/FactoryGame/Mods/TicketSystem/Config/DefaultTickets.ini
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `BotToken` | *(empty)* | Discord bot token for standalone mode |
+| `TicketNotifyRoleId` | *(empty)* | Role @mentioned in every new ticket; also authorises `!ticket-panel` |
+| `TicketPanelChannelId` | *(empty)* | Channel where the button panel is posted |
+| `TicketCategoryId` | *(empty)* | Discord category under which ticket channels are created |
+| `TicketChannelId` | *(empty)* | Admin notification channel (comma-separated IDs supported) |
+| `TicketWhitelistEnabled` | `True` | Show the Whitelist Request button |
+| `TicketHelpEnabled` | `True` | Show the Help / Support button |
+| `TicketReportEnabled` | `True` | Show the Report a Player button |
+| `TicketReason=Label\|Desc` | *(none)* | Add a custom ticket-reason button (up to 25 total across all buttons). The `|` character is the actual separator in the INI file; the backslash here is markdown-table escaping only. |
+
+#### Depending on TicketSystem
+
+**`.uplugin`** (optional dependency)
+
+```json
+{
+    "Name": "TicketSystem",
+    "Enabled": true,
+    "Optional": true,
+    "SemVersion": "^1.0.0"
+}
+```
+
+**`Build.cs`**
+
+```csharp
+PublicDependencyModuleNames.AddRange(new string[] { "TicketSystem" });
+```
+
+#### Provider architecture (`IDiscordBridgeProvider`)
+
+TicketSystem communicates with Discord exclusively through `IDiscordBridgeProvider` (`Source/TicketSystem/Public/IDiscordBridgeProvider.h`). Any mod that wants to drive the ticket panel must:
+
+1. Add `"TicketSystem"` as a dependency in `.uplugin` and `Build.cs`.
+2. Inherit `IDiscordBridgeProvider` in its subsystem class.
+3. Implement all pure-virtual methods (send messages, create/delete channels, respond to interactions, show modals, etc.).
+4. Call `UTicketSubsystem::SetProvider(this)` in `Initialize()` and `SetProvider(nullptr)` in `Deinitialize()`.
+
+```cpp
+void UMyDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+    Super::Initialize(Collection);
+    if (UTicketSubsystem* Tickets = GetGameInstance()->GetSubsystem<UTicketSubsystem>())
+        Tickets->SetProvider(this);
+}
+
+void UMyDiscordSubsystem::Deinitialize()
+{
+    if (UTicketSubsystem* Tickets = GetGameInstance()->GetSubsystem<UTicketSubsystem>())
+        Tickets->SetProvider(nullptr);
+    Super::Deinitialize();
+}
+```
+
+#### Dependencies
+
+| Dependency | Version | Notes |
+|------------|---------|-------|
+| SML | `^3.11.3` | Required |
+| SMLWebSocket | `^1.0.0` | Required — provides the Discord Gateway WebSocket client |
+| DiscordBridge | `^1.0.2` | Optional — provides paired mode |
+
+---
+
+## 8. Mod Dependency Map
+
+The diagram below shows how the four custom mods relate to each other.
+
+```
+SMLWebSocket   (no mod-level dependencies)
+     ▲
+     │  required by
+     ├──────────────────────────────────────────────┐
+     │                                              │
+DiscordBridge ─────────── optional ─────────► BanSystem
+     │                    (provides bot conn)       │
+     │  optional                                    │
+     │  (provides bot conn + SetProvider)           │
+     └──────────────────────────────────────────────► TicketSystem
+                         (BanSystem also optional to TicketSystem via shared provider pattern)
+```
+
+| Relationship | Direction | Mechanism |
+|---|---|---|
+| DiscordBridge → SMLWebSocket | Required | Module dependency in `.uplugin` / `Build.cs` |
+| BanSystem → SMLWebSocket | Optional | Only active when `BotToken` is set for standalone Discord mode |
+| DiscordBridge → BanSystem | Optional | DiscordBridge implements `IBanDiscordCommandProvider` and registers with `UBanDiscordSubsystem` |
+| DiscordBridge → TicketSystem | Optional | DiscordBridge calls `UTicketSubsystem::SetProvider(this)` |
+| BanSystem standalone | Independent | BanSystem can run without DiscordBridge when its own `BotToken` is configured |
+| TicketSystem standalone | Independent | TicketSystem can run without DiscordBridge when its own `BotToken` is configured |
+
