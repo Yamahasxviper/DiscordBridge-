@@ -234,6 +234,15 @@ private:
 	FTSTicker::FDelegateHandle HeartbeatTickerHandle;
 	float HeartbeatIntervalSeconds{0.0f};
 
+	/**
+	 * Adapter that wraps UDiscordBridgeSubsystem as IBanDiscordCommandProvider.
+	 * Allocated in Initialize() when DiscordBridge is detected; passed to
+	 * SetCommandProvider() so BanSystem shares DiscordBridge's bot connection.
+	 * Kept alive here so SetCommandProvider(nullptr) in Deinitialize() can
+	 * safely clear it before the TUniquePtr releases the allocation.
+	 */
+	TUniquePtr<class FDiscordBridgeCommandProviderAdapter> DiscordBridgeAdapter;
+
 	static const FString DiscordGatewayUrl;
 	static const FString DiscordApiBase;
 };

@@ -24,6 +24,12 @@ public class BanSystem : ModuleRules
             "HTTP",
             // SMLWebSocket — for the standalone Discord Gateway (WebSocket) connection.
             "SMLWebSocket",
+            // DiscordBridge — optional add-on integration.
+            // When DiscordBridge is installed, BanSystem shares its existing Discord bot
+            // connection instead of opening a second Gateway.  Guarded at runtime with
+            // FModuleManager::IsModuleLoaded("DiscordBridge") so BanSystem still works
+            // standalone when DiscordBridge is not installed.
+            "DiscordBridge",
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]
