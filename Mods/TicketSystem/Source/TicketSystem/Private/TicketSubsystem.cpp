@@ -1,4 +1,4 @@
-// Copyright Coffee Stain Studios. All Rights Reserved.
+// Copyright Yamahasxviper. All Rights Reserved.
 
 #include "TicketSubsystem.h"
 #include "TicketDiscordProvider.h"
@@ -86,6 +86,15 @@ IDiscordBridgeProvider* UTicketSubsystem::GetBridge() const
 
 void UTicketSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 {
+	// Idempotency: if the same non-null provider is already registered, do
+	// nothing.  Without this guard, calling SetProvider twice with the same
+	// provider would add a second subscription for both interactions and raw
+	// messages, causing every event to be dispatched to the handler twice.
+	if (InProvider && InProvider == CachedProvider)
+	{
+		return;
+	}
+
 	// If the built-in provider is active and an external provider (e.g.
 	// DiscordBridge) is taking over, disconnect the built-in one first so two
 	// separate Discord Gateway connections are not maintained simultaneously.
