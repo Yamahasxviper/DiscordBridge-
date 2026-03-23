@@ -92,7 +92,20 @@ namespace
 		"# Syntax: !playerids [PlayerName]\r\n"
 		"PlayerIdsCommandPrefix=!playerids\r\n"
 		"#\r\n"
-		"# -- RESPONSE MESSAGE FORMATS -----------------------------------------\r\n"
+		"# -- JOIN-KICK ENFORCEMENT ----------------------------------------------------\r\n"
+		"#\r\n"
+		"# Text shown in-game when a Steam-banned player is kicked on join.\r\n"
+		"# Leave empty to use the default '[Steam Ban] <reason>' format.\r\n"
+		"SteamBanKickReason=\r\n"
+		"#\r\n"
+		"# Text shown in-game when an EOS-banned player is kicked on join.\r\n"
+		"# Leave empty to use the default '[EOS Ban] <reason>' format.\r\n"
+		"EOSBanKickReason=\r\n"
+		"#\r\n"
+		"# Message posted to Discord when a banned player is kicked on join.\r\n"
+		"# Placeholders: %PlayerId% (Steam64 ID or EOS PUID), %Reason% (ban reason)\r\n"
+		"# Leave empty to disable this Discord notification.\r\n"
+		"BanKickDiscordMessage=:hammer: **BanSystem** - Player `%PlayerId%` tried to join but is banned. Reason: %Reason%\r\n"
 		"# Leave empty to use the built-in defaults.\r\n"
 		"# Placeholders: %PlayerId%  %Reason%  %BannedBy%  %Duration%\r\n"
 		"SteamBanResponseMessage=\r\n"
@@ -179,6 +192,13 @@ FBanDiscordConfig FBanDiscordConfig::LoadOrCreate()
 	Out.EOSUnbanResponseMessage = GetIniStringOrFallback(
 		Cfg, TEXT("EOSUnbanResponseMessage"),
 		TEXT(":white_check_mark: **BanSystem** - EOS ID `%PlayerId%` has been unbanned."));
+
+	// Join-kick enforcement
+	Out.SteamBanKickReason  = GetIniStringOrDefault(Cfg, TEXT("SteamBanKickReason"), TEXT(""));
+	Out.EOSBanKickReason    = GetIniStringOrDefault(Cfg, TEXT("EOSBanKickReason"),   TEXT(""));
+	Out.BanKickDiscordMessage = GetIniStringOrFallback(
+		Cfg, TEXT("BanKickDiscordMessage"),
+		TEXT(":hammer: **BanSystem** - Player `%PlayerId%` tried to join but is banned. Reason: %Reason%"));
 
 	UE_LOG(LogTemp, Log,
 	       TEXT("BanSystem: Discord config loaded (BotToken=%s, DiscordChannelId=%s)."),

@@ -78,19 +78,24 @@ LogDiscordBridge: Error: Failed to create WebSocket – SMLWebSocket module not 
 
 ## Ban commands are not recognised / banned players can still join
 
-1. Make sure `BanCommandPrefix` is set (default is `!ban`) and not empty.
-2. Run `!ban status` in the Discord channel to confirm the ban system is **enabled**. If it shows disabled, run `!ban on` or set `BanSystemEnabled=True` in `DefaultDiscordBridge.ini` and restart.
-3. `BanSystemEnabled` in the config file is applied on **every** server restart — set it to `True` or `False` and restart to change the ban system state.
-4. When the ban system is **enabled**, `!ban add <name>` kicks the player immediately if they are already connected. `!ban on` also immediately kicks any currently-connected banned players. Players who are not yet connected are kicked the next time they attempt to join.
+Ban management has been moved to the **BanSystem** mod. If you are looking for ban commands:
+
+1. Install the **BanSystem** mod.
+2. Configure it via `<ServerRoot>/FactoryGame/Mods/BanSystem/Config/DefaultBanSystem.ini`.
+3. Use `!steamban`, `!eosban`, `!banbyname` in the Discord channel configured in `DefaultBanSystem.ini`.
+4. Banned players (by Steam64 ID or EOS PUID) are automatically kicked on join by BanSystem.
+
+See the [Ban System](04-BanSystem.md) page for full details.
 
 ---
 
 ## In-game commands are not recognised
 
-1. Make sure `InGameWhitelistCommandPrefix` and `InGameBanCommandPrefix` are set (both default to `!whitelist` and `!ban` respectively) and not empty in the config file.
+1. Make sure `InGameWhitelistCommandPrefix` is set (defaults to `!whitelist`) and not empty in the config file.
 2. In-game commands can only be typed in the **Satisfactory in-game chat** by players who are already connected to the server.
 3. In-game whitelist commands do not include `!whitelist role add/remove` — that is Discord-only.
-4. If the command appears to do nothing, check the server log (`FactoryGame.log`) for `LogDiscordBridge` or `LogWhitelistManager` / `LogBanManager` lines that may explain why it was rejected.
+4. For in-game ban commands, install the **BanSystem** mod which provides `/steamban`, `/eosban`, `/banbyname`, and related commands.
+5. If the command appears to do nothing, check the server log (`FactoryGame.log`) for `LogDiscordBridge` or `LogWhitelistManager` lines that may explain why it was rejected.
 
 ---
 

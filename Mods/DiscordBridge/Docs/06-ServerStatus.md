@@ -10,9 +10,9 @@ These messages are posted to Discord when the server starts or stops.
 
 > **Scope of these settings**
 > `ServerStatusMessagesEnabled` and `StatusChannelId` apply **only** to the
-> online/offline notifications below.  Kick notifications (`BanKickDiscordMessage`,
-> `WhitelistKickDiscordMessage`) always go to the main `ChannelId`, and command
-> responses always go back to the channel where the command was typed.
+> online/offline notifications below.  Whitelist kick notifications (`WhitelistKickDiscordMessage`)
+> go to the main `ChannelId`, and command responses always go back to the channel where
+> the command was typed.  Ban kick notifications are handled by the BanSystem mod.
 
 ### `ServerStatusMessagesEnabled`
 

@@ -126,27 +126,6 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	FString WhitelistCommandRoleId;
 
 	/**
-	 * Snowflake ID of the Discord role whose members are allowed to run
-	 * !ban management commands.
-	 * Leave empty (or unset) to disable !ban commands entirely – no Discord
-	 * user will be able to run them until a role ID is provided.
-	 *
-	 * This role is also the one granted or revoked by the
-	 * `!ban role add <user_id>` and `!ban role remove <user_id>` commands,
-	 * so holders can promote or demote other Discord members from within Discord
-	 * without needing server-level role management access.
-	 * The bot must have the **Manage Roles** permission for those commands to work.
-	 *
-	 * IMPORTANT: holding this role does NOT grant automatic access to the game
-	 * server.  Discord members with this role are still subject to the whitelist
-	 * and ban checks when they join; they must be added to the whitelist separately.
-	 *
-	 * To get the role ID: Discord Settings → Advanced → Developer Mode, then
-	 * right-click the role in Server Settings → Roles and choose Copy Role ID.
-	 */
-	FString BanCommandRoleId;
-
-	/**
 	 * Prefix that triggers whitelist management commands from Discord.
 	 * Set to an empty string to disable Discord-based whitelist management.
 	 * Default: "!whitelist"
@@ -193,23 +172,6 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	FString WhitelistChannelId;
 
 	/**
-	 * Snowflake ID of a dedicated Discord channel for ban management.
-	 * Leave empty to disable the ban-only channel.
-	 *
-	 * When set:
-	 *  • !ban commands issued from this channel are accepted (sender must still
-	 *    hold BanCommandRoleId).  Command responses are sent back to this channel.
-	 *  • Ban-kick notifications are also posted here (in addition to the main
-	 *    ChannelId), giving admins a focused audit log of bans.
-	 *
-	 * Get the channel ID the same way as ChannelId (right-click the channel in
-	 * Discord with Developer Mode enabled → Copy Channel ID).
-	 *
-	 * Example: BanChannelId=567890123456789012
-	 */
-	FString BanChannelId;
-
-	/**
 	 * Message posted to the main Discord channel whenever the whitelist kicks
 	 * a player who tried to join.  Leave empty to disable the notification.
 	 *
@@ -233,118 +195,6 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 		TEXT("You are not on this server's whitelist. Contact the server admin to be added.")
 	};
 
-	// ── Ban system ────────────────────────────────────────────────────────────
-
-	/**
-	 * When true, the ban system is active on every server start, overriding any
-	 * runtime change made via !ban on / !ban off Discord commands.
-	 * Default: true (ban list is enforced; set to false to disable enforcement).
-	 */
-	bool bBanSystemEnabled{ true };
-
-	/**
-	 * When true (default), Discord `!ban` commands and in-game `!ban` chat commands
-	 * are enabled.  Set to false to disable the entire ban command interface while
-	 * still enforcing bans on join (bBanSystemEnabled is unaffected).
-	 *
-	 * This is the "on/off from config" toggle for the command interface:
-	 *   bBanCommandsEnabled=True   → admins can run !ban commands (subject to BanCommandRoleId)
-	 *   bBanCommandsEnabled=False  → !ban commands are silently ignored; bans still enforced
-	 *
-	 * Default: true.
-	 */
-	bool bBanCommandsEnabled{ true };
-
-	/**
-	 * Prefix that triggers ban management commands from Discord.
-	 * Set to an empty string to disable Discord-based ban management.
-	 * Default: "!ban"
-	 *
-	 * Supported commands (type in the bridged Discord channel):
-	 *   !ban add <name>    – ban a player by in-game name
-	 *   !ban remove <name> – unban a player by in-game name
-	 *   !ban list          – list all banned players
-	 *   !ban status        – show current enabled/disabled state
-	 *   !ban on            – enable the ban system
-	 *   !ban off           – disable the ban system
-	 */
-	FString BanCommandPrefix{ TEXT("!ban") };
-
-	/**
-	 * Message posted to the main Discord channel whenever a banned player tries
-	 * to join.  Leave empty to disable the notification.
-	 *
-	 * Available placeholder:
-	 *   %PlayerName%  – in-game name of the player who was kicked.
-	 *
-	 * Example:
-	 *   BanKickDiscordMessage=:hammer: **%PlayerName%** is banned and was kicked.
-	 */
-	FString BanKickDiscordMessage{
-		TEXT(":hammer: **%PlayerName%** is banned from this server and was kicked.")
-	};
-
-	/**
-	 * Reason shown in-game to the player when they are kicked for being banned.
-	 * This is the text the player sees in the "Disconnected" screen.
-	 * Default: "You are banned from this server."
-	 */
-	FString BanKickReason{ TEXT("You are banned from this server.") };
-
-	// ── BanSystem Mod Integration ─────────────────────────────────────────────
-
-	/**
-	 * Message posted to Discord when the BanSystem mod bans a player by Steam64 ID
-	 * (via /steamban or /banbyname in-game chat commands).
-	 * Leave empty to disable the notification.
-	 *
-	 * Available placeholders:
-	 *   %PlayerId%  – the Steam64 ID of the banned player
-	 *   %Reason%    – the ban reason string
-	 *   %BannedBy%  – the name of the admin who issued the ban
-	 */
-	FString BanSystemSteamBanDiscordMessage{
-		TEXT(":hammer: **BanSystem** - Steam ID `%PlayerId%` was banned by **%BannedBy%** - Reason: %Reason%")
-	};
-
-	/**
-	 * Message posted to Discord when the BanSystem mod unbans a player by Steam64 ID
-	 * (via /steamunban in-game chat command).
-	 * Leave empty to disable the notification.
-	 *
-	 * Available placeholder:
-	 *   %PlayerId%  – the Steam64 ID of the unbanned player
-	 */
-	FString BanSystemSteamUnbanDiscordMessage{
-		TEXT(":white_check_mark: **BanSystem** - Steam ID `%PlayerId%` has been unbanned.")
-	};
-
-	/**
-	 * Message posted to Discord when the BanSystem mod bans a player by EOS Product User ID
-	 * (via /eosban or /banbyname in-game chat commands).
-	 * Leave empty to disable the notification.
-	 *
-	 * Available placeholders:
-	 *   %PlayerId%  – the EOS Product User ID of the banned player
-	 *   %Reason%    – the ban reason string
-	 *   %BannedBy%  – the name of the admin who issued the ban
-	 */
-	FString BanSystemEOSBanDiscordMessage{
-		TEXT(":hammer: **BanSystem** - EOS ID `%PlayerId%` was banned by **%BannedBy%** - Reason: %Reason%")
-	};
-
-	/**
-	 * Message posted to Discord when the BanSystem mod unbans a player by EOS Product User ID
-	 * (via /eosunban in-game chat command).
-	 * Leave empty to disable the notification.
-	 *
-	 * Available placeholder:
-	 *   %PlayerId%  – the EOS Product User ID of the unbanned player
-	 */
-	FString BanSystemEOSUnbanDiscordMessage{
-		TEXT(":white_check_mark: **BanSystem** - EOS ID `%PlayerId%` has been unbanned.")
-	};
-
 	// ── In-game commands ──────────────────────────────────────────────────────
 
 	/**
@@ -362,22 +212,6 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 *   !whitelist status        – show current enabled/disabled state
 	 */
 	FString InGameWhitelistCommandPrefix{ TEXT("!whitelist") };
-
-	/**
-	 * Prefix that triggers ban management commands when typed in the
-	 * Satisfactory in-game chat.  Set to an empty string to disable in-game
-	 * ban commands.
-	 * Default: "!ban"
-	 *
-	 * Supported commands (type in the Satisfactory in-game chat):
-	 *   !ban add <name>    – ban a player by in-game name
-	 *   !ban remove <name> – unban a player by in-game name
-	 *   !ban list          – list all banned players
-	 *   !ban status        – show current enabled/disabled state
-	 *   !ban on            – enable the ban system
-	 *   !ban off           – disable the ban system
-	 */
-	FString InGameBanCommandPrefix{ TEXT("!ban") };
 
 	// ── Player count presence ─────────────────────────────────────────────────
 
@@ -417,7 +251,7 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 *
 	 * A single backup file is written on every server start (located in
 	 * Saved/Config/, which Alpakit/SMM mod updates never touch):
-	 *   DiscordBridge.ini  – all settings (connection, chat, presence, whitelist, ban)
+	 *   DiscordBridge.ini  – all settings (connection, chat, presence, whitelist)
 	 *
 	 * IMPORTANT FOR FUTURE MAINTAINERS: when adding a new field to
 	 * FDiscordBridgeConfig, you must update DiscordBridgeConfig.cpp in ALL
