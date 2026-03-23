@@ -299,6 +299,73 @@ Both subsystems include static validation helpers:
 
 ---
 
+## Discord Integration
+
+BanSystem includes its own Discord bot integration that mirrors every in-game ban command as a Discord command.  It can share an existing bot connection from **DiscordBridge** (paired mode) or run entirely on its own (standalone mode).
+
+### Modes of operation
+
+| Mode | When to use |
+|------|-------------|
+| **Standalone** | Set `BotToken` in `DefaultBanSystem.ini`. BanSystem connects to Discord independently — no DiscordBridge required. |
+| **Paired** | Leave `BotToken` empty. When DiscordBridge is installed it automatically provides the Discord connection. BanSystem picks it up with zero extra configuration. |
+
+### Discord Commands
+
+All commands are role-gated by `DiscordCommandRoleId`.  The guild owner can always use them regardless.
+
+| Command | Description |
+|---------|-------------|
+| `!steamban <Steam64Id\|PlayerName> [minutes] [reason]` | Ban by Steam 64-bit ID or player name. `0` or omitted minutes = permanent. |
+| `!steamunban <Steam64Id>` | Remove a Steam ban. |
+| `!steambanlist` | List all active Steam bans with reasons and expiry. |
+| `!eosban <EOSProductUserId\|PlayerName> [minutes] [reason]` | Ban by EOS Product User ID or player name. |
+| `!eosunban <EOSProductUserId>` | Remove an EOS ban. |
+| `!eosbanlist` | List all active EOS bans with reasons and expiry. |
+| `!banbyname <PlayerName> [minutes] [reason]` | Ban a connected player on **all** available platforms (Steam + EOS) at once. |
+| `!playerids [PlayerName]` | Show the platform IDs of all connected players, or of a specific player. |
+
+Command prefixes are configurable in `DefaultBanSystem.ini` (set any prefix to empty to disable that command).
+
+### Configuration file
+
+```
+<ServerRoot>/FactoryGame/Mods/BanSystem/Config/DefaultBanSystem.ini
+```
+
+#### Essential settings
+
+| Setting | Description |
+|---------|-------------|
+| `BotToken` | Discord bot token for standalone mode. Leave empty to use DiscordBridge. |
+| `DiscordChannelId` | Snowflake ID of the Discord channel where commands are accepted and responses are posted. |
+| `DiscordCommandRoleId` | Snowflake ID of the role whose members may run ban commands. Leave empty to allow the guild owner only. |
+| `SteamBanKickReason` | Text shown to a Steam-banned player when kicked. Leave empty for the default `[Steam Ban] <reason>` format. |
+| `EOSBanKickReason` | Text shown to an EOS-banned player when kicked. Leave empty for the default `[EOS Ban] <reason>` format. |
+| `BanKickDiscordMessage` | Message posted to `DiscordChannelId` when a banned player tries to join and is kicked. Leave empty to disable. Supports `%PlayerId%` and `%Reason%` placeholders. |
+
+#### Response message placeholders
+
+The `SteamBanResponseMessage`, `SteamUnbanResponseMessage`, `EOSBanResponseMessage`, and `EOSUnbanResponseMessage` settings support:
+
+| Placeholder | Value |
+|-------------|-------|
+| `%PlayerId%` | Steam 64-bit ID or EOS Product User ID |
+| `%Reason%` | The ban reason string |
+| `%BannedBy%` | Discord display name of the admin who issued the ban |
+| `%Duration%` | `"permanently"` or `"X minute(s)"` |
+
+### Required bot intents (standalone mode)
+
+Enable these in the [Discord Developer Portal](https://discord.com/developers/applications) under **Bot → Privileged Gateway Intents**:
+
+| Intent | Why |
+|--------|-----|
+| Server Members Intent | Role info in `MESSAGE_CREATE` |
+| Message Content Intent | Read ban commands sent in the channel |
+
+---
+
 ## Build Targets
 
 This mod is built for all Satisfactory server targets as required by Alpakit:
@@ -316,6 +383,6 @@ LinuxServer
 | Dependency | Version | Purpose |
 |---|---|---|
 | SML | `^3.11.3` | Native hooks, chat commands |
-| FactoryGame | bundled | Game mode hook targets |
+| SMLWebSocket | `^1.0.0` | *(Optional)* Discord Gateway WebSocket client for standalone mode |
 
-No dependency on any CSS-custom engine modules or online integration APIs.
+SMLWebSocket is only needed when running BanSystem in **standalone Discord mode** (i.e. `BotToken` is set in `DefaultBanSystem.ini`). When DiscordBridge is installed instead, SMLWebSocket is already provided by that mod and BanSystem uses the shared connection automatically.
