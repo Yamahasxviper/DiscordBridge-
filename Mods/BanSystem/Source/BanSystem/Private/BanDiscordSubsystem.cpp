@@ -77,6 +77,15 @@ void UBanDiscordSubsystem::Deinitialize()
 
 void UBanDiscordSubsystem::SetCommandProvider(IBanDiscordCommandProvider* InProvider)
 {
+	// If the same non-null provider is already registered, nothing to do.
+	// Without this guard, calling SetCommandProvider twice with the same provider
+	// would add a second MESSAGE_CREATE subscription, causing every Discord
+	// message to be dispatched to the command handler twice.
+	if (InProvider && InProvider == ExternalProvider)
+	{
+		return;
+	}
+
 	// Unsubscribe from the old external provider.
 	if (ExternalProvider && ExternalProvider != InProvider)
 	{
@@ -313,19 +322,50 @@ void UBanDiscordSubsystem::HandleGatewayPayload(const FString& RawJson)
 		HandleHeartbeatAck();
 		break;
 	case 7: // Reconnect
+		// Per Discord spec: reset all gateway state before reconnecting.
+		// Do NOT call Disconnect()/Close() here — that sets bUserInitiatedClose
+		// inside the SMLWebSocket runnable, permanently disabling auto-reconnect.
+		// Calling Connect() on the existing client stops the current runnable
+		// and starts a fresh one with auto-reconnect still active.
+		if (HeartbeatTickerHandle.IsValid())
+		{
+			FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
+			HeartbeatTickerHandle.Reset();
+		}
+		bPendingHeartbeatAck = false;
+		bGatewayReady        = false;
+		LastSequenceNumber   = -1;
+		BotUserId.Empty();
+		GuildOwnerId.Empty();
 		if (WebSocketClient)
 		{
 			WebSocketClient->Connect(DiscordGatewayUrl, {}, {});
 		}
 		break;
 	case 9: // Invalid Session
+	{
 		// Re-identify with fresh state.
-		bGatewayReady        = false;
-		LastSequenceNumber   = -1;
+		// Per Discord spec, wait 1–5 seconds before re-identifying.
+		// Use a one-shot FTSTicker so the game thread is NEVER blocked.
+		bGatewayReady      = false;
+		LastSequenceNumber = -1;
 		BotUserId.Empty();
-		FPlatformProcess::Sleep(5.0f);
-		SendIdentify();
+		UE_LOG(LogBanDiscord, Warning,
+		       TEXT("BanDiscordSubsystem: Invalid session received — "
+		            "re-identifying in 5 s."));
+		TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
+		FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateLambda([WeakThis](float) -> bool
+			{
+				if (UBanDiscordSubsystem* Self = WeakThis.Get())
+				{
+					Self->SendIdentify();
+				}
+				return false; // one-shot — do not repeat
+			}),
+			5.0f);
 		break;
+	}
 	default:
 		break;
 	}
