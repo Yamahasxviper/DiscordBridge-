@@ -2,6 +2,7 @@
 
 #include "DiscordBridgeSubsystem.h"
 #include "TicketSubsystem.h"
+#include "BanDiscordSubsystem.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -89,9 +90,6 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Connect();
 
 	// Inject ourselves as the Discord provider into TicketSubsystem (if installed).
-	// TicketSystem is an optional dependency: DiscordBridge works without it, but
-	// when present it powers the ticket panel.  Any mod that implements
-	// IDiscordBridgeProvider can do the same by calling SetProvider on the subsystem.
 	if (FModuleManager::Get().IsModuleLoaded(TEXT("TicketSystem")))
 	{
 		Collection.InitializeDependency<UTicketSubsystem>();
@@ -101,6 +99,26 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 			{
 				CachedTicketSubsystem = Tickets;
 				Tickets->SetProvider(this);
+			}
+		}
+	}
+
+	// Inject ourselves as the Discord command provider into BanDiscordSubsystem
+	// (if BanSystem is installed).  BanSystem is an optional dependency: DiscordBridge
+	// works without it, but when both are installed BanSystem's Discord ban commands
+	// (!steamban, !eosban, !banbyname, etc.) share DiscordBridge's existing bot
+	// connection instead of requiring a second BotToken in DefaultBanSystem.ini.
+	if (FModuleManager::Get().IsModuleLoaded(TEXT("BanSystem")))
+	{
+		Collection.InitializeDependency<UBanDiscordSubsystem>();
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UBanDiscordSubsystem* BanDiscord = GI->GetSubsystem<UBanDiscordSubsystem>())
+			{
+				CachedBanDiscordSubsystem = BanDiscord;
+				BanDiscord->SetCommandProvider(this);
+				UE_LOG(LogTemp, Log,
+				       TEXT("DiscordBridge: Injected as BanSystem Discord command provider."));
 			}
 		}
 	}
@@ -115,6 +133,15 @@ void UDiscordBridgeSubsystem::Deinitialize()
 		Tickets->SetProvider(nullptr);
 	}
 	CachedTicketSubsystem.Reset();
+
+	// Detach from BanDiscordSubsystem so it falls back to its own standalone
+	// connection (if BotToken is set in DefaultBanSystem.ini) or disables Discord
+	// commands cleanly.
+	if (UBanDiscordSubsystem* BanDiscord = CachedBanDiscordSubsystem.Get())
+	{
+		BanDiscord->SetCommandProvider(nullptr);
+	}
+	CachedBanDiscordSubsystem.Reset();
 
 	// Stop the chat-manager bind ticker if it is still running.
 	FTSTicker::GetCoreTicker().RemoveTicker(ChatManagerBindTickHandle);
@@ -2309,6 +2336,23 @@ return OnDiscordRawMessageReceived.AddLambda(MoveTemp(Callback));
 }
 
 void UDiscordBridgeSubsystem::UnsubscribeRawMessage(FDelegateHandle Handle)
+{
+OnDiscordRawMessageReceived.Remove(Handle);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IBanDiscordCommandProvider – subscribe / unsubscribe helpers
+// SendDiscordChannelMessage and GetGuildOwnerId are already implemented above
+// as part of IDiscordBridgeProvider and satisfy both interfaces simultaneously.
+// ─────────────────────────────────────────────────────────────────────────────
+
+FDelegateHandle UDiscordBridgeSubsystem::SubscribeDiscordMessages(
+TFunction<void(const TSharedPtr<FJsonObject>&)> Callback)
+{
+return OnDiscordRawMessageReceived.AddLambda(MoveTemp(Callback));
+}
+
+void UDiscordBridgeSubsystem::UnsubscribeDiscordMessages(FDelegateHandle Handle)
 {
 OnDiscordRawMessageReceived.Remove(Handle);
 }

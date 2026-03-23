@@ -1,7 +1,6 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 
 #include "BanDiscordSubsystem.h"
-#include "DiscordBridgeAdapter.h"
 #include "Steam/SteamBanSubsystem.h"
 #include "EOS/EOSBanSubsystem.h"
 #include "BanPlayerLookup.h"
@@ -46,36 +45,6 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		            "Mods/BanSystem/Config/DefaultBanSystem.ini."));
 	}
 
-	// ── Connection mode selection ─────────────────────────────────────────────
-	//
-	// Priority order:
-	//   1. DiscordBridge (optional add-on): if installed, share its bot connection
-	//      so BanSystem's Discord commands use the same bot without a second token.
-	//   2. Standalone: use our own BotToken to open a dedicated Gateway connection.
-	//   3. Neither: Discord commands are unavailable; wait silently for an external
-	//      mod to call SetCommandProvider() at runtime if needed.
-
-	if (FModuleManager::Get().IsModuleLoaded(TEXT("DiscordBridge")))
-	{
-		// DiscordBridge is installed — use it as our Discord connection.
-		Collection.InitializeDependency<UDiscordBridgeSubsystem>();
-		if (UGameInstance* GI = GetGameInstance())
-		{
-			if (UDiscordBridgeSubsystem* Bridge = GI->GetSubsystem<UDiscordBridgeSubsystem>())
-			{
-				DiscordBridgeAdapter = MakeUnique<FDiscordBridgeCommandProviderAdapter>(Bridge);
-				SetCommandProvider(DiscordBridgeAdapter.Get());
-				UE_LOG(LogBanDiscord, Log,
-				       TEXT("BanDiscordSubsystem: Using DiscordBridge's connection — "
-				            "ban commands will share the existing bot."));
-				return;
-			}
-		}
-		UE_LOG(LogBanDiscord, Warning,
-		       TEXT("BanDiscordSubsystem: DiscordBridge module is loaded but "
-		            "UDiscordBridgeSubsystem was not found — falling back to standalone mode."));
-	}
-
 	// Standalone mode: connect to Discord Gateway with our own bot token when one
 	// is provided and no external provider has been injected yet.
 	if (!Config.BotToken.IsEmpty() && ExternalProvider == nullptr)
@@ -93,14 +62,8 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UBanDiscordSubsystem::Deinitialize()
 {
-	// Remove any external provider subscription before releasing the adapter.
-	// SetCommandProvider(nullptr) will call ExternalProvider->UnsubscribeDiscordMessages()
-	// so DiscordBridgeAdapter must still be alive at that point.
+	// Remove any external provider subscription.
 	SetCommandProvider(nullptr);
-
-	// Release the DiscordBridge adapter (if any) now that SetCommandProvider has
-	// finished using its raw pointer.
-	DiscordBridgeAdapter.Reset();
 
 	// Disconnect the standalone Gateway connection.
 	Disconnect();
