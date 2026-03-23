@@ -16,7 +16,6 @@ public class BanSystem : ModuleRules
             "Engine",
             "NetCore",
             "Json",
-            "JsonUtilities",
             "DummyHeaders",
             "FactoryGame",
             "SML",
