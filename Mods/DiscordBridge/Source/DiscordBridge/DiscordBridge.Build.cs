@@ -32,6 +32,12 @@ public class DiscordBridge : ModuleRules
 			// UTicketSubsystem::SetProvider() when TicketSystem is loaded.
 			// Any future mod that also implements IDiscordBridgeProvider can do the same.
 			"TicketSystem",
+			// BanSystem – provides IBanDiscordCommandProvider and UBanDiscordSubsystem.
+			// DiscordBridge implements IBanDiscordCommandProvider and injects itself into
+			// UBanDiscordSubsystem::SetCommandProvider() when BanSystem is loaded.
+			// This lets BanSystem's Discord ban commands (!steamban, !eosban, etc.) share
+			// DiscordBridge's existing bot connection instead of opening a second one.
+			"BanSystem",
 			// Unreal HTTP module – confirmed present in Satisfactory's custom UE build.
 			// Verified: FactoryGame.Build.cs lists "HTTP" in PublicDependencyModuleNames,
 			// which makes it transitively available to every SML-dependent mod.

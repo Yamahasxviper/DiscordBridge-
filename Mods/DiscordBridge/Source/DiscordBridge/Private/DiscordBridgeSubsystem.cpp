@@ -2,6 +2,7 @@
 
 #include "DiscordBridgeSubsystem.h"
 #include "TicketSubsystem.h"
+#include "BanDiscordSubsystem.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -105,6 +106,25 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		}
 	}
 
+	// Inject ourselves as the Discord command provider into BanDiscordSubsystem (if
+	// BanSystem is installed).  BanSystem is an optional dependency: DiscordBridge
+	// works without it, but when both are installed BanSystem's Discord ban commands
+	// (!steamban, !eosban, !banbyname, etc.) share DiscordBridge's existing bot
+	// connection instead of opening a second Gateway connection.
+	if (FModuleManager::Get().IsModuleLoaded(TEXT("BanSystem")))
+	{
+		Collection.InitializeDependency<UBanDiscordSubsystem>();
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UBanDiscordSubsystem* BanDiscord = GI->GetSubsystem<UBanDiscordSubsystem>())
+			{
+				CachedBanDiscordSubsystem = BanDiscord;
+				BanDiscord->SetCommandProvider(this);
+				UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Injected as BanSystem Discord command provider."));
+			}
+		}
+	}
+
 }
 
 void UDiscordBridgeSubsystem::Deinitialize()
@@ -115,6 +135,14 @@ void UDiscordBridgeSubsystem::Deinitialize()
 		Tickets->SetProvider(nullptr);
 	}
 	CachedTicketSubsystem.Reset();
+
+	// Detach from BanDiscordSubsystem so it falls back to its own standalone connection
+	// (if BotToken is set in DefaultBanSystem.ini) or disables Discord commands.
+	if (UBanDiscordSubsystem* BanDiscord = CachedBanDiscordSubsystem.Get())
+	{
+		BanDiscord->SetCommandProvider(nullptr);
+	}
+	CachedBanDiscordSubsystem.Reset();
 
 	// Stop the chat-manager bind ticker if it is still running.
 	FTSTicker::GetCoreTicker().RemoveTicker(ChatManagerBindTickHandle);
