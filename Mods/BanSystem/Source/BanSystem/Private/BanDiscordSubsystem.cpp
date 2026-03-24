@@ -255,6 +255,56 @@ void UBanDiscordSubsystem::OnWebSocketClosed(int32 StatusCode, const FString& Re
 	       TEXT("BanDiscordSubsystem: Gateway connection closed (%d: %s)."),
 	       StatusCode, *Reason);
 
+	// Detect Discord-specific terminal close codes that indicate permanent failure.
+	// For these codes auto-reconnect must be stopped; retrying will always fail
+	// with the same error and produce an endless reconnect-reject loop.
+	bool bTerminal = false;
+	switch (StatusCode)
+	{
+	case 4004:
+		UE_LOG(LogBanDiscord, Error,
+		       TEXT("BanDiscordSubsystem: Authentication failed (4004). "
+		            "Verify BotToken in Mods/BanSystem/Config/DefaultBanSystem.ini. "
+		            "Auto-reconnect disabled."));
+		bTerminal = true;
+		break;
+	case 4010:
+		UE_LOG(LogBanDiscord, Error,
+		       TEXT("BanDiscordSubsystem: Invalid shard (4010). Auto-reconnect disabled."));
+		bTerminal = true;
+		break;
+	case 4011:
+		UE_LOG(LogBanDiscord, Error,
+		       TEXT("BanDiscordSubsystem: Sharding required (4011). Auto-reconnect disabled."));
+		bTerminal = true;
+		break;
+	case 4012:
+		UE_LOG(LogBanDiscord, Error,
+		       TEXT("BanDiscordSubsystem: Invalid API version (4012). Auto-reconnect disabled."));
+		bTerminal = true;
+		break;
+	case 4013:
+		UE_LOG(LogBanDiscord, Error,
+		       TEXT("BanDiscordSubsystem: Invalid intent(s) (4013). Auto-reconnect disabled."));
+		bTerminal = true;
+		break;
+	case 4014:
+		UE_LOG(LogBanDiscord, Error,
+		       TEXT("BanDiscordSubsystem: Disallowed intent(s) (4014). "
+		            "Enable Server Members Intent and Message Content Intent "
+		            "in the Discord Developer Portal. Auto-reconnect disabled."));
+		bTerminal = true;
+		break;
+	default:
+		break;
+	}
+
+	if (bTerminal && WebSocketClient)
+	{
+		WebSocketClient->Close(1000,
+			FString::Printf(TEXT("Terminal Discord close code %d"), StatusCode));
+	}
+
 	bGatewayReady        = false;
 	bPendingHeartbeatAck = false;
 
