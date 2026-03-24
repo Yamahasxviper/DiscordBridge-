@@ -174,6 +174,28 @@ private:
 	/** Return a pointer to IDiscordBridgeProvider (set via SetProvider()). */
 	IDiscordBridgeProvider* GetBridge() const;
 
+	// ── Ticket state persistence ──────────────────────────────────────────────
+
+	/**
+	 * Persist TicketChannelToOpener (and its reverse map) to disk so active
+	 * tickets survive server restarts.  Written to:
+	 *   <ProjectSavedDir>/Config/TicketSystem/ActiveTickets.json
+	 *
+	 * Called every time the map is mutated (channel created, ticket closed).
+	 */
+	void SaveTicketState() const;
+
+	/**
+	 * Restore the ticket maps from the state file written by SaveTicketState().
+	 * Called at the end of Initialize() so the duplicate-ticket check is
+	 * immediately functional after a server restart.
+	 *
+	 * Any entries that reference channels that no longer exist in Discord are
+	 * harmless: the Close button still works correctly because the opener's
+	 * Discord user ID is embedded in the button's custom_id.
+	 */
+	void LoadTicketState();
+
 	// ── State ─────────────────────────────────────────────────────────────────
 
 	/** Loaded config (populated in Initialize()). */

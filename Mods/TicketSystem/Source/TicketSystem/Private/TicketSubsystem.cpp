@@ -9,6 +9,9 @@
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
 #include "Engine/GameInstance.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "HAL/PlatformFileManager.h"
 
 DEFINE_LOG_CATEGORY(LogTicketSystem);
 
@@ -32,6 +35,10 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	// Load ticket configuration.
 	Config = FTicketConfig::Load();
+
+	// Restore any active tickets from the previous session so the duplicate-ticket
+	// check works correctly immediately after a server restart.
+	LoadTicketState();
 
 	// If a BotToken is supplied in DefaultTickets.ini, start the built-in
 	// standalone Discord provider so TicketSystem works without DiscordBridge.
@@ -409,6 +416,8 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		{
 			OpenerToTicketChannel.Remove(RemovedOpener);
 		}
+		// Persist the updated state so this closure survives a server restart.
+		SaveTicketState();
 		Bridge->DeleteDiscordChannel(SourceChannelId);
 		return;
 	}
@@ -774,6 +783,8 @@ void UTicketSubsystem::CreateTicketChannel(
 			// Track the channel.
 			TicketChannelToOpener.Add(NewChannelId, OpenerUserIdCopy);
 			OpenerToTicketChannel.Add(OpenerUserIdCopy, NewChannelId);
+			// Persist the updated state so this ticket survives a server restart.
+			SaveTicketState();
 
 			// ── Build the welcome message ─────────────────────────────────────
 			const FString MentionPrefix = NotifyRoleIdCopy.IsEmpty()
@@ -1069,4 +1080,106 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		: Config.TicketPanelChannelId;
 
 	PostTicketPanel(PanelChannelId, SourceChannelId);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ticket state persistence
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UTicketSubsystem::SaveTicketState() const
+{
+	// Build the directory path and ensure it exists.
+	const FString StateDir  = FPaths::ProjectSavedDir() / TEXT("Config/TicketSystem");
+	const FString StatePath = StateDir / TEXT("ActiveTickets.json");
+
+	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+	if (!PlatformFile.DirectoryExists(*StateDir))
+	{
+		PlatformFile.CreateDirectoryTree(*StateDir);
+	}
+
+	// Serialize TicketChannelToOpener to a JSON array.
+	TArray<TSharedPtr<FJsonValue>> TicketArray;
+	for (const TPair<FString, FString>& Pair : TicketChannelToOpener)
+	{
+		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetStringField(TEXT("channel_id"), Pair.Key);
+		Entry->SetStringField(TEXT("opener_id"),  Pair.Value);
+		TicketArray.Add(MakeShared<FJsonValueObject>(Entry));
+	}
+
+	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetArrayField(TEXT("tickets"), TicketArray);
+
+	FString JsonContent;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonContent);
+	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
+
+	if (!FFileHelper::SaveStringToFile(JsonContent, *StatePath))
+	{
+		UE_LOG(LogTicketSystem, Warning,
+		       TEXT("TicketSystem: Failed to save active ticket state to '%s'."),
+		       *StatePath);
+	}
+}
+
+void UTicketSubsystem::LoadTicketState()
+{
+	const FString StatePath =
+		FPaths::ProjectSavedDir() / TEXT("Config/TicketSystem/ActiveTickets.json");
+
+	FString JsonContent;
+	if (!FFileHelper::LoadFileToString(JsonContent, *StatePath))
+	{
+		// No state file is fine – this is a clean first run.
+		return;
+	}
+
+	TSharedPtr<FJsonObject> Root;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonContent);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		UE_LOG(LogTicketSystem, Warning,
+		       TEXT("TicketSystem: Failed to parse active ticket state from '%s'. "
+		            "State discarded; any pre-restart tickets will not block duplicates."),
+		       *StatePath);
+		return;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* Tickets = nullptr;
+	if (!Root->TryGetArrayField(TEXT("tickets"), Tickets) || !Tickets)
+	{
+		return;
+	}
+
+	int32 Loaded = 0;
+	for (const TSharedPtr<FJsonValue>& Entry : *Tickets)
+	{
+		const TSharedPtr<FJsonObject>* EntryObj = nullptr;
+		if (!Entry->TryGetObject(EntryObj) || !EntryObj)
+		{
+			continue;
+		}
+
+		FString ChannelId;
+		FString OpenerId;
+		(*EntryObj)->TryGetStringField(TEXT("channel_id"), ChannelId);
+		(*EntryObj)->TryGetStringField(TEXT("opener_id"),  OpenerId);
+
+		if (ChannelId.IsEmpty() || OpenerId.IsEmpty())
+		{
+			continue;
+		}
+
+		TicketChannelToOpener.Add(ChannelId, OpenerId);
+		OpenerToTicketChannel.Add(OpenerId,  ChannelId);
+		++Loaded;
+	}
+
+	if (Loaded > 0)
+	{
+		UE_LOG(LogTicketSystem, Log,
+		       TEXT("TicketSystem: Restored %d active ticket(s) from previous session."),
+		       Loaded);
+	}
 }
