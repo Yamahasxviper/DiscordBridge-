@@ -91,20 +91,27 @@ public:
 	 * (Discord response type 9 = MODAL) via the REST API.  Must be called
 	 * within ~3 seconds of receiving the interaction.
 	 *
-	 * @param InteractionId    The interaction "id" field from the payload.
-	 * @param InteractionToken The interaction "token" field from the payload.
-	 * @param ModalCustomId    The custom_id to assign to the modal itself
-	 *                         (e.g. "ticket_modal:wl").  Returned verbatim in
-	 *                         the subsequent MODAL_SUBMIT interaction.
-	 * @param Title            Modal window title (max 45 characters).
-	 * @param Placeholder      Placeholder text shown inside the paragraph-style
-	 *                         text input component.
+	 * @param InteractionId      The interaction "id" field from the payload.
+	 * @param InteractionToken   The interaction "token" field from the payload.
+	 * @param ModalCustomId      The custom_id to assign to the modal itself
+	 *                           (e.g. "ticket_modal:wl").  Returned verbatim in
+	 *                           the subsequent MODAL_SUBMIT interaction.
+	 * @param Title              Modal window title (max 45 characters).
+	 * @param Placeholder        Placeholder text shown inside the paragraph-style
+	 *                           text input component.
+	 * @param ComponentCustomId  The custom_id assigned to the single text-input
+	 *                           component inside the modal.  Returned verbatim
+	 *                           inside the MODAL_SUBMIT components array so the
+	 *                           caller can locate the submitted value.
+	 *                           Defaults to "ticket_reason" for backward
+	 *                           compatibility with existing TicketSystem callers.
 	 */
 	virtual void RespondWithModal(const FString& InteractionId,
 	                              const FString& InteractionToken,
 	                              const FString& ModalCustomId,
 	                              const FString& Title,
-	                              const FString& Placeholder) = 0;
+	                              const FString& Placeholder,
+	                              const FString& ComponentCustomId = TEXT("ticket_reason")) = 0;
 
 	/**
 	 * Post a plain-text message to any Discord channel via the REST API.

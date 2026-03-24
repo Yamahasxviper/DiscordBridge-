@@ -647,7 +647,8 @@ void UTicketDiscordProvider::RespondWithModal(const FString& InteractionId,
                                               const FString& InteractionToken,
                                               const FString& ModalCustomId,
                                               const FString& Title,
-                                              const FString& Placeholder)
+                                              const FString& Placeholder,
+                                              const FString& ComponentCustomId)
 {
 	if (InteractionId.IsEmpty() || InteractionToken.IsEmpty())
 	{
@@ -656,7 +657,7 @@ void UTicketDiscordProvider::RespondWithModal(const FString& InteractionId,
 
 	TSharedPtr<FJsonObject> TextInput = MakeShared<FJsonObject>();
 	TextInput->SetNumberField(TEXT("type"),        4); // TEXT_INPUT
-	TextInput->SetStringField(TEXT("custom_id"),   TEXT("ticket_reason"));
+	TextInput->SetStringField(TEXT("custom_id"),   ComponentCustomId.IsEmpty() ? TEXT("ticket_reason") : ComponentCustomId);
 	TextInput->SetNumberField(TEXT("style"),       2); // PARAGRAPH
 	TextInput->SetStringField(TEXT("label"),       TEXT("Reason"));
 	TextInput->SetStringField(TEXT("placeholder"), Placeholder);

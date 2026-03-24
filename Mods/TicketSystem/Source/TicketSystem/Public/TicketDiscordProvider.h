@@ -86,7 +86,8 @@ public:
 	                              const FString& InteractionToken,
 	                              const FString& ModalCustomId,
 	                              const FString& Title,
-	                              const FString& Placeholder) override;
+	                              const FString& Placeholder,
+	                              const FString& ComponentCustomId = TEXT("ticket_reason")) override;
 
 	virtual void SendDiscordChannelMessage(const FString& TargetChannelId,
 	                                       const FString& Message) override;
