@@ -58,7 +58,7 @@ jobs:
         run: .\\ue\\Engine\\Build\\BatchFiles\\Build.bat FactoryEditor Win64 Development -project="C:\\SML\\SML\\FactoryGame.uproject"
 
       - name: Package SML Mod
-        run: .\\ue\\Engine\\Build\\BatchFiles\\RunUAT.bat -ScriptsForProject="C:\\SML\\SML\\FactoryGame.uproject" PackagePlugin -Project="C:\\SML\\SML\\FactoryGame.uproject" -dlcname="C:\\SML\\SML\\Mods\\SML\\SML.uplugin" -merge -build -server -clientconfig=Shipping -serverconfig=Shipping -platform=Win64 -serverplatform=Win64+Linux -nocompileeditor -installed
+        run: .\\ue\\Engine\\Build\\BatchFiles\\RunUAT.bat -ScriptsForProject="C:\\SML\\SML\\FactoryGame.uproject" PackagePlugin -Project="C:\\SML\\SML\\FactoryGame.uproject" -dlcname=SML -merge -build -server -clientconfig=Shipping -serverconfig=Shipping -platform=Win64 -serverplatform=Win64+Linux -nocompileeditor -installed
 
       - name: Archive SML artifact
         uses: actions/upload-artifact@v4
@@ -68,7 +68,7 @@ jobs:
           path: C:\\SML\\SML\\Saved\\ArchivedPlugins\\SML\\*.zip
 
       - name: Package SMLWebSocket Mod
-        run: .\\ue\\Engine\\Build\\BatchFiles\\RunUAT.bat -ScriptsForProject="C:\\SML\\SML\\FactoryGame.uproject" PackagePlugin -Project="C:\\SML\\SML\\FactoryGame.uproject" -dlcname="C:\\SML\\SML\\Mods\\SMLWebSocket\\SMLWebSocket.uplugin" -merge -build -server -clientconfig=Shipping -serverconfig=Shipping -platform=Win64 -serverplatform=Win64+Linux -nocompileeditor -installed
+        run: .\\ue\\Engine\\Build\\BatchFiles\\RunUAT.bat -ScriptsForProject="C:\\SML\\SML\\FactoryGame.uproject" PackagePlugin -Project="C:\\SML\\SML\\FactoryGame.uproject" -dlcname=SMLWebSocket -merge -build -server -clientconfig=Shipping -serverconfig=Shipping -platform=Win64 -serverplatform=Win64+Linux -nocompileeditor -installed
 
       - name: Archive SMLWebSocket artifact
         uses: actions/upload-artifact@v4
@@ -78,7 +78,7 @@ jobs:
           path: C:\\SML\\SML\\Saved\\ArchivedPlugins\\SMLWebSocket\\*.zip
 
       - name: Package BanSystem Mod
-        run: .\\ue\\Engine\\Build\\BatchFiles\\RunUAT.bat -ScriptsForProject="C:\\SML\\SML\\FactoryGame.uproject" PackagePlugin -Project="C:\\SML\\SML\\FactoryGame.uproject" -dlcname="C:\\SML\\SML\\Mods\\BanSystem\\BanSystem.uplugin" -merge -build -server -clientconfig=Shipping -serverconfig=Shipping -platform=Win64 -serverplatform=Win64+Linux -nocompileeditor -installed
+        run: .\\ue\\Engine\\Build\\BatchFiles\\RunUAT.bat -ScriptsForProject="C:\\SML\\SML\\FactoryGame.uproject" PackagePlugin -Project="C:\\SML\\SML\\FactoryGame.uproject" -dlcname=BanSystem -merge -build -server -clientconfig=Shipping -serverconfig=Shipping -platform=Win64 -serverplatform=Win64+Linux -nocompileeditor -installed
 
       - name: Archive BanSystem artifact
         uses: actions/upload-artifact@v4
@@ -88,7 +88,7 @@ jobs:
           path: C:\\SML\\SML\\Saved\\ArchivedPlugins\\BanSystem\\*.zip
 
       - name: Package TicketSystem Mod
-        run: .\\ue\\Engine\\Build\\BatchFiles\\RunUAT.bat -ScriptsForProject="C:\\SML\\SML\\FactoryGame.uproject" PackagePlugin -Project="C:\\SML\\SML\\FactoryGame.uproject" -dlcname="C:\\SML\\SML\\Mods\\TicketSystem\\TicketSystem.uplugin" -merge -build -server -clientconfig=Shipping -serverconfig=Shipping -platform=Win64 -serverplatform=Win64+Linux -nocompileeditor -installed
+        run: .\\ue\\Engine\\Build\\BatchFiles\\RunUAT.bat -ScriptsForProject="C:\\SML\\SML\\FactoryGame.uproject" PackagePlugin -Project="C:\\SML\\SML\\FactoryGame.uproject" -dlcname=TicketSystem -merge -build -server -clientconfig=Shipping -serverconfig=Shipping -platform=Win64 -serverplatform=Win64+Linux -nocompileeditor -installed
 
       - name: Archive TicketSystem artifact
         uses: actions/upload-artifact@v4
@@ -98,7 +98,7 @@ jobs:
           path: C:\\SML\\SML\\Saved\\ArchivedPlugins\\TicketSystem\\*.zip
 
       - name: Package DiscordBridge Mod
-        run: .\\ue\\Engine\\Build\\BatchFiles\\RunUAT.bat -ScriptsForProject="C:\\SML\\SML\\FactoryGame.uproject" PackagePlugin -Project="C:\\SML\\SML\\FactoryGame.uproject" -dlcname="C:\\SML\\SML\\Mods\\DiscordBridge\\DiscordBridge.uplugin" -merge -build -server -clientconfig=Shipping -serverconfig=Shipping -platform=Win64 -serverplatform=Win64+Linux -nocompileeditor -installed
+        run: .\\ue\\Engine\\Build\\BatchFiles\\RunUAT.bat -ScriptsForProject="C:\\SML\\SML\\FactoryGame.uproject" PackagePlugin -Project="C:\\SML\\SML\\FactoryGame.uproject" -dlcname=DiscordBridge -merge -build -server -clientconfig=Shipping -serverconfig=Shipping -platform=Win64 -serverplatform=Win64+Linux -nocompileeditor -installed
 
       - name: Archive DiscordBridge artifact
         uses: actions/upload-artifact@v4
