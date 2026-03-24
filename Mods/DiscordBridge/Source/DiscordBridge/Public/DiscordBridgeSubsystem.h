@@ -277,7 +277,8 @@ public:
 	                              const FString& InteractionToken,
 	                              const FString& ModalCustomId,
 	                              const FString& Title,
-	                              const FString& Placeholder) override;
+	                              const FString& Placeholder,
+	                              const FString& ComponentCustomId = TEXT("ticket_reason")) override;
 
 	/**
 	 * Send a pre-built JSON message body (content + optional components) to a
@@ -518,9 +519,20 @@ private:
 	/**
 	 * Fetch all guild members who hold WhitelistRoleId via the Discord REST API
 	 * and populate RoleMemberIdToNames / WhitelistRoleMemberNames.
+	 * Clears the cache then initiates paginated fetching via FetchWhitelistRoleMembersPage.
 	 * Called from HandleReady whenever WhitelistRoleId is configured.
 	 */
 	void FetchWhitelistRoleMembers();
+
+	/**
+	 * Fetch a single page of guild members starting after AfterUserId.
+	 * Recurses automatically when the returned page is full (1000 entries),
+	 * stopping when a partial page is received (indicating the final page).
+	 *
+	 * @param AfterUserId  Snowflake ID of the last member from the previous page.
+	 *                     Pass an empty string to start from the beginning.
+	 */
+	void FetchWhitelistRoleMembersPage(const FString& AfterUserId);
 
 	/**
 	 * Add or remove a single member's display names in the Discord role member

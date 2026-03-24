@@ -469,8 +469,23 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 	}
 	else if (EventType == TEXT("GUILD_CREATE"))
 	{
-		// Capture the guild owner ID so extension modules (e.g. TicketSystem)
-		// can authorise guild-owner actions.
+		// GUILD_CREATE carries the full guild object; capture both the guild ID
+		// (reliable fallback in case READY's partial guilds array was absent)
+		// and the owner ID used by extension modules (e.g. TicketSystem).
+		FString IncomingGuildId;
+		if (DataObj->TryGetStringField(TEXT("id"), IncomingGuildId) &&
+		    !IncomingGuildId.IsEmpty())
+		{
+			if (GuildId.IsEmpty())
+			{
+				// Only update when GuildId has not been set yet.  For bots in
+				// multiple guilds the first GUILD_CREATE wins (same policy as
+				// the READY handler which picks the first entry in the array).
+				GuildId = IncomingGuildId;
+				UE_LOG(LogTemp, Log,
+				       TEXT("DiscordBridge: Guild ID set from GUILD_CREATE: %s"), *GuildId);
+			}
+		}
 		DataObj->TryGetStringField(TEXT("owner_id"), GuildOwnerId);
 	}
 	else if (EventType == TEXT("INTERACTION_CREATE"))
@@ -540,6 +555,20 @@ void UDiscordBridgeSubsystem::HandleInvalidSession(bool bResumable)
 	UE_LOG(LogTemp, Warning,
 	       TEXT("DiscordBridge: Invalid session (resumable=%s). Re-identifying in 2s…"),
 	       bResumable ? TEXT("true") : TEXT("false"));
+
+	// Cancel the heartbeat immediately so no further heartbeats are sent on
+	// the now-invalid session.  HandleHello will restart it once a new READY
+	// is received after re-identifying.
+	FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
+	HeartbeatTickerHandle.Reset();
+	bPendingHeartbeatAck = false;
+
+	// Clear all per-session gateway state so stale IDs are never used.
+	bGatewayReady      = false;
+	LastSequenceNumber = -1;
+	BotUserId.Empty();
+	GuildId.Empty();
+	GuildOwnerId.Empty();
 
 	// Per Discord spec, wait 1–5 seconds before re-identifying.
 	// Use a one-shot FTSTicker so the game thread is never blocked.
@@ -1075,7 +1104,8 @@ void UDiscordBridgeSubsystem::RespondWithModal(const FString& InteractionId,
                                                const FString& InteractionToken,
                                                const FString& ModalCustomId,
                                                const FString& Title,
-                                               const FString& Placeholder)
+                                               const FString& Placeholder,
+                                               const FString& ComponentCustomId)
 {
 	if (Config.BotToken.IsEmpty() || InteractionId.IsEmpty() || InteractionToken.IsEmpty())
 	{
@@ -1085,7 +1115,7 @@ void UDiscordBridgeSubsystem::RespondWithModal(const FString& InteractionId,
 	// Build the single paragraph text-input component.
 	TSharedPtr<FJsonObject> TextInput = MakeShared<FJsonObject>();
 	TextInput->SetNumberField(TEXT("type"),        4); // TEXT_INPUT
-	TextInput->SetStringField(TEXT("custom_id"),   TEXT("ticket_reason"));
+	TextInput->SetStringField(TEXT("custom_id"),   ComponentCustomId.IsEmpty() ? TEXT("ticket_reason") : ComponentCustomId);
 	TextInput->SetNumberField(TEXT("style"),       2); // PARAGRAPH (multi-line)
 	TextInput->SetStringField(TEXT("label"),       TEXT("Reason"));
 	TextInput->SetStringField(TEXT("placeholder"), Placeholder);
@@ -2137,11 +2167,29 @@ void UDiscordBridgeSubsystem::FetchWhitelistRoleMembers()
 		return;
 	}
 
-	// Fetch up to 1000 guild members; sufficient for most gaming communities.
-	// Discord's maximum per-request limit for this endpoint is 1000.
-	const FString Url = FString::Printf(
+	// Clear the cache before starting a fresh paginated fetch so stale entries
+	// from a previous load do not linger if membership has changed.
+	RoleMemberIdToNames.Empty();
+	WhitelistRoleMemberNames.Empty();
+
+	// Initiate pagination starting from the beginning (no `after` cursor).
+	FetchWhitelistRoleMembersPage(TEXT(""));
+}
+
+void UDiscordBridgeSubsystem::FetchWhitelistRoleMembersPage(const FString& AfterUserId)
+{
+	// Discord's maximum per-request limit for GET /guilds/{id}/members is 1000.
+	// Pages are fetched sequentially using the `after` cursor (last user ID of
+	// the previous page) until a page returns fewer than 1000 members, which
+	// indicates the final page has been reached.
+	FString Url = FString::Printf(
 		TEXT("%s/guilds/%s/members?limit=1000"),
 		*DiscordApiBase, *GuildId);
+
+	if (!AfterUserId.IsEmpty())
+	{
+		Url += FString::Printf(TEXT("&after=%s"), *AfterUserId);
+	}
 
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
 		FHttpModule::Get().CreateRequest();
@@ -2158,13 +2206,13 @@ void UDiscordBridgeSubsystem::FetchWhitelistRoleMembers()
 			if (!bConnected || !Resp.IsValid())
 			{
 				UE_LOG(LogTemp, Warning,
-				       TEXT("DiscordBridge: FetchWhitelistRoleMembers request failed."));
+				       TEXT("DiscordBridge: FetchWhitelistRoleMembersPage request failed."));
 				return;
 			}
 			if (Resp->GetResponseCode() != 200)
 			{
 				UE_LOG(LogTemp, Warning,
-				       TEXT("DiscordBridge: FetchWhitelistRoleMembers returned HTTP %d: %s"),
+				       TEXT("DiscordBridge: FetchWhitelistRoleMembersPage returned HTTP %d: %s"),
 				       Resp->GetResponseCode(), *Resp->GetContentAsString());
 				return;
 			}
@@ -2176,24 +2224,45 @@ void UDiscordBridgeSubsystem::FetchWhitelistRoleMembers()
 			if (!FJsonSerializer::Deserialize(Reader, Members))
 			{
 				UE_LOG(LogTemp, Warning,
-				       TEXT("DiscordBridge: FetchWhitelistRoleMembers – failed to parse JSON."));
+				       TEXT("DiscordBridge: FetchWhitelistRoleMembersPage – failed to parse JSON."));
 				return;
 			}
 
-			// Clear the cache and rebuild it from the full member list.
-			RoleMemberIdToNames.Empty();
+			// Process each member from this page.
+			FString LastUserId;
 			for (const TSharedPtr<FJsonValue>& Val : Members)
 			{
 				const TSharedPtr<FJsonObject>* MemberPtr = nullptr;
-				if (Val->TryGetObject(MemberPtr) && MemberPtr)
+				if (!Val->TryGetObject(MemberPtr) || !MemberPtr)
 				{
-					UpdateWhitelistRoleMemberEntry(*MemberPtr);
+					continue;
+				}
+				UpdateWhitelistRoleMemberEntry(*MemberPtr);
+
+				// Track the last user ID for the pagination cursor.
+				const TSharedPtr<FJsonObject>* UserPtr = nullptr;
+				if ((*MemberPtr)->TryGetObjectField(TEXT("user"), UserPtr) && UserPtr)
+				{
+					(*UserPtr)->TryGetStringField(TEXT("id"), LastUserId);
 				}
 			}
 
-			UE_LOG(LogTemp, Log,
-			       TEXT("DiscordBridge: Whitelist role cache built – %d member(s) hold WhitelistRoleId (%d name(s) cached)."),
-			       RoleMemberIdToNames.Num(), WhitelistRoleMemberNames.Num());
+			if (Members.Num() == 1000 && !LastUserId.IsEmpty())
+			{
+				// Full page received – there may be more members; fetch the next page.
+				UE_LOG(LogTemp, Log,
+				       TEXT("DiscordBridge: Whitelist role cache page complete (%d members). "
+				            "Fetching next page after user %s…"),
+				       Members.Num(), *LastUserId);
+				FetchWhitelistRoleMembersPage(LastUserId);
+			}
+			else
+			{
+				// Final page – log the completed cache size.
+				UE_LOG(LogTemp, Log,
+				       TEXT("DiscordBridge: Whitelist role cache built – %d member(s) hold WhitelistRoleId (%d name(s) cached)."),
+				       RoleMemberIdToNames.Num(), WhitelistRoleMemberNames.Num());
+			}
 		});
 
 	Request->ProcessRequest();
