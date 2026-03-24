@@ -1,4 +1,4 @@
-// Copyright Coffee Stain Studios. All Rights Reserved.
+// Copyright Yamahasxviper. All Rights Reserved.
 
 #include "TicketConfig.h"
 
@@ -58,13 +58,12 @@ static TArray<FString> ParseRawIniArray(const FString& RawContent, const FString
 
 FString FTicketConfig::GetConfigFilePath()
 {
-	// Stored under the mod's own Config/ directory so Alpakit ships it with
-	// the packaged .zip and SMM installs it in the right place.
-	return FPaths::Combine(
-		FPaths::ProjectModsDir(),
-		TEXT("TicketSystem"),
-		TEXT("Config"),
-		TEXT("DefaultTickets.ini"));
+	// Use FPaths::ProjectDir() + "Mods/..." — the same pattern used by
+	// BanSystem and DiscordBridge throughout this repo.
+	// FPaths::ProjectModsDir() is not part of Satisfactory's CSS custom
+	// Unreal Engine build and would cause a compile/link failure.
+	return FPaths::ProjectDir() /
+	       TEXT("Mods/TicketSystem/Config/DefaultTickets.ini");
 }
 
 FString FTicketConfig::GetBackupFilePath()

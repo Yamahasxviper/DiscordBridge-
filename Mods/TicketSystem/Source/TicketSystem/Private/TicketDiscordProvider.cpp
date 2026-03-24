@@ -1,4 +1,4 @@
-// Copyright Coffee Stain Studios. All Rights Reserved.
+// Copyright Yamahasxviper. All Rights Reserved.
 
 #include "TicketDiscordProvider.h"
 
@@ -208,7 +208,13 @@ void UTicketDiscordProvider::HandleGatewayPayload(const FString& RawJson)
 		return;
 	}
 
-	const int32 OpCode = Root->GetIntegerField(TEXT("op"));
+	// Use TryGetNumberField so a missing or non-numeric "op" field (which can
+	// occur during a reconnect race or from a malformed frame) does not trigger
+	// a hard assert.  Default to -1 so the switch falls through to the no-op
+	// default case.
+	double OpCodeDouble = -1.0;
+	Root->TryGetNumberField(TEXT("op"), OpCodeDouble);
+	const int32 OpCode = static_cast<int32>(OpCodeDouble);
 
 	switch (OpCode)
 	{
