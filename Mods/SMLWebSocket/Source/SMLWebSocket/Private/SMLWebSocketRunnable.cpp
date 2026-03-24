@@ -2,6 +2,7 @@
 
 #include "SMLWebSocketRunnable.h"
 #include "SMLWebSocketClient.h"
+#include "SMLWebSocket.h"
 
 #include "Async/Async.h"
 #include "HAL/PlatformProcess.h"
@@ -68,11 +69,13 @@ FSMLWebSocketRunnable::FSMLWebSocketRunnable(USMLWebSocketClient* InOwner,
                                              const FString& InUrl,
                                              const TArray<FString>& InProtocols,
                                              const TMap<FString, FString>& InExtraHeaders,
-                                             const FSMLWebSocketReconnectConfig& InReconnectCfg)
+                                             const FSMLWebSocketReconnectConfig& InReconnectCfg,
+                                             uint32 InConnectionGeneration)
 	: Owner(InOwner)
 	, Protocols(InProtocols)
 	, ExtraHeaders(InExtraHeaders)
 	, ReconnectCfg(InReconnectCfg)
+	, ConnectionGeneration(InConnectionGeneration)
 {
 	// Parse the URL into components.
 	// Expected forms:  ws://host[:port]/path   or   wss://host[:port]/path
@@ -95,7 +98,7 @@ FSMLWebSocketRunnable::FSMLWebSocketRunnable(USMLWebSocketClient* InOwner,
 		// Treat an unknown scheme as plain ws://
 		bUseSsl = false;
 		ParsedPort = 80;
-		UE_LOG(LogTemp, Warning, TEXT("SMLWebSocket: Unrecognized scheme in URL '%s', treating as ws://"), *InUrl);
+		UE_LOG(LogSMLWebSocket, Warning, TEXT("SMLWebSocket: Unrecognized scheme in URL '%s', treating as ws://"), *InUrl);
 	}
 
 	// Split host[:port] from path
@@ -212,7 +215,7 @@ uint32 FSMLWebSocketRunnable::Run()
 #else
 			// SSL is not available on this platform; wss:// connections are unsupported.
 			// Satisfactory dedicated servers only run on Win64 and Linux where OpenSSL is present.
-			UE_LOG(LogTemp, Error, TEXT("SMLWebSocket: wss:// is not supported on this platform. "
+			UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: wss:// is not supported on this platform. "
 			                           "Satisfactory dedicated servers require Win64 or Linux."));
 #endif
 			if (!bSslOk)
@@ -433,7 +436,7 @@ bool FSMLWebSocketRunnable::ResolveAndConnect(const FString& Host, int32 Port)
 	ISocketSubsystem* SocketSS = ISocketSubsystem::Get(NAME_None);
 	if (!SocketSS)
 	{
-		UE_LOG(LogTemp, Error, TEXT("SMLWebSocket: No socket subsystem"));
+		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: No socket subsystem"));
 		return false;
 	}
 
@@ -443,7 +446,7 @@ bool FSMLWebSocketRunnable::ResolveAndConnect(const FString& Host, int32 Port)
 	                                                       NAME_None);
 	if (Result.ReturnCode != SE_NO_ERROR || Result.Results.IsEmpty())
 	{
-		UE_LOG(LogTemp, Error, TEXT("SMLWebSocket: Failed to resolve '%s'"), *Host);
+		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: Failed to resolve '%s'"), *Host);
 		return false;
 	}
 
@@ -454,7 +457,7 @@ bool FSMLWebSocketRunnable::ResolveAndConnect(const FString& Host, int32 Port)
 	Socket = SocketSS->CreateSocket(NAME_Stream, TEXT("SMLWebSocket"), Addr->GetProtocolType());
 	if (!Socket)
 	{
-		UE_LOG(LogTemp, Error, TEXT("SMLWebSocket: Failed to create socket"));
+		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: Failed to create socket"));
 		return false;
 	}
 
@@ -465,7 +468,7 @@ bool FSMLWebSocketRunnable::ResolveAndConnect(const FString& Host, int32 Port)
 
 	if (!Socket->Connect(*Addr))
 	{
-		UE_LOG(LogTemp, Error, TEXT("SMLWebSocket: Connect() failed to %s:%d"), *Host, Port);
+		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: Connect() failed to %s:%d"), *Host, Port);
 		return false;
 	}
 
@@ -482,7 +485,9 @@ bool FSMLWebSocketRunnable::InitSslContext()
 	SslCtx = SSL_CTX_new(TLS_client_method());
 	if (!SslCtx)
 	{
-		UE_LOG(LogTemp, Error, TEXT("SMLWebSocket: SSL_CTX_new failed"));
+		char ErrBuf[256];
+		ERR_error_string_n(ERR_get_error(), ErrBuf, sizeof(ErrBuf));
+		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: SSL_CTX_new failed: %s"), UTF8_TO_TCHAR(ErrBuf));
 		return false;
 	}
 
@@ -500,7 +505,9 @@ bool FSMLWebSocketRunnable::InitSslContext()
 	SslInstance = SSL_new(SslCtx);
 	if (!SslInstance)
 	{
-		UE_LOG(LogTemp, Error, TEXT("SMLWebSocket: SSL_new failed"));
+		char ErrBuf[256];
+		ERR_error_string_n(ERR_get_error(), ErrBuf, sizeof(ErrBuf));
+		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: SSL_new failed: %s"), UTF8_TO_TCHAR(ErrBuf));
 		return false;
 	}
 
@@ -511,7 +518,7 @@ bool FSMLWebSocketRunnable::InitSslContext()
 
 	if (!ReadBio || !WriteBio)
 	{
-		UE_LOG(LogTemp, Error, TEXT("SMLWebSocket: Failed to create memory BIOs"));
+		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: Failed to create memory BIOs"));
 		return false;
 	}
 
@@ -552,7 +559,7 @@ bool FSMLWebSocketRunnable::PerformSslHandshake(const FString& Host)
 	// that certificate-selection problems are easier to diagnose.
 	if (SSL_set_tlsext_host_name(SslInstance, TCHAR_TO_UTF8(*Host)) != 1)
 	{
-		UE_LOG(LogTemp, Warning,
+		UE_LOG(LogSMLWebSocket, Warning,
 		       TEXT("SMLWebSocket: SSL_set_tlsext_host_name failed for host '%s'. "
 		            "TLS handshake will proceed without SNI."), *Host);
 	}
@@ -586,7 +593,10 @@ bool FSMLWebSocketRunnable::PerformSslHandshake(const FString& Host)
 		}
 		else
 		{
-			UE_LOG(LogTemp, Error, TEXT("SMLWebSocket: SSL handshake error %d"), Err);
+			char ErrBuf[256];
+			ERR_error_string_n(ERR_get_error(), ErrBuf, sizeof(ErrBuf));
+			UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: SSL handshake error %d: %s"),
+			       Err, UTF8_TO_TCHAR(ErrBuf));
 			return false;
 		}
 	}
@@ -619,7 +629,7 @@ bool FSMLWebSocketRunnable::FeedSslReadBio()
 	// Wait up to RecvTimeoutMs for data to arrive (the handshake must complete promptly).
 	if (!Socket->Wait(ESocketWaitConditions::WaitForRead, FTimespan::FromMilliseconds(RecvTimeoutMs)))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("SMLWebSocket: Timed out waiting for TLS handshake data"));
+		UE_LOG(LogSMLWebSocket, Warning, TEXT("SMLWebSocket: Timed out waiting for TLS handshake data"));
 		return false;
 	}
 
@@ -705,7 +715,10 @@ bool FSMLWebSocketRunnable::SslWrite(const uint8* Data, int32 DataSize)
 			}
 			else
 			{
-				UE_LOG(LogTemp, Error, TEXT("SMLWebSocket: SSL_write error %d"), Err);
+				char ErrBuf[256];
+				ERR_error_string_n(ERR_get_error(), ErrBuf, sizeof(ErrBuf));
+				UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: SSL_write error %d: %s"),
+				       Err, UTF8_TO_TCHAR(ErrBuf));
 				return false;
 			}
 		}
@@ -855,7 +868,12 @@ bool FSMLWebSocketRunnable::SendHttpUpgradeRequest(const FString& Host, int32 Po
 
 	for (const auto& Pair : ExtraHeaders)
 	{
-		Request += FString::Printf(TEXT("%s: %s\r\n"), *Pair.Key, *Pair.Value);
+		// Sanitize keys and values: strip CR and LF characters to prevent
+		// HTTP header injection if a caller provides untrusted header content.
+		const FString SafeKey   = Pair.Key.Replace(TEXT("\r"), TEXT("")).Replace(TEXT("\n"), TEXT(""));
+		const FString SafeValue = Pair.Value.Replace(TEXT("\r"), TEXT("")).Replace(TEXT("\n"), TEXT(""));
+		if (SafeKey.IsEmpty()) continue;
+		Request += FString::Printf(TEXT("%s: %s\r\n"), *SafeKey, *SafeValue);
 	}
 
 	Request += TEXT("\r\n");
@@ -871,8 +889,20 @@ bool FSMLWebSocketRunnable::ReadHttpUpgradeResponse(const FString& ExpectedAccep
 	FString ResponseHeaders;
 	uint8 Buf[1];
 
+	// Cap the total header bytes we will accept to protect against malicious or
+	// misbehaving servers that never send \r\n\r\n.
+	static constexpr int32 MaxHttpHeaderBytes = 8192;
+
 	while (!bStopRequested)
 	{
+		if (ResponseHeaders.Len() >= MaxHttpHeaderBytes)
+		{
+			UE_LOG(LogSMLWebSocket, Error,
+			       TEXT("SMLWebSocket: HTTP upgrade response headers exceeded %d bytes – aborting"),
+			       MaxHttpHeaderBytes);
+			return false;
+		}
+
 		if (!NetRecvExact(Buf, 1))
 		{
 			return false;
@@ -890,36 +920,39 @@ bool FSMLWebSocketRunnable::ReadHttpUpgradeResponse(const FString& ExpectedAccep
 
 	if (bStopRequested) return false;
 
-	// Validate HTTP 101 status
-	if (!ResponseHeaders.Contains(TEXT("101")))
-	{
-		UE_LOG(LogTemp, Error, TEXT("SMLWebSocket: Server did not return 101 Switching Protocols.\n%s"), *ResponseHeaders);
-		return false;
-	}
-
-	// Validate Sec-WebSocket-Accept (case-insensitive header search)
-	const FString LowerResponse = ResponseHeaders.ToLower();
-	const FString LowerKey      = ExpectedAcceptKey.ToLower();
-	if (!LowerResponse.Contains(TEXT("sec-websocket-accept")))
-	{
-		UE_LOG(LogTemp, Error, TEXT("SMLWebSocket: Response missing Sec-WebSocket-Accept header"));
-		return false;
-	}
-
-	// Extract the accept value from the response
+	// Validate that the first status line is "HTTP/x.y 101 <reason>".
+	// We check only the first line so we don't accidentally match "101" in
+	// a header value or response body.
 	TArray<FString> Lines;
 	ResponseHeaders.ParseIntoArrayLines(Lines);
+	const bool bGot101 = Lines.Num() > 0 &&
+	                     Lines[0].StartsWith(TEXT("HTTP/"), ESearchCase::IgnoreCase) &&
+	                     (Lines[0].Contains(TEXT(" 101 ")) || Lines[0].EndsWith(TEXT(" 101")));
+	if (!bGot101)
+	{
+		UE_LOG(LogSMLWebSocket, Error,
+		       TEXT("SMLWebSocket: Server did not return 101 Switching Protocols.\n%s"),
+		       *ResponseHeaders);
+		return false;
+	}
+	// Validate Sec-WebSocket-Accept (case-insensitive header search)
+	if (!ResponseHeaders.Contains(TEXT("sec-websocket-accept"), ESearchCase::IgnoreCase))
+	{
+		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: Response missing Sec-WebSocket-Accept header"));
+		return false;
+	}
+
+	// Extract the accept value from the response (Lines is already populated above)
 	for (const FString& Line : Lines)
 	{
-		if (Line.StartsWith(TEXT("Sec-WebSocket-Accept:"), ESearchCase::IgnoreCase) ||
-		    Line.StartsWith(TEXT("Sec-WebSocket-Accept: "), ESearchCase::IgnoreCase))
+		if (Line.StartsWith(TEXT("Sec-WebSocket-Accept:"), ESearchCase::IgnoreCase))
 		{
 			FString AcceptValue;
 			Line.Split(TEXT(":"), nullptr, &AcceptValue);
 			AcceptValue.TrimStartAndEndInline();
 			if (!AcceptValue.Equals(ExpectedAcceptKey, ESearchCase::IgnoreCase))
 			{
-				UE_LOG(LogTemp, Error,
+				UE_LOG(LogSMLWebSocket, Error,
 				       TEXT("SMLWebSocket: Sec-WebSocket-Accept mismatch. Expected '%s', got '%s'"),
 				       *ExpectedAcceptKey, *AcceptValue);
 				return false;
@@ -928,7 +961,7 @@ bool FSMLWebSocketRunnable::ReadHttpUpgradeResponse(const FString& ExpectedAccep
 		}
 	}
 
-	UE_LOG(LogTemp, Error, TEXT("SMLWebSocket: Could not parse Sec-WebSocket-Accept header"));
+	UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: Could not parse Sec-WebSocket-Accept header"));
 	return false;
 }
 
@@ -1044,7 +1077,7 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 	static constexpr uint64 MaxPayloadBytes = 64u * 1024u * 1024u;
 	if (PayloadLen > MaxPayloadBytes)
 	{
-		UE_LOG(LogTemp, Error,
+		UE_LOG(LogSMLWebSocket, Error,
 		       TEXT("SMLWebSocket: Incoming frame payload too large (%llu bytes) – closing connection"),
 		       static_cast<unsigned long long>(PayloadLen));
 		return false;
@@ -1168,7 +1201,7 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 	}
 
 	default:
-		UE_LOG(LogTemp, Warning, TEXT("SMLWebSocket: Unknown opcode 0x%02X – ignoring"), Opcode);
+		UE_LOG(LogSMLWebSocket, Warning, TEXT("SMLWebSocket: Unknown opcode 0x%02X – ignoring"), Opcode);
 		break;
 	}
 
@@ -1231,7 +1264,7 @@ FString FSMLWebSocketRunnable::ComputeAcceptKey(const FString& ClientKey)
 	// SHA1 requires OpenSSL which is not available on this platform.
 	// Satisfactory dedicated servers only run on Win64 and Linux, where OpenSSL is
 	// always present, so this branch is dead code in all supported configurations.
-	UE_LOG(LogTemp, Error,
+	UE_LOG(LogSMLWebSocket, Error,
 	       TEXT("SMLWebSocket: SHA1 is not available on this platform. "
 	            "WebSocket handshake will fail. "
 	            "Satisfactory dedicated servers require Win64 or Linux."));
@@ -1246,11 +1279,15 @@ FString FSMLWebSocketRunnable::ComputeAcceptKey(const FString& ClientKey)
 void FSMLWebSocketRunnable::NotifyConnected()
 {
 	TWeakObjectPtr<USMLWebSocketClient> WeakOwner = Owner;
-	AsyncTask(ENamedThreads::GameThread, [WeakOwner]()
+	const uint32 Gen = ConnectionGeneration;
+	AsyncTask(ENamedThreads::GameThread, [WeakOwner, Gen]()
 	{
 		if (USMLWebSocketClient* Ptr = WeakOwner.Get())
 		{
-			Ptr->Internal_OnConnected();
+			if (Ptr->ConnectionGeneration == Gen)
+			{
+				Ptr->Internal_OnConnected();
+			}
 		}
 	});
 }
@@ -1258,11 +1295,15 @@ void FSMLWebSocketRunnable::NotifyConnected()
 void FSMLWebSocketRunnable::NotifyMessage(const FString& Message)
 {
 	TWeakObjectPtr<USMLWebSocketClient> WeakOwner = Owner;
-	AsyncTask(ENamedThreads::GameThread, [WeakOwner, Message]()
+	const uint32 Gen = ConnectionGeneration;
+	AsyncTask(ENamedThreads::GameThread, [WeakOwner, Gen, Message]()
 	{
 		if (USMLWebSocketClient* Ptr = WeakOwner.Get())
 		{
-			Ptr->Internal_OnMessage(Message);
+			if (Ptr->ConnectionGeneration == Gen)
+			{
+				Ptr->Internal_OnMessage(Message);
+			}
 		}
 	});
 }
@@ -1270,11 +1311,15 @@ void FSMLWebSocketRunnable::NotifyMessage(const FString& Message)
 void FSMLWebSocketRunnable::NotifyBinaryMessage(const TArray<uint8>& Data, bool bIsFinal)
 {
 	TWeakObjectPtr<USMLWebSocketClient> WeakOwner = Owner;
-	AsyncTask(ENamedThreads::GameThread, [WeakOwner, Data, bIsFinal]()
+	const uint32 Gen = ConnectionGeneration;
+	AsyncTask(ENamedThreads::GameThread, [WeakOwner, Gen, Data, bIsFinal]()
 	{
 		if (USMLWebSocketClient* Ptr = WeakOwner.Get())
 		{
-			Ptr->Internal_OnBinaryMessage(Data, bIsFinal);
+			if (Ptr->ConnectionGeneration == Gen)
+			{
+				Ptr->Internal_OnBinaryMessage(Data, bIsFinal);
+			}
 		}
 	});
 }
@@ -1282,11 +1327,15 @@ void FSMLWebSocketRunnable::NotifyBinaryMessage(const TArray<uint8>& Data, bool 
 void FSMLWebSocketRunnable::NotifyClosed(int32 Code, const FString& Reason)
 {
 	TWeakObjectPtr<USMLWebSocketClient> WeakOwner = Owner;
-	AsyncTask(ENamedThreads::GameThread, [WeakOwner, Code, Reason]()
+	const uint32 Gen = ConnectionGeneration;
+	AsyncTask(ENamedThreads::GameThread, [WeakOwner, Gen, Code, Reason]()
 	{
 		if (USMLWebSocketClient* Ptr = WeakOwner.Get())
 		{
-			Ptr->Internal_OnClosed(Code, Reason);
+			if (Ptr->ConnectionGeneration == Gen)
+			{
+				Ptr->Internal_OnClosed(Code, Reason);
+			}
 		}
 	});
 }
@@ -1294,11 +1343,15 @@ void FSMLWebSocketRunnable::NotifyClosed(int32 Code, const FString& Reason)
 void FSMLWebSocketRunnable::NotifyError(const FString& Error)
 {
 	TWeakObjectPtr<USMLWebSocketClient> WeakOwner = Owner;
-	AsyncTask(ENamedThreads::GameThread, [WeakOwner, Error]()
+	const uint32 Gen = ConnectionGeneration;
+	AsyncTask(ENamedThreads::GameThread, [WeakOwner, Gen, Error]()
 	{
 		if (USMLWebSocketClient* Ptr = WeakOwner.Get())
 		{
-			Ptr->Internal_OnError(Error);
+			if (Ptr->ConnectionGeneration == Gen)
+			{
+				Ptr->Internal_OnError(Error);
+			}
 		}
 	});
 }
@@ -1306,11 +1359,15 @@ void FSMLWebSocketRunnable::NotifyError(const FString& Error)
 void FSMLWebSocketRunnable::NotifyReconnecting(int32 AttemptNumber, float DelaySeconds)
 {
 	TWeakObjectPtr<USMLWebSocketClient> WeakOwner = Owner;
-	AsyncTask(ENamedThreads::GameThread, [WeakOwner, AttemptNumber, DelaySeconds]()
+	const uint32 Gen = ConnectionGeneration;
+	AsyncTask(ENamedThreads::GameThread, [WeakOwner, Gen, AttemptNumber, DelaySeconds]()
 	{
 		if (USMLWebSocketClient* Ptr = WeakOwner.Get())
 		{
-			Ptr->Internal_OnReconnecting(AttemptNumber, DelaySeconds);
+			if (Ptr->ConnectionGeneration == Gen)
+			{
+				Ptr->Internal_OnReconnecting(AttemptNumber, DelaySeconds);
+			}
 		}
 	});
 }

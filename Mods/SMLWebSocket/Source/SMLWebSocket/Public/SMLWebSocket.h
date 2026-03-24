@@ -3,6 +3,10 @@
 #pragma once
 
 #include "Modules/ModuleManager.h"
+#include "Logging/LogMacros.h"
+
+/** Dedicated log category for all SMLWebSocket diagnostics. */
+SMLWEBSOCKET_API DECLARE_LOG_CATEGORY_EXTERN(LogSMLWebSocket, Log, All);
 
 /** Custom WebSocket module providing SSL/OpenSSL-backed WebSocket client support for Satisfactory mods. */
 class FSMLWebSocketModule : public IModuleInterface

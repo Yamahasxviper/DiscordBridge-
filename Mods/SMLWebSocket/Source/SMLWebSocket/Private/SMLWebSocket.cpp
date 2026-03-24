@@ -3,6 +3,8 @@
 #include "SMLWebSocket.h"
 #include "Modules/ModuleManager.h"
 
+DEFINE_LOG_CATEGORY(LogSMLWebSocket);
+
 // OpenSSL global init/cleanup — only on the two Satisfactory dedicated-server platforms.
 // UE's Slate/InputCore declares `namespace UI {}` at global scope.  OpenSSL's
 // ossl_typ.h (line 144) also declares `typedef struct ui_st UI` at global scope.

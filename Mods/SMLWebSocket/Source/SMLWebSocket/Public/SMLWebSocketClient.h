@@ -199,4 +199,13 @@ private:
 	FRunnableThread* RunnableThread{nullptr};
 
 	FThreadSafeBool bIsConnected{false};
+
+	/**
+	 * Monotonically-increasing counter that is incremented each time
+	 * StopRunnable() is called.  Async game-thread callbacks captured by an
+	 * FSMLWebSocketRunnable carry the generation value at their creation time
+	 * and are silently dropped when it no longer matches, preventing stale
+	 * events from a replaced connection from firing on the game thread.
+	 */
+	uint32 ConnectionGeneration{0};
 };
