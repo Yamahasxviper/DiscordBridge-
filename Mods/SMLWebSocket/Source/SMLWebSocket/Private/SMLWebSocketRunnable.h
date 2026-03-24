@@ -76,7 +76,8 @@ public:
 	                      const FString& InUrl,
 	                      const TArray<FString>& InProtocols,
 	                      const TMap<FString, FString>& InExtraHeaders,
-	                      const FSMLWebSocketReconnectConfig& InReconnectCfg);
+	                      const FSMLWebSocketReconnectConfig& InReconnectCfg,
+	                      uint32 InConnectionGeneration);
 
 	virtual ~FSMLWebSocketRunnable() override;
 
@@ -203,6 +204,12 @@ private:
 
 	// Reconnect configuration (immutable after construction)
 	FSMLWebSocketReconnectConfig ReconnectCfg;
+
+	// Connection-generation snapshot taken from USMLWebSocketClient at construction
+	// time. Every async game-thread notification lambda captures this value and
+	// discards the callback when it no longer matches the client's current
+	// generation, preventing stale events from a replaced connection.
+	uint32 ConnectionGeneration{0};
 
 	// Unreal TCP socket (blocking mode)
 	FSocket* Socket{nullptr};

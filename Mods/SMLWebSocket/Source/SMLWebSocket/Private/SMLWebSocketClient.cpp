@@ -1,6 +1,7 @@
 // Copyright Coffee Stain Studios. All Rights Reserved.
 
 #include "SMLWebSocketClient.h"
+#include "SMLWebSocket.h"
 #include "SMLWebSocketRunnable.h"
 #include "HAL/RunnableThread.h"
 #include "Async/Async.h"
@@ -50,7 +51,8 @@ void USMLWebSocketClient::Connect(const FString& Url,
 	ReconnectCfg.MaxReconnectDelay         = MaxReconnectDelaySeconds;
 	ReconnectCfg.MaxReconnectAttempts      = MaxReconnectAttempts;
 
-	Runnable = MakeShared<FSMLWebSocketRunnable>(this, Url, Protocols, ExtraHeaders, ReconnectCfg);
+	Runnable = MakeShared<FSMLWebSocketRunnable>(this, Url, Protocols, ExtraHeaders, ReconnectCfg,
+	                                             ConnectionGeneration);
 	RunnableThread = FRunnableThread::Create(Runnable.Get(),
 	                                         TEXT("SMLWebSocketThread"),
 	                                         0,
@@ -94,6 +96,12 @@ bool USMLWebSocketClient::IsConnected() const
 
 void USMLWebSocketClient::StopRunnable()
 {
+	// Invalidate any game-thread callbacks that were queued by the old
+	// connection before we tear it down.  The Notify* lambdas inside
+	// FSMLWebSocketRunnable capture this generation value and silently
+	// discard their work when it no longer matches.
+	++ConnectionGeneration;
+
 	if (Runnable.IsValid())
 	{
 		Runnable->Stop();
