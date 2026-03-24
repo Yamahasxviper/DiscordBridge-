@@ -379,6 +379,9 @@
 			]
 		}
 	],
+	"AdditionalPluginDirectories": [
+		"Mods"
+	],
 	"TargetPlatforms": [
 		"Win64",
 		"Linux",
