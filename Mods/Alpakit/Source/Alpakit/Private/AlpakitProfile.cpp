@@ -69,18 +69,13 @@ FString FAlpakitProfile::MakeUATCommandLine() {
 	const FString ProjectPath = FPaths::IsProjectFilePathSet()
 		? FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath())
 		: FPaths::RootDir() / FApp::GetProjectName() / FApp::GetProjectName() + TEXT(".uproject");
-
-	// When a full .uplugin path is available use it so that RunUAT can locate the plugin
-	// directly rather than searching only the standard Engine/Plugins and Plugins directories.
-	// Mods/ is not a standard search path, so a bare plugin name would fail to resolve.
-	const FString DLCNameArg = PluginPath.IsEmpty() ? PluginName : FString::Printf(TEXT("\"%s\""), *PluginPath);
 	
 	FString CommandLine = FString::Printf(TEXT("-ScriptsForProject=\"%s\" PackagePlugin -project=\"%s\" -clientconfig=%s -serverconfig=%s -utf8output -DLCName=%s"),
 			*ProjectPath,
 			*ProjectPath,
 			LexToString(BuildConfiguration),
 			LexToString(BuildConfiguration),
-			*DLCNameArg);
+			*PluginName);
 
 	if (bBuild) {
 		CommandLine += TEXT(" -build");

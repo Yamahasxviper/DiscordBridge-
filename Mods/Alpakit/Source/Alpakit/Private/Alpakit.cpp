@@ -171,7 +171,6 @@ TSharedRef<FAlpakitProfile> MakeDevelopmentProfileForMod(TSharedRef<IPlugin> Mod
     TSharedRef<FAlpakitProfile> Profile = MakeShared<FAlpakitProfile>(Mod->GetName());
 
     Profile->bBuild = Mod->GetDescriptor().Modules.Num() > 0;
-    Profile->PluginPath = FPaths::ConvertRelativePathToFull(Mod->GetBaseDir() / Mod->GetName() + TEXT(".uplugin"));
     
     UAlpakitSettings* Settings = UAlpakitSettings::Get();
 
@@ -225,7 +224,6 @@ TSharedRef<FAlpakitProfile> MakeReleaseProfileForMod(TSharedRef<IPlugin> Mod) {
     TSharedRef<FAlpakitProfile> Profile = MakeShared<FAlpakitProfile>(Mod->GetName());
 
     Profile->bBuild = Mod->GetDescriptor().Modules.Num() > 0;
-    Profile->PluginPath = FPaths::ConvertRelativePathToFull(Mod->GetBaseDir() / Mod->GetName() + TEXT(".uplugin"));
     Profile->BuildConfiguration = EBuildConfiguration::Shipping;
 
     Profile->bMergeArchive = true;
