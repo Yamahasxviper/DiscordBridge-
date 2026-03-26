@@ -127,11 +127,13 @@ private:
 	void HandleHello(const TSharedPtr<FJsonObject>& DataObj);
 	void HandleDispatch(const FString& EventType, const TSharedPtr<FJsonObject>& DataObj);
 	void HandleReady(const TSharedPtr<FJsonObject>& DataObj);
+	void HandleResumed();
 	void HandleHeartbeatAck();
 	void HandleReconnect();
 	void HandleInvalidSession(bool bResumable);
 
 	void SendIdentify();
+	void SendResume();
 	void SendHeartbeat();
 	bool HeartbeatTick(float DeltaTime);
 	void SendGatewayPayload(const TSharedPtr<FJsonObject>& Payload);
@@ -157,6 +159,8 @@ private:
 	FString GuildIdOverride; ///< Optional user-supplied value from config.
 	FString GuildOwnerId;    ///< Populated from GUILD_CREATE.
 	FString BotUserId;       ///< Populated from READY.
+	FString SessionId;       ///< Session ID from READY; used for Gateway resume (op=6).
+	FString ResumeGatewayUrl;///< Resume URL from READY; preferred reconnect target.
 
 	int32 LastSequenceNumber    = -1;
 	bool  bGatewayReady         = false;

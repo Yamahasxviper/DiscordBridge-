@@ -404,6 +404,9 @@ private:
 	/** t=READY: Bot is authenticated and ready. */
 	void HandleReady(const TSharedPtr<FJsonObject>& DataObj);
 
+	/** t=RESUMED: Gateway session successfully resumed after reconnect. */
+	void HandleResumed();
+
 	/** t=MESSAGE_CREATE: A new message was posted in a channel. */
 	void HandleMessageCreate(const TSharedPtr<FJsonObject>& DataObj);
 
@@ -418,6 +421,15 @@ private:
 
 	/** Send the Identify payload (op=2) to authenticate the bot. */
 	void SendIdentify();
+
+	/**
+	 * Send the Resume payload (op=6) to resume an interrupted Gateway session.
+	 * Requires SessionId and LastSequenceNumber to be populated.
+	 * Discord replays all missed events when the resume succeeds and fires
+	 * t=RESUMED; on failure it sends op=9 (Invalid Session, d=false) and we
+	 * fall back to a full Identify.
+	 */
+	void SendResume();
 
 	/** Send a heartbeat (op=1) to keep the Gateway connection alive. */
 	void SendHeartbeat();
@@ -490,6 +502,24 @@ private:
 
 	/** Snowflake ID of the bot user; used to filter out self-sent messages. */
 	FString BotUserId;
+
+	// ── Gateway session resumption ────────────────────────────────────────────
+
+	/**
+	 * Session ID received in the READY event.  Retained across reconnects so
+	 * that the bot can send op=6 (Resume) instead of a full op=2 (Identify),
+	 * which causes Discord to replay any missed events.
+	 * Cleared only on Disconnect() or when op=9 with d=false is received
+	 * (indicating the session has expired and cannot be resumed).
+	 */
+	FString SessionId;
+
+	/**
+	 * Gateway URL received in the READY event.  Discord may route the bot to
+	 * a specific shard URL for resumption; always prefer this URL when resuming.
+	 * Falls back to DiscordGatewayUrl when empty.
+	 */
+	FString ResumeGatewayUrl;
 
 	// ── Chat manager binding ──────────────────────────────────────────────────
 

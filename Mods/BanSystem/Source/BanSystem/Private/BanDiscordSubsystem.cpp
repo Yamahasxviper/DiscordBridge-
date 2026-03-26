@@ -232,6 +232,8 @@ void UBanDiscordSubsystem::Disconnect()
 	LastSequenceNumber   = -1;
 	BotUserId.Empty();
 	GuildOwnerId.Empty();
+	SessionId.Empty();
+	ResumeGatewayUrl.Empty();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -372,11 +374,9 @@ void UBanDiscordSubsystem::HandleGatewayPayload(const FString& RawJson)
 		HandleHeartbeatAck();
 		break;
 	case 7: // Reconnect
-		// Per Discord spec: reset all gateway state before reconnecting.
+		// Per Discord spec: keep SessionId/ResumeGatewayUrl for resume attempt.
 		// Do NOT call Disconnect()/Close() here — that sets bUserInitiatedClose
 		// inside the SMLWebSocket runnable, permanently disabling auto-reconnect.
-		// Calling Connect() on the existing client stops the current runnable
-		// and starts a fresh one with auto-reconnect still active.
 		if (HeartbeatTickerHandle.IsValid())
 		{
 			FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
@@ -384,36 +384,21 @@ void UBanDiscordSubsystem::HandleGatewayPayload(const FString& RawJson)
 		}
 		bPendingHeartbeatAck = false;
 		bGatewayReady        = false;
-		LastSequenceNumber   = -1;
 		BotUserId.Empty();
 		GuildOwnerId.Empty();
 		if (WebSocketClient)
 		{
-			WebSocketClient->Connect(DiscordGatewayUrl, {}, {});
+			const FString ConnectUrl = ResumeGatewayUrl.IsEmpty()
+				? DiscordGatewayUrl
+				: (ResumeGatewayUrl + TEXT("/?v=10&encoding=json"));
+			WebSocketClient->Connect(ConnectUrl, {}, {});
 		}
 		break;
 	case 9: // Invalid Session
 	{
-		// Re-identify with fresh state.
-		// Per Discord spec, wait 1–5 seconds before re-identifying.
-		// Use a one-shot FTSTicker so the game thread is NEVER blocked.
-		bGatewayReady      = false;
-		LastSequenceNumber = -1;
-		BotUserId.Empty();
-		UE_LOG(LogBanDiscord, Warning,
-		       TEXT("BanDiscordSubsystem: Invalid session received — "
-		            "re-identifying in 5 s."));
-		TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
-		FTSTicker::GetCoreTicker().AddTicker(
-			FTickerDelegate::CreateLambda([WeakThis](float) -> bool
-			{
-				if (UBanDiscordSubsystem* Self = WeakThis.Get())
-				{
-					Self->SendIdentify();
-				}
-				return false; // one-shot — do not repeat
-			}),
-			5.0f);
+		bool bResumable = false;
+		Root->TryGetBoolField(TEXT("d"), bResumable);
+		HandleInvalidSession(bResumable);
 		break;
 	}
 	default:
@@ -437,12 +422,23 @@ void UBanDiscordSubsystem::HandleHello(const TSharedPtr<FJsonObject>& DataObj)
 		HeartbeatIntervalSeconds);
 	bPendingHeartbeatAck = false;
 
-	SendIdentify();
-
-	UE_LOG(LogBanDiscord, Log,
-	       TEXT("BanDiscordSubsystem: Gateway Hello received — "
-	            "heartbeat interval %.1f s, Identify sent."),
-	       HeartbeatIntervalSeconds);
+	// Attempt Resume if we have a session; otherwise Identify fresh.
+	if (!SessionId.IsEmpty())
+	{
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: Gateway Hello received (resume path). "
+		            "Sending Resume for session %s. Heartbeat interval %.1f s."),
+		       *SessionId, HeartbeatIntervalSeconds);
+		SendResume();
+	}
+	else
+	{
+		SendIdentify();
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: Gateway Hello received — "
+		            "heartbeat interval %.1f s, Identify sent."),
+		       HeartbeatIntervalSeconds);
+	}
 }
 
 void UBanDiscordSubsystem::HandleDispatch(const FString& EventType, int32 Sequence,
@@ -451,6 +447,10 @@ void UBanDiscordSubsystem::HandleDispatch(const FString& EventType, int32 Sequen
 	if (EventType == TEXT("READY"))
 	{
 		HandleReady(DataObj);
+	}
+	else if (EventType == TEXT("RESUMED"))
+	{
+		HandleResumed();
 	}
 	else if (EventType == TEXT("MESSAGE_CREATE"))
 	{
@@ -475,9 +475,20 @@ void UBanDiscordSubsystem::HandleReady(const TSharedPtr<FJsonObject>& DataObj)
 		(*UserObj)->TryGetStringField(TEXT("id"), BotUserId);
 	}
 
+	// Capture session_id and resume_gateway_url for future reconnects.
+	DataObj->TryGetStringField(TEXT("session_id"), SessionId);
+	DataObj->TryGetStringField(TEXT("resume_gateway_url"), ResumeGatewayUrl);
+
 	bGatewayReady = true;
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: Gateway READY — bot user ID: %s"), *BotUserId);
+}
+
+void UBanDiscordSubsystem::HandleResumed()
+{
+	bGatewayReady = true;
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: Gateway session resumed successfully."));
 }
 
 void UBanDiscordSubsystem::HandleGuildCreate(const TSharedPtr<FJsonObject>& DataObj)
@@ -525,11 +536,82 @@ void UBanDiscordSubsystem::SendIdentify()
 	SendGatewayPayload(Payload);
 }
 
+void UBanDiscordSubsystem::SendResume()
+{
+	if (SessionId.IsEmpty())
+	{
+		UE_LOG(LogBanDiscord, Warning,
+		       TEXT("BanDiscordSubsystem: SendResume called with empty SessionId — "
+		            "falling back to Identify."));
+		SendIdentify();
+		return;
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("token"),      Config.BotToken);
+	Data->SetStringField(TEXT("session_id"), SessionId);
+	Data->SetNumberField(TEXT("seq"),        LastSequenceNumber);
+
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetNumberField(TEXT("op"), 6); // Resume
+	Payload->SetObjectField(TEXT("d"),  Data);
+
+	SendGatewayPayload(Payload);
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: Resume sent (session_id=%s, seq=%d)."),
+	       *SessionId, LastSequenceNumber);
+}
+
+void UBanDiscordSubsystem::HandleInvalidSession(bool bResumable)
+{
+	bGatewayReady = false;
+	BotUserId.Empty();
+
+	if (bResumable && !SessionId.IsEmpty())
+	{
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: Invalid session (resumable) — "
+		            "scheduling Resume in 2 s."));
+		TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
+		FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateLambda([WeakThis](float) -> bool
+			{
+				if (UBanDiscordSubsystem* Self = WeakThis.Get())
+				{
+					Self->SendResume();
+				}
+				return false;
+			}),
+			2.0f);
+	}
+	else
+	{
+		// Session not resumable — clear session and re-identify.
+		SessionId.Empty();
+		ResumeGatewayUrl.Empty();
+		LastSequenceNumber = -1;
+		UE_LOG(LogBanDiscord, Warning,
+		       TEXT("BanDiscordSubsystem: Invalid session (not resumable) — "
+		            "re-identifying in 2 s."));
+		TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
+		FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateLambda([WeakThis](float) -> bool
+			{
+				if (UBanDiscordSubsystem* Self = WeakThis.Get())
+				{
+					Self->SendIdentify();
+				}
+				return false;
+			}),
+			2.0f);
+	}
+}
+
 void UBanDiscordSubsystem::SendHeartbeat()
 {
 	if (bPendingHeartbeatAck)
 	{
-		// Zombie connection — force reconnect.
+		// Zombie connection — force reconnect but keep session for resume.
 		UE_LOG(LogBanDiscord, Warning,
 		       TEXT("BanDiscordSubsystem: Heartbeat not acknowledged — "
 		            "reconnecting to Discord Gateway."));
@@ -540,12 +622,14 @@ void UBanDiscordSubsystem::SendHeartbeat()
 		}
 		bPendingHeartbeatAck = false;
 		bGatewayReady        = false;
-		LastSequenceNumber   = -1;
 		BotUserId.Empty();
 		GuildOwnerId.Empty();
 		if (WebSocketClient)
 		{
-			WebSocketClient->Connect(DiscordGatewayUrl, {}, {});
+			const FString ConnectUrl = ResumeGatewayUrl.IsEmpty()
+				? DiscordGatewayUrl
+				: (ResumeGatewayUrl + TEXT("/?v=10&encoding=json"));
+			WebSocketClient->Connect(ConnectUrl, {}, {});
 		}
 		return;
 	}

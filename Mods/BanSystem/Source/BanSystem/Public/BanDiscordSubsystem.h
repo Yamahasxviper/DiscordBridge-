@@ -159,6 +159,13 @@ private:
 	/** op=2 Identify */
 	void SendIdentify();
 
+	/**
+	 * op=6 Resume — attempt to resume an interrupted Gateway session.
+	 * Requires SessionId and LastSequenceNumber to be populated.
+	 * Falls back to SendIdentify() when SessionId is empty.
+	 */
+	void SendResume();
+
 	/** op=1 Heartbeat */
 	void SendHeartbeat();
 
@@ -184,7 +191,9 @@ private:
 	void HandleDispatch(const FString& EventType, int32 Sequence,
 	                    const TSharedPtr<FJsonObject>& DataObj);
 	void HandleHeartbeatAck();
+	void HandleInvalidSession(bool bResumable);
 	void HandleReady(const TSharedPtr<FJsonObject>& DataObj);
+	void HandleResumed();
 	void HandleMessageCreate(const TSharedPtr<FJsonObject>& DataObj);
 	void HandleGuildCreate(const TSharedPtr<FJsonObject>& DataObj);
 
@@ -229,6 +238,12 @@ private:
 
 	/** Snowflake ID of the guild owner; populated from GUILD_CREATE. */
 	FString GuildOwnerId;
+
+	/** Session ID from the READY event; used to resume after reconnect. */
+	FString SessionId;
+
+	/** Resume gateway URL from the READY event; used as the reconnect target. */
+	FString ResumeGatewayUrl;
 
 	/** Heartbeat ticker handle. */
 	FTSTicker::FDelegateHandle HeartbeatTickerHandle;
