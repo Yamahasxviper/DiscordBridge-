@@ -87,6 +87,8 @@ void UTicketDiscordProvider::Disconnect()
 	BotUserId.Empty();
 	GuildId.Empty();
 	GuildOwnerId.Empty();
+	SessionId.Empty();
+	ResumeGatewayUrl.Empty();
 
 	if (WebSocketClient)
 	{
@@ -295,7 +297,18 @@ void UTicketDiscordProvider::HandleHello(const TSharedPtr<FJsonObject>& DataObj)
 		}),
 		JitterSeconds);
 
-	SendIdentify();
+	// Attempt Resume if we have a session; otherwise Identify fresh.
+	if (!SessionId.IsEmpty())
+	{
+		UE_LOG(LogTicketDiscordProvider, Log,
+		       TEXT("TicketDiscordProvider: Hello received (resume path). "
+		            "Sending Resume for session %s."), *SessionId);
+		SendResume();
+	}
+	else
+	{
+		SendIdentify();
+	}
 }
 
 void UTicketDiscordProvider::HandleDispatch(const FString& EventType,
@@ -304,6 +317,10 @@ void UTicketDiscordProvider::HandleDispatch(const FString& EventType,
 	if (EventType == TEXT("READY"))
 	{
 		HandleReady(DataObj);
+	}
+	else if (EventType == TEXT("RESUMED"))
+	{
+		HandleResumed();
 	}
 	else if (EventType == TEXT("GUILD_CREATE"))
 	{
@@ -332,6 +349,10 @@ void UTicketDiscordProvider::HandleReady(const TSharedPtr<FJsonObject>& DataObj)
 	{
 		(*UserPtr)->TryGetStringField(TEXT("id"), BotUserId);
 	}
+
+	// Capture session_id and resume_gateway_url for future reconnects.
+	DataObj->TryGetStringField(TEXT("session_id"), SessionId);
+	DataObj->TryGetStringField(TEXT("resume_gateway_url"), ResumeGatewayUrl);
 
 	// Populate GuildId from the READY guilds array only when no override is set.
 	if (GuildIdOverride.IsEmpty())
@@ -371,7 +392,6 @@ void UTicketDiscordProvider::HandleReconnect()
 	HeartbeatTickerHandle.Reset();
 	bPendingHeartbeatAck = false;
 	bGatewayReady        = false;
-	LastSequenceNumber   = -1;
 	BotUserId.Empty();
 	if (GuildIdOverride.IsEmpty())
 	{
@@ -381,23 +401,53 @@ void UTicketDiscordProvider::HandleReconnect()
 
 	if (WebSocketClient)
 	{
-		WebSocketClient->Connect(TSDiscordGatewayUrl, {}, {});
+		const FString ConnectUrl = ResumeGatewayUrl.IsEmpty()
+			? TSDiscordGatewayUrl
+			: (ResumeGatewayUrl + TEXT("/?v=10&encoding=json"));
+		WebSocketClient->Connect(ConnectUrl, {}, {});
 	}
 }
 
 void UTicketDiscordProvider::HandleInvalidSession(bool bResumable)
 {
-	UE_LOG(LogTicketDiscordProvider, Warning,
-	       TEXT("TicketDiscordProvider: Invalid session (resumable=%s). Re-identifying in 2s…"),
-	       bResumable ? TEXT("true") : TEXT("false"));
+	bGatewayReady = false;
+	BotUserId.Empty();
 
-	FTSTicker::GetCoreTicker().AddTicker(
-		FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
+	if (bResumable && !SessionId.IsEmpty())
+	{
+		UE_LOG(LogTicketDiscordProvider, Log,
+		       TEXT("TicketDiscordProvider: Invalid session (resumable) — "
+		            "scheduling Resume in 2 s."));
+		FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
+			{
+				SendResume();
+				return false;
+			}),
+			2.0f);
+	}
+	else
+	{
+		// Session not resumable — clear session state and re-identify.
+		SessionId.Empty();
+		ResumeGatewayUrl.Empty();
+		LastSequenceNumber = -1;
+		if (GuildIdOverride.IsEmpty())
 		{
-			SendIdentify();
-			return false;
-		}),
-		2.0f);
+			GuildId.Empty();
+		}
+		GuildOwnerId.Empty();
+		UE_LOG(LogTicketDiscordProvider, Warning,
+		       TEXT("TicketDiscordProvider: Invalid session (not resumable) — "
+		            "re-identifying in 2 s."));
+		FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
+			{
+				SendIdentify();
+				return false;
+			}),
+			2.0f);
+	}
 }
 
 void UTicketDiscordProvider::SendIdentify()
@@ -437,6 +487,40 @@ void UTicketDiscordProvider::SendIdentify()
 	       TEXT("TicketDiscordProvider: Identify sent (intents=%d)."), TSGatewayIntents);
 }
 
+void UTicketDiscordProvider::SendResume()
+{
+	if (SessionId.IsEmpty())
+	{
+		UE_LOG(LogTicketDiscordProvider, Warning,
+		       TEXT("TicketDiscordProvider: SendResume called with empty SessionId — "
+		            "falling back to Identify."));
+		SendIdentify();
+		return;
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("token"),      BotToken);
+	Data->SetStringField(TEXT("session_id"), SessionId);
+	Data->SetNumberField(TEXT("seq"),        LastSequenceNumber);
+
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetNumberField(TEXT("op"), 6); // Resume
+	Payload->SetObjectField(TEXT("d"),  Data);
+
+	SendGatewayPayload(Payload);
+
+	UE_LOG(LogTicketDiscordProvider, Log,
+	       TEXT("TicketDiscordProvider: Resume sent (session_id=%s, seq=%d)."),
+	       *SessionId, LastSequenceNumber);
+}
+
+void UTicketDiscordProvider::HandleResumed()
+{
+	UE_LOG(LogTicketDiscordProvider, Log,
+	       TEXT("TicketDiscordProvider: Gateway session resumed successfully."));
+	bGatewayReady = true;
+}
+
 void UTicketDiscordProvider::SendHeartbeat()
 {
 	// Zombie-connection detection: if the previous heartbeat was never acked,
@@ -451,7 +535,6 @@ void UTicketDiscordProvider::SendHeartbeat()
 		HeartbeatTickerHandle.Reset();
 		bPendingHeartbeatAck = false;
 		bGatewayReady        = false;
-		LastSequenceNumber   = -1;
 		BotUserId.Empty();
 		if (GuildIdOverride.IsEmpty())
 		{
@@ -461,7 +544,10 @@ void UTicketDiscordProvider::SendHeartbeat()
 
 		if (WebSocketClient)
 		{
-			WebSocketClient->Connect(TSDiscordGatewayUrl, {}, {});
+			const FString ConnectUrl = ResumeGatewayUrl.IsEmpty()
+				? TSDiscordGatewayUrl
+				: (ResumeGatewayUrl + TEXT("/?v=10&encoding=json"));
+			WebSocketClient->Connect(ConnectUrl, {}, {});
 		}
 		return;
 	}

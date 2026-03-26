@@ -226,6 +226,8 @@ void UDiscordBridgeSubsystem::Disconnect()
 	BotUserId.Empty();
 	GuildId.Empty();
 	GuildOwnerId.Empty();
+	SessionId.Empty();
+	ResumeGatewayUrl.Empty();
 
 	if (WebSocketClient)
 	{
@@ -452,8 +454,21 @@ void UDiscordBridgeSubsystem::HandleHello(const TSharedPtr<FJsonObject>& DataObj
 		}),
 		JitterSeconds);
 
-	// Send Identify so Discord authenticates us.
-	SendIdentify();
+	// If we have an active session, attempt to resume it rather than starting a
+	// full Identify.  Discord will replay missed events and fire t=RESUMED on
+	// success, or send op=9 (Invalid Session, d=false) if the session expired.
+	if (!SessionId.IsEmpty())
+	{
+		UE_LOG(LogTemp, Log,
+		       TEXT("DiscordBridge: Hello received (resume path). Sending Resume for session %s."),
+		       *SessionId);
+		SendResume();
+	}
+	else
+	{
+		// Send Identify so Discord authenticates us.
+		SendIdentify();
+	}
 }
 
 void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Sequence,
@@ -462,6 +477,10 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 	if (EventType == TEXT("READY"))
 	{
 		HandleReady(DataObj);
+	}
+	else if (EventType == TEXT("RESUMED"))
+	{
+		HandleResumed();
 	}
 	else if (EventType == TEXT("MESSAGE_CREATE"))
 	{
@@ -528,12 +547,12 @@ void UDiscordBridgeSubsystem::HandleReconnect()
 {
 	UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Server requested reconnect."));
 
-	// Reset Gateway state; we'll re-identify once the WebSocket reconnects.
+	// Reset per-connection Gateway state but KEEP SessionId and ResumeGatewayUrl
+	// so HandleHello can attempt op=6 Resume instead of a full Identify.
 	FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
 	HeartbeatTickerHandle.Reset();
 	bPendingHeartbeatAck = false;
 	bGatewayReady        = false;
-	LastSequenceNumber   = -1;
 	BotUserId.Empty();
 	GuildId.Empty();
 	GuildOwnerId.Empty();
@@ -544,16 +563,20 @@ void UDiscordBridgeSubsystem::HandleReconnect()
 	// the reconnect loop permanently and leaves the bot offline.
 	// Connect() stops the current thread and starts a fresh runnable with
 	// auto-reconnect still enabled.
+	// Per Discord spec, reconnect to resume_gateway_url when available.
 	if (WebSocketClient)
 	{
-		WebSocketClient->Connect(DiscordGatewayUrl, {}, {});
+		const FString ConnectUrl = ResumeGatewayUrl.IsEmpty()
+			? DiscordGatewayUrl
+			: (ResumeGatewayUrl + TEXT("/?v=10&encoding=json"));
+		WebSocketClient->Connect(ConnectUrl, {}, {});
 	}
 }
 
 void UDiscordBridgeSubsystem::HandleInvalidSession(bool bResumable)
 {
 	UE_LOG(LogTemp, Warning,
-	       TEXT("DiscordBridge: Invalid session (resumable=%s). Re-identifying in 2s…"),
+	       TEXT("DiscordBridge: Invalid session (resumable=%s)."),
 	       bResumable ? TEXT("true") : TEXT("false"));
 
 	// Cancel the heartbeat immediately so no further heartbeats are sent on
@@ -565,20 +588,42 @@ void UDiscordBridgeSubsystem::HandleInvalidSession(bool bResumable)
 
 	// Clear all per-session gateway state so stale IDs are never used.
 	bGatewayReady      = false;
-	LastSequenceNumber = -1;
 	BotUserId.Empty();
 	GuildId.Empty();
 	GuildOwnerId.Empty();
 
-	// Per Discord spec, wait 1–5 seconds before re-identifying.
-	// Use a one-shot FTSTicker so the game thread is never blocked.
-	FTSTicker::GetCoreTicker().AddTicker(
-		FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
-		{
-			SendIdentify();
-			return false; // one-shot – do not repeat
-		}),
-		2.0f);
+	if (bResumable && !SessionId.IsEmpty())
+	{
+		// Session can be resumed — schedule a Resume attempt in 2 seconds.
+		UE_LOG(LogTemp, Log,
+		       TEXT("DiscordBridge: Scheduling Resume attempt for session %s in 2s."),
+		       *SessionId);
+		FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
+			{
+				SendResume();
+				return false; // one-shot – do not repeat
+			}),
+			2.0f);
+	}
+	else
+	{
+		// Session is not resumable — clear session state and do a fresh Identify.
+		// Per Discord spec, wait 1–5 seconds before re-identifying.
+		SessionId.Empty();
+		ResumeGatewayUrl.Empty();
+		LastSequenceNumber = -1;
+
+		UE_LOG(LogTemp, Log,
+		       TEXT("DiscordBridge: Session expired — scheduling fresh Identify in 2s."));
+		FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
+			{
+				SendIdentify();
+				return false; // one-shot – do not repeat
+			}),
+			2.0f);
+	}
 }
 
 void UDiscordBridgeSubsystem::HandleReady(const TSharedPtr<FJsonObject>& DataObj)
@@ -589,6 +634,11 @@ void UDiscordBridgeSubsystem::HandleReady(const TSharedPtr<FJsonObject>& DataObj
 	{
 		(*UserPtr)->TryGetStringField(TEXT("id"), BotUserId);
 	}
+
+	// Capture the session ID and resume gateway URL.  These are required to
+	// resume the session after a disconnect instead of doing a full re-identify.
+	DataObj->TryGetStringField(TEXT("session_id"), SessionId);
+	DataObj->TryGetStringField(TEXT("resume_gateway_url"), ResumeGatewayUrl);
 
 	// Extract the guild (server) ID from the first entry in the guilds array.
 	// This is needed for Discord REST role-management API calls.
@@ -644,6 +694,34 @@ void UDiscordBridgeSubsystem::HandleReady(const TSharedPtr<FJsonObject>& DataObj
 	if (!Config.WhitelistRoleId.IsEmpty())
 	{
 		FetchWhitelistRoleMembers();
+	}
+
+	OnDiscordConnected.Broadcast();
+}
+
+void UDiscordBridgeSubsystem::HandleResumed()
+{
+	UE_LOG(LogTemp, Log,
+	       TEXT("DiscordBridge: Session resumed successfully. Missed events replayed by Discord."));
+
+	bGatewayReady = true;
+
+	// Restart the player count presence ticker that was stopped on reconnect.
+	FTSTicker::GetCoreTicker().RemoveTicker(PlayerCountTickerHandle);
+	PlayerCountTickerHandle.Reset();
+
+	if (Config.bShowPlayerCountInPresence)
+	{
+		UpdatePlayerCountPresence();
+
+		const float Interval = FMath::Max(Config.PlayerCountUpdateIntervalSeconds, 15.0f);
+		PlayerCountTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateUObject(this, &UDiscordBridgeSubsystem::PlayerCountTick),
+			Interval);
+	}
+	else
+	{
+		SendUpdatePresence(TEXT("online"));
 	}
 
 	OnDiscordConnected.Broadcast();
@@ -824,6 +902,32 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 // Sending Gateway payloads
 // ─────────────────────────────────────────────────────────────────────────────
 
+void UDiscordBridgeSubsystem::SendResume()
+{
+	if (SessionId.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning,
+		       TEXT("DiscordBridge: SendResume called with empty SessionId — falling back to Identify."));
+		SendIdentify();
+		return;
+	}
+
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetStringField(TEXT("token"),      Config.BotToken);
+	Data->SetStringField(TEXT("session_id"), SessionId);
+	Data->SetNumberField(TEXT("seq"),        LastSequenceNumber);
+
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetNumberField(TEXT("op"), 6); // op=6 RESUME
+	Payload->SetObjectField(TEXT("d"),  Data);
+
+	SendGatewayPayload(Payload);
+
+	UE_LOG(LogTemp, Log,
+	       TEXT("DiscordBridge: Resume sent (session_id=%s, seq=%d)."),
+	       *SessionId, LastSequenceNumber);
+}
+
 void UDiscordBridgeSubsystem::SendIdentify()
 {
 	// Build the connection properties object.
@@ -888,9 +992,9 @@ void UDiscordBridgeSubsystem::SendHeartbeat()
 		HeartbeatTickerHandle.Reset();
 		bPendingHeartbeatAck = false;
 
-		// Reset Gateway state; we'll re-identify once the WebSocket reconnects.
-		bGatewayReady      = false;
-		LastSequenceNumber = -1;
+		// Reset Gateway state but keep SessionId/ResumeGatewayUrl so HandleHello
+		// can attempt a Resume instead of a full Identify.
+		bGatewayReady = false;
 		BotUserId.Empty();
 		GuildId.Empty();
 		GuildOwnerId.Empty();
@@ -902,7 +1006,10 @@ void UDiscordBridgeSubsystem::SendHeartbeat()
 			// FSMLWebSocketRunnable, which exits the reconnect loop permanently
 			// and leaves the bot offline.  Connect() stops the current thread
 			// and starts a new runnable with auto-reconnect still enabled.
-			WebSocketClient->Connect(DiscordGatewayUrl, {}, {});
+			const FString ConnectUrl = ResumeGatewayUrl.IsEmpty()
+				? DiscordGatewayUrl
+				: (ResumeGatewayUrl + TEXT("/?v=10&encoding=json"));
+			WebSocketClient->Connect(ConnectUrl, {}, {});
 		}
 		return;
 	}
