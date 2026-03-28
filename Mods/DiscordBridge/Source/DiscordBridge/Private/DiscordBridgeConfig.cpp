@@ -271,6 +271,9 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.WhitelistKickReason             = GetIniStringOrFallback(ConfigFile, TEXT("WhitelistKickReason"),             Config.WhitelistKickReason);
 		Config.bWhitelistEnabled               = GetIniBoolOrDefault  (ConfigFile, TEXT("WhitelistEnabled"),               Config.bWhitelistEnabled);
 		Config.InGameWhitelistCommandPrefix    = GetIniStringOrDefault(ConfigFile, TEXT("InGameWhitelistCommandPrefix"),    Config.InGameWhitelistCommandPrefix);
+		Config.bPlayerEventsEnabled            = GetIniBoolOrDefault  (ConfigFile, TEXT("PlayerEventsEnabled"),            Config.bPlayerEventsEnabled);
+		Config.PlayerJoinMessage               = GetIniStringOrDefault(ConfigFile, TEXT("PlayerJoinMessage"),               Config.PlayerJoinMessage);
+		Config.PlayerLeaveMessage              = GetIniStringOrDefault(ConfigFile, TEXT("PlayerLeaveMessage"),              Config.PlayerLeaveMessage);
 
 		// Trim leading/trailing whitespace from credential fields to prevent
 		// subtle mismatches when operators accidentally include spaces.
@@ -480,6 +483,22 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("StatusChannelId=\n");
 				}
 
+				if (!ConfigFile.GetString(ConfigSection, TEXT("PlayerEventsEnabled"), TmpVal))
+				{
+					AppendContent2 +=
+						TEXT("\n")
+						TEXT("# -- PLAYER EVENT NOTIFICATIONS (added by mod update) -----------------\n")
+						TEXT("# When True, player join and leave/timeout events are posted to Discord.\n")
+						TEXT("# Default: False\n")
+						TEXT("PlayerEventsEnabled=False\n")
+						TEXT("# Message posted to Discord when a player joins. Leave empty to disable.\n")
+						TEXT("# Placeholder: %PlayerName% - in-game name of the player.\n")
+						TEXT("PlayerJoinMessage=:arrow_right: **%PlayerName%** has joined the server.\n")
+						TEXT("# Message posted to Discord when a player leaves or times out. Leave empty to disable.\n")
+						TEXT("# Placeholder: %PlayerName% - in-game name of the player.\n")
+						TEXT("PlayerLeaveMessage=:arrow_left: **%PlayerName%** has left the server.\n");
+				}
+
 				if (!AppendContent2.IsEmpty())
 				{
 					UE_LOG(LogTemp, Log,
@@ -595,7 +614,20 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("# Reason shown in-game to the player when kicked for not being whitelisted.\n")
 			TEXT("WhitelistKickReason=\n")
 			TEXT("# Prefix for whitelist commands in the in-game chat. Default: !whitelist\n")
-			TEXT("InGameWhitelistCommandPrefix=!whitelist\n");
+			TEXT("InGameWhitelistCommandPrefix=!whitelist\n")
+			TEXT("\n")
+			TEXT("# -- PLAYER EVENT NOTIFICATIONS -----------------------------------------------\n")
+			TEXT("# When True, player join and leave (including timeout) events are posted to Discord.\n")
+			TEXT("# Default: False\n")
+			TEXT("PlayerEventsEnabled=False\n")
+			TEXT("# Message posted to Discord when a player joins. Leave empty to disable.\n")
+			TEXT("# Available placeholder: %PlayerName% - in-game name of the player who joined.\n")
+			TEXT("# Default: :arrow_right: **%PlayerName%** has joined the server.\n")
+			TEXT("PlayerJoinMessage=:arrow_right: **%PlayerName%** has joined the server.\n")
+			TEXT("# Message posted to Discord when a player leaves or times out. Leave empty to disable.\n")
+			TEXT("# Available placeholder: %PlayerName% - in-game name of the player who disconnected.\n")
+			TEXT("# Default: :arrow_left: **%PlayerName%** has left the server.\n")
+			TEXT("PlayerLeaveMessage=:arrow_left: **%PlayerName%** has left the server.\n");
 
 		// Ensure the Config directory exists before writing.
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(ModFilePath));
@@ -675,6 +707,9 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.WhitelistKickReason              = GetRawStringOrFallback(BackupValues, TEXT("WhitelistKickReason"),              Config.WhitelistKickReason);
 		Config.bWhitelistEnabled                = GetRawBoolOrDefault  (BackupValues, TEXT("WhitelistEnabled"),                Config.bWhitelistEnabled);
 		Config.InGameWhitelistCommandPrefix     = GetRawStringOrDefault(BackupValues, TEXT("InGameWhitelistCommandPrefix"),     Config.InGameWhitelistCommandPrefix);
+		Config.bPlayerEventsEnabled             = GetRawBoolOrDefault  (BackupValues, TEXT("PlayerEventsEnabled"),             Config.bPlayerEventsEnabled);
+		Config.PlayerJoinMessage                = GetRawStringOrDefault(BackupValues, TEXT("PlayerJoinMessage"),                Config.PlayerJoinMessage);
+		Config.PlayerLeaveMessage               = GetRawStringOrDefault(BackupValues, TEXT("PlayerLeaveMessage"),               Config.PlayerLeaveMessage);
 
 		// Only log the "restored from backup" message when credentials were
 		// actually recovered (i.e. previously blank in primary but now non-empty
@@ -756,6 +791,9 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("WhitelistKickDiscordMessage"),   Config.WhitelistKickDiscordMessage);
 				PatchLine(TEXT("WhitelistKickReason"),           Config.WhitelistKickReason);
 				PatchLine(TEXT("InGameWhitelistCommandPrefix"),  Config.InGameWhitelistCommandPrefix);
+				PatchLine(TEXT("PlayerEventsEnabled"),           Config.bPlayerEventsEnabled ? TEXT("True") : TEXT("False"));
+				PatchLine(TEXT("PlayerJoinMessage"),             Config.PlayerJoinMessage);
+				PatchLine(TEXT("PlayerLeaveMessage"),            Config.PlayerLeaveMessage);
 
 				if (FFileHelper::SaveStringToFile(PrimaryContent, *ModFilePath))
 				{
@@ -811,7 +849,10 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			+ TEXT("WhitelistChannelId=") + Config.WhitelistChannelId + TEXT("\n")
 			+ TEXT("WhitelistKickDiscordMessage=") + Config.WhitelistKickDiscordMessage + TEXT("\n")
 			+ TEXT("WhitelistKickReason=") + Config.WhitelistKickReason + TEXT("\n")
-			+ TEXT("InGameWhitelistCommandPrefix=") + Config.InGameWhitelistCommandPrefix + TEXT("\n");
+			+ TEXT("InGameWhitelistCommandPrefix=") + Config.InGameWhitelistCommandPrefix + TEXT("\n")
+			+ TEXT("PlayerEventsEnabled=") + (Config.bPlayerEventsEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
+			+ TEXT("PlayerJoinMessage=") + Config.PlayerJoinMessage + TEXT("\n")
+			+ TEXT("PlayerLeaveMessage=") + Config.PlayerLeaveMessage + TEXT("\n");
 
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupFilePath));
 

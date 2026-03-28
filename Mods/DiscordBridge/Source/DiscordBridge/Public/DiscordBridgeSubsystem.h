@@ -538,6 +538,22 @@ private:
 	 */
 	TArray<FChatMessageStruct> LastKnownMessages;
 
+	// ── Player event notifications ────────────────────────────────────────────
+
+	/**
+	 * Installed via SUBSCRIBE_METHOD_VIRTUAL_AFTER on AGameModeBase::Logout when
+	 * bPlayerEventsEnabled is true and credentials are configured.
+	 * Posts a leave/timeout notification to Discord when a player disconnects.
+	 * Valid only when bPlayerEventsEnabled is configured at startup.
+	 */
+	FDelegateHandle LogoutHandle;
+
+	/**
+	 * Called after AGameModeBase::Logout when bPlayerEventsEnabled is set.
+	 * Posts PlayerLeaveMessage to the bridged Discord channel.
+	 */
+	void OnLogout(AGameModeBase* GameMode, AController* Exiting);
+
 	// ── Whitelist enforcement ─────────────────────────────────────────────────
 
 	/**

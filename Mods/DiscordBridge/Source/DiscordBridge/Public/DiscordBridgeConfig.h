@@ -101,6 +101,40 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	/** Posted to Discord when the server shuts down. Leave empty to disable. */
 	FString ServerOfflineMessage{ TEXT(":red_circle: Server is now **offline**.") };
 
+	// ── Player event notifications ────────────────────────────────────────────
+
+	/**
+	 * Master on/off switch for player join and leave (including timeout) notifications.
+	 * When true, PlayerJoinMessage and PlayerLeaveMessage are posted to the bridged
+	 * Discord channel when players connect to or disconnect from the server.
+	 * Default: false.
+	 */
+	bool bPlayerEventsEnabled{ false };
+
+	/**
+	 * Message posted to Discord when a player joins the server.
+	 * Leave empty to disable join notifications.
+	 *
+	 * Available placeholder:
+	 *   %PlayerName%  – in-game name of the player who joined.
+	 *
+	 * Example:
+	 *   PlayerJoinMessage=:green_circle: **%PlayerName%** has joined the server.
+	 */
+	FString PlayerJoinMessage{ TEXT(":arrow_right: **%PlayerName%** has joined the server.") };
+
+	/**
+	 * Message posted to Discord when a player leaves or times out.
+	 * Leave empty to disable leave/timeout notifications.
+	 *
+	 * Available placeholder:
+	 *   %PlayerName%  – in-game name of the player who disconnected.
+	 *
+	 * Example:
+	 *   PlayerLeaveMessage=:red_circle: **%PlayerName%** has left the server.
+	 */
+	FString PlayerLeaveMessage{ TEXT(":arrow_left: **%PlayerName%** has left the server.") };
+
 	// ── Whitelist ─────────────────────────────────────────────────────────────
 
 	/**

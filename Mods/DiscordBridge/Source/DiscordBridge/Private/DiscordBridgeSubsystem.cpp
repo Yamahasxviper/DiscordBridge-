@@ -3,6 +3,7 @@
 #include "DiscordBridgeSubsystem.h"
 #include "TicketSubsystem.h"
 #include "BanDiscordSubsystem.h"
+#include "Patching/NativeHookManager.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -89,6 +90,24 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	Connect();
 
+	// Install a virtual hook on AGameModeBase::Logout so we can detect player
+	// disconnects (including connection timeouts) and post a leave notification
+	// to Discord when PlayerEventsEnabled is set.
+	if (Config.bPlayerEventsEnabled)
+	{
+		LogoutHandle = SUBSCRIBE_METHOD_VIRTUAL_AFTER(
+			AGameModeBase::Logout,
+			GetMutableDefault<AGameModeBase>(),
+			[WeakThis = TWeakObjectPtr<UDiscordBridgeSubsystem>(this)](AGameModeBase* GameMode, AController* Exiting)
+			{
+				if (UDiscordBridgeSubsystem* Self = WeakThis.Get())
+				{
+					Self->OnLogout(GameMode, Exiting);
+				}
+			}
+		);
+	}
+
 	// Inject ourselves as the Discord provider into TicketSubsystem (if installed).
 	if (FModuleManager::Get().IsModuleLoaded(TEXT("TicketSystem")))
 	{
@@ -150,6 +169,13 @@ void UDiscordBridgeSubsystem::Deinitialize()
 	// Remove the whitelist PostLogin listener.
 	FGameModeEvents::GameModePostLoginEvent.Remove(PostLoginHandle);
 	PostLoginHandle.Reset();
+
+	// Remove the player leave/timeout notification hook.
+	if (LogoutHandle.IsValid())
+	{
+		UNSUBSCRIBE_METHOD(AGameModeBase::Logout, LogoutHandle);
+		LogoutHandle.Reset();
+	}
 
 	// Unbind from the chat manager's delegate so no stale callbacks fire
 	// after this subsystem is destroyed.
@@ -1922,13 +1948,27 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 	}
 
 	// ── Whitelist check ───────────────────────────────────────────────────────
+
+	// Helper: post a player join notification to Discord when configured.
+	auto NotifyPlayerJoined = [this, &PlayerName]()
+	{
+		if (Config.bPlayerEventsEnabled && !Config.PlayerJoinMessage.IsEmpty())
+		{
+			FString Notice = Config.PlayerJoinMessage;
+			Notice = Notice.Replace(TEXT("%PlayerName%"), *PlayerName);
+			SendMessageToChannel(Config.ChannelId, Notice);
+		}
+	};
+
 	if (!FWhitelistManager::IsEnabled())
 	{
+		NotifyPlayerJoined();
 		return;
 	}
 
 	if (FWhitelistManager::IsWhitelisted(PlayerName))
 	{
+		NotifyPlayerJoined();
 		return;
 	}
 
@@ -1943,6 +1983,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 		UE_LOG(LogTemp, Log,
 		       TEXT("DiscordBridge Whitelist: allowing '%s' – matches a Discord member with WhitelistRoleId."),
 		       *PlayerName);
+		NotifyPlayerJoined();
 		return;
 	}
 
@@ -1966,6 +2007,31 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 		Notice = Notice.Replace(TEXT("%PlayerName%"), *PlayerName);
 		SendMessageToChannel(Config.ChannelId, Notice);
 	}
+}
+
+void UDiscordBridgeSubsystem::OnLogout(AGameModeBase* /*GameMode*/, AController* Exiting)
+{
+	if (Config.PlayerLeaveMessage.IsEmpty())
+	{
+		return;
+	}
+
+	const APlayerController* PC = Cast<APlayerController>(Exiting);
+	if (!PC || PC->IsLocalController())
+	{
+		return;
+	}
+
+	const APlayerState* PS = PC->GetPlayerState<APlayerState>();
+	const FString PlayerName = PS ? PS->GetPlayerName() : FString();
+	if (PlayerName.IsEmpty())
+	{
+		return;
+	}
+
+	FString Notice = Config.PlayerLeaveMessage;
+	Notice = Notice.Replace(TEXT("%PlayerName%"), *PlayerName);
+	SendMessageToChannel(Config.ChannelId, Notice);
 }
 
 void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
