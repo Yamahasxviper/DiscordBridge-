@@ -44,8 +44,9 @@ FResolvedBanId FBanIdResolver::Resolve(const FUniqueNetIdRepl& UniqueId)
     {
         UE_LOG(LogBanIdResolver, Verbose,
             TEXT("FBanIdResolver::Resolve — no recognised platform ID for type '%s' / raw '%s'"),
-            UniqueId.IsValid() ? *UniqueId->GetType().ToString() : TEXT("<invalid>"),
-            UniqueId.IsValid() ? *UniqueId->ToString()           : TEXT("<invalid>"));
+            *GetIdTypeName(UniqueId),
+            UniqueId.IsValid() && UniqueId.GetUniqueNetId().IsValid()
+                ? *UniqueId->ToString() : TEXT("<invalid>"));
     }
 
     return Result;
@@ -54,7 +55,10 @@ FResolvedBanId FBanIdResolver::Resolve(const FUniqueNetIdRepl& UniqueId)
 FString FBanIdResolver::GetIdTypeName(const FUniqueNetIdRepl& UniqueId)
 {
     if (!UniqueId.IsValid()) return FString();
-    return UniqueId->GetType().ToString();
+    // Guard against a null underlying pointer even when IsValid() passes.
+    const TSharedPtr<const FUniqueNetId> SharedId = UniqueId.GetUniqueNetId();
+    if (!SharedId.IsValid()) return FString();
+    return SharedId->GetType().ToString();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -65,14 +69,23 @@ bool FBanIdResolver::TryGetSteam64Id(const FUniqueNetIdRepl& UniqueId,
 {
     if (!UniqueId.IsValid()) return false;
 
+    // Guard against a null underlying FUniqueNetId pointer.
+    // In the CSS UE5 build, FUniqueNetIdRepl::IsValid() can return true based on a
+    // cached string representation even when the inner TSharedPtr<FUniqueNetId> is
+    // null (e.g. a player connecting with a partially-initialised network identity
+    // where the string is replicated before the FUniqueNetId object is created).
+    // Dereferencing with operator->() without this check causes a segmentation fault.
+    const TSharedPtr<const FUniqueNetId> SharedId = UniqueId.GetUniqueNetId();
+    if (!SharedId.IsValid()) return false;
+
     // The UE5 Steam online services plugin stamps each ID it creates with the
     // type name "Steam".  Any other type name is not a Steam ID.
-    if (UniqueId->GetType() != SteamTypeName)
+    if (SharedId->GetType() != SteamTypeName)
         return false;
 
     // For Steam IDs, ToString() returns the raw 17-digit Steam64 decimal
     // string (e.g. "76561198000000000").  Validate the format before use.
-    const FString Candidate = UniqueId->ToString();
+    const FString Candidate = SharedId->ToString();
     if (!USteamBanSubsystem::IsValidSteam64Id(Candidate))
     {
         UE_LOG(LogBanIdResolver, Warning,
@@ -96,6 +109,12 @@ bool FBanIdResolver::TryGetEOSProductUserId(const FUniqueNetIdRepl& UniqueId,
 {
     if (!UniqueId.IsValid()) return false;
 
+    // Same defensive check as TryGetSteam64Id – ensure the underlying pointer is
+    // non-null before passing it to EOSId::GetProductUserId, which takes a
+    // const FUniqueNetId& (dereferences UniqueId).
+    const TSharedPtr<const FUniqueNetId> SharedId = UniqueId.GetUniqueNetId();
+    if (!SharedId.IsValid()) return false;
+
     // EOSId::GetProductUserId is a CSS FactoryGame helper that understands the
     // internal representation of EOS accounts in the UE5 OnlineServices layer.
     // It extracts the 32-char hex EOS Product User ID from the opaque FAccountId
@@ -110,7 +129,7 @@ bool FBanIdResolver::TryGetEOSProductUserId(const FUniqueNetIdRepl& UniqueId,
     //   • Offline/LAN players (Null online service)
     //   • Steam-only players with no linked Epic account
     FString Candidate;
-    if (!EOSId::GetProductUserId(*UniqueId, Candidate) || Candidate.IsEmpty())
+    if (!EOSId::GetProductUserId(*SharedId, Candidate) || Candidate.IsEmpty())
         return false;
 
     // Validate that the returned string matches the 32-char lowercase hex
