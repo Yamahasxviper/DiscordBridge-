@@ -3,13 +3,15 @@
 #include "BanSystemModule.h"
 
 // SML
-#include "Patching/NativeHookManager.h"
 #include "Command/ChatCommandLibrary.h"
 
 // FactoryGame
 #include "FGGameMode.h"
 #include "FGGameSession.h"
 #include "FGPlayerState.h"
+
+// UE GameMode events
+#include "GameFramework/GameModeBase.h"
 
 // BanSystem
 #include "BanIdResolver.h"
@@ -59,11 +61,16 @@ void FBanSystemModule::StartupModule()
     //   Both checks run independently — a dual-platform (Steam+EOS) player
     //   can be banned by either their Steam ID or their EOS PUID.
     //
-    PostLoginHookHandle = SUBSCRIBE_METHOD_VIRTUAL_AFTER(
-        AFGGameMode::PostLogin,
-        GetMutableDefault<AFGGameMode>(),
-        [](AFGGameMode* Self, APlayerController* NewPlayer)
+    // FGameModeEvents::GameModePostLoginEvent is a native UE delegate that fires
+    // after every AGameModeBase::PostLogin call without going through funchook,
+    // so it works even when the AFGGameMode::PostLogin body is too short to hook
+    // directly (which causes "Too short instructions" in the editor build).
+    PostLoginHookHandle = FGameModeEvents::GameModePostLoginEvent.AddLambda(
+        [](AGameModeBase* GameMode, APlayerController* NewPlayer)
         {
+            AFGGameMode* Self = Cast<AFGGameMode>(GameMode);
+            if (!Self) return;
+
             if (!NewPlayer || !NewPlayer->PlayerState) return;
 
             UGameInstance* GI = Self->GetGameInstance();
@@ -242,8 +249,9 @@ void FBanSystemModule::ShutdownModule()
     FWorldDelegates::OnWorldInitializedActors.Remove(WorldInitHandle);
     WorldInitHandle.Reset();
 
-    // Unsubscribe PostLogin hook
-    UNSUBSCRIBE_METHOD(AFGGameMode::PostLogin, PostLoginHookHandle);
+    // Unsubscribe PostLogin delegate
+    FGameModeEvents::GameModePostLoginEvent.Remove(PostLoginHookHandle);
+    PostLoginHookHandle.Reset();
 
     UE_LOG(LogBanSystem, Log, TEXT("BanSystem module shut down."));
 }
