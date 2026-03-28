@@ -1,4 +1,5 @@
 #include "WhitelistManager.h"
+#include "Logging/LogMacros.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "HAL/PlatformFileManager.h"
