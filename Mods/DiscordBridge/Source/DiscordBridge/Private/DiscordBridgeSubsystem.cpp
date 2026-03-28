@@ -23,6 +23,9 @@ static const FString DiscordGatewayUrl = TEXT("wss://gateway.discord.gg/?v=10&en
 // Discord REST API base URL
 static const FString DiscordApiBase    = TEXT("https://discord.com/api/v10");
 
+// Static member definition – persists across level-transition subsystem recreations.
+bool UDiscordBridgeSubsystem::bServerOnlineMessageSent = false;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // USubsystem lifetime
 // ─────────────────────────────────────────────────────────────────────────────
@@ -160,7 +163,21 @@ void UDiscordBridgeSubsystem::Deinitialize()
 		BoundChatManager.Reset();
 	}
 
-	Disconnect();
+	// Disconnect from the Discord Gateway.
+	//
+	// Only send the "server offline" presence update and status message when the
+	// engine is actually shutting down.  When Satisfactory loads a save game on
+	// the first player join it performs a non-seamless level travel that
+	// destroys and recreates all GameInstance subsystems (Deinitialize → GC →
+	// Initialize).  Calling Disconnect() unconditionally in that path would post
+	// a false "server offline" chat message followed immediately by a "server
+	// online" message once the new subsystem instance reconnects — which is
+	// exactly the "server going offline on player join" symptom reported by users.
+	//
+	// When IsEngineExitRequested() is true the process is genuinely shutting
+	// down, so the full disconnect (with offline message and presence reset)
+	// is the correct behaviour.
+	DisconnectInternal(IsEngineExitRequested());
 	Super::Deinitialize();
 }
 
@@ -196,6 +213,11 @@ void UDiscordBridgeSubsystem::Connect()
 
 void UDiscordBridgeSubsystem::Disconnect()
 {
+	DisconnectInternal(true);
+}
+
+void UDiscordBridgeSubsystem::DisconnectInternal(bool bSendStatusMessages)
+{
 	// Stop heartbeat ticker.
 	FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
 	HeartbeatTickerHandle.Reset();
@@ -206,7 +228,9 @@ void UDiscordBridgeSubsystem::Disconnect()
 
 	// Signal offline status and post the server-offline notification while
 	// the WebSocket is still open so Discord receives both before we close.
-	if (bGatewayReady)
+	// Only send these messages when the caller explicitly requests it (i.e.
+	// during a genuine server shutdown, not during a level transition).
+	if (bSendStatusMessages && bGatewayReady)
 	{
 		// Setting presence to "invisible" makes the bot appear offline to
 		// users immediately, without waiting for Discord to detect the
@@ -219,15 +243,24 @@ void UDiscordBridgeSubsystem::Disconnect()
 		}
 	}
 
-	bGatewayReady            = false;
-	bPendingHeartbeatAck     = false;
-	bServerOnlineMessageSent = false;
-	LastSequenceNumber       = -1;
+	bGatewayReady        = false;
+	bPendingHeartbeatAck = false;
+	LastSequenceNumber   = -1;
 	BotUserId.Empty();
 	GuildId.Empty();
 	GuildOwnerId.Empty();
 	SessionId.Empty();
 	ResumeGatewayUrl.Empty();
+
+	// Only reset the static "online message sent" flag when the engine is
+	// genuinely shutting down so that a true process restart sends the
+	// "server online" message again on the next connection.  During a level
+	// transition the flag must stay true to prevent the message from being
+	// re-sent when the new subsystem instance reconnects after the travel.
+	if (bSendStatusMessages)
+	{
+		bServerOnlineMessageSent = false;
+	}
 
 	if (WebSocketClient)
 	{

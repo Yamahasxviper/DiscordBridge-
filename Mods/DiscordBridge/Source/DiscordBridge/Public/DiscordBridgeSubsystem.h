@@ -205,7 +205,9 @@ public:
 
 	/**
 	 * Disconnect from the Discord Gateway and cancel the heartbeat timer.
-	 * Called automatically during Deinitialize().
+	 * Sends the "server offline" status message and resets the online-message
+	 * flag so the next connection re-posts "server online".
+	 * Called automatically during Deinitialize() on actual server shutdown.
 	 */
 	UFUNCTION(BlueprintCallable, Category="Discord Bridge")
 	void Disconnect();
@@ -346,6 +348,19 @@ public:
 	virtual void UnsubscribeDiscordMessages(FDelegateHandle Handle) override;
 
 private:
+	/**
+	 * Internal disconnect helper.
+	 *
+	 * @param bSendStatusMessages  When true, sends the "server offline" presence
+	 *                              update and status message before closing, and
+	 *                              resets bServerOnlineMessageSent so the "server
+	 *                              online" message is re-sent on the next connection.
+	 *                              Pass false during a level transition (not a true
+	 *                              server shutdown) to suppress false offline/online
+	 *                              chat messages.
+	 */
+	void DisconnectInternal(bool bSendStatusMessages);
+
 	// ── WebSocket event handlers (called on the game thread) ──────────────────
 
 	UFUNCTION()
@@ -495,10 +510,18 @@ private:
 	 * session.  Prevents the message from being re-sent on Discord Gateway
 	 * reconnects (which happen periodically and trigger a fresh READY event
 	 * even when the game server has not restarted).
-	 * Reset to false in Disconnect() so that a true server restart sends the
-	 * message again on the next connection.
+	 *
+	 * Declared static so that it survives level-transition subsystem
+	 * recreations within the same process.  When the Satisfactory server
+	 * loads a save game on first player join it performs a non-seamless level
+	 * travel that destroys and recreates all GameInstance subsystems.  A
+	 * per-instance flag would be reset to false for the new object and the
+	 * "server online" message would be re-posted even though the game process
+	 * never restarted.  The static flag persists for the lifetime of the
+	 * process and is only reset to false in Disconnect() when the engine is
+	 * actually shutting down (IsEngineExitRequested()).
 	 */
-	bool bServerOnlineMessageSent{false};
+	static bool bServerOnlineMessageSent;
 
 	/** Snowflake ID of the bot user; used to filter out self-sent messages. */
 	FString BotUserId;

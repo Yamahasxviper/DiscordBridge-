@@ -433,6 +433,8 @@ bool FSMLWebSocketRunnable::IsConnected() const
 
 bool FSMLWebSocketRunnable::ResolveAndConnect(const FString& Host, int32 Port)
 {
+	if (bStopRequested) return false;
+
 	ISocketSubsystem* SocketSS = ISocketSubsystem::Get(NAME_None);
 	if (!SocketSS)
 	{
@@ -444,6 +446,11 @@ bool FSMLWebSocketRunnable::ResolveAndConnect(const FString& Host, int32 Port)
 	FAddressInfoResult Result = SocketSS->GetAddressInfo(*Host, nullptr,
 	                                                       EAddressInfoFlags::Default,
 	                                                       NAME_None);
+	// Check after the potentially-blocking DNS call so a stop request that arrived
+	// while DNS was in flight is honoured immediately rather than proceeding to
+	// connect.
+	if (bStopRequested) return false;
+
 	if (Result.ReturnCode != SE_NO_ERROR || Result.Results.IsEmpty())
 	{
 		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: Failed to resolve '%s'"), *Host);
@@ -458,6 +465,16 @@ bool FSMLWebSocketRunnable::ResolveAndConnect(const FString& Host, int32 Port)
 	if (!Socket)
 	{
 		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: Failed to create socket"));
+		return false;
+	}
+
+	// Check again after socket creation: if a stop was requested while we were
+	// allocating the socket, destroy it and bail so we don't start a blocking
+	// TCP connect that could stall the thread.
+	if (bStopRequested)
+	{
+		SocketSS->DestroySocket(Socket);
+		Socket = nullptr;
 		return false;
 	}
 
@@ -626,8 +643,20 @@ bool FSMLWebSocketRunnable::FeedSslReadBio()
 {
 	if (!ReadBio || !Socket) return false;
 
-	// Wait up to RecvTimeoutMs for data to arrive (the handshake must complete promptly).
-	if (!Socket->Wait(ESocketWaitConditions::WaitForRead, FTimespan::FromMilliseconds(RecvTimeoutMs)))
+	// Wait for incoming data in short slices so that a concurrent Stop() request
+	// is honoured within PollIntervalMs instead of waiting up to RecvTimeoutMs.
+	const double Deadline = FPlatformTime::Seconds() + RecvTimeoutMs / 1000.0;
+	bool bDataAvailable = false;
+	while (!bStopRequested && FPlatformTime::Seconds() < Deadline)
+	{
+		if (Socket->Wait(ESocketWaitConditions::WaitForRead, FTimespan::FromMilliseconds(PollIntervalMs)))
+		{
+			bDataAvailable = true;
+			break;
+		}
+	}
+	if (bStopRequested) return false;
+	if (!bDataAvailable)
 	{
 		UE_LOG(LogSMLWebSocket, Warning, TEXT("SMLWebSocket: Timed out waiting for TLS handshake data"));
 		return false;
@@ -753,8 +782,20 @@ int32 FSMLWebSocketRunnable::RawRecvAvailable(uint8* Buffer, int32 BufferSize)
 {
 	if (!Socket) return -1;
 
-	// Wait up to RecvTimeoutMs for data to arrive before returning.
-	if (!Socket->Wait(ESocketWaitConditions::WaitForRead, FTimespan::FromMilliseconds(RecvTimeoutMs)))
+	// Wait for data in short slices so that a concurrent Stop() request is
+	// honoured within PollIntervalMs instead of waiting up to RecvTimeoutMs.
+	const double Deadline = FPlatformTime::Seconds() + RecvTimeoutMs / 1000.0;
+	bool bDataAvailable = false;
+	while (!bStopRequested && FPlatformTime::Seconds() < Deadline)
+	{
+		if (Socket->Wait(ESocketWaitConditions::WaitForRead, FTimespan::FromMilliseconds(PollIntervalMs)))
+		{
+			bDataAvailable = true;
+			break;
+		}
+	}
+	if (bStopRequested) return 0; // treat as timeout so callers can clean up
+	if (!bDataAvailable)
 	{
 		return 0; // timeout – caller should retry
 	}
@@ -774,11 +815,20 @@ bool FSMLWebSocketRunnable::RawRecvExact(uint8* Buffer, int32 BytesRequired)
 	{
 		if (bStopRequested) return false;
 
-		// Wait for data
-		if (!Socket->Wait(ESocketWaitConditions::WaitForRead, FTimespan::FromMilliseconds(RecvTimeoutMs)))
+		// Wait for data in short slices so a concurrent Stop() is honoured
+		// within PollIntervalMs rather than waiting a full RecvTimeoutMs.
+		bool bDataAvailable = false;
+		const double Deadline = FPlatformTime::Seconds() + RecvTimeoutMs / 1000.0;
+		while (!bStopRequested && FPlatformTime::Seconds() < Deadline)
 		{
-			continue; // timeout – retry
+			if (Socket->Wait(ESocketWaitConditions::WaitForRead, FTimespan::FromMilliseconds(PollIntervalMs)))
+			{
+				bDataAvailable = true;
+				break;
+			}
 		}
+		if (bStopRequested) return false;
+		if (!bDataAvailable) continue; // full timeout – retry outer loop
 
 		int32 Received = 0;
 		if (!Socket->Recv(Buffer + Total, BytesRequired - Total, Received) || Received <= 0)
