@@ -18,6 +18,11 @@
 			"Name": "FGOnlineHelpers",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "EOSIdHelper",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
@@ -31,6 +36,10 @@
 		},
 		{
 			"Name": "EOSShared",
+			"Enabled": true
+		},
+		{
+			"Name": "EOSSDK",
 			"Enabled": true
 		}
 	]

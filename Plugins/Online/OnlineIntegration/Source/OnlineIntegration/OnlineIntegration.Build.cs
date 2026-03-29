@@ -12,6 +12,13 @@ public class OnlineIntegration : ModuleRules
 		bAllowConfidentialPlatformDefines = true;
 		// </FL>
 		bUseUnity = false; // Disable unity because mixing OnlineSubsystem and OnlineServices is no good (but OnlineGameActivityInterface.h only exists on OnlineSubsystem)
+		// Suppress C4458 "declaration of 'X' hides class member" in the auto-generated
+		// stub implementation files (OnlineFriendPrivate.cpp, OnlinePrivilegeObserver.cpp).
+		// Those stubs are machine-generated; rewriting them to avoid shadowing is fragile.
+		if (Target.Platform.IsInGroup(UnrealPlatformGroup.Windows))
+		{
+			AdditionalCompilerArguments += " /wd4458";
+		}
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
