@@ -37,6 +37,7 @@
 		{
 			"Name": "SMLWebSocket",
 			"Enabled": true,
+			"Optional": false,
 			"SemVersion": "^1.0.0"
 		},
 		{

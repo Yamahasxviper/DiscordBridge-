@@ -36,7 +36,9 @@
 		},
 		{
 			"Name": "DummyHeaders",
-			"Enabled": true
+			"Enabled": true,
+			"Optional": false,
+			"SemVersion": "^1.0.0"
 		}
 	]
 }
