@@ -7,7 +7,7 @@
 
 #if WITH_EOS_SDK
 
-// EOS SDK — EOS_ProductUserId, EOS_ProductUserId_IsValid
+// EOS SDK — EOS_ProductUserId, EOS_EpicAccountId, EOS_ProductUserId_IsValid
 #if defined(EOS_PLATFORM_BASE_FILE_NAME)
 #include EOS_PLATFORM_BASE_FILE_NAME
 #endif
@@ -17,11 +17,17 @@
 // for the V2 (FAccountId / UE::Online::Online Services) path.
 #include "Online/OnlineIdEOSGS.h"
 
-// OnlineSubsystemEOS — IUniqueNetIdEOS interface for the V1 EOS identity path.
-#include "OnlineSubsystemEOSTypesPublic.h"
-
 // EOSShared — LexToString(EOS_ProductUserId) → FString
 #include "EOSShared.h"
+
+// V1 — OnlineSubsystemEOS — IUniqueNetIdEOS interface for the legacy EOS path.
+// Guarded by WITH_EOS_SUBSYSTEM_V1 because OnlineSubsystemEOS is currently
+// "Enabled": false in FactoryGame.uproject.  Including it without the module
+// dep produces LNK1181.  Flip WITH_EOS_SUBSYSTEM_V1 to 1 in
+// FGOnlineHelpers.Build.cs to re-enable when the plugin becomes available.
+#if WITH_EOS_SUBSYSTEM_V1
+#include "OnlineSubsystemEOSTypesPublic.h"
+#endif
 
 #endif // WITH_EOS_SDK
 
@@ -44,7 +50,7 @@
  *       extracts the EOS_ProductUserId from the registry.
  *
  *   V1 — FUniqueNetId of type "EOS"  (OnlineSubsystemEOS)
- *       Older or fallback code paths may produce a V1 net-id of EOS type.
+ *       Legacy path.  Compiled only when WITH_EOS_SUBSYSTEM_V1=1.
  *       The id is cast to IUniqueNetIdEOS to retrieve the ProductUserId.
  *
  *   V1 — FUniqueNetId of any other type (e.g. "Steam", "Null")
@@ -89,6 +95,7 @@ inline bool GetProductUserId(const FUniqueNetIdRepl& UniqueId, FString& OutProdu
         return !OutProductUserId.IsEmpty();
     }
 
+#if WITH_EOS_SUBSYSTEM_V1
     if (UniqueId.IsV1())
     {
         // ── V1 path: FUniqueNetId of EOS type (OnlineSubsystemEOS) ──────────
@@ -115,6 +122,7 @@ inline bool GetProductUserId(const FUniqueNetIdRepl& UniqueId, FString& OutProdu
         OutProductUserId = LexToString(ProductUserId);
         return !OutProductUserId.IsEmpty();
     }
+#endif  // WITH_EOS_SUBSYSTEM_V1
 
 #endif  // WITH_EOS_SDK
 

@@ -33,8 +33,18 @@ public class EOSIdHelper : ModuleRules
             "EOSSDK",
         });
 
-        // NOTE: "OnlineSubsystemEOS" is intentionally NOT listed here.
-        // That engine plugin is "Enabled": false in FactoryGame.uproject, so
-        // its .lib is never produced and any reference to it causes LNK1181.
+        // ── V1 EOS path (OnlineSubsystemEOS) ─────────────────────────────────
+        // OnlineSubsystemEOS is currently "Enabled": false in FactoryGame.uproject,
+        // so its .lib is never produced.  Listing it as a dependency causes:
+        //   LNK1181: cannot open input file 'UnrealEditor-OnlineSubsystemEOS.lib'
+        //
+        // WITH_EOS_SUBSYSTEM_V1 defaults to 0 (disabled).
+        // To re-enable the V1 IUniqueNetIdEOS code path when OnlineSubsystemEOS
+        // becomes available:
+        //   1. Set OnlineSubsystemEOS "Enabled": true in FactoryGame.uproject
+        //   2. Change PublicDefinitions.Add below to "WITH_EOS_SUBSYSTEM_V1=1"
+        //   3. Uncomment the PublicDependencyModuleNames.Add("OnlineSubsystemEOS") line
+        PublicDefinitions.Add("WITH_EOS_SUBSYSTEM_V1=0");
+        // PublicDependencyModuleNames.Add("OnlineSubsystemEOS");
     }
 }
