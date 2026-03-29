@@ -16,7 +16,7 @@ public class BanSystem : ModuleRules
             "Engine",
             "NetCore",
             "Json",
-            "DummyHeaders",
+            "FGOnlineHelpers",
             "FactoryGame",
             "SML",
             // SMLWebSocket — for the standalone Discord Gateway (WebSocket) connection.
