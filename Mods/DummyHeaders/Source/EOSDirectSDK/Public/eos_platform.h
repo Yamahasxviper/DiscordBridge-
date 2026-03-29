@@ -158,6 +158,21 @@ struct EOS_CustomInvitesHandle;
 typedef struct EOS_CustomInvitesHandle* EOS_HCustomInvites;
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  EOS_HPlatform — the main platform handle
+//  In the real EOS C SDK this typedef is declared here in eos_platform.h, not
+//  in eos_common.h.  Define it here so that every EOS_Platform_Get*Interface
+//  function declaration below compiles correctly even when eos_common.h does
+//  not forward-declare it (as is the case in the CSS UE5.3.2 engine build).
+// ─────────────────────────────────────────────────────────────────────────────
+
+#ifndef EOS_HPlatform_DEFINED
+#define EOS_HPlatform_DEFINED
+/** Opaque handle representing the main EOS platform instance. */
+struct EOS_PlatformHandle;
+typedef struct EOS_PlatformHandle* EOS_HPlatform;
+#endif // EOS_HPlatform_DEFINED
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  EOS_Platform_Get*Interface — interface accessor declarations
 //  All functions are C-linkage, matching the real EOS C SDK ABI exactly.
 // ─────────────────────────────────────────────────────────────────────────────

@@ -102,9 +102,9 @@
 //   IEOSPlatformHandle             →  thin wrapper around EOS_HPlatform
 #include "EOSShared.h"
 #include "IEOSSDKManager.h"
-// IEOSPlatformHandle is included via IEOSSDKManager.h in most EOSShared versions.
-// Include explicitly to guarantee availability across all CSS engine variants.
-#include "IEOSPlatformHandle.h"
+// IEOSPlatformHandle is defined within IEOSSDKManager.h in the CSS UE5.3.2
+// engine build.  A separate IEOSPlatformHandle.h is not distributed, so we
+// do NOT include it explicitly here.
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOSDirectSDK namespace
