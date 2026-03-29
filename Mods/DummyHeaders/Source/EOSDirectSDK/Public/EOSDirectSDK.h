@@ -77,8 +77,8 @@
 #   include EOS_PLATFORM_BASE_FILE_NAME
 #endif
 
-// Core EOS C SDK types: EOS_ProductUserId, EOS_HPlatform, EOS_HConnect,
-// EOS_Bool, EOS_TRUE, EOS_FALSE, EOS_ProductUserId_FromString,
+// Core EOS C SDK types: EOS_ProductUserId, EOS_HPlatform, EOS_Bool,
+// EOS_TRUE, EOS_FALSE, EOS_ProductUserId_FromString,
 // EOS_ProductUserId_IsValid, EOS_ProductUserId_ToString
 #include "eos_common.h"
 
@@ -87,7 +87,21 @@
 //   EOS_Platform_GetUserInfoInterface(platform)   →  EOS_HUserInfo
 //   EOS_Platform_GetSanctionsInterface(platform)  →  EOS_HSanctions
 //   (and all other EOS_Platform_Get*Interface functions)
-#include "eos_platform.h"
+//
+// eos_platform.h is absent from some CSS engine EOSSDK distributions.
+// Include it when available; otherwise forward-declare the single type and
+// function used by GetConnectInterface() below so the header still compiles.
+#if __has_include("eos_platform.h")
+#  include "eos_platform.h"
+#else
+// EOS_HConnect opaque handle (normally declared inside eos_platform.h).
+struct EOS_ConnectHandle;
+typedef struct EOS_ConnectHandle* EOS_HConnect;
+// EOS_Platform_GetConnectInterface C-linkage declaration.
+// On Windows x64 the default calling convention is __cdecl, which matches
+// EOS_EOSSDK_CALL, so no explicit specifier is needed.
+extern "C" EOS_HConnect EOS_Platform_GetConnectInterface(EOS_HPlatform Handle);
+#endif
 
 // EOSShared helpers:
 //   LexToString(EOS_ProductUserId)  →  FString (32-char lowercase hex)
