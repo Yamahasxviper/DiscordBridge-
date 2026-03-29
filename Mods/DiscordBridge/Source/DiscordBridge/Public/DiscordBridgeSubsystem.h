@@ -12,13 +12,14 @@
 #include "GameFramework/PlayerController.h"
 #include "Dom/JsonObject.h"
 #include "IDiscordBridgeProvider.h"
-#include "IBanDiscordCommandProvider.h"
+#include "IBanNotificationProvider.h"
 #include "DiscordBridgeSubsystem.generated.h"
 
 // Forward-declared so the header does not pull in TicketSystem's full header chain.
 class UTicketSubsystem;
 // Forward-declared so the header does not pull in BanSystem's full header chain.
-class UBanDiscordSubsystem;
+class USteamBanSubsystem;
+class UEOSBanSubsystem;
 
 // ── Delegate declarations ─────────────────────────────────────────────────────
 
@@ -138,7 +139,7 @@ namespace EDiscordGatewayIntent
 UCLASS(BlueprintType)
 class DISCORDBRIDGE_API UDiscordBridgeSubsystem : public UGameInstanceSubsystem,
                                                   public IDiscordBridgeProvider,
-                                                  public IBanDiscordCommandProvider
+                                                  public IBanNotificationProvider
 {
 	GENERATED_BODY()
 
@@ -336,14 +337,17 @@ public:
 		TFunction<void(const TSharedPtr<FJsonObject>&)> Callback) override;
 	virtual void UnsubscribeRawMessage(FDelegateHandle Handle) override;
 
-	// ── IBanDiscordCommandProvider ────────────────────────────────────────────
-	// These two methods are the only ones not already satisfied by the
-	// IDiscordBridgeProvider overrides above.  SendDiscordChannelMessage and
-	// GetGuildOwnerId are declared further up and fulfil both interfaces.
+	// ── IBanNotificationProvider ──────────────────────────────────────────────
+	// Called by USteamBanSubsystem / UEOSBanSubsystem whenever a ban or unban
+	// is issued from any source (Discord commands, in-game chat commands, etc.).
+	// DiscordBridge uses these to post admin-facing notifications to Discord.
 
-	virtual FDelegateHandle SubscribeDiscordMessages(
-		TFunction<void(const TSharedPtr<FJsonObject>&)> Callback) override;
-	virtual void UnsubscribeDiscordMessages(FDelegateHandle Handle) override;
+	virtual void OnSteamPlayerBanned(const FString& Steam64Id,
+	                                 const FBanEntry& Entry) override;
+	virtual void OnSteamPlayerUnbanned(const FString& Steam64Id) override;
+	virtual void OnEOSPlayerBanned(const FString& EOSProductUserId,
+	                               const FBanEntry& Entry) override;
+	virtual void OnEOSPlayerUnbanned(const FString& EOSProductUserId) override;
 
 private:
 	// ── WebSocket event handlers (called on the game thread) ──────────────────
@@ -646,9 +650,16 @@ private:
 	TWeakObjectPtr<UTicketSubsystem> CachedTicketSubsystem;
 
 	/**
-	 * Weak reference to the BanDiscordSubsystem; populated during Initialize() if
+	 * Weak reference to the SteamBanSubsystem; populated during Initialize() if
 	 * BanSystem is installed.  Held so Deinitialize() can call
-	 * SetCommandProvider(nullptr) to detach cleanly.
+	 * SetNotificationProvider(nullptr) to detach cleanly.
 	 */
-	TWeakObjectPtr<UBanDiscordSubsystem> CachedBanDiscordSubsystem;
+	TWeakObjectPtr<USteamBanSubsystem> CachedSteamBanSubsystem;
+
+	/**
+	 * Weak reference to the EOSBanSubsystem; populated during Initialize() if
+	 * BanSystem is installed.  Held so Deinitialize() can call
+	 * SetNotificationProvider(nullptr) to detach cleanly.
+	 */
+	TWeakObjectPtr<UEOSBanSubsystem> CachedEOSBanSubsystem;
 };

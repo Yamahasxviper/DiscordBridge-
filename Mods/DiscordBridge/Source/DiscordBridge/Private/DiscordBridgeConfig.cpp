@@ -272,6 +272,14 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.bWhitelistEnabled               = GetIniBoolOrDefault  (ConfigFile, TEXT("WhitelistEnabled"),               Config.bWhitelistEnabled);
 		Config.InGameWhitelistCommandPrefix    = GetIniStringOrDefault(ConfigFile, TEXT("InGameWhitelistCommandPrefix"),    Config.InGameWhitelistCommandPrefix);
 
+		// BanSystem notification settings
+		Config.bBanNotificationsEnabled        = GetIniBoolOrDefault  (ConfigFile, TEXT("BanNotificationsEnabled"),        Config.bBanNotificationsEnabled);
+		Config.BanNotificationChannelId        = GetIniStringOrDefault(ConfigFile, TEXT("BanNotificationChannelId"),       Config.BanNotificationChannelId);
+		Config.SteamBanNotificationMessage     = GetIniStringOrDefault(ConfigFile, TEXT("SteamBanNotificationMessage"),    Config.SteamBanNotificationMessage);
+		Config.SteamUnbanNotificationMessage   = GetIniStringOrDefault(ConfigFile, TEXT("SteamUnbanNotificationMessage"),  Config.SteamUnbanNotificationMessage);
+		Config.EOSBanNotificationMessage       = GetIniStringOrDefault(ConfigFile, TEXT("EOSBanNotificationMessage"),      Config.EOSBanNotificationMessage);
+		Config.EOSUnbanNotificationMessage     = GetIniStringOrDefault(ConfigFile, TEXT("EOSUnbanNotificationMessage"),    Config.EOSUnbanNotificationMessage);
+
 		// Trim leading/trailing whitespace from credential fields to prevent
 		// subtle mismatches when operators accidentally include spaces.
 		Config.BotToken  = Config.BotToken.TrimStartAndEnd();
@@ -480,6 +488,40 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("StatusChannelId=\n");
 				}
 
+				if (!ConfigFile.GetString(ConfigSection, TEXT("BanNotificationsEnabled"), TmpVal))
+				{
+					AppendContent2 +=
+						TEXT("\n")
+						TEXT("# -- BAN NOTIFICATIONS (added by mod update) --------------------------\n")
+						TEXT("# Requires BanSystem to be installed alongside DiscordBridge.\n")
+						TEXT("#\n")
+						TEXT("# Master switch for ban/unban event notifications.\n")
+						TEXT("# When True, posts a Discord message for every Steam/EOS ban or unban\n")
+						TEXT("# issued from any source (Discord commands, in-game commands, etc.).\n")
+						TEXT("# Default: False (disabled).\n")
+						TEXT("BanNotificationsEnabled=False\n")
+						TEXT("#\n")
+						TEXT("# Snowflake ID of the channel where ban notifications are posted.\n")
+						TEXT("# Leave empty to use the main bridged channel (ChannelId).\n")
+						TEXT("BanNotificationChannelId=\n")
+						TEXT("#\n")
+						TEXT("# Message posted when a Steam ban is issued. Leave empty to disable.\n")
+						TEXT("# Placeholders: %PlayerId%, %Reason%, %BannedBy%, %Expiry%\n")
+						TEXT("SteamBanNotificationMessage=\n")
+						TEXT("#\n")
+						TEXT("# Message posted when a Steam ban is removed. Leave empty to disable.\n")
+						TEXT("# Placeholder: %PlayerId%\n")
+						TEXT("SteamUnbanNotificationMessage=\n")
+						TEXT("#\n")
+						TEXT("# Message posted when an EOS ban is issued. Leave empty to disable.\n")
+						TEXT("# Placeholders: %PlayerId%, %Reason%, %BannedBy%, %Expiry%\n")
+						TEXT("EOSBanNotificationMessage=\n")
+						TEXT("#\n")
+						TEXT("# Message posted when an EOS ban is removed. Leave empty to disable.\n")
+						TEXT("# Placeholder: %PlayerId%\n")
+						TEXT("EOSUnbanNotificationMessage=\n");
+				}
+
 				if (!AppendContent2.IsEmpty())
 				{
 					UE_LOG(LogTemp, Log,
@@ -595,7 +637,28 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("# Reason shown in-game to the player when kicked for not being whitelisted.\n")
 			TEXT("WhitelistKickReason=\n")
 			TEXT("# Prefix for whitelist commands in the in-game chat. Default: !whitelist\n")
-			TEXT("InGameWhitelistCommandPrefix=!whitelist\n");
+			TEXT("InGameWhitelistCommandPrefix=!whitelist\n")
+			TEXT("\n")
+			TEXT("# -- BAN NOTIFICATIONS (requires BanSystem mod) -------------------------------\n")
+			TEXT("# When True, posts a Discord message for every Steam/EOS ban or unban\n")
+			TEXT("# issued from any source (Discord commands, in-game chat commands, etc.).\n")
+			TEXT("# Default: False (disabled). Set to True to enable.\n")
+			TEXT("BanNotificationsEnabled=False\n")
+			TEXT("# Snowflake ID of the channel where ban notifications are posted.\n")
+			TEXT("# Leave empty to use the main bridged channel (ChannelId).\n")
+			TEXT("BanNotificationChannelId=\n")
+			TEXT("# Message posted when a Steam ban is issued. Leave empty to disable.\n")
+			TEXT("# Placeholders: %PlayerId%, %Reason%, %BannedBy%, %Expiry%\n")
+			TEXT("SteamBanNotificationMessage=\n")
+			TEXT("# Message posted when a Steam ban is removed. Leave empty to disable.\n")
+			TEXT("# Placeholder: %PlayerId%\n")
+			TEXT("SteamUnbanNotificationMessage=\n")
+			TEXT("# Message posted when an EOS ban is issued. Leave empty to disable.\n")
+			TEXT("# Placeholders: %PlayerId%, %Reason%, %BannedBy%, %Expiry%\n")
+			TEXT("EOSBanNotificationMessage=\n")
+			TEXT("# Message posted when an EOS ban is removed. Leave empty to disable.\n")
+			TEXT("# Placeholder: %PlayerId%\n")
+			TEXT("EOSUnbanNotificationMessage=\n");
 
 		// Ensure the Config directory exists before writing.
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(ModFilePath));
@@ -675,6 +738,14 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.WhitelistKickReason              = GetRawStringOrFallback(BackupValues, TEXT("WhitelistKickReason"),              Config.WhitelistKickReason);
 		Config.bWhitelistEnabled                = GetRawBoolOrDefault  (BackupValues, TEXT("WhitelistEnabled"),                Config.bWhitelistEnabled);
 		Config.InGameWhitelistCommandPrefix     = GetRawStringOrDefault(BackupValues, TEXT("InGameWhitelistCommandPrefix"),     Config.InGameWhitelistCommandPrefix);
+
+		// BanSystem notification settings
+		Config.bBanNotificationsEnabled         = GetRawBoolOrDefault  (BackupValues, TEXT("BanNotificationsEnabled"),         Config.bBanNotificationsEnabled);
+		Config.BanNotificationChannelId         = GetRawStringOrDefault(BackupValues, TEXT("BanNotificationChannelId"),        Config.BanNotificationChannelId);
+		Config.SteamBanNotificationMessage      = GetRawStringOrDefault(BackupValues, TEXT("SteamBanNotificationMessage"),     Config.SteamBanNotificationMessage);
+		Config.SteamUnbanNotificationMessage    = GetRawStringOrDefault(BackupValues, TEXT("SteamUnbanNotificationMessage"),   Config.SteamUnbanNotificationMessage);
+		Config.EOSBanNotificationMessage        = GetRawStringOrDefault(BackupValues, TEXT("EOSBanNotificationMessage"),       Config.EOSBanNotificationMessage);
+		Config.EOSUnbanNotificationMessage      = GetRawStringOrDefault(BackupValues, TEXT("EOSUnbanNotificationMessage"),     Config.EOSUnbanNotificationMessage);
 
 		// Only log the "restored from backup" message when credentials were
 		// actually recovered (i.e. previously blank in primary but now non-empty
@@ -756,6 +827,12 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("WhitelistKickDiscordMessage"),   Config.WhitelistKickDiscordMessage);
 				PatchLine(TEXT("WhitelistKickReason"),           Config.WhitelistKickReason);
 				PatchLine(TEXT("InGameWhitelistCommandPrefix"),  Config.InGameWhitelistCommandPrefix);
+				PatchLine(TEXT("BanNotificationsEnabled"),       Config.bBanNotificationsEnabled ? TEXT("True") : TEXT("False"));
+				PatchLine(TEXT("BanNotificationChannelId"),      Config.BanNotificationChannelId);
+				PatchLine(TEXT("SteamBanNotificationMessage"),   Config.SteamBanNotificationMessage);
+				PatchLine(TEXT("SteamUnbanNotificationMessage"), Config.SteamUnbanNotificationMessage);
+				PatchLine(TEXT("EOSBanNotificationMessage"),     Config.EOSBanNotificationMessage);
+				PatchLine(TEXT("EOSUnbanNotificationMessage"),   Config.EOSUnbanNotificationMessage);
 
 				if (FFileHelper::SaveStringToFile(PrimaryContent, *ModFilePath))
 				{
@@ -811,7 +888,13 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			+ TEXT("WhitelistChannelId=") + Config.WhitelistChannelId + TEXT("\n")
 			+ TEXT("WhitelistKickDiscordMessage=") + Config.WhitelistKickDiscordMessage + TEXT("\n")
 			+ TEXT("WhitelistKickReason=") + Config.WhitelistKickReason + TEXT("\n")
-			+ TEXT("InGameWhitelistCommandPrefix=") + Config.InGameWhitelistCommandPrefix + TEXT("\n");
+			+ TEXT("InGameWhitelistCommandPrefix=") + Config.InGameWhitelistCommandPrefix + TEXT("\n")
+			+ TEXT("BanNotificationsEnabled=") + (Config.bBanNotificationsEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
+			+ TEXT("BanNotificationChannelId=") + Config.BanNotificationChannelId + TEXT("\n")
+			+ TEXT("SteamBanNotificationMessage=") + Config.SteamBanNotificationMessage + TEXT("\n")
+			+ TEXT("SteamUnbanNotificationMessage=") + Config.SteamUnbanNotificationMessage + TEXT("\n")
+			+ TEXT("EOSBanNotificationMessage=") + Config.EOSBanNotificationMessage + TEXT("\n")
+			+ TEXT("EOSUnbanNotificationMessage=") + Config.EOSUnbanNotificationMessage + TEXT("\n");
 
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupFilePath));
 
