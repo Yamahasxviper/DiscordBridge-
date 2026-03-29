@@ -17,7 +17,7 @@ public class OnlineIntegration : ModuleRules
 		// Those stubs are machine-generated; rewriting them to avoid shadowing is fragile.
 		if (Target.Platform.IsInGroup(UnrealPlatformGroup.Windows))
 		{
-			AdditionalCompilerArguments += " /wd4458";
+			AdditionalCompilerArgumentsForCPP += " /wd4458";
 		}
 		PublicDependencyModuleNames.AddRange(
 			new string[]
@@ -55,27 +55,6 @@ public class OnlineIntegration : ModuleRules
 				"OnlineSubsystem"
 			});
 		
-		// <FL> [ZimmermannA] Needed to display xbox system messages during joining
-			if (/*Target.Platform == UnrealTargetPlatform.XSX*/ false)
-			{
-				PrivateDependencyModuleNames.AddRange(new string[] {
-					"OnlineSubsystemGDK",
-				});
-			}
-		// </FL> 
-		//<FL>[KonradA]
-		if (/*Target.Platform == UnrealTargetPlatform.PS5*/ false)
-		{
-			PrivateDependencyModuleNames.AddRange(new string[] {
-					"OnlineSubsystemSony"
-				});
-		}
-		//</FL>
-		if (/*Target.Platform == UnrealTargetPlatform.PS5 || Target.Platform == UnrealTargetPlatform.XSX*/ false)
-		{
-			PrivateDependencyModuleNames.AddRange(new string[] {
-				"OnlineServicesOSSAdapter"
-			});
-		}
+		// <FL> [ZimmermannA] XSX/PS5 platform-specific dependencies not applicable for modding build. 
 	}
 }
