@@ -18,6 +18,11 @@
 			"Name": "FGOnlineHelpers",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "OnlineSubsystemEOS",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
