@@ -51,7 +51,7 @@ public class EOSDirectSDK : ModuleRules
             // EOSShared — provides:
             //   LexToString(EOS_ProductUserId)  →  FString
             //   IEOSSDKManager::Get()           →  singleton access to engine EOS platforms
-            //   IEOSPlatformHandle              →  wraps EOS_HPlatform (GetHandle())
+            //   IEOSPlatformHandle              →  wraps EOS_HPlatform (public member: PlatformHandle)
             "EOSShared",
             // EOSSDK — all EOS C SDK headers:
             //   eos_common.h    — EOS_ProductUserId, EOS_HPlatform, EOS_Bool, EOS_TRUE/FALSE

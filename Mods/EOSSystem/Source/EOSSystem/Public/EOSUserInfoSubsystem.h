@@ -34,6 +34,7 @@ public:
 private:
     EOS_HUserInfo GetUserInfoHandle() const;
     TMap<FString, FEOSUserInfo> UserInfoCache;
+    static void CopyAndCacheUserInfo(UEOSUserInfoSubsystem* Self, EOS_HUserInfo H, const FString& LocalStr, const FString& TargetStr, EOS_EpicAccountId LocalId, EOS_EpicAccountId TargetId);
     static void EOS_CALL OnQueryUserInfoCb(const EOS_UserInfo_QueryUserInfoCallbackInfo* D);
     static void EOS_CALL OnQueryByDisplayNameCb(const EOS_UserInfo_QueryUserInfoByDisplayNameCallbackInfo* D);
 };

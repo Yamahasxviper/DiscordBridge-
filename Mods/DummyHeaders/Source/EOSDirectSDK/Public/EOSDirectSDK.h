@@ -231,11 +231,10 @@ inline bool IsValidHandle(EOS_ProductUserId PUID)
  *           • The EOS platform has not been initialised yet (call too early in
  *             the startup sequence — typically safe from PostDefault onwards).
  *
- * NOTE — GetAllPlatformHandles() / GetHandle() method names
- *   The IEOSSDKManager API used below (GetAllPlatformHandles) and the
- *   IEOSPlatformHandle::GetHandle() method are the standard names present
- *   in the UE5.3.2 (CSS) EOSShared plugin build.  If a future engine update
- *   renames these methods, update the single call site here.
+ * NOTE — IEOSSDKManager / IEOSPlatformHandle API
+ *   IEOSSDKManager::GetPlatformHandles() returns a const TArray of TSharedRef
+ *   to IEOSPlatformHandle.  The raw EOS_HPlatform is exposed as the public
+ *   data member PlatformHandle on IEOSPlatformHandle (not via a getter method).
  *   Reference: Engine/Plugins/Online/EOSShared/Source/EOSShared/Public/IEOSSDKManager.h
  */
 inline EOS_HPlatform GetPlatformHandle()
@@ -244,12 +243,13 @@ inline EOS_HPlatform GetPlatformHandle()
     if (!Manager)
         return nullptr;
 
-    TArray<TSharedRef<IEOSPlatformHandle>> Handles = Manager->GetAllPlatformHandles();
+    const TArray<TSharedRef<IEOSPlatformHandle>>& Handles = Manager->GetPlatformHandles();
     if (Handles.IsEmpty())
         return nullptr;
 
-    // IEOSPlatformHandle::GetHandle() returns the raw EOS_HPlatform.
-    return Handles[0]->GetHandle();
+    // IEOSPlatformHandle::PlatformHandle is the public data member holding the
+    // raw EOS_HPlatform — it is NOT a method call.
+    return Handles[0]->PlatformHandle;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

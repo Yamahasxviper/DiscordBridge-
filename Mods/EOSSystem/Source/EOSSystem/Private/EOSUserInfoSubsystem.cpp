@@ -49,7 +49,7 @@ FEOSUserInfo UEOSUserInfoSubsystem::GetCachedUserInfo(const FString& TargetEpicA
 { if (const auto* P = UserInfoCache.Find(TargetEpicAccountId)) return *P; return FEOSUserInfo{}; }
 bool UEOSUserInfoSubsystem::HasCachedUserInfo(const FString& TargetEpicAccountId) const { return UserInfoCache.Contains(TargetEpicAccountId); }
 
-static void CopyAndCacheUserInfo(UEOSUserInfoSubsystem* Self, EOS_HUserInfo H, const FString& LocalStr, const FString& TargetStr, EOS_EpicAccountId LocalId, EOS_EpicAccountId TargetId)
+void UEOSUserInfoSubsystem::CopyAndCacheUserInfo(UEOSUserInfoSubsystem* Self, EOS_HUserInfo H, const FString& LocalStr, const FString& TargetStr, EOS_EpicAccountId LocalId, EOS_EpicAccountId TargetId)
 {
     FEOSSDKLoader& SDK = FEOSSDKLoader::Get();
     if (!SDK.fp_EOS_UserInfo_CopyUserInfo) return;

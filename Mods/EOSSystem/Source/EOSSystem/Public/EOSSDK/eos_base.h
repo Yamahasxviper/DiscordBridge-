@@ -6,20 +6,41 @@
 // documentation (https://dev.epicgames.com/docs).  No UE EOSSDK module,
 // no EOSShared, and no CSS FactoryGame headers are referenced anywhere in
 // this file or the EOSSystem mod.
+//
+// INCLUDE GUARD NOTE
+// ──────────────────
+// The engine's ThirdParty EOSSDK eos_base.h also uses EOS_BASE_H as its
+// include guard.  By defining EOS_BASE_H here, we ensure that when this
+// mod-local header is included first in a translation unit (which happens
+// in BanSystem because EOSSystem headers come before EOSDirectSDK), the
+// engine's eos_base.h is skipped entirely — preventing both the C1189
+// "macros not defined" error and any typedef redefinition conflicts.
 
-#pragma once
+#ifndef EOS_BASE_H
+#define EOS_BASE_H
 
 #include <stdint.h>  // int32_t, uint64_t, etc.
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Calling convention
+//  Calling convention macros
+//  All three are required by the engine's eos_base.h check at line 35.
+//  Define them here so that any translation unit that reaches the engine's
+//  eos_base.h (via EOSDirectSDK's EOSSDK dependency) already has them set.
 // ─────────────────────────────────────────────────────────────────────────────
 #ifndef EOS_CALL
-  #if defined(_WIN32)
-    #define EOS_CALL __cdecl
-  #else
-    #define EOS_CALL
-  #endif
+#  if defined(_WIN32)
+#    define EOS_CALL __cdecl
+#  else
+#    define EOS_CALL
+#  endif
+#endif
+
+#ifndef EOS_MEMORY_CALL
+#  define EOS_MEMORY_CALL EOS_CALL
+#endif
+
+#ifndef EOS_USE_DLLEXPORT
+#  define EOS_USE_DLLEXPORT 0
 #endif
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -163,3 +184,5 @@ typedef int32_t EOS_EResult;
 #define EOS_AntiCheat_PeerNotProtected               ((EOS_EResult)6010)
 #define EOS_AntiCheat_ClientDeploymentIdMismatch     ((EOS_EResult)6011)
 #define EOS_AntiCheat_DeviceIdAuthIsNotSupported     ((EOS_EResult)6012)
+
+#endif // EOS_BASE_H
