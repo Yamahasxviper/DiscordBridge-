@@ -12,10 +12,10 @@ public class EOSIdHelper : ModuleRules
         bLegacyPublicIncludePaths = false;
 
         // Public headers provided by this module (all inline — zero DLL overhead):
-        //   EOSIdHelper.h  — EOSId::GetProductUserId()        : extract EOS PUID from FUniqueNetIdRepl
-        //   EOSBanSDK.h    — EOSBanSDK::PUIDFromString/ToStr  : string ↔ EOS_ProductUserId conversion
-        //                  — EOSBanSDK::GetPlatformHandle()   : access the engine's EOS_HPlatform
-        //                  — EOSBanSDK::GetConnectInterface() : access EOS_HConnect for identity ops
+        //   EOSIdHelper.h  — EOSId::GetProductUserId()  : extract EOS PUID from FUniqueNetIdRepl
+        //   EOSBanSDK.h    — compatibility forwarder: includes EOSDirectSDK.h and aliases
+        //                    EOSBanSDK namespace to EOSDirectSDK namespace.
+        //                    New code should depend on "EOSDirectSDK" and use EOSDirectSDK.h.
         //
         // All public deps below flow transitively to any mod that lists
         // "EOSIdHelper" in its own PublicDependencyModuleNames.
@@ -32,12 +32,15 @@ public class EOSIdHelper : ModuleRules
             // OnlineSubsystemEOS is disabled in FactoryGame.uproject.
             "OnlineServicesEOSGS",
             // LexToString(EOS_ProductUserId) -> FString
-            // IEOSSDKManager::Get() for GetPlatformHandle() in EOSBanSDK.h
-            // IEOSPlatformHandle for the wrapped EOS_HPlatform
             "EOSShared",
-            // EOS_ProductUserId, EOS_ProductUserId_IsValid, EOS_ProductUserId_FromString
+            // EOS_ProductUserId, EOS_ProductUserId_IsValid, EOS_ProductUserId_FromString,
             // eos_common.h, eos_platform.h and all EOS C SDK headers
             "EOSSDK",
+            // EOSDirectSDK — dedicated direct EOS C SDK access module.
+            // EOSBanSDK.h in this module includes EOSDirectSDK.h and aliases
+            // EOSBanSDK = EOSDirectSDK, so consumers of EOSIdHelper that include
+            // EOSBanSDK.h automatically have access to both namespaces.
+            "EOSDirectSDK",
         });
 
         // ── V1 EOS path (OnlineSubsystemEOS) ─────────────────────────────────

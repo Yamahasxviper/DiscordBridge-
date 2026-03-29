@@ -24,6 +24,11 @@ public class BanSystem : ModuleRules
             // via OnlineServicesEOSGS (V2).  Replaces the DummyHeaders/FGOnlineHelpers
             // dependency which required the disabled OnlineSubsystemEOS plugin.
             "EOSIdHelper",
+            // EOSDirectSDK — dedicated module providing direct EOS C SDK access.
+            // Exposes EOSDirectSDK::PUIDFromString, PUIDToString, IsValidHandle,
+            // GetPlatformHandle (EOS_HPlatform) and GetConnectInterface (EOS_HConnect).
+            // Also accessible as EOSBanSDK:: via the alias in EOSBanSDK.h.
+            "EOSDirectSDK",
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]
