@@ -4,6 +4,7 @@
 #include "TicketSubsystem.h"
 #include "Steam/SteamBanSubsystem.h"
 #include "EOS/EOSBanSubsystem.h"
+#include "BanDiscordSubsystem.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -111,6 +112,10 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	// registers here so that ban/unban events from any source (Discord commands,
 	// in-game chat commands, etc.) can be forwarded to Discord when the
 	// BanNotificationsEnabled config is set to True.
+	// DiscordBridge also injects itself as IBanDiscordCommandProvider so that
+	// UBanDiscordSubsystem routes Discord ban commands (!steamban, !eosban, etc.)
+	// through this subsystem's existing Gateway connection instead of opening a
+	// second bot connection.
 	if (FModuleManager::Get().IsModuleLoaded(TEXT("BanSystem")))
 	{
 		if (UGameInstance* GI = GetGameInstance())
@@ -129,6 +134,14 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				EOSBans->SetNotificationProvider(this);
 				UE_LOG(LogTemp, Log,
 				       TEXT("DiscordBridge: Registered as EOS ban notification provider."));
+			}
+
+			if (UBanDiscordSubsystem* BanDiscord = GI->GetSubsystem<UBanDiscordSubsystem>())
+			{
+				CachedBanDiscordSubsystem = BanDiscord;
+				BanDiscord->SetCommandProvider(this);
+				UE_LOG(LogTemp, Log,
+				       TEXT("DiscordBridge: Registered as BanDiscord command provider."));
 			}
 		}
 	}
@@ -157,6 +170,14 @@ void UDiscordBridgeSubsystem::Deinitialize()
 		EOSBans->SetNotificationProvider(nullptr);
 	}
 	CachedEOSBanSubsystem.Reset();
+
+	// Deregister as the BanDiscord command provider so it does not hold a
+	// dangling pointer to this (now-destroyed) subsystem.
+	if (UBanDiscordSubsystem* BanDiscord = CachedBanDiscordSubsystem.Get())
+	{
+		BanDiscord->SetCommandProvider(nullptr);
+	}
+	CachedBanDiscordSubsystem.Reset();
 
 	// Stop the chat-manager bind ticker if it is still running.
 	FTSTicker::GetCoreTicker().RemoveTicker(ChatManagerBindTickHandle);
@@ -2527,6 +2548,26 @@ return OnDiscordRawMessageReceived.AddLambda(MoveTemp(Callback));
 }
 
 void UDiscordBridgeSubsystem::UnsubscribeRawMessage(FDelegateHandle Handle)
+{
+OnDiscordRawMessageReceived.Remove(Handle);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IBanDiscordCommandProvider – shared Discord connection for BanSystem
+// BanSystem calls SubscribeDiscordMessages to receive raw MESSAGE_CREATE events
+// through this subsystem's existing Gateway connection so that Discord ban
+// commands (!steamban, !eosban, etc.) work without a second bot token.
+// SendDiscordChannelMessage and GetGuildOwnerId are already satisfied by the
+// IDiscordBridgeProvider overrides.
+// ─────────────────────────────────────────────────────────────────────────────
+
+FDelegateHandle UDiscordBridgeSubsystem::SubscribeDiscordMessages(
+TFunction<void(const TSharedPtr<FJsonObject>&)> Callback)
+{
+return OnDiscordRawMessageReceived.AddLambda(MoveTemp(Callback));
+}
+
+void UDiscordBridgeSubsystem::UnsubscribeDiscordMessages(FDelegateHandle Handle)
 {
 OnDiscordRawMessageReceived.Remove(Handle);
 }

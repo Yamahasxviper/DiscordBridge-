@@ -13,6 +13,7 @@
 #include "Dom/JsonObject.h"
 #include "IDiscordBridgeProvider.h"
 #include "IBanNotificationProvider.h"
+#include "IBanDiscordCommandProvider.h"
 #include "DiscordBridgeSubsystem.generated.h"
 
 // Forward-declared so the header does not pull in TicketSystem's full header chain.
@@ -20,6 +21,7 @@ class UTicketSubsystem;
 // Forward-declared so the header does not pull in BanSystem's full header chain.
 class USteamBanSubsystem;
 class UEOSBanSubsystem;
+class UBanDiscordSubsystem;
 
 // ── Delegate declarations ─────────────────────────────────────────────────────
 
@@ -139,7 +141,8 @@ namespace EDiscordGatewayIntent
 UCLASS(BlueprintType)
 class DISCORDBRIDGE_API UDiscordBridgeSubsystem : public UGameInstanceSubsystem,
                                                   public IDiscordBridgeProvider,
-                                                  public IBanNotificationProvider
+                                                  public IBanNotificationProvider,
+                                                  public IBanDiscordCommandProvider
 {
 	GENERATED_BODY()
 
@@ -348,6 +351,16 @@ public:
 	virtual void OnEOSPlayerBanned(const FString& EOSProductUserId,
 	                               const FBanEntry& Entry) override;
 	virtual void OnEOSPlayerUnbanned(const FString& EOSProductUserId) override;
+
+	// ── IBanDiscordCommandProvider ────────────────────────────────────────────
+	// Allows UBanDiscordSubsystem to route Discord command I/O through this
+	// subsystem's existing Gateway connection instead of opening its own.
+	// SendDiscordChannelMessage() and GetGuildOwnerId() are already satisfied
+	// by the IDiscordBridgeProvider overrides above.
+
+	virtual FDelegateHandle SubscribeDiscordMessages(
+		TFunction<void(const TSharedPtr<FJsonObject>&)> Callback) override;
+	virtual void UnsubscribeDiscordMessages(FDelegateHandle Handle) override;
 
 private:
 	// ── WebSocket event handlers (called on the game thread) ──────────────────
@@ -662,4 +675,11 @@ private:
 	 * SetNotificationProvider(nullptr) to detach cleanly.
 	 */
 	TWeakObjectPtr<UEOSBanSubsystem> CachedEOSBanSubsystem;
+
+	/**
+	 * Weak reference to the BanDiscordSubsystem; populated during Initialize() if
+	 * BanSystem is installed.  Held so Deinitialize() can call
+	 * SetCommandProvider(nullptr) to detach cleanly.
+	 */
+	TWeakObjectPtr<UBanDiscordSubsystem> CachedBanDiscordSubsystem;
 };
