@@ -106,6 +106,10 @@ bool FEOSSDKLoader::Load()
     LOAD_EOS_FN(EOS_Connect_RemoveNotifyAuthExpiration)
     LOAD_EOS_FN(EOS_Connect_AddNotifyLoginStatusChanged)
     LOAD_EOS_FN(EOS_Connect_RemoveNotifyLoginStatusChanged)
+    LOAD_EOS_FN(EOS_Connect_QueryProductUserIdMappings)
+    LOAD_EOS_FN(EOS_Connect_GetProductUserExternalAccountCount)
+    LOAD_EOS_FN(EOS_Connect_CopyProductUserExternalAccountByIndex)
+    LOAD_EOS_FN(EOS_Connect_ExternalAccountInfo_Release)
 
     // UserInfo
     LOAD_EOS_FN(EOS_UserInfo_QueryUserInfo)
@@ -270,6 +274,10 @@ void FEOSSDKLoader::Unload()
     fp_EOS_Connect_GetLoggedInUsersCount = nullptr; fp_EOS_Connect_GetLoggedInUserByIndex = nullptr;
     fp_EOS_Connect_AddNotifyAuthExpiration = nullptr; fp_EOS_Connect_RemoveNotifyAuthExpiration = nullptr;
     fp_EOS_Connect_AddNotifyLoginStatusChanged = nullptr; fp_EOS_Connect_RemoveNotifyLoginStatusChanged = nullptr;
+    fp_EOS_Connect_QueryProductUserIdMappings = nullptr;
+    fp_EOS_Connect_GetProductUserExternalAccountCount = nullptr;
+    fp_EOS_Connect_CopyProductUserExternalAccountByIndex = nullptr;
+    fp_EOS_Connect_ExternalAccountInfo_Release = nullptr;
     fp_EOS_UserInfo_QueryUserInfo = nullptr; fp_EOS_UserInfo_QueryUserInfoByDisplayName = nullptr;
     fp_EOS_UserInfo_CopyUserInfo = nullptr; fp_EOS_UserInfo_Release = nullptr;
     fp_EOS_Friends_QueryFriends = nullptr; fp_EOS_Friends_GetFriendsCount = nullptr;

@@ -79,6 +79,11 @@ public:
     EOS_Connect_RemoveNotifyAuthExpiration_t        fp_EOS_Connect_RemoveNotifyAuthExpiration        = nullptr;
     EOS_Connect_AddNotifyLoginStatusChanged_t       fp_EOS_Connect_AddNotifyLoginStatusChanged       = nullptr;
     EOS_Connect_RemoveNotifyLoginStatusChanged_t    fp_EOS_Connect_RemoveNotifyLoginStatusChanged    = nullptr;
+    // Reverse PUID lookup (PUID → external account IDs)
+    EOS_Connect_QueryProductUserIdMappings_t            fp_EOS_Connect_QueryProductUserIdMappings            = nullptr;
+    EOS_Connect_GetProductUserExternalAccountCount_t    fp_EOS_Connect_GetProductUserExternalAccountCount    = nullptr;
+    EOS_Connect_CopyProductUserExternalAccountByIndex_t fp_EOS_Connect_CopyProductUserExternalAccountByIndex = nullptr;
+    EOS_Connect_ExternalAccountInfo_Release_t           fp_EOS_Connect_ExternalAccountInfo_Release           = nullptr;
 
     // ── UserInfo ──────────────────────────────────────────────────────────
     EOS_UserInfo_QueryUserInfo_t                    fp_EOS_UserInfo_QueryUserInfo                    = nullptr;

@@ -292,6 +292,92 @@ typedef EOS_NotificationId (EOS_CALL *EOS_Connect_AddNotifyLoginStatusChanged_t)
 /** Removes a login-status-changed notification previously registered */
 typedef void               (EOS_CALL *EOS_Connect_RemoveNotifyLoginStatusChanged_t)(EOS_HConnect Handle, EOS_NotificationId InId);
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Reverse lookup: Product User ID → external account IDs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Opaque info struct returned by CopyProductUserExternalAccountByIndex */
+#define EOS_CONNECT_EXTERNALACCOUNTINFO_API_LATEST 1
+typedef struct EOS_Connect_ExternalAccountInfo
+{
+    /** API version: must be EOS_CONNECT_EXTERNALACCOUNTINFO_API_LATEST */
+    int32_t                   ApiVersion;
+    /** Product User ID for this external account link */
+    EOS_ProductUserId         ProductUserId;
+    /** Display name associated with the external account (may be NULL) */
+    const char*               DisplayName;
+    /** The external account ID string */
+    const char*               AccountId;
+    /** The external account type */
+    EOS_EExternalAccountType  AccountIdType;
+    /** Last login time (seconds since epoch; EOS_CONNECT_TIME_UNDEFINED if not available) */
+    int64_t                   LastLoginTime;
+} EOS_Connect_ExternalAccountInfo;
+
+#define EOS_CONNECT_TIME_UNDEFINED ((int64_t)(-1))
+
+/** QueryProductUserIdMappings — PUID → external account ID */
+#define EOS_CONNECT_QUERYPRODUCTUSERIDMAPPINGS_API_LATEST 2
+typedef struct EOS_Connect_QueryProductUserIdMappingsOptions
+{
+    /** API version: must be EOS_CONNECT_QUERYPRODUCTUSERIDMAPPINGS_API_LATEST */
+    int32_t                   ApiVersion;
+    /** The local Product User ID making the request */
+    EOS_ProductUserId         LocalUserId;
+    /** Optional: filter to a specific external account type; pass EOS_EAT_EPIC (0) for all */
+    EOS_EExternalAccountType  AccountIdType_DEPRECATED;
+    /** Array of PUIDs to query; max 128 */
+    const EOS_ProductUserId*  ProductUserIds;
+    /** Number of entries in ProductUserIds */
+    uint32_t                  ProductUserIdCount;
+} EOS_Connect_QueryProductUserIdMappingsOptions;
+
+typedef struct EOS_Connect_QueryProductUserIdMappingsCallbackInfo
+{
+    /** EOS_Success if the query completed successfully */
+    EOS_EResult       ResultCode;
+    /** ClientData passed to the function */
+    void*             ClientData;
+    /** Local user who made the request */
+    EOS_ProductUserId LocalUserId;
+} EOS_Connect_QueryProductUserIdMappingsCallbackInfo;
+
+typedef void (EOS_CALL *EOS_Connect_OnQueryProductUserIdMappingsCallback)(const EOS_Connect_QueryProductUserIdMappingsCallbackInfo* Data);
+
+/** GetProductUserExternalAccountCount — number of external accounts linked to a PUID */
+#define EOS_CONNECT_GETPRODUCTUSEREXTERNALACCOUNTCOUNT_API_LATEST 1
+typedef struct EOS_Connect_GetProductUserExternalAccountCountOptions
+{
+    /** API version: must be EOS_CONNECT_GETPRODUCTUSEREXTERNALACCOUNTCOUNT_API_LATEST */
+    int32_t           ApiVersion;
+    /** The Product User ID whose linked external accounts to count */
+    EOS_ProductUserId TargetUserId;
+} EOS_Connect_GetProductUserExternalAccountCountOptions;
+
+/** CopyProductUserExternalAccountByIndex — retrieve a single linked external account */
+#define EOS_CONNECT_COPYPRODUCTUSEREXTERNALACCOUNTBYINDEX_API_LATEST 1
+typedef struct EOS_Connect_CopyProductUserExternalAccountByIndexOptions
+{
+    /** API version: must be EOS_CONNECT_COPYPRODUCTUSEREXTERNALACCOUNTBYINDEX_API_LATEST */
+    int32_t           ApiVersion;
+    /** The Product User ID whose linked external accounts to enumerate */
+    EOS_ProductUserId TargetUserId;
+    /** Zero-based index into the linked external accounts list */
+    uint32_t          ExternalAccountInfoIndex;
+} EOS_Connect_CopyProductUserExternalAccountByIndexOptions;
+
+/** QueryProductUserIdMappings: queries the EOS backend for PUID → external-account-ID mappings */
+typedef void      (EOS_CALL *EOS_Connect_QueryProductUserIdMappings_t)(EOS_HConnect Handle, const EOS_Connect_QueryProductUserIdMappingsOptions* Options, void* ClientData, EOS_Connect_OnQueryProductUserIdMappingsCallback CompletionDelegate);
+
+/** Returns the number of external accounts linked to the given PUID */
+typedef uint32_t  (EOS_CALL *EOS_Connect_GetProductUserExternalAccountCount_t)(EOS_HConnect Handle, const EOS_Connect_GetProductUserExternalAccountCountOptions* Options);
+
+/** Copies one external account info entry for the given PUID (caller must call ExternalAccountInfo_Release) */
+typedef EOS_EResult (EOS_CALL *EOS_Connect_CopyProductUserExternalAccountByIndex_t)(EOS_HConnect Handle, const EOS_Connect_CopyProductUserExternalAccountByIndexOptions* Options, EOS_Connect_ExternalAccountInfo** OutExternalAccountInfo);
+
+/** Releases memory allocated by CopyProductUserExternalAccountByIndex */
+typedef void      (EOS_CALL *EOS_Connect_ExternalAccountInfo_Release_t)(EOS_Connect_ExternalAccountInfo* ExternalAccountInfo);
+
 #ifdef __cplusplus
 }
 #endif

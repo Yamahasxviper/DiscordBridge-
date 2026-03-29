@@ -18,6 +18,25 @@ enum class EEOSResult : uint8
     Unexpected      UMETA(DisplayName="Unexpected"),
 };
 
+// ─── External account type ─────────────────────────────────────────────────
+// Blueprint-friendly mirror of EOS_EExternalAccountType.
+// Values match the EOS C SDK enum exactly so they can be cast directly:
+//   static_cast<EOS_EExternalAccountType>(EEOSExternalAccountType::Steam)
+UENUM(BlueprintType)
+enum class EEOSExternalAccountType : uint8
+{
+    Epic        = 0  UMETA(DisplayName="Epic Games"),
+    Steam       = 1  UMETA(DisplayName="Steam"),
+    PSN         = 2  UMETA(DisplayName="PlayStation Network"),
+    XBL         = 3  UMETA(DisplayName="Xbox Live"),
+    Discord     = 4  UMETA(DisplayName="Discord"),
+    GOG         = 5  UMETA(DisplayName="GOG"),
+    Nintendo    = 6  UMETA(DisplayName="Nintendo"),
+    Oculus      = 7  UMETA(DisplayName="Oculus/Meta"),
+    Itchio      = 8  UMETA(DisplayName="itch.io"),
+    Amazon      = 9  UMETA(DisplayName="Amazon"),
+};
+
 // ─── PUID wrapper ──────────────────────────────────────────────────────────
 USTRUCT(BlueprintType)
 struct EOSSYSTEM_API FEOSProductUserId
@@ -116,3 +135,18 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEOSFriendsQueried,      const FS
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEOSPresenceSet,         const FString&,                  EpicAccountId, bool,                        bSuccess);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEOSUserInfoQueried,     const FString&,                  EpicAccountId, bool,                        bSuccess);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEOSPUIDLookupComplete,  const FString&,                  ExternalId,  const FString&,                PUID);
+// Fires when a reverse PUID lookup completes: PUID → its linked external accounts
+// Each linked external account fires one broadcast: (PUID, ExternalAccountId, Type)
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnEOSReverseLookupComplete, const FString&, PUID, const FString&, ExternalAccountId, EEOSExternalAccountType, AccountType);
+
+// ─── External account info (returned from reverse lookup cache) ───────────
+USTRUCT(BlueprintType)
+struct EOSSYSTEM_API FEOSExternalAccountInfo
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite, Category="EOS|Connect") FString                  AccountId;
+    UPROPERTY(BlueprintReadWrite, Category="EOS|Connect") EEOSExternalAccountType  AccountType    = EEOSExternalAccountType::Epic;
+    UPROPERTY(BlueprintReadWrite, Category="EOS|Connect") FString                  DisplayName;
+    UPROPERTY(BlueprintReadWrite, Category="EOS|Connect") int64                    LastLoginTime  = -1;
+};
