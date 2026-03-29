@@ -112,6 +112,25 @@ struct BANSYSTEM_API FBanDiscordConfig
 	 */
 	FString PlayerIdsCommandPrefix{ TEXT("!playerids") };
 
+	/**
+	 * Prefix for the EOS player behavior report command.
+	 * Syntax: !eosreport <PUID|PlayerName> [category] [message]
+	 * Submits a player behavior report to the EOS platform on behalf of the server.
+	 * Categories: Cheating, VerbalAbuse, Scamming, Exploiting, Spamming,
+	 *             OffensiveProfile, Other  (case-insensitive; defaults to Other).
+	 * Set to an empty string to disable this command.
+	 */
+	FString EOSReportCommandPrefix{ TEXT("!eosreport") };
+
+	/**
+	 * Prefix for the EOS sanctions check command.
+	 * Syntax: !sanctionscheck <PUID|PlayerName>
+	 * Queries EOS for active platform sanctions on the specified player and
+	 * posts the results back to Discord.
+	 * Set to an empty string to disable this command.
+	 */
+	FString SanctionsCheckCommandPrefix{ TEXT("!sanctionscheck") };
+
 	// ── Response message formats ──────────────────────────────────────────────
 
 	/**
