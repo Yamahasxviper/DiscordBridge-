@@ -33,6 +33,10 @@
 			"Name": "SML",
 			"Enabled": true,
 			"SemVersion": "^3.11.3"
+		},
+		{
+			"Name": "DummyHeaders",
+			"Enabled": true
 		}
 	]
 }

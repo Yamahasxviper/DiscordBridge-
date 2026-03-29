@@ -7,6 +7,7 @@
 // this file just satisfies UBT's requirement that every Runtime module produce
 // a loadable DLL via IMPLEMENT_MODULE.
 
+#include "Online/FGOnlineHelpers.h"
 #include "Modules/ModuleManager.h"
 
 IMPLEMENT_MODULE(FDefaultModuleImpl, FGOnlineHelpers)
