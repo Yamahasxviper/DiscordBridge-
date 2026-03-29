@@ -40,6 +40,12 @@
 			"SemVersion": "^1.0.0"
 		},
 		{
+			"Name": "DummyHeaders",
+			"Enabled": true,
+			"Optional": false,
+			"SemVersion": "^1.0.0"
+		},
+		{
 			"Name": "TicketSystem",
 			"Enabled": true,
 			"Optional": true,

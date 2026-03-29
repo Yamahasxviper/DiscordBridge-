@@ -9,8 +9,8 @@ public class DummyHeaders : ModuleRules
         DefaultBuildSettings = BuildSettingsVersion.Latest;
         bLegacyPublicIncludePaths = false;
 
-        // Header-only module — all functionality is provided as inline
-        // code in Public headers; there are no private source files.
+        // All inline functionality is provided in Public headers; DummyHeaders.cpp
+        // contains only the minimal IMPLEMENT_MODULE required to produce a loadable DLL.
 
         PublicDependencyModuleNames.AddRange(new string[]
         {
