@@ -5,6 +5,8 @@
 #include "BanPlayerLookup.h"
 #include "Steam/SteamBanSubsystem.h"
 #include "EOS/EOSBanSubsystem.h"
+// EOSBanSDK — custom EOS SDK wrapper for PUID string↔handle conversion
+#include "EOSBanSDK.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/PlayerController.h"
 
@@ -166,7 +168,21 @@ namespace BanCmdHelper
         // Fast path: raw EOS PUID
         if (UEOSBanSubsystem::IsValidEOSProductUserId(Input))
         {
-            OutPUID = Input;
+            // Also validate via the custom EOS SDK: parse the string into an
+            // EOS_ProductUserId handle and confirm the EOS C SDK considers it valid.
+#if WITH_EOS_SDK
+            const EOS_ProductUserId PUIDHandle = EOSBanSDK::PUIDFromString(Input);
+            if (!EOSBanSDK::IsValidHandle(PUIDHandle))
+            {
+                Sender->SendChatMessage(
+                    FString::Printf(TEXT("[BanSystem] '%s' passed format validation "
+                        "but was rejected by the EOS SDK as an invalid Product User ID."),
+                        *Input),
+                    FLinearColor::Red);
+                return false;
+            }
+#endif
+            OutPUID = Input.ToLower();
             return true;
         }
 

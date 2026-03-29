@@ -7,6 +7,11 @@
 // Satisfactory, so this plugin replaces the DummyHeaders/FGOnlineHelpers path).
 #include "EOSIdHelper.h"
 
+// EOSBanSDK — custom EOS SDK wrapper that converts stored PUID strings back to
+// EOS_ProductUserId handles, validates them via the EOS C SDK, and exposes the
+// EOS platform handle for direct SDK calls.
+#include "EOSBanSDK.h"
+
 // Ban subsystem validators
 #include "Steam/SteamBanSubsystem.h"
 #include "EOS/EOSBanSubsystem.h"
@@ -125,6 +130,26 @@ bool FBanIdResolver::TryGetEOSProductUserId(const FUniqueNetIdRepl& UniqueId,
             *Candidate);
         return false;
     }
+
+#if WITH_EOS_SDK
+    // Secondary validation via the custom EOS SDK:
+    // EOSBanSDK::PUIDFromString() calls EOS_ProductUserId_FromString() to parse
+    // the string into an EOS_ProductUserId handle, then IsValidHandle() calls
+    // EOS_ProductUserId_IsValid() to confirm the EOS SDK considers it valid.
+    // This cross-checks that the PUID produced by the UE OnlineServices layer
+    // is accepted by the underlying EOS C SDK.
+    {
+        const EOS_ProductUserId PUIDHandle = EOSBanSDK::PUIDFromString(Candidate);
+        if (!EOSBanSDK::IsValidHandle(PUIDHandle))
+        {
+            UE_LOG(LogBanIdResolver, Warning,
+                TEXT("TryGetEOSProductUserId: PUID '%s' passed format validation but "
+                     "EOS_ProductUserId_IsValid() returned false — discarding."),
+                *Candidate);
+            return false;
+        }
+    }
+#endif // WITH_EOS_SDK
 
     OutPUID = Candidate;
     UE_LOG(LogBanIdResolver, Verbose,

@@ -5,6 +5,9 @@
 #include "EOS/EOSBanSubsystem.h"
 #include "BanPlayerLookup.h"
 #include "BanIdResolver.h"
+// EOSBanSDK — custom EOS SDK wrapper for PUID string↔handle conversion
+// and EOS platform handle access.
+#include "EOSBanSDK.h"
 #include "Engine/GameInstance.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -1127,7 +1130,21 @@ void UBanDiscordSubsystem::HandleEOSBanCommand(const FString& Args,
 	FString EOSPUID;
 	if (UEOSBanSubsystem::IsValidEOSProductUserId(Input))
 	{
-		EOSPUID = Input;
+		// Input looks like a raw PUID string (32 hex chars).
+		// Confirm via the custom EOS SDK that the EOS C SDK also considers
+		// this a valid Product User ID handle before accepting it.
+#if WITH_EOS_SDK
+		const EOS_ProductUserId PUIDHandle = EOSBanSDK::PUIDFromString(Input);
+		if (!EOSBanSDK::IsValidHandle(PUIDHandle))
+		{
+			Reply(ChannelId,
+			      FString::Printf(TEXT(":x: `%s` passed format validation but was "
+			                          "rejected by the EOS SDK as an invalid Product User ID."),
+			                      *Input));
+			return;
+		}
+#endif
+		EOSPUID = Input.ToLower();
 	}
 	else
 	{

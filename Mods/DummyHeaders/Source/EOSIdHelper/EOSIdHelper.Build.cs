@@ -11,9 +11,13 @@ public class EOSIdHelper : ModuleRules
         DefaultBuildSettings = BuildSettingsVersion.Latest;
         bLegacyPublicIncludePaths = false;
 
-        // All EOS-extraction logic lives in EOSIdHelper.h as an inline function
-        // so consumers can use it with zero overhead and no additional DLL calls.
-        // The public deps below flow transitively to any mod that lists
+        // Public headers provided by this module (all inline — zero DLL overhead):
+        //   EOSIdHelper.h  — EOSId::GetProductUserId()  : extract EOS PUID from FUniqueNetIdRepl
+        //   EOSBanSDK.h    — compatibility forwarder: includes EOSDirectSDK.h and aliases
+        //                    EOSBanSDK namespace to EOSDirectSDK namespace.
+        //                    New code should depend on "EOSDirectSDK" and use EOSDirectSDK.h.
+        //
+        // All public deps below flow transitively to any mod that lists
         // "EOSIdHelper" in its own PublicDependencyModuleNames.
 
         PublicDependencyModuleNames.AddRange(new string[]
@@ -29,8 +33,14 @@ public class EOSIdHelper : ModuleRules
             "OnlineServicesEOSGS",
             // LexToString(EOS_ProductUserId) -> FString
             "EOSShared",
-            // EOS_ProductUserId, EOS_ProductUserId_IsValid
+            // EOS_ProductUserId, EOS_ProductUserId_IsValid, EOS_ProductUserId_FromString,
+            // eos_common.h, eos_platform.h and all EOS C SDK headers
             "EOSSDK",
+            // EOSDirectSDK — dedicated direct EOS C SDK access module.
+            // EOSBanSDK.h in this module includes EOSDirectSDK.h and aliases
+            // EOSBanSDK = EOSDirectSDK, so consumers of EOSIdHelper that include
+            // EOSBanSDK.h automatically have access to both namespaces.
+            "EOSDirectSDK",
         });
 
         // ── V1 EOS path (OnlineSubsystemEOS) ─────────────────────────────────
