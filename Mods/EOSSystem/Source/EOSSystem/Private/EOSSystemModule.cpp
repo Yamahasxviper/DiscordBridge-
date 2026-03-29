@@ -8,9 +8,13 @@ void FEOSSystemModule::StartupModule()
 {
     UE_LOG(LogEOSSystem, Log, TEXT("EOSSystem module starting up — loading EOS SDK DLL..."));
     if (FEOSSDKLoader::Get().Load())
+    {
         UE_LOG(LogEOSSystem, Log, TEXT("EOSSystem: EOS SDK DLL loaded successfully."));
+    }
     else
+    {
         UE_LOG(LogEOSSystem, Warning, TEXT("EOSSystem: EOS SDK DLL not found — EOS features will be disabled."));
+    }
 }
 
 void FEOSSystemModule::ShutdownModule()

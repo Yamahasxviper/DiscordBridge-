@@ -67,6 +67,10 @@ typedef enum EOS_ELogCategory
     EOS_LC_AllCategories         = 0x7fffffff
 } EOS_ELogCategory;
 
+// Convenience alias matching the ALL_CAPS naming used by the real EOS SDK
+// and by EOSSystemSubsystem.cpp (EOS_LC_ALL_CATEGORIES).
+#define EOS_LC_ALL_CATEGORIES EOS_LC_AllCategories
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOS_LogMessage
 // ─────────────────────────────────────────────────────────────────────────────
