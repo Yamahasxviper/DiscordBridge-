@@ -88,20 +88,13 @@
 //   EOS_Platform_GetSanctionsInterface(platform)  →  EOS_HSanctions
 //   (and all other EOS_Platform_Get*Interface functions)
 //
-// eos_platform.h is absent from some CSS engine EOSSDK distributions.
-// Include it when available; otherwise forward-declare the single type and
-// function used by GetConnectInterface() below so the header still compiles.
-#if __has_include("eos_platform.h")
-#  include "eos_platform.h"
-#else
-// EOS_HConnect opaque handle (normally declared inside eos_platform.h).
-struct EOS_ConnectHandle;
-typedef struct EOS_ConnectHandle* EOS_HConnect;
-// EOS_Platform_GetConnectInterface C-linkage declaration.
-// On Windows x64 the default calling convention is __cdecl, which matches
-// EOS_EOSSDK_CALL, so no explicit specifier is needed.
-extern "C" EOS_HConnect EOS_Platform_GetConnectInterface(EOS_HPlatform Handle);
-#endif
+// eos_platform.h lives alongside this header in EOSDirectSDK/Public/.  That
+// stub provides a complete, ABI-compatible replacement for the real EOS SDK
+// eos_platform.h, which is absent from some CSS engine EOSSDK distributions.
+// If a future CSS engine build does ship eos_platform.h inside the EOSSDK
+// plugin, the include guard in our stub (EOS_Platform_H — the same guard the
+// real SDK uses) prevents any redeclaration conflicts.
+#include "eos_platform.h"
 
 // EOSShared helpers:
 //   LexToString(EOS_ProductUserId)  →  FString (32-char lowercase hex)
