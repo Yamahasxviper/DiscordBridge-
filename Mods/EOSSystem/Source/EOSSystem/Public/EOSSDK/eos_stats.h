@@ -17,8 +17,8 @@ extern "C" {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Forward declare the Stats handle (defined in eos_platform.h)
 // ─────────────────────────────────────────────────────────────────────────────
-struct EOS_StatsHandleDetails;
-typedef struct EOS_StatsHandleDetails* EOS_HStats;
+struct EOS_StatsHandle;
+typedef struct EOS_StatsHandle* EOS_HStats;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOS_Stats_Stat

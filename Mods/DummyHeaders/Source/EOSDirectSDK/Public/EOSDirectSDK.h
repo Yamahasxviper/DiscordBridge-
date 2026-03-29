@@ -232,10 +232,9 @@ inline bool IsValidHandle(EOS_ProductUserId PUID)
  *             the startup sequence — typically safe from PostDefault onwards).
  *
  * NOTE — IEOSSDKManager / IEOSPlatformHandle API
- *   IEOSSDKManager::GetAllPlatformHandles() returns a TArray of TSharedRef
- *   to IEOSPlatformHandle.  The raw EOS_HPlatform is obtained via the public
- *   accessor GetHandle() on IEOSPlatformHandle.  PlatformHandle is a protected
- *   data member and must NOT be accessed directly.
+ *   IEOSSDKManager::GetPlatformHandles() returns a TArray of TSharedRef
+ *   to IEOSPlatformHandle.  The raw EOS_HPlatform is exposed via the public
+ *   data member PlatformHandle on IEOSPlatformHandle.
  *   Reference: Engine/Plugins/Online/EOSShared/Source/EOSShared/Public/IEOSSDKManager.h
  */
 inline EOS_HPlatform GetPlatformHandle()
@@ -244,14 +243,11 @@ inline EOS_HPlatform GetPlatformHandle()
     if (!Manager)
         return nullptr;
 
-    const TArray<TSharedRef<IEOSPlatformHandle>> Handles = Manager->GetAllPlatformHandles();
+    const TArray<TSharedRef<IEOSPlatformHandle>> Handles = Manager->GetPlatformHandles();
     if (Handles.IsEmpty())
         return nullptr;
 
-    // IEOSPlatformHandle::GetHandle() is the public accessor returning the
-    // raw EOS_HPlatform.  PlatformHandle is a protected member and must NOT
-    // be accessed directly.
-    return Handles[0]->GetHandle();
+    return Handles[0]->PlatformHandle;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

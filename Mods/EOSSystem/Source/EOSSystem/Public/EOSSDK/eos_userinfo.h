@@ -17,8 +17,8 @@ extern "C" {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Forward declare the UserInfo handle (defined in eos_platform.h)
 // ─────────────────────────────────────────────────────────────────────────────
-struct EOS_UserInfoHandleDetails;
-typedef struct EOS_UserInfoHandleDetails* EOS_HUserInfo;
+struct EOS_UserInfoHandle;
+typedef struct EOS_UserInfoHandle* EOS_HUserInfo;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOS_UserInfo
