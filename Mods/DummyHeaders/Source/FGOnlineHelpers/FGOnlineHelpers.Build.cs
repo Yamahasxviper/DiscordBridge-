@@ -1,15 +1,15 @@
 using UnrealBuildTool;
 
-public class DummyHeaders : ModuleRules
+public class FGOnlineHelpers : ModuleRules
 {
-    public DummyHeaders(ReadOnlyTargetRules Target) : base(Target)
+    public FGOnlineHelpers(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         CppStandard = CppStandardVersion.Cpp20;
         DefaultBuildSettings = BuildSettingsVersion.Latest;
         bLegacyPublicIncludePaths = false;
 
-        // All inline functionality is provided in Public headers; DummyHeaders.cpp
+        // All inline functionality is provided in Public headers; FGOnlineHelpers.cpp
         // contains only the minimal IMPLEMENT_MODULE required to produce a loadable DLL.
 
         PublicDependencyModuleNames.AddRange(new string[]

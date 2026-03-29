@@ -18,7 +18,7 @@ public class SMLWebSocket : ModuleRules
 			"Engine",
 			// Header stubs for APIs not present in Satisfactory's custom UE build.
 			// Required by all Alpakit C++ mods so UBT can resolve engine headers at mod compile time.
-			"DummyHeaders",
+			"FGOnlineHelpers",
 			// SML runtime dependency – ensures correct module load ordering
 			"SML",
 		});
