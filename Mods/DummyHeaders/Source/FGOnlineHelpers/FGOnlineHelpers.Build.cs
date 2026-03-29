@@ -20,14 +20,13 @@ public class FGOnlineHelpers : ModuleRules
             // OnlineServicesEOSGS provides UE::Online::GetProductUserId(FAccountId)
             // for the V2 (FAccountId) EOS identity path.
             "OnlineServicesEOSGS",
+            // OnlineSubsystemEOS provides IUniqueNetIdEOS for the V1 "EOS"-typed
+            // FUniqueNetId identity path.
+            "OnlineSubsystemEOS",
             // EOSShared provides LexToString(EOS_ProductUserId) -> FString.
             "EOSShared",
             // EOSSDK provides EOS_ProductUserId, EOS_ProductUserId_IsValid, etc.
             "EOSSDK",
-            // NOTE: OnlineSubsystemEOS is intentionally omitted — it is disabled
-            // ("Enabled": false) in FactoryGame.uproject and Satisfactory does not
-            // use the old V1 OnlineSubsystemEOS path.  Including it would produce
-            // LNK1181 (cannot open input file 'UnrealEditor-OnlineSubsystemEOS.lib').
         });
     }
 }

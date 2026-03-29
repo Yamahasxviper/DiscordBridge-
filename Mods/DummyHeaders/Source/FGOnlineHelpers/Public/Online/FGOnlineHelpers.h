@@ -17,13 +17,11 @@
 // for the V2 (FAccountId / UE::Online::Online Services) path.
 #include "Online/OnlineIdEOSGS.h"
 
+// OnlineSubsystemEOS — IUniqueNetIdEOS interface for the V1 EOS identity path.
+#include "OnlineSubsystemEOSTypesPublic.h"
+
 // EOSShared — LexToString(EOS_ProductUserId) → FString
 #include "EOSShared.h"
-
-// NOTE: OnlineSubsystemEOS (IUniqueNetIdEOS) is intentionally omitted.
-// Satisfactory uses the UE5 V2 OnlineServicesEOSGS path exclusively.
-// OnlineSubsystemEOS is disabled ("Enabled": false) in FactoryGame.uproject,
-// so including OnlineSubsystemEOSTypesPublic.h would produce LNK1181.
 
 #endif // WITH_EOS_SDK
 
@@ -44,11 +42,13 @@
  *       Players whose primary authentication goes through EOS/Epic Online
  *       Services hold a V2 FAccountId.  UE::Online::GetProductUserId()
  *       extracts the EOS_ProductUserId from the registry.
- *       Satisfactory uses this path exclusively.
  *
- *   V1 — FUniqueNetId of any type (e.g. "Steam", "Null", legacy "EOS")
- *       Not used in Satisfactory.  OnlineSubsystemEOS is disabled in
- *       FactoryGame.uproject, so no IUniqueNetIdEOS cast is attempted.
+ *   V1 — FUniqueNetId of type "EOS"  (OnlineSubsystemEOS)
+ *       Older or fallback code paths may produce a V1 net-id of EOS type.
+ *       The id is cast to IUniqueNetIdEOS to retrieve the ProductUserId.
+ *
+ *   V1 — FUniqueNetId of any other type (e.g. "Steam", "Null")
+ *       No EOS PUID is embedded — GetProductUserId returns false.
  */
 namespace EOSId
 {
@@ -89,9 +89,32 @@ inline bool GetProductUserId(const FUniqueNetIdRepl& UniqueId, FString& OutProdu
         return !OutProductUserId.IsEmpty();
     }
 
-    // V1 FUniqueNetId paths (Steam, Null, legacy EOS) do not carry an EOS PUID
-    // accessible without OnlineSubsystemEOS.  Satisfactory does not use the V1
-    // EOS path, so no further extraction is attempted.
+    if (UniqueId.IsV1())
+    {
+        // ── V1 path: FUniqueNetId of EOS type (OnlineSubsystemEOS) ──────────
+        // Only attempt the cast when the type name confirms this is an EOS ID;
+        // a Steam or Null FUniqueNetId must NOT be cast to IUniqueNetIdEOS.
+        static const FName EosTypeName(TEXT("EOS"));
+        const FUniqueNetIdPtr& Ptr = UniqueId.GetV1Unsafe();
+        if (!Ptr.IsValid())
+            return false;
+
+        if (Ptr->GetType() != EosTypeName)
+            return false;  // Not an EOS V1 id (e.g. Steam, Null) — no PUID
+
+        // IUniqueNetIdEOS is the shared interface for all EOS V1 net-ids.
+        // The static_cast is valid here because we already confirmed the type.
+        const IUniqueNetIdEOS* EosId = static_cast<const IUniqueNetIdEOS*>(Ptr.Get());
+        if (!EosId)
+            return false;
+
+        const EOS_ProductUserId ProductUserId = EosId->GetProductUserId();
+        if (!EOS_ProductUserId_IsValid(ProductUserId))
+            return false;
+
+        OutProductUserId = LexToString(ProductUserId);
+        return !OutProductUserId.IsEmpty();
+    }
 
 #endif  // WITH_EOS_SDK
 
