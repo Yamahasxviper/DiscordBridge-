@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "OnlineSubsystemTypes.h"  // FUniqueNetId
+#include "Online/CoreOnline.h"  // FUniqueNetId (CoreOnline module — UE5 OnlineServices layer)
 
 #if WITH_EOS_SDK
 
