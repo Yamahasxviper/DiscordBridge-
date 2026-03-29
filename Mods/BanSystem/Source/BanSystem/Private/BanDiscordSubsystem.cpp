@@ -8,6 +8,9 @@
 // EOSBanSDK — custom EOS SDK wrapper for PUID string↔handle conversion
 // and EOS platform handle access.
 #include "EOSBanSDK.h"
+// EOSSystem — provides UEOSConnectSubsystem for cross-platform cache lookups.
+#include "EOSConnectSubsystem.h"
+#include "EOSTypes.h"
 #include "Engine/GameInstance.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -1036,6 +1039,25 @@ void UBanDiscordSubsystem::HandleSteamBanCommand(const FString& Args,
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: Steam ban issued by '%s' — ID: %s, Duration: %d min, Reason: %s"),
 	       *IssuedBy, *Steam64Id, Duration, *Reason);
+
+	// Cross-platform: if EOSSystem has a cached PUID for this Steam64 ID, also apply the EOS ban.
+	{
+		FString LinkedPUID;
+		if (FBanIdResolver::TryGetCachedPUIDFromSteam64(GI, Steam64Id, LinkedPUID))
+		{
+			UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>();
+			if (EOSBans)
+			{
+				EOSBans->BanPlayer(LinkedPUID, Reason, Duration, IssuedBy);
+				Reply(ChannelId,
+				      FString::Printf(TEXT(":link: Cross-platform EOS ban also applied — PUID: `%s`"),
+				                      *LinkedPUID));
+				UE_LOG(LogBanDiscord, Log,
+				       TEXT("BanDiscordSubsystem: cross-platform EOS ban issued — Steam64 '%s' → PUID '%s'"),
+				       *Steam64Id, *LinkedPUID);
+			}
+		}
+	}
 }
 
 void UBanDiscordSubsystem::HandleSteamUnbanCommand(const FString& Args,
@@ -1237,6 +1259,25 @@ void UBanDiscordSubsystem::HandleEOSBanCommand(const FString& Args,
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: EOS ban issued by '%s' — ID: %s, Duration: %d min, Reason: %s"),
 	       *IssuedBy, *EOSPUID, Duration, *Reason);
+
+	// Cross-platform: if EOSSystem has a cached Steam64 ID for this PUID, also apply the Steam ban.
+	{
+		FString LinkedSteam64;
+		if (FBanIdResolver::TryGetCachedSteam64FromPUID(GI, EOSPUID, LinkedSteam64))
+		{
+			USteamBanSubsystem* SteamBans = GI->GetSubsystem<USteamBanSubsystem>();
+			if (SteamBans)
+			{
+				SteamBans->BanPlayer(LinkedSteam64, Reason, Duration, IssuedBy);
+				Reply(ChannelId,
+				      FString::Printf(TEXT(":link: Cross-platform Steam ban also applied — Steam64: `%s`"),
+				                      *LinkedSteam64));
+				UE_LOG(LogBanDiscord, Log,
+				       TEXT("BanDiscordSubsystem: cross-platform Steam ban issued — PUID '%s' → Steam64 '%s'"),
+				       *EOSPUID, *LinkedSteam64);
+			}
+		}
+	}
 }
 
 void UBanDiscordSubsystem::HandleEOSUnbanCommand(const FString& Args,

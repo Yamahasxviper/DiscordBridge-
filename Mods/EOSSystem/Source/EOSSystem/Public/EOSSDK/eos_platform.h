@@ -1,0 +1,239 @@
+// Copyright Yamahasxviper. All Rights Reserved.
+//
+// eos_platform.h — EOS SDK platform interface, written from scratch using
+// only public EOS SDK documentation (https://dev.epicgames.com/docs).
+// No UE EOSSDK module, no EOSShared, and no CSS FactoryGame headers are
+// referenced anywhere in this file.
+
+#pragma once
+
+#include "eos_init.h"
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Platform creation flags  (EOS_PF_*)
+// ─────────────────────────────────────────────────────────────────────────────
+#define EOS_PF_LOADING_IN_EDITOR               0x00001u
+#define EOS_PF_DISABLE_OVERLAY                 0x00002u
+#define EOS_PF_DISABLE_SOCIAL_OVERLAY          0x00004u
+#define EOS_PF_RESERVED1                       0x00008u
+#define EOS_PF_WINDOWS_ENABLE_OVERLAY_D3D9     0x00010u
+#define EOS_PF_WINDOWS_ENABLE_OVERLAY_D3D10    0x00020u
+#define EOS_PF_WINDOWS_ENABLE_OVERLAY_OPENGL   0x00040u
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  EOS_Platform_ClientCredentials
+// ─────────────────────────────────────────────────────────────────────────────
+typedef struct EOS_Platform_ClientCredentials
+{
+    /** OAuth2 client ID for your product */
+    const char* ClientId;
+    /** OAuth2 client secret for your product */
+    const char* ClientSecret;
+} EOS_Platform_ClientCredentials;
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  EOS_Platform_RTCOptions
+// ─────────────────────────────────────────────────────────────────────────────
+#define EOS_PLATFORM_RTCOPTIONS_API_LATEST 1
+
+typedef struct EOS_Platform_RTCOptions
+{
+    /** API version: must be EOS_PLATFORM_RTCOPTIONS_API_LATEST */
+    int32_t      ApiVersion;
+    /** Platform-specific RTC options (platform-dependent struct pointer) */
+    const void*  PlatformSpecificOptions;
+} EOS_Platform_RTCOptions;
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  EOS_Platform_Options
+// ─────────────────────────────────────────────────────────────────────────────
+#define EOS_PLATFORM_OPTIONS_API_LATEST 12
+
+typedef struct EOS_Platform_Options
+{
+    /** API version: must be EOS_PLATFORM_OPTIONS_API_LATEST */
+    int32_t                        ApiVersion;
+    /** Reserved — must be NULL */
+    void*                          Reserved;
+    /** Product ID from the Developer Portal */
+    const char*                    ProductId;
+    /** Sandbox ID from the Developer Portal */
+    const char*                    SandboxId;
+    /** OAuth2 client credentials */
+    EOS_Platform_ClientCredentials ClientCredentials;
+    /** EOS_TRUE when running a dedicated server, EOS_FALSE for a client */
+    EOS_Bool                       bIsServer;
+    /** Optional 64-character hex encryption key for player data */
+    const char*                    EncryptionKey;
+    /** Override the country code detected from the OS (NULL = auto) */
+    const char*                    OverrideCountryCode;
+    /** Override the locale code detected from the OS (NULL = auto) */
+    const char*                    OverrideLocaleCode;
+    /** Deployment ID from the Developer Portal */
+    const char*                    DeploymentId;
+    /** Bitfield of EOS_PF_* platform flags */
+    uint64_t                       Flags;
+    /** Path the SDK uses for its local disk cache */
+    const char*                    CacheDirectory;
+    /** Throttle for EOS_Platform_Tick in milliseconds (0 = no throttle) */
+    uint32_t                       TickBudgetInMilliseconds;
+    /** Optional RTC options; NULL = disable RTC */
+    const EOS_Platform_RTCOptions* RTCOptions;
+} EOS_Platform_Options;
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Forward declarations for interface handles used in function pointer typedefs
+// ─────────────────────────────────────────────────────────────────────────────
+struct EOS_AuthHandleDetails;
+typedef struct EOS_AuthHandleDetails*            EOS_HAuth;
+
+struct EOS_UserInfoHandleDetails;
+typedef struct EOS_UserInfoHandleDetails*        EOS_HUserInfo;
+
+struct EOS_FriendsHandleDetails;
+typedef struct EOS_FriendsHandleDetails*         EOS_HFriends;
+
+struct EOS_PresenceHandleDetails;
+typedef struct EOS_PresenceHandleDetails*        EOS_HPresence;
+
+struct EOS_P2PHandleDetails;
+typedef struct EOS_P2PHandleDetails*             EOS_HP2P;
+
+struct EOS_AchievementsHandleDetails;
+typedef struct EOS_AchievementsHandleDetails*    EOS_HAchievements;
+
+struct EOS_StatsHandleDetails;
+typedef struct EOS_StatsHandleDetails*           EOS_HStats;
+
+struct EOS_LeaderboardsHandleDetails;
+typedef struct EOS_LeaderboardsHandleDetails*    EOS_HLeaderboards;
+
+struct EOS_PlayerDataStorageHandleDetails;
+typedef struct EOS_PlayerDataStorageHandleDetails* EOS_HPlayerDataStorage;
+
+struct EOS_TitleStorageHandleDetails;
+typedef struct EOS_TitleStorageHandleDetails*    EOS_HTitleStorage;
+
+struct EOS_EcomHandleDetails;
+typedef struct EOS_EcomHandleDetails*            EOS_HEcom;
+
+struct EOS_RTCHandleDetails;
+typedef struct EOS_RTCHandleDetails*             EOS_HRTC;
+
+struct EOS_RTCAdminHandleDetails;
+typedef struct EOS_RTCAdminHandleDetails*        EOS_HRTCAdmin;
+
+struct EOS_LobbyHandleDetails;
+typedef struct EOS_LobbyHandleDetails*           EOS_HLobby;
+
+struct EOS_LobbyModificationHandleDetails;
+typedef struct EOS_LobbyModificationHandleDetails* EOS_HLobbyModification;
+
+struct EOS_LobbyDetailsHandleDetails;
+typedef struct EOS_LobbyDetailsHandleDetails*    EOS_HLobbyDetails;
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  EOS_Platform_* function pointer typedefs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Creates and returns a new platform instance */
+typedef EOS_HPlatform      (EOS_CALL *EOS_Platform_Create_t)(const EOS_Platform_Options* Options);
+
+/** Releases a platform instance previously created with EOS_Platform_Create */
+typedef void               (EOS_CALL *EOS_Platform_Release_t)(EOS_HPlatform Handle);
+
+/** Tick the platform — drives callbacks and timed operations */
+typedef void               (EOS_CALL *EOS_Platform_Tick_t)(EOS_HPlatform Handle);
+
+/** Returns the Connect interface handle */
+typedef EOS_HConnect       (EOS_CALL *EOS_Platform_GetConnectInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the Auth interface handle */
+typedef EOS_HAuth          (EOS_CALL *EOS_Platform_GetAuthInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the UserInfo interface handle */
+typedef EOS_HUserInfo      (EOS_CALL *EOS_Platform_GetUserInfoInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the Friends interface handle */
+typedef EOS_HFriends       (EOS_CALL *EOS_Platform_GetFriendsInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the Presence interface handle */
+typedef EOS_HPresence      (EOS_CALL *EOS_Platform_GetPresenceInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the Sessions interface handle */
+typedef EOS_HSessions      (EOS_CALL *EOS_Platform_GetSessionsInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the Lobby interface handle */
+typedef EOS_HLobby         (EOS_CALL *EOS_Platform_GetLobbyInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the P2P interface handle */
+typedef EOS_HP2P           (EOS_CALL *EOS_Platform_GetP2PInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the Achievements interface handle */
+typedef EOS_HAchievements  (EOS_CALL *EOS_Platform_GetAchievementsInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the Stats interface handle */
+typedef EOS_HStats         (EOS_CALL *EOS_Platform_GetStatsInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the Leaderboards interface handle */
+typedef EOS_HLeaderboards  (EOS_CALL *EOS_Platform_GetLeaderboardsInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the PlayerDataStorage interface handle */
+typedef EOS_HPlayerDataStorage (EOS_CALL *EOS_Platform_GetPlayerDataStorageInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the TitleStorage interface handle */
+typedef EOS_HTitleStorage  (EOS_CALL *EOS_Platform_GetTitleStorageInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the AntiCheatServer interface handle */
+typedef EOS_HAntiCheatServer (EOS_CALL *EOS_Platform_GetAntiCheatServerInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the Sanctions interface handle */
+typedef EOS_HSanctions     (EOS_CALL *EOS_Platform_GetSanctionsInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the Metrics interface handle */
+typedef EOS_HMetrics       (EOS_CALL *EOS_Platform_GetMetricsInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the Reports interface handle */
+typedef EOS_HReports       (EOS_CALL *EOS_Platform_GetReportsInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the Ecom interface handle */
+typedef EOS_HEcom          (EOS_CALL *EOS_Platform_GetEcomInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the RTC interface handle */
+typedef EOS_HRTC           (EOS_CALL *EOS_Platform_GetRTCInterface_t)(EOS_HPlatform Handle);
+
+/** Returns the RTCAdmin interface handle */
+typedef EOS_HRTCAdmin      (EOS_CALL *EOS_Platform_GetRTCAdminInterface_t)(EOS_HPlatform Handle);
+
+/** Sets the log level for the specified category */
+typedef EOS_EResult        (EOS_CALL *EOS_Platform_SetLogLevel_t)(EOS_ELogCategory LogCategory, EOS_ELogLevel LogLevel);
+
+/** Registers a callback for log messages */
+typedef EOS_EResult        (EOS_CALL *EOS_Logging_SetCallback_t)(EOS_LogMessageFunc Callback);
+
+/** Returns a human-readable string for an EOS_EResult code */
+typedef const char*        (EOS_CALL *EOS_EResult_ToString_t)(EOS_EResult Result);
+
+/** Converts a EOS_ProductUserId to a string */
+typedef EOS_EResult        (EOS_CALL *EOS_ProductUserId_ToString_t)(EOS_ProductUserId AccountId, char* OutBuffer, int32_t* InOutBufferLength);
+
+/** Creates an EOS_ProductUserId from a string */
+typedef EOS_ProductUserId  (EOS_CALL *EOS_ProductUserId_FromString_t)(const char* AccountIdString);
+
+/** Returns EOS_TRUE if the EOS_ProductUserId is valid */
+typedef EOS_Bool           (EOS_CALL *EOS_ProductUserId_IsValid_t)(EOS_ProductUserId AccountId);
+
+/** Converts an EOS_EpicAccountId to a string */
+typedef EOS_EResult        (EOS_CALL *EOS_EpicAccountId_ToString_t)(EOS_EpicAccountId AccountId, char* OutBuffer, int32_t* InOutBufferLength);
+
+/** Returns EOS_TRUE if the EOS_EpicAccountId is valid */
+typedef EOS_Bool           (EOS_CALL *EOS_EpicAccountId_IsValid_t)(EOS_EpicAccountId AccountId);
+
+#ifdef __cplusplus
+}
+#endif

@@ -12,9 +12,14 @@
 // EOS platform handle for direct SDK calls.
 #include "EOSBanSDK.h"
 
+// EOSSystem — provides UEOSConnectSubsystem for cross-platform cache lookups.
+#include "EOSConnectSubsystem.h"
+#include "EOSTypes.h"
+
 // Ban subsystem validators
 #include "Steam/SteamBanSubsystem.h"
 #include "EOS/EOSBanSubsystem.h"
+#include "Engine/GameInstance.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogBanIdResolver, Log, All);
 
@@ -154,5 +159,49 @@ bool FBanIdResolver::TryGetEOSProductUserId(const FUniqueNetIdRepl& UniqueId,
     OutPUID = Candidate;
     UE_LOG(LogBanIdResolver, Verbose,
         TEXT("TryGetEOSProductUserId: resolved EOS PUID '%s'"), *OutPUID);
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  EOSSystem cross-platform cache helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool FBanIdResolver::TryGetCachedPUIDFromSteam64(UGameInstance* GameInstance,
+                                                  const FString& Steam64Id,
+                                                  FString&       OutPUID)
+{
+    if (!GameInstance || Steam64Id.IsEmpty()) return false;
+
+    UEOSConnectSubsystem* EOS = GameInstance->GetSubsystem<UEOSConnectSubsystem>();
+    if (!EOS) return false;
+
+    const FString Cached = EOS->GetCachedPUIDForExternalAccountTyped(
+        Steam64Id, EEOSExternalAccountType::Steam);
+
+    if (Cached.IsEmpty()) return false;
+
+    OutPUID = Cached;
+    UE_LOG(LogBanIdResolver, Verbose,
+        TEXT("TryGetCachedPUIDFromSteam64: EOSSystem cache hit — Steam64 '%s' → PUID '%s'"),
+        *Steam64Id, *OutPUID);
+    return true;
+}
+
+bool FBanIdResolver::TryGetCachedSteam64FromPUID(UGameInstance* GameInstance,
+                                                   const FString& PUID,
+                                                   FString&       OutSteam64Id)
+{
+    if (!GameInstance || PUID.IsEmpty()) return false;
+
+    UEOSConnectSubsystem* EOS = GameInstance->GetSubsystem<UEOSConnectSubsystem>();
+    if (!EOS) return false;
+
+    const FString Cached = EOS->GetCachedSteam64ForPUID(PUID);
+    if (Cached.IsEmpty()) return false;
+
+    OutSteam64Id = Cached;
+    UE_LOG(LogBanIdResolver, Verbose,
+        TEXT("TryGetCachedSteam64FromPUID: EOSSystem cache hit — PUID '%s' → Steam64 '%s'"),
+        *PUID, *OutSteam64Id);
     return true;
 }
