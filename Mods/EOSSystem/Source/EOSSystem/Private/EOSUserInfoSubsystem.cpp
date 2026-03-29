@@ -19,14 +19,14 @@ EOS_HUserInfo UEOSUserInfoSubsystem::GetUserInfoHandle() const
     return SDK.fp_EOS_Platform_GetUserInfoInterface(Sys->GetPlatformHandle());
 }
 
-static EOS_EpicAccountId AccountFromStr(const FString& S) { FEOSSDKLoader& SDK = FEOSSDKLoader::Get(); return SDK.fp_EOS_EpicAccountId_FromString ? SDK.fp_EOS_EpicAccountId_FromString(TCHAR_TO_UTF8(*S)) : nullptr; }
+static EOS_EpicAccountId UserInfo_AccountFromStr(const FString& S) { FEOSSDKLoader& SDK = FEOSSDKLoader::Get(); return SDK.fp_EOS_EpicAccountId_FromString ? SDK.fp_EOS_EpicAccountId_FromString(TCHAR_TO_UTF8(*S)) : nullptr; }
 
 void UEOSUserInfoSubsystem::QueryUserInfo(const FString& Local, const FString& Target)
 {
     FEOSSDKLoader& SDK = FEOSSDKLoader::Get();
     EOS_HUserInfo H = GetUserInfoHandle();
     if (!H || !SDK.fp_EOS_UserInfo_QueryUserInfo) return;
-    EOS_EpicAccountId LocalId = AccountFromStr(Local); EOS_EpicAccountId TargetId = AccountFromStr(Target);
+    EOS_EpicAccountId LocalId = UserInfo_AccountFromStr(Local); EOS_EpicAccountId TargetId = UserInfo_AccountFromStr(Target);
     if (!LocalId || !TargetId) return;
     EOS_UserInfo_QueryUserInfoOptions O = {}; O.ApiVersion = EOS_USERINFO_QUERYUSERINFO_API_LATEST; O.LocalUserId = LocalId; O.TargetUserId = TargetId;
     auto* Cb = new FUserInfoCbData{ this, Local, Target, LocalId, TargetId };
@@ -38,7 +38,7 @@ void UEOSUserInfoSubsystem::QueryUserInfoByDisplayName(const FString& Local, con
     FEOSSDKLoader& SDK = FEOSSDKLoader::Get();
     EOS_HUserInfo H = GetUserInfoHandle();
     if (!H || !SDK.fp_EOS_UserInfo_QueryUserInfoByDisplayName) return;
-    EOS_EpicAccountId LocalId = AccountFromStr(Local); if (!LocalId) return;
+    EOS_EpicAccountId LocalId = UserInfo_AccountFromStr(Local); if (!LocalId) return;
     EOS_UserInfo_QueryUserInfoByDisplayNameOptions O = {}; O.ApiVersion = EOS_USERINFO_QUERYUSERINFOBYDISPLAYNAME_API_LATEST;
     O.LocalUserId = LocalId; O.DisplayName = TCHAR_TO_UTF8(*DisplayName);
     auto* Cb = new FUserInfoCbData{ this, Local, DisplayName, LocalId, nullptr };

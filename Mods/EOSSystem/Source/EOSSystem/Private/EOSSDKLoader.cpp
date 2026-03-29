@@ -21,7 +21,7 @@ bool FEOSSDKLoader::Load()
     // Well-known engine / project Binaries directories
     Candidates.Add(FPaths::EngineDir() / TEXT("Binaries/Win64/EOSSDK-Win64-Shipping.dll"));
     Candidates.Add(FPaths::ProjectDir() / TEXT("Binaries/Win64/EOSSDK-Win64-Shipping.dll"));
-    Candidates.Add(FPlatformProcess::BaseDir() + TEXT("EOSSDK-Win64-Shipping.dll"));
+    Candidates.Add(FString(FPlatformProcess::BaseDir()) + TEXT("EOSSDK-Win64-Shipping.dll"));
     Candidates.Add(FPaths::ProjectDir() / TEXT("EOSSDK-Win64-Shipping.dll"));
     // Plugin-local Binaries directory — the preferred shipping location for DLLs
     // distributed inside a mod package (Alpakit copies them next to the .uplugin).
@@ -33,7 +33,7 @@ bool FEOSSDKLoader::Load()
 #elif PLATFORM_LINUX
     Candidates.Add(FPaths::EngineDir() / TEXT("Binaries/Linux/libEOSSDK-Linux-Shipping.so"));
     Candidates.Add(FPaths::ProjectDir() / TEXT("Binaries/Linux/libEOSSDK-Linux-Shipping.so"));
-    Candidates.Add(FPlatformProcess::BaseDir() + TEXT("libEOSSDK-Linux-Shipping.so"));
+    Candidates.Add(FString(FPlatformProcess::BaseDir()) + TEXT("libEOSSDK-Linux-Shipping.so"));
     {
         TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("EOSSystem"));
         if (Plugin.IsValid())

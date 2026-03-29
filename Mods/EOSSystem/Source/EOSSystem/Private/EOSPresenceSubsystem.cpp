@@ -20,14 +20,14 @@ EOS_HPresence UEOSPresenceSubsystem::GetPresenceHandle() const
     return SDK.fp_EOS_Platform_GetPresenceInterface(Sys->GetPlatformHandle());
 }
 
-static EOS_EpicAccountId AccountFromStr(const FString& S) { FEOSSDKLoader& SDK = FEOSSDKLoader::Get(); return SDK.fp_EOS_EpicAccountId_FromString ? SDK.fp_EOS_EpicAccountId_FromString(TCHAR_TO_UTF8(*S)) : nullptr; }
+static EOS_EpicAccountId Presence_AccountFromStr(const FString& S) { FEOSSDKLoader& SDK = FEOSSDKLoader::Get(); return SDK.fp_EOS_EpicAccountId_FromString ? SDK.fp_EOS_EpicAccountId_FromString(TCHAR_TO_UTF8(*S)) : nullptr; }
 
 void UEOSPresenceSubsystem::QueryPresence(const FString& Local, const FString& Target)
 {
     FEOSSDKLoader& SDK = FEOSSDKLoader::Get();
     EOS_HPresence H = GetPresenceHandle();
     if (!H || !SDK.fp_EOS_Presence_QueryPresence) return;
-    EOS_EpicAccountId LocalId = AccountFromStr(Local); EOS_EpicAccountId TargetId = AccountFromStr(Target);
+    EOS_EpicAccountId LocalId = Presence_AccountFromStr(Local); EOS_EpicAccountId TargetId = Presence_AccountFromStr(Target);
     if (!LocalId || !TargetId) return;
     EOS_Presence_QueryPresenceOptions O = {}; O.ApiVersion = EOS_PRESENCE_QUERYPRESENCE_API_LATEST; O.LocalUserId = LocalId; O.TargetUserId = TargetId;
     auto* Cb = new FPresenceQueryCbData{ this, Target };
@@ -52,7 +52,7 @@ void UEOSPresenceSubsystem::SetStatusAndCommit(const FString& Local, const FStri
     FEOSSDKLoader& SDK = FEOSSDKLoader::Get();
     EOS_HPresence H = GetPresenceHandle();
     if (!H || !SDK.fp_EOS_Presence_CreatePresenceModification || !SDK.fp_EOS_Presence_SetPresence) return;
-    EOS_EpicAccountId LocalId = AccountFromStr(Local); if (!LocalId) return;
+    EOS_EpicAccountId LocalId = Presence_AccountFromStr(Local); if (!LocalId) return;
 
     EOS_HPresenceModification Mod = nullptr;
     EOS_Presence_CreatePresenceModificationOptions CO = {}; CO.ApiVersion = EOS_PRESENCE_CREATEPRESENCEMODIFICATION_API_LATEST; CO.LocalUserId = LocalId;
@@ -61,11 +61,11 @@ void UEOSPresenceSubsystem::SetStatusAndCommit(const FString& Local, const FStri
     if (!Status.IsEmpty() && SDK.fp_EOS_PresenceModification_SetStatus)
     {
         EOS_PresenceModification_SetStatusOptions SO = {}; SO.ApiVersion = EOS_PRESENCEMODIFICATION_SETSTATUS_API_LATEST;
-        SO.Status = EOS_PS_Online;
-        if (Status.Equals(TEXT("Away"),       ESearchCase::IgnoreCase)) SO.Status = EOS_PS_Away;
-        else if (Status.Equals(TEXT("ExtendedAway"), ESearchCase::IgnoreCase)) SO.Status = EOS_PS_ExtendedAway;
-        else if (Status.Equals(TEXT("DoNotDisturb"), ESearchCase::IgnoreCase)) SO.Status = EOS_PS_DoNotDisturb;
-        else if (Status.Equals(TEXT("Offline"),      ESearchCase::IgnoreCase)) SO.Status = EOS_PS_Offline;
+        SO.Status = EOS_PMS_Online;
+        if (Status.Equals(TEXT("Away"),       ESearchCase::IgnoreCase)) SO.Status = EOS_PMS_Away;
+        else if (Status.Equals(TEXT("ExtendedAway"), ESearchCase::IgnoreCase)) SO.Status = EOS_PMS_ExtendedAway;
+        else if (Status.Equals(TEXT("DoNotDisturb"), ESearchCase::IgnoreCase)) SO.Status = EOS_PMS_DoNotDisturb;
+        else if (Status.Equals(TEXT("Offline"),      ESearchCase::IgnoreCase)) SO.Status = EOS_PMS_Offline;
         SDK.fp_EOS_PresenceModification_SetStatus(Mod, &SO);
     }
     if (!RichText.IsEmpty() && SDK.fp_EOS_PresenceModification_SetRawRichText)

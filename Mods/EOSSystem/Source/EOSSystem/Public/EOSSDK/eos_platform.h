@@ -234,6 +234,9 @@ typedef EOS_EResult        (EOS_CALL *EOS_EpicAccountId_ToString_t)(EOS_EpicAcco
 /** Returns EOS_TRUE if the EOS_EpicAccountId is valid */
 typedef EOS_Bool           (EOS_CALL *EOS_EpicAccountId_IsValid_t)(EOS_EpicAccountId AccountId);
 
+/** Creates an EOS_EpicAccountId from a string */
+typedef EOS_EpicAccountId  (EOS_CALL *EOS_EpicAccountId_FromString_t)(const char* AccountIdString);
+
 #ifdef __cplusplus
 }
 #endif

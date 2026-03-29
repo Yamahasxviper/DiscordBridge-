@@ -7,7 +7,7 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogEOSSessions, Log, All);
 
-static EOS_ProductUserId PUIDFromStr(const FString& S)
+static EOS_ProductUserId Sessions_PUIDFromStr(const FString& S)
 {
     FEOSSDKLoader& SDK = FEOSSDKLoader::Get();
     if (S.IsEmpty() || !SDK.fp_EOS_ProductUserId_FromString) return nullptr;
@@ -173,7 +173,7 @@ void UEOSSessionsSubsystem::RegisterPlayers(const TArray<FString>& PUIDs)
     if (!Sess || !SDK.fp_EOS_Sessions_RegisterPlayers) return;
     const UEOSSystemConfig* Cfg = GetDefault<UEOSSystemConfig>(); if (!Cfg) return;
     TArray<EOS_ProductUserId> Ids;
-    for (const FString& P : PUIDs) { if (auto Id = PUIDFromStr(P)) Ids.Add(Id); }
+    for (const FString& P : PUIDs) { if (auto Id = Sessions_PUIDFromStr(P)) Ids.Add(Id); }
     if (Ids.IsEmpty()) return;
     EOS_Sessions_RegisterPlayersOptions O = {};
     O.ApiVersion = EOS_SESSIONS_REGISTERPLAYERS_API_LATEST;
@@ -190,7 +190,7 @@ void UEOSSessionsSubsystem::UnregisterPlayers(const TArray<FString>& PUIDs)
     if (!Sess || !SDK.fp_EOS_Sessions_UnregisterPlayers) return;
     const UEOSSystemConfig* Cfg = GetDefault<UEOSSystemConfig>(); if (!Cfg) return;
     TArray<EOS_ProductUserId> Ids;
-    for (const FString& P : PUIDs) { if (auto Id = PUIDFromStr(P)) Ids.Add(Id); }
+    for (const FString& P : PUIDs) { if (auto Id = Sessions_PUIDFromStr(P)) Ids.Add(Id); }
     if (Ids.IsEmpty()) return;
     EOS_Sessions_UnregisterPlayersOptions O = {};
     O.ApiVersion = EOS_SESSIONS_UNREGISTERPLAYERS_API_LATEST;
