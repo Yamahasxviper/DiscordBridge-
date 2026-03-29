@@ -3,14 +3,9 @@
 #include "Commands/BanCommands.h"
 #include "Command/CommandSender.h"
 #include "BanPlayerLookup.h"
-#include "BanIdResolver.h"
+#include "BanEnforcementSubsystem.h"
 #include "Steam/SteamBanSubsystem.h"
 #include "EOS/EOSBanSubsystem.h"
-// EOSBanSDK — custom EOS SDK wrapper for PUID string↔handle conversion
-#include "EOSBanSDK.h"
-// EOSSystem — provides UEOSConnectSubsystem for cross-platform cache lookups.
-#include "EOSConnectSubsystem.h"
-#include "EOSTypes.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/PlayerController.h"
 
@@ -169,23 +164,9 @@ namespace BanCmdHelper
     static bool ResolveEOSId(UObject* WorldContext, UCommandSender* Sender,
                              const FString& Input, FString& OutPUID)
     {
-        // Fast path: raw EOS PUID
+        // Fast path: raw EOS PUID — accept if it passes the 32-hex-char format check.
         if (UEOSBanSubsystem::IsValidEOSProductUserId(Input))
         {
-            // Also validate via the custom EOS SDK: parse the string into an
-            // EOS_ProductUserId handle and confirm the EOS C SDK considers it valid.
-#if WITH_EOS_SDK
-            const EOS_ProductUserId PUIDHandle = EOSBanSDK::PUIDFromString(Input);
-            if (!EOSBanSDK::IsValidHandle(PUIDHandle))
-            {
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanSystem] '%s' passed format validation "
-                        "but was rejected by the EOS SDK as an invalid Product User ID."),
-                        *Input),
-                    FLinearColor::Red);
-                return false;
-            }
-#endif
             OutPUID = Input.ToLower();
             return true;
         }
@@ -281,22 +262,16 @@ EExecutionStatus ASteamBanCommand::ExecuteCommand_Implementation(
             *Steam64Id, *BanCmdHelper::FormatDuration(Duration), *Reason),
         FLinearColor::Green);
 
-    // Cross-platform: if EOSSystem has a cached PUID for this Steam64 ID, also apply the EOS ban.
+    // Cross-platform: asynchronously look up the linked EOS PUID via EOSSystem
+    // and apply an EOS ban with the same reason/duration when the result arrives.
+    // This uses UBanEnforcementSubsystem which checks the sync cache first and
+    // falls back to an async EOS query when the PUID is not yet cached.
     {
         UWorld* World = GetWorld();
         UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
-        FString LinkedPUID;
-        if (FBanIdResolver::TryGetCachedPUIDFromSteam64(GI, Steam64Id, LinkedPUID))
+        if (UBanEnforcementSubsystem* Enforcement = GI ? GI->GetSubsystem<UBanEnforcementSubsystem>() : nullptr)
         {
-            UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>();
-            if (EOSBans)
-            {
-                EOSBans->BanPlayer(LinkedPUID, Reason, Duration, Sender->GetSenderName());
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanSystem] Cross-platform EOS ban also applied — PUID: %s"),
-                        *LinkedPUID),
-                    FLinearColor::Green);
-            }
+            Enforcement->PropagateToEOSAsync(Steam64Id, Reason, Duration, Sender->GetSenderName());
         }
     }
 
@@ -425,22 +400,15 @@ EExecutionStatus AEOSBanCommand::ExecuteCommand_Implementation(
             *EOSID, *BanCmdHelper::FormatDuration(Duration), *Reason),
         FLinearColor::Green);
 
-    // Cross-platform: if EOSSystem has a cached Steam64 ID for this PUID, also apply the Steam ban.
+    // Cross-platform: asynchronously look up the linked Steam64 ID via EOSSystem
+    // and apply a Steam ban with the same reason/duration when the result arrives.
+    // Uses UBanEnforcementSubsystem (sync cache check first, async fallback).
     {
         UWorld* World = GetWorld();
         UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
-        FString LinkedSteam64;
-        if (FBanIdResolver::TryGetCachedSteam64FromPUID(GI, EOSID, LinkedSteam64))
+        if (UBanEnforcementSubsystem* Enforcement = GI ? GI->GetSubsystem<UBanEnforcementSubsystem>() : nullptr)
         {
-            USteamBanSubsystem* SteamBans = GI->GetSubsystem<USteamBanSubsystem>();
-            if (SteamBans)
-            {
-                SteamBans->BanPlayer(LinkedSteam64, Reason, Duration, Sender->GetSenderName());
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanSystem] Cross-platform Steam ban also applied — Steam64: %s"),
-                        *LinkedSteam64),
-                    FLinearColor::Green);
-            }
+            Enforcement->PropagateToSteamAsync(EOSID, Reason, Duration, Sender->GetSenderName());
         }
     }
 
