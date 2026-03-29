@@ -31,6 +31,12 @@ typedef enum EOS_ELeaderboardAggregation
     EOS_LA_Latest = 3
 } EOS_ELeaderboardAggregation;
 
+// Alias for code compatibility with the real EOS SDK naming
+#define EOS_LBA_Max EOS_LA_Max
+#define EOS_LBA_Min EOS_LA_Min
+#define EOS_LBA_Sum EOS_LA_Sum
+#define EOS_LEADERBOARDS_TIME_UNDEFINED ((int64_t)(-1))
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOS_Leaderboards_Definition
 // ─────────────────────────────────────────────────────────────────────────────
