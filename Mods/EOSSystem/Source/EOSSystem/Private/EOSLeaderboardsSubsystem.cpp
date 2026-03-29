@@ -30,7 +30,7 @@ void UEOSLeaderboardsSubsystem::QueryLeaderboardDefinitions()
         ? SDK.fp_EOS_ProductUserId_FromString(TCHAR_TO_UTF8(*Conn->GetLocalServerPUID())) : nullptr;
     EOS_Leaderboards_QueryLeaderboardDefinitionsOptions O = {};
     O.ApiVersion = EOS_LEADERBOARDS_QUERYLEADERBOARDDEFINITIONS_API_LATEST;
-    O.StartTime = EOS_LEADERBOARDS_TIME_UNDEFINED; O.EndTime = EOS_LEADERBOARDS_TIME_UNDEFINED; O.LocalUserId = LocalId;
+    O.StartTime = EOS_LEADERBOARDS_TIME_UNDEFINED; O.EndTime = EOS_LEADERBOARDS_TIME_UNDEFINED; O.LocalUserId = LocalId ? &LocalId : nullptr;
     SDK.fp_EOS_Leaderboards_QueryLeaderboardDefinitions(H, &O, this, &UEOSLeaderboardsSubsystem::OnQueryDefsCb);
 }
 
@@ -44,7 +44,7 @@ void UEOSLeaderboardsSubsystem::QueryLeaderboardRanks(const FString& Leaderboard
         ? SDK.fp_EOS_ProductUserId_FromString(TCHAR_TO_UTF8(*Conn->GetLocalServerPUID())) : nullptr;
     EOS_Leaderboards_QueryLeaderboardRanksOptions O = {};
     O.ApiVersion = EOS_LEADERBOARDS_QUERYLEADERBOARDRANKS_API_LATEST;
-    O.LeaderboardId = TCHAR_TO_UTF8(*LeaderboardId); O.LocalUserId = LocalId;
+    O.LeaderboardId = TCHAR_TO_UTF8(*LeaderboardId); O.LocalUserId = LocalId ? &LocalId : nullptr;
     auto* Cb = new FLBRankCbData{ this, LeaderboardId };
     SDK.fp_EOS_Leaderboards_QueryLeaderboardRanks(H, &O, Cb, &UEOSLeaderboardsSubsystem::OnQueryRanksCb);
 }
@@ -65,7 +65,7 @@ void UEOSLeaderboardsSubsystem::QueryUserScores(const TArray<FString>& PUIDs, co
     O.ApiVersion = EOS_LEADERBOARDS_QUERYLEADERBOARDUSERSCORES_API_LATEST;
     O.UserIds = Ids.GetData(); O.UserIdsCount = (uint32_t)Ids.Num();
     O.StatName = TCHAR_TO_UTF8(*StatName); O.Aggregation = EOS_LBA_Max;
-    O.StartTime = EOS_LEADERBOARDS_TIME_UNDEFINED; O.EndTime = EOS_LEADERBOARDS_TIME_UNDEFINED; O.LocalUserId = LocalId;
+    O.StartTime = EOS_LEADERBOARDS_TIME_UNDEFINED; O.EndTime = EOS_LEADERBOARDS_TIME_UNDEFINED; O.LocalUserId = LocalId ? &LocalId : nullptr;
     SDK.fp_EOS_Leaderboards_QueryLeaderboardUserScores(H, &O, this, &UEOSLeaderboardsSubsystem::OnQueryScoresCb);
 }
 

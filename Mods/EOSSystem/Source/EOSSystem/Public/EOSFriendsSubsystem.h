@@ -32,5 +32,5 @@ private:
     static void EOS_CALL OnSendInviteCb(const EOS_Friends_SendInviteCallbackInfo* D);
     static void EOS_CALL OnAcceptInviteCb(const EOS_Friends_AcceptInviteCallbackInfo* D);
     static void EOS_CALL OnRejectInviteCb(const EOS_Friends_RejectInviteCallbackInfo* D);
-    static void EOS_CALL OnFriendsUpdateCb(const EOS_Friends_OnFriendsUpdateInfo* D);
+    static void EOS_CALL OnFriendsUpdateCb(const EOS_Friends_FriendsUpdateInfo* D);
 };

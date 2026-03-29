@@ -31,7 +31,7 @@ static FString PUIDToStr(EOS_ProductUserId Id)
     return FString();
 }
 
-static EOS_ProductUserId PUIDFromStr(const FString& S)
+static EOS_ProductUserId Connect_PUIDFromStr(const FString& S)
 {
     FEOSSDKLoader& SDK = FEOSSDKLoader::Get();
     if (S.IsEmpty() || !SDK.fp_EOS_ProductUserId_FromString) return nullptr;
@@ -165,7 +165,7 @@ void UEOSConnectSubsystem::InternalLookupBatch(const TArray<FString>& ExternalAc
         UE_LOG(LogEOSConnect, Warning, TEXT("LookupPUIDBatch: Connect not ready"));
         return;
     }
-    EOS_ProductUserId LocalId = PUIDFromStr(LocalServerPUID);
+    EOS_ProductUserId LocalId = Connect_PUIDFromStr(LocalServerPUID);
     if (!LocalId) { UE_LOG(LogEOSConnect, Warning, TEXT("LookupPUIDBatch: no local server PUID yet")); return; }
 
     // Build a char* array; pointers into the FString data are valid for the scope of this call.
@@ -193,7 +193,7 @@ FString UEOSConnectSubsystem::GetCachedPUIDForExternalAccount(const FString& Ext
     EOS_HConnect H = GetConnectHandle();
     if (!H || !SDK.fp_EOS_Connect_GetExternalAccountMapping) return FString();
 
-    EOS_ProductUserId LocalId = PUIDFromStr(LocalServerPUID);
+    EOS_ProductUserId LocalId = Connect_PUIDFromStr(LocalServerPUID);
     if (!LocalId) return FString();
 
     EOS_Connect_GetExternalAccountMappingsOptions O = {};
@@ -232,13 +232,13 @@ void UEOSConnectSubsystem::InternalReverseLookupBatch(const TArray<FString>& PUI
         UE_LOG(LogEOSConnect, Warning, TEXT("QueryExternalAccountsForPUID: Connect not ready"));
         return;
     }
-    EOS_ProductUserId LocalId = PUIDFromStr(LocalServerPUID);
+    EOS_ProductUserId LocalId = Connect_PUIDFromStr(LocalServerPUID);
     if (!LocalId) { UE_LOG(LogEOSConnect, Warning, TEXT("QueryExternalAccountsForPUID: no local server PUID")); return; }
 
     TArray<EOS_ProductUserId> IdArr;
     for (const FString& S : PUIDs)
     {
-        EOS_ProductUserId Id = PUIDFromStr(S);
+        EOS_ProductUserId Id = Connect_PUIDFromStr(S);
         if (Id) IdArr.Add(Id);
     }
     if (IdArr.IsEmpty()) return;
@@ -416,7 +416,7 @@ void EOS_CALL UEOSConnectSubsystem::OnQueryProductUserIdMappingsCallback(const E
 
     for (const FString& PUIDStr : AllPUIDs)
     {
-        EOS_ProductUserId PUIDHandle = PUIDFromStr(PUIDStr);
+        EOS_ProductUserId PUIDHandle = Connect_PUIDFromStr(PUIDStr);
         if (!PUIDHandle) continue;
 
         EOS_Connect_GetProductUserExternalAccountCountOptions CountOpts = {};

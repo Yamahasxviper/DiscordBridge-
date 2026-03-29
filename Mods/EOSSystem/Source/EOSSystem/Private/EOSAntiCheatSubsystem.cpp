@@ -82,7 +82,7 @@ void UEOSAntiCheatSubsystem::RegisterClient(const FString& PUID, const FString& 
     EOS_ProductUserId UserId = (SDK.fp_EOS_ProductUserId_FromString && !PUID.IsEmpty()) ? SDK.fp_EOS_ProductUserId_FromString(TCHAR_TO_UTF8(*PUID)) : nullptr;
     EOS_AntiCheatServer_RegisterConnectedClientOptions O = {};
     O.ApiVersion = EOS_ANTICHEATSERVER_REGISTERCONNECTEDCLIENT_API_LATEST;
-    O.ClientHandle = Handle; O.ClientType = EOS_ACCT_ManagedByEOS; O.ClientPlatform = EOS_ACCP_Windows;
+    O.ClientHandle = Handle; O.ClientType = EOS_ACCT_ManagedByEOS; O.ClientPlatform = EOS_ACCCP_Windows;
     O.IpAddress = IpAddress.IsEmpty() ? nullptr : TCHAR_TO_UTF8(*IpAddress); O.UserId = UserId;
     if (SDK.fp_EOS_AntiCheatServer_RegisterConnectedClient(AC, &O) == EOS_Success)
     {
