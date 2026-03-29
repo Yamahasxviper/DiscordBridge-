@@ -32,6 +32,10 @@
 		{
 			"Name": "EOSShared",
 			"Enabled": true
+		},
+		{
+			"Name": "OnlineIntegration",
+			"Enabled": true
 		}
 	]
 }
