@@ -8,6 +8,7 @@
 #include "IBanDiscordCommandProvider.h"
 #include "BanDiscordConfig.h"
 #include "SMLWebSocketClient.h"
+#include "EOSTypes.h"
 #include "BanDiscordSubsystem.generated.h"
 
 /**
@@ -133,6 +134,33 @@ private:
 	void HandlePlayerIdsCommand(const FString& Args,
 	                            const FString& ChannelId);
 
+	/**
+	 * !eosreport <PUID|PlayerName> [category] [message]
+	 * Submits a player behavior report to the EOS platform.
+	 * Categories: Cheating, VerbalAbuse, Scamming, Exploiting, Spamming,
+	 *             OffensiveProfile, Other  (case-insensitive)
+	 */
+	void HandleEOSReportCommand(const FString& Args,
+	                            const FString& IssuedBy,
+	                            const FString& ChannelId);
+
+	/**
+	 * !sanctionscheck <PUID|PlayerName>
+	 * Queries EOS sanctions for the specified player and posts results to Discord.
+	 * Uses UEOSSanctionsSubsystem; result arrives asynchronously via
+	 * OnSanctionsResultForDiscord.
+	 */
+	void HandleSanctionsCheckCommand(const FString& Args,
+	                                 const FString& ChannelId);
+
+	/**
+	 * Called when a sanctions query triggered by !sanctionscheck completes.
+	 * Looks up the pending Discord channel and sends the results.
+	 */
+	UFUNCTION()
+	void OnSanctionsResultForDiscord(const FString&                  PUID,
+	                                 const TArray<FEOSSanctionInfo>& Sanctions);
+
 	// ── Helpers ───────────────────────────────────────────────────────────────
 
 	/** Send a response message (no-op when neither standalone nor external provider). */
@@ -217,6 +245,13 @@ private:
 
 	/** Loaded configuration (bot token, channel, role, prefixes, formats). */
 	FBanDiscordConfig Config;
+
+	/**
+	 * Maps EOS PUID → Discord channel ID for pending !sanctionscheck requests.
+	 * Populated by HandleSanctionsCheckCommand and consumed in
+	 * OnSanctionsResultForDiscord.
+	 */
+	TMap<FString, FString> PendingSanctionsChecks;
 
 	// ── Standalone Gateway state ──────────────────────────────────────────────
 

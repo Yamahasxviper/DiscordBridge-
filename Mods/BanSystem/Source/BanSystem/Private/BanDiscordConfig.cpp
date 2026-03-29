@@ -92,6 +92,15 @@ namespace
 		"# Syntax: !playerids [PlayerName]\r\n"
 		"PlayerIdsCommandPrefix=!playerids\r\n"
 		"#\r\n"
+		"# Submit a player behavior report to EOS.\r\n"
+		"# Syntax: !eosreport <PUID|PlayerName> [category] [message]\r\n"
+		"# Categories: Cheating, VerbalAbuse, Scamming, Exploiting, Spamming, OffensiveProfile, Other\r\n"
+		"EOSReportCommandPrefix=!eosreport\r\n"
+		"#\r\n"
+		"# Query and display active EOS platform sanctions for a player.\r\n"
+		"# Syntax: !sanctionscheck <PUID|PlayerName>\r\n"
+		"SanctionsCheckCommandPrefix=!sanctionscheck\r\n"
+		"#\r\n"
 		"# -- JOIN-KICK ENFORCEMENT ----------------------------------------------------\r\n"
 		"#\r\n"
 		"# Text shown in-game when a Steam-banned player is kicked on join.\r\n"
@@ -175,6 +184,8 @@ FBanDiscordConfig FBanDiscordConfig::LoadOrCreate()
 	Out.EOSBanListCommandPrefix    = GetIniStringOrDefault(Cfg, TEXT("EOSBanListCommandPrefix"),    TEXT("!eosbanlist"));
 	Out.BanByNameCommandPrefix     = GetIniStringOrDefault(Cfg, TEXT("BanByNameCommandPrefix"),     TEXT("!banbyname"));
 	Out.PlayerIdsCommandPrefix     = GetIniStringOrDefault(Cfg, TEXT("PlayerIdsCommandPrefix"),     TEXT("!playerids"));
+	Out.EOSReportCommandPrefix     = GetIniStringOrDefault(Cfg, TEXT("EOSReportCommandPrefix"),     TEXT("!eosreport"));
+	Out.SanctionsCheckCommandPrefix = GetIniStringOrDefault(Cfg, TEXT("SanctionsCheckCommandPrefix"), TEXT("!sanctionscheck"));
 
 	// Response message formats (fall back to defaults when left empty in the INI)
 	Out.SteamBanResponseMessage = GetIniStringOrFallback(

@@ -4,13 +4,11 @@
 #include "Steam/SteamBanSubsystem.h"
 #include "EOS/EOSBanSubsystem.h"
 #include "BanPlayerLookup.h"
-#include "BanIdResolver.h"
-// EOSBanSDK — custom EOS SDK wrapper for PUID string↔handle conversion
-// and EOS platform handle access.
-#include "EOSBanSDK.h"
-// EOSSystem — provides UEOSConnectSubsystem for cross-platform cache lookups.
+#include "BanEnforcementSubsystem.h"
+// EOSSystem subsystems used for !eosreport and !sanctionscheck
+#include "EOSReportsSubsystem.h"
+#include "EOSSanctionsSubsystem.h"
 #include "EOSConnectSubsystem.h"
-#include "EOSTypes.h"
 #include "Engine/GameInstance.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -64,10 +62,27 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		            "shared-connection mode.  Waiting for an external provider "
 		            "(e.g. DiscordBridge) to call SetCommandProvider()."));
 	}
+
+	// Subscribe to EOS Sanctions results so !sanctionscheck responses can
+	// be sent back to the Discord channel that issued the command.
+	if (UEOSSanctionsSubsystem* Sanctions = GetGameInstance()->GetSubsystem<UEOSSanctionsSubsystem>())
+	{
+		Sanctions->OnSanctionsQueried.AddDynamic(
+			this, &UBanDiscordSubsystem::OnSanctionsResultForDiscord);
+	}
 }
 
 void UBanDiscordSubsystem::Deinitialize()
 {
+	// Unsubscribe from EOS Sanctions results.
+	if (UEOSSanctionsSubsystem* Sanctions = GetGameInstance()->GetSubsystem<UEOSSanctionsSubsystem>())
+	{
+		Sanctions->OnSanctionsQueried.RemoveDynamic(
+			this, &UBanDiscordSubsystem::OnSanctionsResultForDiscord);
+	}
+
+	PendingSanctionsChecks.Empty();
+
 	// Remove any external provider subscription.
 	SetCommandProvider(nullptr);
 
@@ -881,6 +896,16 @@ void UBanDiscordSubsystem::OnDiscordMessageReceived(const TSharedPtr<FJsonObject
 	{
 		return;
 	}
+	if (TryCommand(Config.EOSReportCommandPrefix, true, [&](const FString& Args)
+	               { HandleEOSReportCommand(Args, DisplayName, MsgChannelId); }))
+	{
+		return;
+	}
+	if (TryCommand(Config.SanctionsCheckCommandPrefix, true, [&](const FString& Args)
+	               { HandleSanctionsCheckCommand(Args, MsgChannelId); }))
+	{
+		return;
+	}
 }
 
 bool UBanDiscordSubsystem::HasCommandPermission(const TSharedPtr<FJsonObject>& MessageObj,
@@ -1040,23 +1065,13 @@ void UBanDiscordSubsystem::HandleSteamBanCommand(const FString& Args,
 	       TEXT("BanDiscordSubsystem: Steam ban issued by '%s' — ID: %s, Duration: %d min, Reason: %s"),
 	       *IssuedBy, *Steam64Id, Duration, *Reason);
 
-	// Cross-platform: if EOSSystem has a cached PUID for this Steam64 ID, also apply the EOS ban.
+	// Cross-platform: asynchronously look up the linked EOS PUID via EOSSystem
+	// and apply an EOS ban with the same reason/duration when the result arrives.
+	// UBanEnforcementSubsystem checks the sync cache first and falls back to an
+	// async EOS query when the PUID is not yet cached.
+	if (UBanEnforcementSubsystem* Enforcement = GI ? GI->GetSubsystem<UBanEnforcementSubsystem>() : nullptr)
 	{
-		FString LinkedPUID;
-		if (FBanIdResolver::TryGetCachedPUIDFromSteam64(GI, Steam64Id, LinkedPUID))
-		{
-			UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>();
-			if (EOSBans)
-			{
-				EOSBans->BanPlayer(LinkedPUID, Reason, Duration, IssuedBy);
-				Reply(ChannelId,
-				      FString::Printf(TEXT(":link: Cross-platform EOS ban also applied — PUID: `%s`"),
-				                      *LinkedPUID));
-				UE_LOG(LogBanDiscord, Log,
-				       TEXT("BanDiscordSubsystem: cross-platform EOS ban issued — Steam64 '%s' → PUID '%s'"),
-				       *Steam64Id, *LinkedPUID);
-			}
-		}
+		Enforcement->PropagateToEOSAsync(Steam64Id, Reason, Duration, IssuedBy);
 	}
 }
 
@@ -1152,20 +1167,7 @@ void UBanDiscordSubsystem::HandleEOSBanCommand(const FString& Args,
 	FString EOSPUID;
 	if (UEOSBanSubsystem::IsValidEOSProductUserId(Input))
 	{
-		// Input looks like a raw PUID string (32 hex chars).
-		// Confirm via the custom EOS SDK that the EOS C SDK also considers
-		// this a valid Product User ID handle before accepting it.
-#if WITH_EOS_SDK
-		const EOS_ProductUserId PUIDHandle = EOSBanSDK::PUIDFromString(Input);
-		if (!EOSBanSDK::IsValidHandle(PUIDHandle))
-		{
-			Reply(ChannelId,
-			      FString::Printf(TEXT(":x: `%s` passed format validation but was "
-			                          "rejected by the EOS SDK as an invalid Product User ID."),
-			                      *Input));
-			return;
-		}
-#endif
+		// Input passes the 32-hex-char format check — accept it directly.
 		EOSPUID = Input.ToLower();
 	}
 	else
@@ -1260,23 +1262,13 @@ void UBanDiscordSubsystem::HandleEOSBanCommand(const FString& Args,
 	       TEXT("BanDiscordSubsystem: EOS ban issued by '%s' — ID: %s, Duration: %d min, Reason: %s"),
 	       *IssuedBy, *EOSPUID, Duration, *Reason);
 
-	// Cross-platform: if EOSSystem has a cached Steam64 ID for this PUID, also apply the Steam ban.
+	// Cross-platform: asynchronously look up the linked Steam64 ID via EOSSystem
+	// and apply a Steam ban with the same reason/duration when the result arrives.
+	// UBanEnforcementSubsystem checks the sync cache first and falls back to an
+	// async EOS reverse lookup when the Steam64 ID is not yet cached.
+	if (UBanEnforcementSubsystem* Enforcement = GI ? GI->GetSubsystem<UBanEnforcementSubsystem>() : nullptr)
 	{
-		FString LinkedSteam64;
-		if (FBanIdResolver::TryGetCachedSteam64FromPUID(GI, EOSPUID, LinkedSteam64))
-		{
-			USteamBanSubsystem* SteamBans = GI->GetSubsystem<USteamBanSubsystem>();
-			if (SteamBans)
-			{
-				SteamBans->BanPlayer(LinkedSteam64, Reason, Duration, IssuedBy);
-				Reply(ChannelId,
-				      FString::Printf(TEXT(":link: Cross-platform Steam ban also applied — Steam64: `%s`"),
-				                      *LinkedSteam64));
-				UE_LOG(LogBanDiscord, Log,
-				       TEXT("BanDiscordSubsystem: cross-platform Steam ban issued — PUID '%s' → Steam64 '%s'"),
-				       *EOSPUID, *LinkedSteam64);
-			}
-		}
+		Enforcement->PropagateToSteamAsync(EOSPUID, Reason, Duration, IssuedBy);
 	}
 }
 
@@ -1572,4 +1564,218 @@ TArray<FString> UBanDiscordSubsystem::SplitArgs(const FString& Input)
 	TArray<FString> Parts;
 	Input.TrimStartAndEnd().ParseIntoArrayWS(Parts);
 	return Parts;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !eosreport — submit a player behavior report to EOS
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleEOSReportCommand(const FString& Args,
+                                                   const FString& IssuedBy,
+                                                   const FString& ChannelId)
+{
+	// Syntax: !eosreport <PUID|PlayerName> [category] [message]
+	const TArray<FString> Parts = SplitArgs(Args);
+	if (Parts.Num() < 1)
+	{
+		Reply(ChannelId,
+		      FString::Printf(TEXT(":warning: Usage: `%s <PUID|PlayerName> [category] [message]`\n"
+		                          "Categories: Cheating, VerbalAbuse, Scamming, Exploiting, "
+		                          "Spamming, OffensiveProfile, Other"),
+		                      *Config.EOSReportCommandPrefix));
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	UEOSReportsSubsystem* Reports = GI ? GI->GetSubsystem<UEOSReportsSubsystem>() : nullptr;
+	if (!Reports)
+	{
+		Reply(ChannelId, TEXT(":x: EOS Reports subsystem is not available."));
+		return;
+	}
+
+	// Resolve the target PUID (accept direct PUID or in-game player name).
+	FString TargetPUID;
+	const FString& Input = Parts[0];
+
+	if (UEOSBanSubsystem::IsValidEOSProductUserId(Input))
+	{
+		TargetPUID = Input.ToLower();
+	}
+	else
+	{
+		// Try to resolve by in-game player name.
+		UWorld* World = GetWorld();
+		if (!World)
+		{
+			Reply(ChannelId, TEXT(":x: Cannot resolve player name — world not available."));
+			return;
+		}
+		FResolvedBanId Ids;
+		FString PlayerName;
+		TArray<FString> Ambiguous;
+		if (!FBanPlayerLookup::FindPlayerByName(World, Input, Ids, PlayerName, Ambiguous)
+		    || !Ids.HasEOSPuid())
+		{
+			if (Ambiguous.Num() > 1)
+				Reply(ChannelId, FString::Printf(TEXT(":warning: Ambiguous name `%s`. Matches: %s"),
+				                                 *Input, *FString::Join(Ambiguous, TEXT(", "))));
+			else
+				Reply(ChannelId, FString::Printf(TEXT(":x: `%s` is not a valid EOS PUID "
+				                                      "and no online player with that name was found."),
+				                                 *Input));
+			return;
+		}
+		TargetPUID = Ids.EOSProductUserId;
+	}
+
+	// Get the server's own PUID to use as the reporter.
+	UEOSConnectSubsystem* Connect = GI ? GI->GetSubsystem<UEOSConnectSubsystem>() : nullptr;
+	const FString ReporterPUID = Connect ? Connect->GetLocalServerPUID() : FString();
+	if (ReporterPUID.IsEmpty())
+	{
+		Reply(ChannelId, TEXT(":x: Server EOS PUID not available — cannot submit report."));
+		return;
+	}
+
+	// Parse optional category and message.
+	const FString Category = Parts.Num() > 1 ? Parts[1] : TEXT("Other");
+	FString Message;
+	for (int32 i = 2; i < Parts.Num(); ++i)
+	{
+		if (i > 2) Message += TEXT(" ");
+		Message += Parts[i];
+	}
+	if (Message.IsEmpty())
+	{
+		Message = FString::Printf(TEXT("Reported by server admin %s"), *IssuedBy);
+	}
+
+	Reports->SendReport(ReporterPUID, TargetPUID, Category, Message, TEXT(""));
+
+	Reply(ChannelId,
+	      FString::Printf(TEXT(":envelope: EOS behavior report submitted for `%s` "
+	                           "(category: **%s**, reported by: **%s**)."),
+	                      *TargetPUID, *Category, *IssuedBy));
+
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: EOS report by '%s' — target %s, category %s, message: %s"),
+	       *IssuedBy, *TargetPUID, *Category, *Message);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !sanctionscheck — query and display EOS sanctions for a player
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleSanctionsCheckCommand(const FString& Args,
+                                                        const FString& ChannelId)
+{
+	// Syntax: !sanctionscheck <PUID|PlayerName>
+	const FString Input = Args.TrimStartAndEnd();
+	if (Input.IsEmpty())
+	{
+		Reply(ChannelId,
+		      FString::Printf(TEXT(":warning: Usage: `%s <PUID|PlayerName>`"),
+		                      *Config.SanctionsCheckCommandPrefix));
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	UEOSSanctionsSubsystem* Sanctions = GI ? GI->GetSubsystem<UEOSSanctionsSubsystem>() : nullptr;
+	if (!Sanctions)
+	{
+		Reply(ChannelId, TEXT(":x: EOS Sanctions subsystem is not available."));
+		return;
+	}
+
+	// Resolve PUID.
+	FString TargetPUID;
+	if (UEOSBanSubsystem::IsValidEOSProductUserId(Input))
+	{
+		TargetPUID = Input.ToLower();
+	}
+	else
+	{
+		UWorld* World = GetWorld();
+		if (!World)
+		{
+			Reply(ChannelId, TEXT(":x: Cannot resolve player name — world not available."));
+			return;
+		}
+		FResolvedBanId Ids;
+		FString PlayerName;
+		TArray<FString> Ambiguous;
+		if (!FBanPlayerLookup::FindPlayerByName(World, Input, Ids, PlayerName, Ambiguous)
+		    || !Ids.HasEOSPuid())
+		{
+			if (Ambiguous.Num() > 1)
+				Reply(ChannelId, FString::Printf(TEXT(":warning: Ambiguous name `%s`. Matches: %s"),
+				                                 *Input, *FString::Join(Ambiguous, TEXT(", "))));
+			else
+				Reply(ChannelId, FString::Printf(TEXT(":x: `%s` is not a valid EOS PUID "
+				                                      "and no online player with that name was found."),
+				                                 *Input));
+			return;
+		}
+		TargetPUID = Ids.EOSProductUserId;
+	}
+
+	// Fast path: if we already know there are active sanctions, show them immediately
+	// and refresh the cache in the background.
+	if (Sanctions->HasActiveSanction(TargetPUID))
+	{
+		const TArray<FEOSSanctionInfo> Cached = Sanctions->GetCachedSanctions(TargetPUID);
+		FString List;
+		for (const FEOSSanctionInfo& S : Cached)
+		{
+			List += FString::Printf(TEXT("\n  • **%s** (placed: %s, ref: `%s`)"),
+			                        *S.Action, *S.TimePlaced, *S.ReferenceId);
+		}
+		Reply(ChannelId,
+		      FString::Printf(TEXT(":warning: **%d** active EOS sanction(s) for `%s` "
+		                          "_(cached — refreshing)_:%s"),
+		                      Cached.Num(), *TargetPUID, *List));
+		// Refresh the cache in the background.
+		Sanctions->QuerySanctions(TargetPUID);
+		return;
+	}
+
+	// No cached result — submit an async query and wait for OnSanctionsResultForDiscord.
+	PendingSanctionsChecks.FindOrAdd(TargetPUID) = ChannelId;
+	Sanctions->QuerySanctions(TargetPUID);
+
+	Reply(ChannelId,
+	      FString::Printf(TEXT(":hourglass: Querying EOS sanctions for `%s`... "
+	                           "Results will follow shortly."),
+	                      *TargetPUID));
+}
+
+void UBanDiscordSubsystem::OnSanctionsResultForDiscord(const FString&                  PUID,
+                                                        const TArray<FEOSSanctionInfo>& Sanctions)
+{
+	// Only respond if this PUID was requested by a !sanctionscheck command.
+	const FString* PendingChannelId = PendingSanctionsChecks.Find(PUID);
+	if (!PendingChannelId) return;
+
+	const FString ChannelId = *PendingChannelId;
+	PendingSanctionsChecks.Remove(PUID);
+
+	if (Sanctions.Num() == 0)
+	{
+		Reply(ChannelId,
+		      FString::Printf(TEXT(":white_check_mark: No active EOS sanctions found for `%s`."),
+		                      *PUID));
+		return;
+	}
+
+	FString List;
+	for (const FEOSSanctionInfo& S : Sanctions)
+	{
+		List += FString::Printf(TEXT("\n  • **%s** (placed: %s, ref: `%s`)"),
+		                        *S.Action, *S.TimePlaced, *S.ReferenceId);
+	}
+
+	Reply(ChannelId,
+	      FString::Printf(TEXT(":warning: **%d** active EOS sanction(s) for `%s`:%s"),
+	                      Sanctions.Num(), *PUID, *List));
 }
