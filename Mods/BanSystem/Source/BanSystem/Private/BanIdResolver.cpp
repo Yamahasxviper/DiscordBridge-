@@ -7,12 +7,13 @@
 // Satisfactory, so this plugin replaces the DummyHeaders/FGOnlineHelpers path).
 #include "EOSIdHelper.h"
 
-// EOSBanSDK — custom EOS SDK wrapper that converts stored PUID strings back to
-// EOS_ProductUserId handles, validates them via the EOS C SDK, and exposes the
-// EOS platform handle for direct SDK calls.
-#include "EOSBanSDK.h"
-
 // EOSSystem — provides UEOSConnectSubsystem for cross-platform cache lookups.
+// NOTE: Do NOT include EOSBanSDK.h / EOSDirectSDK.h in this file.
+// EOSDirectSDK.h includes DummyHeaders' eos_platform.h which defines EOS interface
+// handles (EOS_HConnect, EOS_HSessions, etc.) with struct names like EOS_ConnectHandle*.
+// EOSConnectSubsystem.h brings in EOSSystem's eos_base.h which defines the same
+// typedef names with different struct names (EOS_ConnectHandleDetails*).
+// Including both in the same translation unit causes C2371 redefinition errors.
 #include "EOSConnectSubsystem.h"
 #include "EOSTypes.h"
 
@@ -135,26 +136,6 @@ bool FBanIdResolver::TryGetEOSProductUserId(const FUniqueNetIdRepl& UniqueId,
             *Candidate);
         return false;
     }
-
-#if WITH_EOS_SDK
-    // Secondary validation via the custom EOS SDK:
-    // EOSBanSDK::PUIDFromString() calls EOS_ProductUserId_FromString() to parse
-    // the string into an EOS_ProductUserId handle, then IsValidHandle() calls
-    // EOS_ProductUserId_IsValid() to confirm the EOS SDK considers it valid.
-    // This cross-checks that the PUID produced by the UE OnlineServices layer
-    // is accepted by the underlying EOS C SDK.
-    {
-        const EOS_ProductUserId PUIDHandle = EOSBanSDK::PUIDFromString(Candidate);
-        if (!EOSBanSDK::IsValidHandle(PUIDHandle))
-        {
-            UE_LOG(LogBanIdResolver, Warning,
-                TEXT("TryGetEOSProductUserId: PUID '%s' passed format validation but "
-                     "EOS_ProductUserId_IsValid() returned false — discarding."),
-                *Candidate);
-            return false;
-        }
-    }
-#endif // WITH_EOS_SDK
 
     OutPUID = Candidate;
     UE_LOG(LogBanIdResolver, Verbose,
