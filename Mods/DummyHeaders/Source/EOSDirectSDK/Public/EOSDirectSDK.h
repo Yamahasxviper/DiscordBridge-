@@ -77,6 +77,27 @@
 #   include EOS_PLATFORM_BASE_FILE_NAME
 #endif
 
+// The CSS UE5.3.2 engine ships its own eos_base.h (at
+// Engine/Source/ThirdParty/EOSSDK/SDK/Include/eos_base.h) which requires
+// EOS_MEMORY_CALL, EOS_CALL, and EOS_USE_DLLEXPORT to be pre-defined.
+// When EOS_PLATFORM_BASE_FILE_NAME is not set (common in server/editor
+// builds) these macros are missing, producing C1189.  Define them here as
+// a safe fallback — each definition is guarded so the engine's own
+// eos_platform_prereqs.h wins if it was already included.
+#ifndef EOS_CALL
+#  if defined(_WIN32)
+#    define EOS_CALL __cdecl
+#  else
+#    define EOS_CALL
+#  endif
+#endif
+#ifndef EOS_MEMORY_CALL
+#  define EOS_MEMORY_CALL EOS_CALL
+#endif
+#ifndef EOS_USE_DLLEXPORT
+#  define EOS_USE_DLLEXPORT 0
+#endif
+
 // Core EOS C SDK types: EOS_ProductUserId, EOS_HPlatform, EOS_Bool,
 // EOS_TRUE, EOS_FALSE, EOS_ProductUserId_FromString,
 // EOS_ProductUserId_IsValid, EOS_ProductUserId_ToString
@@ -210,10 +231,11 @@ inline bool IsValidHandle(EOS_ProductUserId PUID)
  *           • The EOS platform has not been initialised yet (call too early in
  *             the startup sequence — typically safe from PostDefault onwards).
  *
- * NOTE — GetPlatformHandles() method name
- *   The IEOSSDKManager API used below (GetPlatformHandles) is the name present
- *   in the CSS UE5.3.2 engine build.  If a future engine update renames this
- *   method, update the single call site here.
+ * NOTE — GetAllPlatformHandles() / GetHandle() method names
+ *   The IEOSSDKManager API used below (GetAllPlatformHandles) and the
+ *   IEOSPlatformHandle::GetHandle() method are the standard names present
+ *   in the UE5.3.2 (CSS) EOSShared plugin build.  If a future engine update
+ *   renames these methods, update the single call site here.
  *   Reference: Engine/Plugins/Online/EOSShared/Source/EOSShared/Public/IEOSSDKManager.h
  */
 inline EOS_HPlatform GetPlatformHandle()
@@ -222,7 +244,7 @@ inline EOS_HPlatform GetPlatformHandle()
     if (!Manager)
         return nullptr;
 
-    TArray<TSharedRef<IEOSPlatformHandle>> Handles = Manager->GetPlatformHandles();
+    TArray<TSharedRef<IEOSPlatformHandle>> Handles = Manager->GetAllPlatformHandles();
     if (Handles.IsEmpty())
         return nullptr;
 
