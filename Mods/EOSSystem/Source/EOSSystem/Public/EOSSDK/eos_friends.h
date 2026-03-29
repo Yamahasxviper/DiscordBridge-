@@ -17,8 +17,8 @@ extern "C" {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Forward declare the Friends handle (defined in eos_platform.h)
 // ─────────────────────────────────────────────────────────────────────────────
-struct EOS_FriendsHandleDetails;
-typedef struct EOS_FriendsHandleDetails* EOS_HFriends;
+struct EOS_FriendsHandle;
+typedef struct EOS_FriendsHandle* EOS_HFriends;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOS_EFriendsStatus

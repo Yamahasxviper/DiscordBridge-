@@ -18,8 +18,8 @@ extern "C" {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Forward declare the Ecom handle (defined in eos_platform.h)
 // ─────────────────────────────────────────────────────────────────────────────
-struct EOS_EcomHandleDetails;
-typedef struct EOS_EcomHandleDetails* EOS_HEcom;
+struct EOS_EcomHandle;
+typedef struct EOS_EcomHandle* EOS_HEcom;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOS_EEcomOwnershipStatus

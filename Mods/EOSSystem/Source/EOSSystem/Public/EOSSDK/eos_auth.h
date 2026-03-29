@@ -17,8 +17,8 @@ extern "C" {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Forward declare the Auth handle (defined in eos_platform.h)
 // ─────────────────────────────────────────────────────────────────────────────
-struct EOS_AuthHandleDetails;
-typedef struct EOS_AuthHandleDetails* EOS_HAuth;
+struct EOS_AuthHandle;
+typedef struct EOS_AuthHandle* EOS_HAuth;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOS_EAuthScopeFlags  (bitmask)

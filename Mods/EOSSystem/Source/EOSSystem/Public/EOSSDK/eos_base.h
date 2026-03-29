@@ -10,11 +10,17 @@
 // INCLUDE GUARD NOTE
 // ──────────────────
 // The engine's ThirdParty EOSSDK eos_base.h also uses EOS_BASE_H as its
-// include guard.  By defining EOS_BASE_H here, we ensure that when this
-// mod-local header is included first in a translation unit (which happens
-// in BanSystem because EOSSystem headers come before EOSDirectSDK), the
-// engine's eos_base.h is skipped entirely — preventing both the C1189
-// "macros not defined" error and any typedef redefinition conflicts.
+// include guard.  Sharing the guard name ensures exactly ONE of the two
+// eos_base.h files is processed per translation unit — preventing C1189
+// "macros not defined" errors and typedef redefinition conflicts (C2371).
+//
+// STRUCT NAMING
+// ─────────────
+// All opaque handle struct names match the real EOS SDK (and
+// DummyHeaders/EOSDirectSDK eos_platform.h) — i.e. without a 'Details'
+// suffix.  This means that if both this header and DummyHeaders' header are
+// processed in the same translation unit (e.g. in BanSystem), the typedef
+// declarations are identical and C++ silently accepts the redeclaration.
 
 #ifndef EOS_BASE_H
 #define EOS_BASE_H
@@ -53,35 +59,45 @@ typedef int32_t EOS_Bool;
 // ─────────────────────────────────────────────────────────────────────────────
 //  Opaque handle types  (all are pointer-sized; actual structs are internal)
 // ─────────────────────────────────────────────────────────────────────────────
-struct EOS_PlatformHandleDetails;
-struct EOS_EpicAccountIdDetails;
-struct EOS_ProductUserIdDetails;
-struct EOS_ConnectHandleDetails;
-struct EOS_SessionsHandleDetails;
-struct EOS_SessionModificationHandleDetails;
-struct EOS_SessionHandleDetails;
-struct EOS_SessionSearchHandleDetails;
-struct EOS_AntiCheatServerHandleDetails;
-struct EOS_SanctionsHandleDetails;
-struct EOS_MetricsHandleDetails;
-struct EOS_ReportsHandleDetails;
-struct EOS_ContinuanceTokenDetails;
-struct EOS_PlayerSanctionDetails;
+// Struct names match the real EOS SDK and DummyHeaders/EOSDirectSDK eos_platform.h so that
+// identical typedef declarations are produced when both headers reach the same translation unit.
+// C++ (since C++11) permits identical typedef redeclarations — using the same underlying struct
+// name means both header sets produce the same EOS_H* type in any TU that includes them.
+struct EOS_PlatformHandle;             // matches DummyHeaders' eos_platform.h
+struct EOS_EpicAccountIdDetails;       // engine-specific; guarded by EOS_BASE_H, never conflicts
+struct EOS_ProductUserIdDetails;       // same
+struct EOS_ConnectHandle;
+struct EOS_SessionsHandle;
+struct EOS_SessionModificationHandle;
+struct EOS_SessionDetailsHandle;
+struct EOS_SessionSearchHandle;
+struct EOS_AntiCheatServerHandle;
+struct EOS_SanctionsHandle;
+struct EOS_MetricsHandle;
+struct EOS_ReportsHandle;
+struct EOS_ContinuanceTokenDetails;    // not in DummyHeaders; keep unique name
+struct EOS_PlayerSanctionDetails;      // not in DummyHeaders; keep unique name
 
-typedef EOS_PlatformHandleDetails*           EOS_HPlatform;
-typedef EOS_EpicAccountIdDetails*            EOS_EpicAccountId;
-typedef EOS_ProductUserIdDetails*            EOS_ProductUserId;
-typedef EOS_ConnectHandleDetails*            EOS_HConnect;
-typedef EOS_SessionsHandleDetails*           EOS_HSessions;
-typedef EOS_SessionModificationHandleDetails* EOS_HSessionModification;
-typedef EOS_SessionHandleDetails*            EOS_HSessionDetails;
-typedef EOS_SessionSearchHandleDetails*      EOS_HSessionSearch;
-typedef EOS_AntiCheatServerHandleDetails*    EOS_HAntiCheatServer;
-typedef EOS_SanctionsHandleDetails*          EOS_HSanctions;
-typedef EOS_MetricsHandleDetails*            EOS_HMetrics;
-typedef EOS_ReportsHandleDetails*            EOS_HReports;
-typedef EOS_ContinuanceTokenDetails*         EOS_ContinuanceToken;
-typedef EOS_PlayerSanctionDetails*           EOS_HPlayerSanction;
+// Signal that EOS_HPlatform is already defined here so that
+// DummyHeaders' eos_platform.h skips its own guarded redeclaration.
+#ifndef EOS_HPlatform_DEFINED
+#define EOS_HPlatform_DEFINED
+#endif
+
+typedef EOS_PlatformHandle*             EOS_HPlatform;
+typedef EOS_EpicAccountIdDetails*       EOS_EpicAccountId;
+typedef EOS_ProductUserIdDetails*       EOS_ProductUserId;
+typedef EOS_ConnectHandle*              EOS_HConnect;
+typedef EOS_SessionsHandle*             EOS_HSessions;
+typedef EOS_SessionModificationHandle*  EOS_HSessionModification;
+typedef EOS_SessionDetailsHandle*       EOS_HSessionDetails;
+typedef EOS_SessionSearchHandle*        EOS_HSessionSearch;
+typedef EOS_AntiCheatServerHandle*      EOS_HAntiCheatServer;
+typedef EOS_SanctionsHandle*            EOS_HSanctions;
+typedef EOS_MetricsHandle*              EOS_HMetrics;
+typedef EOS_ReportsHandle*              EOS_HReports;
+typedef EOS_ContinuanceTokenDetails*    EOS_ContinuanceToken;
+typedef EOS_PlayerSanctionDetails*      EOS_HPlayerSanction;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Notification ID

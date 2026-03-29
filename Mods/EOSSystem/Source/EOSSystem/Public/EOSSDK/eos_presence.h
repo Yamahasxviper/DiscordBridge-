@@ -17,8 +17,8 @@ extern "C" {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Forward declare the Presence handle (defined in eos_platform.h)
 // ─────────────────────────────────────────────────────────────────────────────
-struct EOS_PresenceHandleDetails;
-typedef struct EOS_PresenceHandleDetails* EOS_HPresence;
+struct EOS_PresenceHandle;
+typedef struct EOS_PresenceHandle* EOS_HPresence;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Opaque PresenceModification handle

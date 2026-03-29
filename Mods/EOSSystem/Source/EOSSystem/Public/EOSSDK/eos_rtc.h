@@ -19,11 +19,11 @@ extern "C" {
 //  Opaque RTC and RTCAdmin interface handles
 //  (concrete types forward-declared; defined in eos_platform.h as well)
 // ─────────────────────────────────────────────────────────────────────────────
-struct EOS_RTCHandleDetails;
-typedef struct EOS_RTCHandleDetails*      EOS_HRTC;
+struct EOS_RTCHandle;
+typedef struct EOS_RTCHandle*      EOS_HRTC;
 
-struct EOS_RTCAdminHandleDetails;
-typedef struct EOS_RTCAdminHandleDetails* EOS_HRTCAdmin;
+struct EOS_RTCAdminHandle;
+typedef struct EOS_RTCAdminHandle* EOS_HRTCAdmin;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOS_RTC_JoinRoomOptions / Callback
