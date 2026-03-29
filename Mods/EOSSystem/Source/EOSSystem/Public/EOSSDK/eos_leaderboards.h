@@ -17,8 +17,8 @@ extern "C" {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Forward declare the Leaderboards handle (defined in eos_platform.h)
 // ─────────────────────────────────────────────────────────────────────────────
-struct EOS_LeaderboardsHandleDetails;
-typedef struct EOS_LeaderboardsHandleDetails* EOS_HLeaderboards;
+struct EOS_LeaderboardsHandle;
+typedef struct EOS_LeaderboardsHandle* EOS_HLeaderboards;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOS_ELeaderboardAggregation

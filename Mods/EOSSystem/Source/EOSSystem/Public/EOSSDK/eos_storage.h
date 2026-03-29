@@ -22,8 +22,8 @@ extern "C" {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Forward declare the PlayerDataStorage handle (defined in eos_platform.h)
 // ─────────────────────────────────────────────────────────────────────────────
-struct EOS_PlayerDataStorageHandleDetails;
-typedef struct EOS_PlayerDataStorageHandleDetails* EOS_HPlayerDataStorage;
+struct EOS_PlayerDataStorageHandle;
+typedef struct EOS_PlayerDataStorageHandle* EOS_HPlayerDataStorage;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Opaque file transfer request handle
@@ -310,8 +310,8 @@ typedef void                                  (EOS_CALL *EOS_PlayerDataStorage_D
 // ─────────────────────────────────────────────────────────────────────────────
 //  Forward declare the TitleStorage handle (defined in eos_platform.h)
 // ─────────────────────────────────────────────────────────────────────────────
-struct EOS_TitleStorageHandleDetails;
-typedef struct EOS_TitleStorageHandleDetails* EOS_HTitleStorage;
+struct EOS_TitleStorageHandle;
+typedef struct EOS_TitleStorageHandle* EOS_HTitleStorage;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Opaque title-storage file transfer request handle

@@ -173,6 +173,9 @@ typedef struct EOS_LobbyModificationHandle*  EOS_HLobbyModification;
 struct EOS_LobbyDetailsHandle;
 typedef struct EOS_LobbyDetailsHandle*       EOS_HLobbyDetails;
 
+struct EOS_AntiCheatClientHandle;
+typedef struct EOS_AntiCheatClientHandle*    EOS_HAntiCheatClient;
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOS_Platform_* function pointer typedefs
 // ─────────────────────────────────────────────────────────────────────────────
@@ -272,6 +275,34 @@ typedef EOS_Bool           (EOS_CALL *EOS_EpicAccountId_IsValid_t)(EOS_EpicAccou
 
 /** Creates an EOS_EpicAccountId from a string */
 typedef EOS_EpicAccountId  (EOS_CALL *EOS_EpicAccountId_FromString_t)(const char* AccountIdString);
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Actual C-linkage function declarations
+//  These mirror the real EOS C SDK ABI so that any translation unit that
+//  processes this header (rather than EOSDirectSDK's eos_platform.h stub) still
+//  has the EOS_Platform_Get*Interface declarations that EOSDirectSDK.h calls.
+// ─────────────────────────────────────────────────────────────────────────────
+
+EOS_HMetrics     EOS_Platform_GetMetricsInterface(EOS_HPlatform Handle);
+EOS_HAuth        EOS_Platform_GetAuthInterface(EOS_HPlatform Handle);
+EOS_HConnect     EOS_Platform_GetConnectInterface(EOS_HPlatform Handle);
+EOS_HEcom        EOS_Platform_GetEcomInterface(EOS_HPlatform Handle);
+EOS_HFriends     EOS_Platform_GetFriendsInterface(EOS_HPlatform Handle);
+EOS_HPresence    EOS_Platform_GetPresenceInterface(EOS_HPlatform Handle);
+EOS_HSessions    EOS_Platform_GetSessionsInterface(EOS_HPlatform Handle);
+EOS_HLobby       EOS_Platform_GetLobbyInterface(EOS_HPlatform Handle);
+EOS_HUserInfo    EOS_Platform_GetUserInfoInterface(EOS_HPlatform Handle);
+EOS_HPlayerDataStorage EOS_Platform_GetPlayerDataStorageInterface(EOS_HPlatform Handle);
+EOS_HTitleStorage      EOS_Platform_GetTitleStorageInterface(EOS_HPlatform Handle);
+EOS_HAchievements      EOS_Platform_GetAchievementsInterface(EOS_HPlatform Handle);
+EOS_HStats       EOS_Platform_GetStatsInterface(EOS_HPlatform Handle);
+EOS_HLeaderboards EOS_Platform_GetLeaderboardsInterface(EOS_HPlatform Handle);
+EOS_HAntiCheatServer EOS_Platform_GetAntiCheatServerInterface(EOS_HPlatform Handle);
+EOS_HAntiCheatClient EOS_Platform_GetAntiCheatClientInterface(EOS_HPlatform Handle);
+EOS_HReports     EOS_Platform_GetReportsInterface(EOS_HPlatform Handle);
+EOS_HSanctions   EOS_Platform_GetSanctionsInterface(EOS_HPlatform Handle);
+EOS_HRTC         EOS_Platform_GetRTCInterface(EOS_HPlatform Handle);
+EOS_HRTCAdmin    EOS_Platform_GetRTCAdminInterface(EOS_HPlatform Handle);
 
 #ifdef __cplusplus
 }

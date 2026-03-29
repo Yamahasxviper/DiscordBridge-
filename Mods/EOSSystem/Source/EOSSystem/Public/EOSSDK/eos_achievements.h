@@ -17,8 +17,8 @@ extern "C" {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Forward declare the Achievements handle (defined in eos_platform.h)
 // ─────────────────────────────────────────────────────────────────────────────
-struct EOS_AchievementsHandleDetails;
-typedef struct EOS_AchievementsHandleDetails* EOS_HAchievements;
+struct EOS_AchievementsHandle;
+typedef struct EOS_AchievementsHandle* EOS_HAchievements;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOS_Achievements_PlayerAchievement
