@@ -77,8 +77,8 @@
 #   include EOS_PLATFORM_BASE_FILE_NAME
 #endif
 
-// Core EOS C SDK types: EOS_ProductUserId, EOS_HPlatform, EOS_HConnect,
-// EOS_Bool, EOS_TRUE, EOS_FALSE, EOS_ProductUserId_FromString,
+// Core EOS C SDK types: EOS_ProductUserId, EOS_HPlatform, EOS_Bool,
+// EOS_TRUE, EOS_FALSE, EOS_ProductUserId_FromString,
 // EOS_ProductUserId_IsValid, EOS_ProductUserId_ToString
 #include "eos_common.h"
 
@@ -87,6 +87,13 @@
 //   EOS_Platform_GetUserInfoInterface(platform)   →  EOS_HUserInfo
 //   EOS_Platform_GetSanctionsInterface(platform)  →  EOS_HSanctions
 //   (and all other EOS_Platform_Get*Interface functions)
+//
+// eos_platform.h lives alongside this header in EOSDirectSDK/Public/.  That
+// stub provides a complete, ABI-compatible replacement for the real EOS SDK
+// eos_platform.h, which is absent from some CSS engine EOSSDK distributions.
+// If a future CSS engine build does ship eos_platform.h inside the EOSSDK
+// plugin, the include guard in our stub (EOS_Platform_H — the same guard the
+// real SDK uses) prevents any redeclaration conflicts.
 #include "eos_platform.h"
 
 // EOSShared helpers:
