@@ -8,6 +8,14 @@
 #include "GameFramework/PlayerController.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
+// JSON serialisation — Dom, Serialization (Json module) + FJsonObjectConverter (JsonUtilities)
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+#include "JsonObjectConverter.h"
+#include "Misc/FileHelper.h"
+#include "HAL/FileManager.h"
 #include <string>
 
 DEFINE_LOG_CATEGORY_STATIC(LogEOSConnect, Log, All);
@@ -39,6 +47,9 @@ void UEOSConnectSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     PostLoginHandle = FGameModeEvents::GameModePostLoginEvent.AddUObject(this, &UEOSConnectSubsystem::HandlePostLogin);
     LogoutHandle    = FGameModeEvents::GameModeLogoutEvent.AddUObject(this,    &UEOSConnectSubsystem::HandleLogout);
 
+    // Restore any PUID↔external-account mappings persisted from a previous session.
+    LoadCacheFromDisk();
+
     const UEOSSystemConfig* Cfg = GetDefault<UEOSSystemConfig>();
     if (Cfg && Cfg->bEnableConnect)
         LoginAsServer();
@@ -46,6 +57,9 @@ void UEOSConnectSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UEOSConnectSubsystem::Deinitialize()
 {
+    // Persist the reverse-lookup cache so Steam64↔PUID mappings survive restarts.
+    SaveCacheToDisk();
+
     FGameModeEvents::GameModePostLoginEvent.Remove(PostLoginHandle);
     FGameModeEvents::GameModeLogoutEvent.Remove(LogoutHandle);
 
@@ -440,4 +454,90 @@ void EOS_CALL UEOSConnectSubsystem::OnQueryProductUserIdMappingsCallback(const E
         if (Infos.Num() > 0)
             Self->ReverseLookupCache.Add(PUIDStr, MoveTemp(Infos));
     }
+    // Persist the updated cache immediately so mappings survive a crash or fast restart.
+    Self->SaveCacheToDisk();
+}
+
+// ─── JSON cache persistence ──────────────────────────────────────────────────
+void UEOSConnectSubsystem::SaveIdCache()
+{
+    SaveCacheToDisk();
+}
+
+void UEOSConnectSubsystem::SaveCacheToDisk() const
+{
+    if (ReverseLookupCache.IsEmpty()) return;
+
+    TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    TArray<TSharedPtr<FJsonValue>> CacheArray;
+
+    for (const auto& Pair : ReverseLookupCache)
+    {
+        TSharedRef<FJsonObject> Entry = MakeShared<FJsonObject>();
+        Entry->SetStringField(TEXT("PUID"), Pair.Key);
+
+        TArray<TSharedPtr<FJsonValue>> AccountsArr;
+        for (const FEOSExternalAccountInfo& Info : Pair.Value)
+        {
+            TSharedPtr<FJsonObject> AccObj = MakeShared<FJsonObject>();
+            if (FJsonObjectConverter::UStructToJsonObject(FEOSExternalAccountInfo::StaticStruct(), &Info, AccObj.ToSharedRef(), 0, 0))
+                AccountsArr.Add(MakeShared<FJsonValueObject>(AccObj));
+        }
+        Entry->SetArrayField(TEXT("accounts"), AccountsArr);
+        CacheArray.Add(MakeShared<FJsonValueObject>(Entry));
+    }
+    Root->SetArrayField(TEXT("cache"), CacheArray);
+
+    FString JsonStr;
+    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonStr);
+    if (FJsonSerializer::Serialize(Root, Writer))
+    {
+        const FString Path = FPaths::ProjectSavedDir() / TEXT("EOSSystem/IdCache.json");
+        IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), true);
+        FFileHelper::SaveStringToFile(JsonStr, *Path);
+        UE_LOG(LogEOSConnect, Verbose, TEXT("Saved %d PUID cache entries to %s"), ReverseLookupCache.Num(), *Path);
+    }
+}
+
+void UEOSConnectSubsystem::LoadCacheFromDisk()
+{
+    const FString Path = FPaths::ProjectSavedDir() / TEXT("EOSSystem/IdCache.json");
+    FString JsonStr;
+    if (!FFileHelper::LoadFileToString(JsonStr, *Path)) return;
+
+    TSharedPtr<FJsonObject> Root;
+    TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonStr);
+    if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid()) return;
+
+    const TArray<TSharedPtr<FJsonValue>>* CacheArray;
+    if (!Root->TryGetArrayField(TEXT("cache"), CacheArray)) return;
+
+    int32 Loaded = 0;
+    for (const TSharedPtr<FJsonValue>& EntryVal : *CacheArray)
+    {
+        const TSharedPtr<FJsonObject>* EntryObj;
+        if (!EntryVal->TryGetObject(EntryObj)) continue;
+
+        FString PUID;
+        if (!(*EntryObj)->TryGetStringField(TEXT("PUID"), PUID) || PUID.IsEmpty()) continue;
+
+        const TArray<TSharedPtr<FJsonValue>>* AccountsArr;
+        if (!(*EntryObj)->TryGetArrayField(TEXT("accounts"), AccountsArr)) continue;
+
+        TArray<FEOSExternalAccountInfo> Infos;
+        for (const TSharedPtr<FJsonValue>& AccVal : *AccountsArr)
+        {
+            const TSharedPtr<FJsonObject>* AccObj;
+            if (!AccVal->TryGetObject(AccObj)) continue;
+            FEOSExternalAccountInfo Info;
+            if (FJsonObjectConverter::JsonObjectToUStruct(AccObj->ToSharedRef(), &Info, 0, 0))
+                Infos.Add(Info);
+        }
+        if (!Infos.IsEmpty())
+        {
+            ReverseLookupCache.Add(PUID, MoveTemp(Infos));
+            ++Loaded;
+        }
+    }
+    UE_LOG(LogEOSConnect, Log, TEXT("Loaded %d PUID→ExternalAccount cache entries from %s"), Loaded, *Path);
 }

@@ -2,6 +2,7 @@
 #include "EOSSDKLoader.h"
 #include "HAL/PlatformProcess.h"
 #include "Misc/Paths.h"
+#include "Interfaces/IPluginManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogEOSSDKLoader, Log, All);
 
@@ -17,14 +18,27 @@ bool FEOSSDKLoader::Load()
     // ── Candidate DLL paths ───────────────────────────────────────────────
     TArray<FString> Candidates;
 #if PLATFORM_WINDOWS
+    // Well-known engine / project Binaries directories
     Candidates.Add(FPaths::EngineDir() / TEXT("Binaries/Win64/EOSSDK-Win64-Shipping.dll"));
     Candidates.Add(FPaths::ProjectDir() / TEXT("Binaries/Win64/EOSSDK-Win64-Shipping.dll"));
     Candidates.Add(FPlatformProcess::BaseDir() + TEXT("EOSSDK-Win64-Shipping.dll"));
     Candidates.Add(FPaths::ProjectDir() / TEXT("EOSSDK-Win64-Shipping.dll"));
+    // Plugin-local Binaries directory — the preferred shipping location for DLLs
+    // distributed inside a mod package (Alpakit copies them next to the .uplugin).
+    {
+        TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("EOSSystem"));
+        if (Plugin.IsValid())
+            Candidates.Add(Plugin->GetBaseDir() / TEXT("Binaries/Win64/EOSSDK-Win64-Shipping.dll"));
+    }
 #elif PLATFORM_LINUX
     Candidates.Add(FPaths::EngineDir() / TEXT("Binaries/Linux/libEOSSDK-Linux-Shipping.so"));
     Candidates.Add(FPaths::ProjectDir() / TEXT("Binaries/Linux/libEOSSDK-Linux-Shipping.so"));
     Candidates.Add(FPlatformProcess::BaseDir() + TEXT("libEOSSDK-Linux-Shipping.so"));
+    {
+        TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("EOSSystem"));
+        if (Plugin.IsValid())
+            Candidates.Add(Plugin->GetBaseDir() / TEXT("Binaries/Linux/libEOSSDK-Linux-Shipping.so"));
+    }
 #endif
 
     for (const FString& Path : Candidates)

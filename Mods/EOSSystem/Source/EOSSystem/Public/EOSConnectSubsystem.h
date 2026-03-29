@@ -73,6 +73,15 @@ public:
     UFUNCTION(BlueprintPure, Category="EOS|Connect|Lookup")
     FString GetCachedSteam64ForPUID(const FString& PUID) const;
 
+    // ── ID cache persistence ──────────────────────────────────────────────
+    // The reverse-lookup cache (PUID → external accounts) is automatically
+    // saved to disk on Deinitialize and loaded back on Initialize so that
+    // Steam64↔PUID mappings survive server restarts without re-querying EOS.
+    // Call this explicitly if you need an immediate flush (e.g. after a bulk
+    // reverse lookup finishes and you want to guarantee persistence).
+    UFUNCTION(BlueprintCallable, Category="EOS|Connect|Cache")
+    void SaveIdCache();
+
     UPROPERTY(BlueprintAssignable, Category="EOS|Connect") FOnEOSPlayerRegistered   OnPlayerPUIDRegistered;
     UPROPERTY(BlueprintAssignable, Category="EOS|Connect") FOnEOSPlayerUnregistered OnPlayerPUIDUnregistered;
     // Forward lookup: fires with (ExternalAccountId, PUID) when LookupPUIDByExternalAccount* completes.
@@ -96,6 +105,9 @@ private:
     void HandleLogout(AGameModeBase* GM, AController* C);
     void InternalLookupBatch(const TArray<FString>& ExternalAccountIds, EOS_EExternalAccountType AccountIdType);
     void InternalReverseLookupBatch(const TArray<FString>& PUIDs);
+    // JSON cache persistence helpers (use Json + JsonUtilities modules)
+    void SaveCacheToDisk() const;
+    void LoadCacheFromDisk();
 
     static void EOS_CALL OnConnectLoginCallback(const EOS_Connect_LoginCallbackInfo* Data);
     static void EOS_CALL OnCreateDeviceIdCallback(const EOS_Connect_CreateDeviceIdCallbackInfo* Data);
