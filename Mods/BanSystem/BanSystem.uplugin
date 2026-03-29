@@ -41,7 +41,7 @@
 			"SemVersion": "^1.0.0"
 		},
 		{
-			"Name": "DummyHeaders",
+			"Name": "EOSIdHelper",
 			"Enabled": true,
 			"Optional": false,
 			"SemVersion": "^1.0.0"

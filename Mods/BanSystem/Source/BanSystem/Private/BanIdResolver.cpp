@@ -2,8 +2,10 @@
 
 #include "BanIdResolver.h"
 
-// CSS FactoryGame helper for extracting EOS Product User IDs
-#include "Online/FGOnlineHelpers.h"
+// EOSIdHelper — custom plugin providing EOS Product User ID extraction via
+// the UE5 OnlineServicesEOSGS V2 path (OnlineSubsystemEOS is disabled in
+// Satisfactory, so this plugin replaces the DummyHeaders/FGOnlineHelpers path).
+#include "EOSIdHelper.h"
 
 // Ban subsystem validators
 #include "Steam/SteamBanSubsystem.h"
