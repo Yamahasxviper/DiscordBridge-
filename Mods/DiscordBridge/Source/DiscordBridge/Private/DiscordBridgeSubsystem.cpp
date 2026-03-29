@@ -19,6 +19,7 @@
 #include "FGChatManager.h"
 #include "TimerManager.h"
 #include "WhitelistManager.h"
+#include "Patching/NativeHookManager.h"
 
 // Discord Gateway endpoint (v10, JSON encoding)
 static const FString DiscordGatewayUrl = TEXT("wss://gateway.discord.gg/?v=10&encoding=json");
@@ -44,6 +45,24 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	// Subscribe to PostLogin to enforce the whitelist and ban list on each player join.
 	PostLoginHandle = FGameModeEvents::GameModePostLoginEvent.AddUObject(
 		this, &UDiscordBridgeSubsystem::OnPostLogin);
+
+	// Subscribe to AGameModeBase::Logout to detect player leaves and timeouts.
+	// SUBSCRIBE_METHOD_VIRTUAL_AFTER installs a global vtable hook the first time
+	// and adds this instance's handler to the handler list.  The handle is stored
+	// so we can remove exactly this handler in Deinitialize().
+	{
+		TWeakObjectPtr<UDiscordBridgeSubsystem> WeakThis(this);
+		LogoutHookHandle = SUBSCRIBE_METHOD_VIRTUAL_AFTER(
+			AGameModeBase::Logout,
+			GetMutableDefault<AGameModeBase>(),
+			[WeakThis](AGameModeBase* GameMode, AController* Exiting)
+			{
+				if (UDiscordBridgeSubsystem* Self = WeakThis.Get())
+				{
+					Self->OnLogout(GameMode, Exiting);
+				}
+			});
+	}
 
 	// Wire up the Discord→game relay once here so it is never double-bound
 	// across reconnect cycles (Connect() may be called multiple times).
@@ -186,6 +205,10 @@ void UDiscordBridgeSubsystem::Deinitialize()
 	// Remove the whitelist PostLogin listener.
 	FGameModeEvents::GameModePostLoginEvent.Remove(PostLoginHandle);
 	PostLoginHandle.Reset();
+
+	// Remove the Logout hook handler installed in Initialize().
+	UNSUBSCRIBE_METHOD(AGameModeBase::Logout, LogoutHookHandle);
+	LogoutHookHandle.Reset();
 
 	// Unbind from the chat manager's delegate so no stale callbacks fire
 	// after this subsystem is destroyed.
@@ -1864,15 +1887,17 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 
 	// In Satisfactory's CSS UE build, the player name is populated asynchronously
 	// from Epic Online Services (via Server_SetPlayerNames RPC) after PostLogin fires.
-	// When enforcement is active and the name is not yet available, schedule a
-	// one-shot deferred retry rather than silently allowing the player through.
+	// When enforcement is active or player-event notifications are enabled and the
+	// name is not yet available, schedule a one-shot deferred retry rather than
+	// silently allowing the player through or missing the join notification.
 	if (PlayerName.IsEmpty())
 	{
 		const bool bEnforcementActive = FWhitelistManager::IsEnabled();
-		if (bEnforcementActive)
+		const bool bNeedsDeferred     = bEnforcementActive || Config.bPlayerEventsEnabled;
+		if (bNeedsDeferred)
 		{
 			UE_LOG(LogTemp, Warning,
-			       TEXT("DiscordBridge: player joined with an empty name – scheduling deferred whitelist check."));
+			       TEXT("DiscordBridge: player joined with an empty name – scheduling deferred check."));
 
 			if (UWorld* World = GetWorld())
 			{
@@ -1887,7 +1912,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 
 				World->GetTimerManager().SetTimer(*SharedHandle,
 					FTimerDelegate::CreateWeakLambda(this,
-						[this, WeakGM, WeakPC, WeakWorld, SharedHandle, RetriesLeft]()
+						[this, WeakGM, WeakPC, WeakWorld, SharedHandle, RetriesLeft, bEnforcementActive]()
 					{
 						UWorld* W = WeakWorld.Get();
 
@@ -1903,7 +1928,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 
 						if (!RetryName.IsEmpty())
 						{
-							// Name is now available – run the whitelist check and stop the timer.
+							// Name is now available – run the whitelist/notification check and stop the timer.
 							if (W) { W->GetTimerManager().ClearTimer(*SharedHandle); }
 							OnPostLogin(WeakGM.Get(), WeakPC.Get());
 							return;
@@ -1915,22 +1940,32 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 							return; // Name not yet populated – try again next tick.
 						}
 
-						// All retries exhausted; kick to enforce whitelist integrity (fail-closed).
+						// All retries exhausted.
 						if (W) { W->GetTimerManager().ClearTimer(*SharedHandle); }
-						UE_LOG(LogTemp, Warning,
-						       TEXT("DiscordBridge: player name still empty after deferred check – kicking to enforce whitelist."));
 
-						AGameModeBase* FallbackGM = WeakGM.IsValid() ? WeakGM.Get() : nullptr;
-						if (!FallbackGM && W)
+						if (bEnforcementActive)
 						{
-							FallbackGM = W->GetAuthGameMode<AGameModeBase>();
+							// Kick to enforce whitelist integrity (fail-closed).
+							UE_LOG(LogTemp, Warning,
+							       TEXT("DiscordBridge: player name still empty after deferred check – kicking to enforce whitelist."));
+
+							AGameModeBase* FallbackGM = WeakGM.IsValid() ? WeakGM.Get() : nullptr;
+							if (!FallbackGM && W)
+							{
+								FallbackGM = W->GetAuthGameMode<AGameModeBase>();
+							}
+							if (FallbackGM && FallbackGM->GameSession)
+							{
+								FallbackGM->GameSession->KickPlayer(
+									WeakPC.Get(),
+									FText::FromString(
+										TEXT("Unable to verify player identity. Please reconnect.")));
+							}
 						}
-						if (FallbackGM && FallbackGM->GameSession)
+						else
 						{
-							FallbackGM->GameSession->KickPlayer(
-								WeakPC.Get(),
-								FText::FromString(
-									TEXT("Unable to verify player identity. Please reconnect.")));
+							UE_LOG(LogTemp, Warning,
+							       TEXT("DiscordBridge: player name still empty after deferred check – skipping (enforcement disabled)."));
 						}
 					}),
 					0.5f, true);
@@ -1960,11 +1995,13 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 	// ── Whitelist check ───────────────────────────────────────────────────────
 	if (!FWhitelistManager::IsEnabled())
 	{
+		SendPlayerJoinNotification(PlayerName);
 		return;
 	}
 
 	if (FWhitelistManager::IsWhitelisted(PlayerName))
 	{
+		SendPlayerJoinNotification(PlayerName);
 		return;
 	}
 
@@ -1979,6 +2016,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 		UE_LOG(LogTemp, Log,
 		       TEXT("DiscordBridge Whitelist: allowing '%s' – matches a Discord member with WhitelistRoleId."),
 		       *PlayerName);
+		SendPlayerJoinNotification(PlayerName);
 		return;
 	}
 
@@ -2002,6 +2040,87 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 		Notice = Notice.Replace(TEXT("%PlayerName%"), *PlayerName);
 		SendMessageToChannel(Config.ChannelId, Notice);
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Player join / leave / timeout notifications
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::SendPlayerJoinNotification(const FString& PlayerName)
+{
+	if (!Config.bPlayerEventsEnabled || Config.PlayerJoinMessage.IsEmpty())
+	{
+		return;
+	}
+
+	const FString& EffectiveChannelId = Config.PlayerEventsChannelId.IsEmpty()
+		? Config.ChannelId
+		: Config.PlayerEventsChannelId;
+
+	FString Message = Config.PlayerJoinMessage;
+	Message = Message.Replace(TEXT("%PlayerName%"), *PlayerName);
+
+	UE_LOG(LogTemp, Log,
+	       TEXT("DiscordBridge: Player join notification for '%s'"), *PlayerName);
+
+	SendMessageToChannel(EffectiveChannelId, Message);
+}
+
+void UDiscordBridgeSubsystem::OnLogout(AGameModeBase* /*GameMode*/, AController* Exiting)
+{
+	if (!Config.bPlayerEventsEnabled)
+	{
+		return;
+	}
+
+	// Only care about remote player controllers on the dedicated server.
+	const APlayerController* PC = Cast<APlayerController>(Exiting);
+	if (!PC || PC->IsLocalController())
+	{
+		return;
+	}
+
+	const APlayerState* PS = PC->GetPlayerState<APlayerState>();
+	const FString PlayerName = PS ? PS->GetPlayerName() : FString();
+	if (PlayerName.IsEmpty())
+	{
+		return;
+	}
+
+	const FString& EffectiveChannelId = Config.PlayerEventsChannelId.IsEmpty()
+		? Config.ChannelId
+		: Config.PlayerEventsChannelId;
+
+	// Attempt to distinguish a timeout/crash from a clean disconnect.
+	// When the net connection has already been cleaned up (null) by the time
+	// Logout fires, the player most likely timed out or crashed rather than
+	// disconnecting gracefully.  Fall back to PlayerLeaveMessage when
+	// PlayerTimeoutMessage is empty so a single leave message covers all cases.
+	const bool bIsTimeout = (PC->GetNetConnection() == nullptr);
+
+	FString Message;
+	if (bIsTimeout && !Config.PlayerTimeoutMessage.IsEmpty())
+	{
+		Message = Config.PlayerTimeoutMessage;
+	}
+	else if (!Config.PlayerLeaveMessage.IsEmpty())
+	{
+		Message = Config.PlayerLeaveMessage;
+	}
+
+	if (Message.IsEmpty())
+	{
+		return;
+	}
+
+	Message = Message.Replace(TEXT("%PlayerName%"), *PlayerName);
+
+	UE_LOG(LogTemp, Log,
+	       TEXT("DiscordBridge: Player %s notification for '%s'"),
+	       bIsTimeout ? TEXT("timeout") : TEXT("leave"),
+	       *PlayerName);
+
+	SendMessageToChannel(EffectiveChannelId, Message);
 }
 
 void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
