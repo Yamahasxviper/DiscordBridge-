@@ -11,9 +11,13 @@ public class EOSIdHelper : ModuleRules
         DefaultBuildSettings = BuildSettingsVersion.Latest;
         bLegacyPublicIncludePaths = false;
 
-        // All EOS-extraction logic lives in EOSIdHelper.h as an inline function
-        // so consumers can use it with zero overhead and no additional DLL calls.
-        // The public deps below flow transitively to any mod that lists
+        // Public headers provided by this module (all inline — zero DLL overhead):
+        //   EOSIdHelper.h  — EOSId::GetProductUserId()        : extract EOS PUID from FUniqueNetIdRepl
+        //   EOSBanSDK.h    — EOSBanSDK::PUIDFromString/ToStr  : string ↔ EOS_ProductUserId conversion
+        //                  — EOSBanSDK::GetPlatformHandle()   : access the engine's EOS_HPlatform
+        //                  — EOSBanSDK::GetConnectInterface() : access EOS_HConnect for identity ops
+        //
+        // All public deps below flow transitively to any mod that lists
         // "EOSIdHelper" in its own PublicDependencyModuleNames.
 
         PublicDependencyModuleNames.AddRange(new string[]
@@ -28,8 +32,11 @@ public class EOSIdHelper : ModuleRules
             // OnlineSubsystemEOS is disabled in FactoryGame.uproject.
             "OnlineServicesEOSGS",
             // LexToString(EOS_ProductUserId) -> FString
+            // IEOSSDKManager::Get() for GetPlatformHandle() in EOSBanSDK.h
+            // IEOSPlatformHandle for the wrapped EOS_HPlatform
             "EOSShared",
-            // EOS_ProductUserId, EOS_ProductUserId_IsValid
+            // EOS_ProductUserId, EOS_ProductUserId_IsValid, EOS_ProductUserId_FromString
+            // eos_common.h, eos_platform.h and all EOS C SDK headers
             "EOSSDK",
         });
 
