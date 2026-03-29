@@ -38,6 +38,12 @@
 			"Name": "SMLWebSocket",
 			"Enabled": true,
 			"SemVersion": "^1.0.0"
+		},
+		{
+			"Name": "DummyHeaders",
+			"Enabled": true,
+			"Optional": false,
+			"SemVersion": "^1.0.0"
 		}
 	]
 }
