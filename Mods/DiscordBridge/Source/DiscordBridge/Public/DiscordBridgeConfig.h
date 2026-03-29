@@ -284,6 +284,61 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 		TEXT(":white_check_mark: **BanSystem** — EOS player `%PlayerId%` was unbanned.")
 	};
 
+	// ── Player join / leave / timeout notifications ───────────────────────────
+
+	/**
+	 * Master on/off switch for player join/leave/timeout notifications.
+	 * When true, DiscordBridge posts a message to Discord whenever a player
+	 * joins, leaves, or times out from the server.
+	 * Default: false (disabled).
+	 */
+	bool bPlayerEventsEnabled{ false };
+
+	/**
+	 * Snowflake ID of a dedicated Discord channel for player join/leave/timeout
+	 * notifications.  Leave empty to post to the main bridged channel (ChannelId).
+	 *
+	 * Get the channel ID the same way as ChannelId (right-click the channel in
+	 * Discord with Developer Mode enabled → Copy Channel ID).
+	 *
+	 * Example: PlayerEventsChannelId=111222333444555666777
+	 */
+	FString PlayerEventsChannelId;
+
+	/**
+	 * Message posted to Discord when a player joins the server.
+	 * Available placeholder: %PlayerName%
+	 * Leave empty to disable join notifications.
+	 * Default: ":green_circle: **%PlayerName%** joined the server."
+	 */
+	FString PlayerJoinMessage{
+		TEXT(":green_circle: **%PlayerName%** joined the server.")
+	};
+
+	/**
+	 * Message posted to Discord when a player leaves the server cleanly.
+	 * Also used as a fallback when PlayerTimeoutMessage is empty and a timeout
+	 * is detected.
+	 * Available placeholder: %PlayerName%
+	 * Leave empty to disable leave notifications.
+	 * Default: ":red_circle: **%PlayerName%** left the server."
+	 */
+	FString PlayerLeaveMessage{
+		TEXT(":red_circle: **%PlayerName%** left the server.")
+	};
+
+	/**
+	 * Message posted to Discord when a player times out (connection lost without
+	 * a clean disconnect).  Leave empty to use PlayerLeaveMessage for timeouts
+	 * instead (or to disable timeout-specific notifications when PlayerLeaveMessage
+	 * is also empty).
+	 * Available placeholder: %PlayerName%
+	 * Default: ":yellow_circle: **%PlayerName%** timed out."
+	 */
+	FString PlayerTimeoutMessage{
+		TEXT(":yellow_circle: **%PlayerName%** timed out.")
+	};
+
 	// ── Player count presence ─────────────────────────────────────────────────
 
 	/** When true, the bot's Discord presence activity shows the current player count. */

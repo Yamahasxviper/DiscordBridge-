@@ -280,6 +280,13 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.EOSBanNotificationMessage       = GetIniStringOrDefault(ConfigFile, TEXT("EOSBanNotificationMessage"),      Config.EOSBanNotificationMessage);
 		Config.EOSUnbanNotificationMessage     = GetIniStringOrDefault(ConfigFile, TEXT("EOSUnbanNotificationMessage"),    Config.EOSUnbanNotificationMessage);
 
+		// Player event notification settings
+		Config.bPlayerEventsEnabled   = GetIniBoolOrDefault  (ConfigFile, TEXT("PlayerEventsEnabled"),   Config.bPlayerEventsEnabled);
+		Config.PlayerEventsChannelId  = GetIniStringOrDefault(ConfigFile, TEXT("PlayerEventsChannelId"),  Config.PlayerEventsChannelId);
+		Config.PlayerJoinMessage      = GetIniStringOrDefault(ConfigFile, TEXT("PlayerJoinMessage"),      Config.PlayerJoinMessage);
+		Config.PlayerLeaveMessage     = GetIniStringOrDefault(ConfigFile, TEXT("PlayerLeaveMessage"),     Config.PlayerLeaveMessage);
+		Config.PlayerTimeoutMessage   = GetIniStringOrDefault(ConfigFile, TEXT("PlayerTimeoutMessage"),   Config.PlayerTimeoutMessage);
+
 		// Trim leading/trailing whitespace from credential fields to prevent
 		// subtle mismatches when operators accidentally include spaces.
 		Config.BotToken  = Config.BotToken.TrimStartAndEnd();
@@ -522,6 +529,34 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("EOSUnbanNotificationMessage=\n");
 				}
 
+				if (!ConfigFile.GetString(ConfigSection, TEXT("PlayerEventsEnabled"), TmpVal))
+				{
+					AppendContent2 +=
+						TEXT("\n")
+						TEXT("# -- PLAYER NOTIFICATIONS (added by mod update) --------------------------\n")
+						TEXT("# When True, posts a Discord message whenever a player joins, leaves,\n")
+						TEXT("# or times out from the server.\n")
+						TEXT("# Default: False (disabled).\n")
+						TEXT("PlayerEventsEnabled=False\n")
+						TEXT("#\n")
+						TEXT("# Snowflake ID of the channel where player notifications are posted.\n")
+						TEXT("# Leave empty to use the main bridged channel (ChannelId).\n")
+						TEXT("PlayerEventsChannelId=\n")
+						TEXT("#\n")
+						TEXT("# Message posted when a player joins. Leave empty to disable.\n")
+						TEXT("# Placeholder: %PlayerName%\n")
+						TEXT("PlayerJoinMessage=\n")
+						TEXT("#\n")
+						TEXT("# Message posted when a player leaves cleanly. Leave empty to disable.\n")
+						TEXT("# Also used as fallback when PlayerTimeoutMessage is empty.\n")
+						TEXT("# Placeholder: %PlayerName%\n")
+						TEXT("PlayerLeaveMessage=\n")
+						TEXT("#\n")
+						TEXT("# Message posted when a player times out. Leave empty to use PlayerLeaveMessage.\n")
+						TEXT("# Placeholder: %PlayerName%\n")
+						TEXT("PlayerTimeoutMessage=\n");
+				}
+
 				if (!AppendContent2.IsEmpty())
 				{
 					UE_LOG(LogTemp, Log,
@@ -658,7 +693,21 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("EOSBanNotificationMessage=\n")
 			TEXT("# Message posted when an EOS ban is removed. Leave empty to disable.\n")
 			TEXT("# Placeholder: %PlayerId%\n")
-			TEXT("EOSUnbanNotificationMessage=\n");
+			TEXT("EOSUnbanNotificationMessage=\n")
+			TEXT("\n")
+			TEXT("# -- PLAYER NOTIFICATIONS -----------------------------------------------------\n")
+			TEXT("# When True, posts a Discord message whenever a player joins, leaves, or times out.\n")
+			TEXT("# Default: False (disabled). Set to True to enable.\n")
+			TEXT("PlayerEventsEnabled=False\n")
+			TEXT("# Snowflake ID of the channel where player notifications are posted.\n")
+			TEXT("# Leave empty to use the main bridged channel (ChannelId).\n")
+			TEXT("PlayerEventsChannelId=\n")
+			TEXT("# Message posted when a player joins. Leave empty to disable. Placeholder: %PlayerName%\n")
+			TEXT("PlayerJoinMessage=\n")
+			TEXT("# Message posted when a player leaves cleanly. Leave empty to disable. Placeholder: %PlayerName%\n")
+			TEXT("PlayerLeaveMessage=\n")
+			TEXT("# Message posted when a player times out. Leave empty to use PlayerLeaveMessage. Placeholder: %PlayerName%\n")
+			TEXT("PlayerTimeoutMessage=\n");
 
 		// Ensure the Config directory exists before writing.
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(ModFilePath));
@@ -747,6 +796,13 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.EOSBanNotificationMessage        = GetRawStringOrDefault(BackupValues, TEXT("EOSBanNotificationMessage"),       Config.EOSBanNotificationMessage);
 		Config.EOSUnbanNotificationMessage      = GetRawStringOrDefault(BackupValues, TEXT("EOSUnbanNotificationMessage"),     Config.EOSUnbanNotificationMessage);
 
+		// Player event notification settings
+		Config.bPlayerEventsEnabled    = GetRawBoolOrDefault  (BackupValues, TEXT("PlayerEventsEnabled"),    Config.bPlayerEventsEnabled);
+		Config.PlayerEventsChannelId   = GetRawStringOrDefault(BackupValues, TEXT("PlayerEventsChannelId"),   Config.PlayerEventsChannelId);
+		Config.PlayerJoinMessage       = GetRawStringOrDefault(BackupValues, TEXT("PlayerJoinMessage"),       Config.PlayerJoinMessage);
+		Config.PlayerLeaveMessage      = GetRawStringOrDefault(BackupValues, TEXT("PlayerLeaveMessage"),      Config.PlayerLeaveMessage);
+		Config.PlayerTimeoutMessage    = GetRawStringOrDefault(BackupValues, TEXT("PlayerTimeoutMessage"),    Config.PlayerTimeoutMessage);
+
 		// Only log the "restored from backup" message when credentials were
 		// actually recovered (i.e. previously blank in primary but now non-empty
 		// from the backup). Avoid a misleading message when the backup also has
@@ -833,6 +889,11 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("SteamUnbanNotificationMessage"), Config.SteamUnbanNotificationMessage);
 				PatchLine(TEXT("EOSBanNotificationMessage"),     Config.EOSBanNotificationMessage);
 				PatchLine(TEXT("EOSUnbanNotificationMessage"),   Config.EOSUnbanNotificationMessage);
+				PatchLine(TEXT("PlayerEventsEnabled"),           Config.bPlayerEventsEnabled ? TEXT("True") : TEXT("False"));
+				PatchLine(TEXT("PlayerEventsChannelId"),         Config.PlayerEventsChannelId);
+				PatchLine(TEXT("PlayerJoinMessage"),             Config.PlayerJoinMessage);
+				PatchLine(TEXT("PlayerLeaveMessage"),            Config.PlayerLeaveMessage);
+				PatchLine(TEXT("PlayerTimeoutMessage"),          Config.PlayerTimeoutMessage);
 
 				if (FFileHelper::SaveStringToFile(PrimaryContent, *ModFilePath))
 				{
@@ -894,7 +955,12 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			+ TEXT("SteamBanNotificationMessage=") + Config.SteamBanNotificationMessage + TEXT("\n")
 			+ TEXT("SteamUnbanNotificationMessage=") + Config.SteamUnbanNotificationMessage + TEXT("\n")
 			+ TEXT("EOSBanNotificationMessage=") + Config.EOSBanNotificationMessage + TEXT("\n")
-			+ TEXT("EOSUnbanNotificationMessage=") + Config.EOSUnbanNotificationMessage + TEXT("\n");
+			+ TEXT("EOSUnbanNotificationMessage=") + Config.EOSUnbanNotificationMessage + TEXT("\n")
+			+ TEXT("PlayerEventsEnabled=") + (Config.bPlayerEventsEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
+			+ TEXT("PlayerEventsChannelId=") + Config.PlayerEventsChannelId + TEXT("\n")
+			+ TEXT("PlayerJoinMessage=") + Config.PlayerJoinMessage + TEXT("\n")
+			+ TEXT("PlayerLeaveMessage=") + Config.PlayerLeaveMessage + TEXT("\n")
+			+ TEXT("PlayerTimeoutMessage=") + Config.PlayerTimeoutMessage + TEXT("\n");
 
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupFilePath));
 

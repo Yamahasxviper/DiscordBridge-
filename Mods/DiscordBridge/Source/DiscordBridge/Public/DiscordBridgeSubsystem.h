@@ -560,8 +560,24 @@ private:
 	/**
 	 * Bound to FGameModeEvents::GameModePostLoginEvent.
 	 * Kicks any player that is not on the whitelist when the whitelist is enabled.
+	 * Also fires the player join Discord notification when PlayerEventsEnabled is true.
 	 */
 	void OnPostLogin(AGameModeBase* GameMode, APlayerController* Controller);
+
+	/**
+	 * Hooked onto AGameModeBase::Logout via SUBSCRIBE_METHOD_VIRTUAL_AFTER.
+	 * Posts a player leave or timeout notification to Discord when
+	 * PlayerEventsEnabled is true.
+	 */
+	void OnLogout(AGameModeBase* GameMode, AController* Exiting);
+
+	/**
+	 * Posts a player join notification to Discord.
+	 * No-op when PlayerEventsEnabled is false or PlayerJoinMessage is empty.
+	 *
+	 * @param PlayerName  The in-game name of the player who joined.
+	 */
+	void SendPlayerJoinNotification(const FString& PlayerName);
 
 	/**
 	 * Fetch all guild members who hold WhitelistRoleId via the Discord REST API
@@ -623,6 +639,10 @@ private:
 	void ModifyDiscordRole(const FString& UserId, const FString& RoleId, bool bGrant);
 
 	FDelegateHandle PostLoginHandle;
+
+	/** Handle returned by SUBSCRIBE_METHOD_VIRTUAL_AFTER on AGameModeBase::Logout.
+	 *  Stored so the handler can be removed in Deinitialize(). */
+	FDelegateHandle LogoutHookHandle;
 
 	/** Snowflake ID of the guild (server) the bot is connected to.
 	 *  Populated from the first entry in the READY event's guilds array.
