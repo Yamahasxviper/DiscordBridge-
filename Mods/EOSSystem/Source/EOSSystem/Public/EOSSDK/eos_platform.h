@@ -4,9 +4,41 @@
 // only public EOS SDK documentation (https://dev.epicgames.com/docs).
 // No UE EOSSDK module, no EOSShared, and no CSS FactoryGame headers are
 // referenced anywhere in this file.
+//
+// INCLUDE GUARD NOTE
+// ──────────────────
+// Two additional guards are defined here:
+//
+//  EOS_Platform_H  — matches the guard in the CSS engine's EOSSDK
+//    eos_platform.h (and in EOSDirectSDK's mod-local eos_platform.h stub).
+//    Whichever platform header is processed first sets this guard, preventing
+//    the other from re-defining EOS_Platform_Options and related structs.
+//
+//  EOS_TYPES_H  — matches the guard used by the CSS engine's EOSSDK
+//    eos_types.h.  Setting it here pre-empts the engine's eos_types.h from
+//    re-defining EOS_HPlatform, EOS_Platform_ClientCredentials, etc. that are
+//    already defined in this file (via eos_base.h for the handle types, and
+//    directly here for the platform-creation structs).
+//
+// STRUCT NAME NOTE
+// ────────────────
+// All forward-declared handle struct names here match the real EOS SDK (no
+// 'Details' suffix), consistent with eos_base.h.  This allows identical
+// typedef re-declarations from the engine's EOSSDK headers without C2371.
 
 #pragma once
 
+#ifndef EOS_Platform_H
+#define EOS_Platform_H
+
+// Claim the engine's eos_types.h guard so that file's duplicate definitions
+// of EOS_HPlatform, EOS_Platform_ClientCredentials, etc. are suppressed when
+// this header has already been processed.
+#ifndef EOS_TYPES_H
+#define EOS_TYPES_H
+#endif
+
+#include "eos_common.h"  // EOS_EResult, EOS_HPlatform (via eos_base.h), EOS_Bool
 #include "eos_init.h"
 #include <stdint.h>
 
@@ -88,54 +120,58 @@ typedef struct EOS_Platform_Options
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Forward declarations for interface handles used in function pointer typedefs
+//
+//  Struct names match the real EOS SDK (no 'Details' suffix) so that if the
+//  engine's EOSSDK headers also define these typedefs with the same struct
+//  names, the identical re-declarations are harmless in C++.
 // ─────────────────────────────────────────────────────────────────────────────
-struct EOS_AuthHandleDetails;
-typedef struct EOS_AuthHandleDetails*            EOS_HAuth;
+struct EOS_AuthHandle;
+typedef struct EOS_AuthHandle*               EOS_HAuth;
 
-struct EOS_UserInfoHandleDetails;
-typedef struct EOS_UserInfoHandleDetails*        EOS_HUserInfo;
+struct EOS_UserInfoHandle;
+typedef struct EOS_UserInfoHandle*           EOS_HUserInfo;
 
-struct EOS_FriendsHandleDetails;
-typedef struct EOS_FriendsHandleDetails*         EOS_HFriends;
+struct EOS_FriendsHandle;
+typedef struct EOS_FriendsHandle*            EOS_HFriends;
 
-struct EOS_PresenceHandleDetails;
-typedef struct EOS_PresenceHandleDetails*        EOS_HPresence;
+struct EOS_PresenceHandle;
+typedef struct EOS_PresenceHandle*           EOS_HPresence;
 
-struct EOS_P2PHandleDetails;
-typedef struct EOS_P2PHandleDetails*             EOS_HP2P;
+struct EOS_P2PHandle;
+typedef struct EOS_P2PHandle*                EOS_HP2P;
 
-struct EOS_AchievementsHandleDetails;
-typedef struct EOS_AchievementsHandleDetails*    EOS_HAchievements;
+struct EOS_AchievementsHandle;
+typedef struct EOS_AchievementsHandle*       EOS_HAchievements;
 
-struct EOS_StatsHandleDetails;
-typedef struct EOS_StatsHandleDetails*           EOS_HStats;
+struct EOS_StatsHandle;
+typedef struct EOS_StatsHandle*              EOS_HStats;
 
-struct EOS_LeaderboardsHandleDetails;
-typedef struct EOS_LeaderboardsHandleDetails*    EOS_HLeaderboards;
+struct EOS_LeaderboardsHandle;
+typedef struct EOS_LeaderboardsHandle*       EOS_HLeaderboards;
 
-struct EOS_PlayerDataStorageHandleDetails;
-typedef struct EOS_PlayerDataStorageHandleDetails* EOS_HPlayerDataStorage;
+struct EOS_PlayerDataStorageHandle;
+typedef struct EOS_PlayerDataStorageHandle*  EOS_HPlayerDataStorage;
 
-struct EOS_TitleStorageHandleDetails;
-typedef struct EOS_TitleStorageHandleDetails*    EOS_HTitleStorage;
+struct EOS_TitleStorageHandle;
+typedef struct EOS_TitleStorageHandle*       EOS_HTitleStorage;
 
-struct EOS_EcomHandleDetails;
-typedef struct EOS_EcomHandleDetails*            EOS_HEcom;
+struct EOS_EcomHandle;
+typedef struct EOS_EcomHandle*               EOS_HEcom;
 
-struct EOS_RTCHandleDetails;
-typedef struct EOS_RTCHandleDetails*             EOS_HRTC;
+struct EOS_RTCHandle;
+typedef struct EOS_RTCHandle*                EOS_HRTC;
 
-struct EOS_RTCAdminHandleDetails;
-typedef struct EOS_RTCAdminHandleDetails*        EOS_HRTCAdmin;
+struct EOS_RTCAdminHandle;
+typedef struct EOS_RTCAdminHandle*           EOS_HRTCAdmin;
 
-struct EOS_LobbyHandleDetails;
-typedef struct EOS_LobbyHandleDetails*           EOS_HLobby;
+struct EOS_LobbyHandle;
+typedef struct EOS_LobbyHandle*              EOS_HLobby;
 
-struct EOS_LobbyModificationHandleDetails;
-typedef struct EOS_LobbyModificationHandleDetails* EOS_HLobbyModification;
+struct EOS_LobbyModificationHandle;
+typedef struct EOS_LobbyModificationHandle*  EOS_HLobbyModification;
 
-struct EOS_LobbyDetailsHandleDetails;
-typedef struct EOS_LobbyDetailsHandleDetails*    EOS_HLobbyDetails;
+struct EOS_LobbyDetailsHandle;
+typedef struct EOS_LobbyDetailsHandle*       EOS_HLobbyDetails;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOS_Platform_* function pointer typedefs
@@ -240,3 +276,5 @@ typedef EOS_EpicAccountId  (EOS_CALL *EOS_EpicAccountId_FromString_t)(const char
 #ifdef __cplusplus
 }
 #endif
+
+#endif // EOS_Platform_H
