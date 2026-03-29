@@ -1,3 +1,5 @@
+// Copyright Yamahasxviper. All Rights Reserved.
+
 #include "WhitelistManager.h"
 #include "Logging/LogMacros.h"
 #include "Dom/JsonObject.h"
