@@ -17,13 +17,6 @@ public class EOSSystem : ModuleRules
             "CoreUObject",
             "Engine",
             "DeveloperSettings",
-            "Json",
-            "JsonUtilities",
-        });
-
-        PrivateDependencyModuleNames.AddRange(new string[]
-        {
-            "Projects",
         });
     }
 }
