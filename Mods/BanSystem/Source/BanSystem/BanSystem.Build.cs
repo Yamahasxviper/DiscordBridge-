@@ -29,6 +29,10 @@ public class BanSystem : ModuleRules
             // GetPlatformHandle (EOS_HPlatform) and GetConnectInterface (EOS_HConnect).
             // Also accessible as EOSBanSDK:: via the alias in EOSBanSDK.h.
             "EOSDirectSDK",
+            // EOSSystem — standalone EOS system providing UEOSConnectSubsystem with
+            // forward (Steam64→PUID) and reverse (PUID→Steam64) lookup cache.
+            // Optional at runtime: used for cross-platform ban ID resolution.
+            "EOSSystem",
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]

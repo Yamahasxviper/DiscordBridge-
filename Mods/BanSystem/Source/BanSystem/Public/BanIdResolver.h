@@ -146,4 +146,38 @@ public:
      * FAccountId (OnlineServices layer), which has no V1 type name.
      */
     static FString GetIdTypeName(const FUniqueNetIdRepl& UniqueId);
+
+    /**
+     * Use EOSSystem's UEOSConnectSubsystem cache to look up the EOS PUID
+     * corresponding to a Steam64 ID.
+     *
+     * This is a synchronous, cache-only call — it returns immediately with
+     * whatever EOS has already mapped from a previous forward-lookup or
+     * from player-login tracking.  Returns true and populates OutPUID when
+     * a cached mapping exists; returns false when EOSSystem is unavailable
+     * or the mapping has not yet been fetched.
+     *
+     * @param GameInstance  UGameInstance used to locate UEOSConnectSubsystem.
+     * @param Steam64Id     17-digit Steam64 decimal string.
+     * @param OutPUID       Receives the cached 32-char hex EOS PUID on success.
+     */
+    static bool TryGetCachedPUIDFromSteam64(UGameInstance* GameInstance,
+                                             const FString& Steam64Id,
+                                             FString&       OutPUID);
+
+    /**
+     * Use EOSSystem's UEOSConnectSubsystem reverse-lookup cache to find the
+     * Steam64 ID linked to an EOS PUID.
+     *
+     * Synchronous, cache-only — returns whatever was stored from a previous
+     * reverse-lookup or player-login event.  Returns true and populates
+     * OutSteam64Id when a cached Steam link exists for this PUID.
+     *
+     * @param GameInstance  UGameInstance used to locate UEOSConnectSubsystem.
+     * @param PUID          32-char hex EOS Product User ID string.
+     * @param OutSteam64Id  Receives the linked Steam64 ID string on success.
+     */
+    static bool TryGetCachedSteam64FromPUID(UGameInstance* GameInstance,
+                                             const FString& PUID,
+                                             FString&       OutSteam64Id);
 };
