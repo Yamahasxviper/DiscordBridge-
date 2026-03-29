@@ -1,54 +1,52 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 //
-// eos_platform.h — EOS SDK platform interface, written from scratch using
-// only public EOS SDK documentation (https://dev.epicgames.com/docs).
-// No UE EOSSDK module, no EOSShared, and no CSS FactoryGame headers are
-// referenced anywhere in this file.
+// eos_platform.h — custom platform interface header for the CSS engine.
 //
-// INCLUDE GUARD NOTE
-// ──────────────────
-// Two additional guards are defined here:
+// The CSS (CoffeeStain Satisfactory) UE5.3.2 engine ships the EOSSDK plugin
+// but omits eos_platform.h from its distribution.  The engine DOES ship
+// eos_types.h, which provides EOS_HPlatform, EOS_Platform_ClientCredentials,
+// EOS_Platform_RTCOptions, and EOS_Platform_Options.  This file:
 //
-//  EOS_Platform_H  — matches the guard in the CSS engine's EOSSDK
-//    eos_platform.h (and in EOSDirectSDK's mod-local eos_platform.h stub).
-//    Whichever platform header is processed first sets this guard, preventing
-//    the other from re-defining EOS_Platform_Options and related structs.
+//   1. Includes <eos_types.h> to get the canonical platform struct definitions
+//      (replacing our old hand-written copies that caused C2371 conflicts when
+//      the engine's eos_types.h was also compiled in the same TU).
 //
-//  EOS_TYPES_H  — matches the guard used by the CSS engine's EOSSDK
-//    eos_types.h.  Setting it here pre-empts the engine's eos_types.h from
-//    re-defining EOS_HPlatform, EOS_Platform_ClientCredentials, etc. that are
-//    already defined in this file (via eos_base.h for the handle types, and
-//    directly here for the platform-creation structs).
+//   2. Provides the missing EOS_Platform_Get*Interface function declarations
+//      and EOS_Platform_*_t function-pointer typedefs needed by EOSSDKLoader.
 //
-// STRUCT NAME NOTE
-// ────────────────
-// All forward-declared handle struct names here match the real EOS SDK (no
-// 'Details' suffix), consistent with eos_base.h.  This allows identical
-// typedef re-declarations from the engine's EOSSDK headers without C2371.
+// INCLUDE GUARD
+// ─────────────
+// EOS_Platform_H matches the guard the real EOS SDK eos_platform.h would use.
+// Setting it here prevents any future engine eos_platform.h from re-declaring
+// the same symbols.
 
 #pragma once
 
 #ifndef EOS_Platform_H
 #define EOS_Platform_H
 
-// Claim the engine's eos_types.h guard so that file's duplicate definitions
-// of EOS_HPlatform, EOS_Platform_ClientCredentials, etc. are suppressed when
-// this header has already been processed.
-#ifndef EOS_TYPES_H
-#define EOS_TYPES_H
-#endif
+// eos_types.h from the real EOSSDK provides the canonical definitions of:
+//   EOS_HPlatform, EOS_Platform_ClientCredentials, EOS_Platform_RTCOptions,
+//   EOS_Platform_Options, EOS_PF_* flags, and other platform structs.
+// Using angle brackets finds the engine's ThirdParty EOSSDK copy rather
+// than this directory (Public/EOSSDK/ is not an /I root).
+#include <eos_types.h>
 
-#include "eos_common.h"  // EOS_EResult, EOS_HPlatform (via eos_base.h), EOS_Bool
+// eos_logging.h provides EOS_ELogCategory, EOS_ELogLevel, EOS_LogMessageFunc
+// used in the function-pointer typedefs below.
+#include "eos_logging.h"
+
+// eos_common.h provides EOS_EResult, EOS_Bool, EOS_ProductUserId, etc.
+#include "eos_common.h"
+
+// eos_init.h provides EOS_InitializeOptions (needed for EOS_Initialize_t below).
 #include "eos_init.h"
-#include <stdint.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Platform creation flags  (EOS_PF_*)
+//  EOS_PF_* platform creation flags
+//  Guard prevents redefining if already defined by <eos_types.h>.
 // ─────────────────────────────────────────────────────────────────────────────
+#ifndef EOS_PF_LOADING_IN_EDITOR
 #define EOS_PF_LOADING_IN_EDITOR               0x00001u
 #define EOS_PF_DISABLE_OVERLAY                 0x00002u
 #define EOS_PF_DISABLE_SOCIAL_OVERLAY          0x00004u
@@ -56,132 +54,95 @@ extern "C" {
 #define EOS_PF_WINDOWS_ENABLE_OVERLAY_D3D9     0x00010u
 #define EOS_PF_WINDOWS_ENABLE_OVERLAY_D3D10    0x00020u
 #define EOS_PF_WINDOWS_ENABLE_OVERLAY_OPENGL   0x00040u
+#endif
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  EOS_Platform_ClientCredentials
+//  Forward declarations for interface handles
+//  Struct names match the real EOS SDK (no 'Details' suffix for handle types).
+//  Identical typedef redeclarations are valid in C++.
 // ─────────────────────────────────────────────────────────────────────────────
-typedef struct EOS_Platform_ClientCredentials
-{
-    /** OAuth2 client ID for your product */
-    const char* ClientId;
-    /** OAuth2 client secret for your product */
-    const char* ClientSecret;
-} EOS_Platform_ClientCredentials;
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  EOS_Platform_RTCOptions
-// ─────────────────────────────────────────────────────────────────────────────
-#define EOS_PLATFORM_RTCOPTIONS_API_LATEST 1
+#ifndef EOS_HPlatform_DEFINED
+#define EOS_HPlatform_DEFINED
+struct EOS_PlatformHandle;
+typedef struct EOS_PlatformHandle* EOS_HPlatform;
+#endif
 
-typedef struct EOS_Platform_RTCOptions
-{
-    /** API version: must be EOS_PLATFORM_RTCOPTIONS_API_LATEST */
-    int32_t      ApiVersion;
-    /** Platform-specific RTC options (platform-dependent struct pointer) */
-    const void*  PlatformSpecificOptions;
-} EOS_Platform_RTCOptions;
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  EOS_Platform_Options
-// ─────────────────────────────────────────────────────────────────────────────
-#define EOS_PLATFORM_OPTIONS_API_LATEST 12
-
-typedef struct EOS_Platform_Options
-{
-    /** API version: must be EOS_PLATFORM_OPTIONS_API_LATEST */
-    int32_t                        ApiVersion;
-    /** Reserved — must be NULL */
-    void*                          Reserved;
-    /** Product ID from the Developer Portal */
-    const char*                    ProductId;
-    /** Sandbox ID from the Developer Portal */
-    const char*                    SandboxId;
-    /** OAuth2 client credentials */
-    EOS_Platform_ClientCredentials ClientCredentials;
-    /** EOS_TRUE when running a dedicated server, EOS_FALSE for a client */
-    EOS_Bool                       bIsServer;
-    /** Optional 64-character hex encryption key for player data */
-    const char*                    EncryptionKey;
-    /** Override the country code detected from the OS (NULL = auto) */
-    const char*                    OverrideCountryCode;
-    /** Override the locale code detected from the OS (NULL = auto) */
-    const char*                    OverrideLocaleCode;
-    /** Deployment ID from the Developer Portal */
-    const char*                    DeploymentId;
-    /** Bitfield of EOS_PF_* platform flags */
-    uint64_t                       Flags;
-    /** Path the SDK uses for its local disk cache */
-    const char*                    CacheDirectory;
-    /** Throttle for EOS_Platform_Tick in milliseconds (0 = no throttle) */
-    uint32_t                       TickBudgetInMilliseconds;
-    /** Optional RTC options; NULL = disable RTC */
-    const EOS_Platform_RTCOptions* RTCOptions;
-} EOS_Platform_Options;
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Forward declarations for interface handles used in function pointer typedefs
-//
-//  Struct names match the real EOS SDK (no 'Details' suffix) so that if the
-//  engine's EOSSDK headers also define these typedefs with the same struct
-//  names, the identical re-declarations are harmless in C++.
-// ─────────────────────────────────────────────────────────────────────────────
+struct EOS_MetricsHandle;
+typedef struct EOS_MetricsHandle*             EOS_HMetrics;
 struct EOS_AuthHandle;
-typedef struct EOS_AuthHandle*               EOS_HAuth;
-
-struct EOS_UserInfoHandle;
-typedef struct EOS_UserInfoHandle*           EOS_HUserInfo;
-
-struct EOS_FriendsHandle;
-typedef struct EOS_FriendsHandle*            EOS_HFriends;
-
-struct EOS_PresenceHandle;
-typedef struct EOS_PresenceHandle*           EOS_HPresence;
-
-struct EOS_P2PHandle;
-typedef struct EOS_P2PHandle*                EOS_HP2P;
-
-struct EOS_AchievementsHandle;
-typedef struct EOS_AchievementsHandle*       EOS_HAchievements;
-
-struct EOS_StatsHandle;
-typedef struct EOS_StatsHandle*              EOS_HStats;
-
-struct EOS_LeaderboardsHandle;
-typedef struct EOS_LeaderboardsHandle*       EOS_HLeaderboards;
-
-struct EOS_PlayerDataStorageHandle;
-typedef struct EOS_PlayerDataStorageHandle*  EOS_HPlayerDataStorage;
-
-struct EOS_TitleStorageHandle;
-typedef struct EOS_TitleStorageHandle*       EOS_HTitleStorage;
-
+typedef struct EOS_AuthHandle*                EOS_HAuth;
+struct EOS_ConnectHandle;
+typedef struct EOS_ConnectHandle*             EOS_HConnect;
 struct EOS_EcomHandle;
-typedef struct EOS_EcomHandle*               EOS_HEcom;
-
-struct EOS_RTCHandle;
-typedef struct EOS_RTCHandle*                EOS_HRTC;
-
-struct EOS_RTCAdminHandle;
-typedef struct EOS_RTCAdminHandle*           EOS_HRTCAdmin;
-
+typedef struct EOS_EcomHandle*                EOS_HEcom;
+struct EOS_UIHandle;
+typedef struct EOS_UIHandle*                  EOS_HUI;
+struct EOS_FriendsHandle;
+typedef struct EOS_FriendsHandle*             EOS_HFriends;
+struct EOS_PresenceHandle;
+typedef struct EOS_PresenceHandle*            EOS_HPresence;
+struct EOS_SessionsHandle;
+typedef struct EOS_SessionsHandle*            EOS_HSessions;
 struct EOS_LobbyHandle;
-typedef struct EOS_LobbyHandle*              EOS_HLobby;
-
+typedef struct EOS_LobbyHandle*               EOS_HLobby;
 struct EOS_LobbyModificationHandle;
-typedef struct EOS_LobbyModificationHandle*  EOS_HLobbyModification;
-
+typedef struct EOS_LobbyModificationHandle*   EOS_HLobbyModification;
 struct EOS_LobbyDetailsHandle;
-typedef struct EOS_LobbyDetailsHandle*       EOS_HLobbyDetails;
-
+typedef struct EOS_LobbyDetailsHandle*        EOS_HLobbyDetails;
+struct EOS_UserInfoHandle;
+typedef struct EOS_UserInfoHandle*            EOS_HUserInfo;
+struct EOS_P2PHandle;
+typedef struct EOS_P2PHandle*                 EOS_HP2P;
+struct EOS_PlayerDataStorageHandle;
+typedef struct EOS_PlayerDataStorageHandle*   EOS_HPlayerDataStorage;
+struct EOS_TitleStorageHandle;
+typedef struct EOS_TitleStorageHandle*        EOS_HTitleStorage;
+struct EOS_AchievementsHandle;
+typedef struct EOS_AchievementsHandle*        EOS_HAchievements;
+struct EOS_StatsHandle;
+typedef struct EOS_StatsHandle*               EOS_HStats;
+struct EOS_LeaderboardsHandle;
+typedef struct EOS_LeaderboardsHandle*        EOS_HLeaderboards;
+struct EOS_ModsHandle;
+typedef struct EOS_ModsHandle*                EOS_HMods;
 struct EOS_AntiCheatClientHandle;
-typedef struct EOS_AntiCheatClientHandle*    EOS_HAntiCheatClient;
+typedef struct EOS_AntiCheatClientHandle*     EOS_HAntiCheatClient;
+struct EOS_AntiCheatServerHandle;
+typedef struct EOS_AntiCheatServerHandle*     EOS_HAntiCheatServer;
+struct EOS_ReportsHandle;
+typedef struct EOS_ReportsHandle*             EOS_HReports;
+struct EOS_SanctionsHandle;
+typedef struct EOS_SanctionsHandle*           EOS_HSanctions;
+struct EOS_KWSHandle;
+typedef struct EOS_KWSHandle*                 EOS_HKWS;
+struct EOS_ProgressionSnapshotHandle;
+typedef struct EOS_ProgressionSnapshotHandle* EOS_HProgressionSnapshot;
+struct EOS_RTCHandle;
+typedef struct EOS_RTCHandle*                 EOS_HRTC;
+struct EOS_RTCAdminHandle;
+typedef struct EOS_RTCAdminHandle*            EOS_HRTCAdmin;
+struct EOS_CustomInvitesHandle;
+typedef struct EOS_CustomInvitesHandle*       EOS_HCustomInvites;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOS_Platform_* function pointer typedefs
+//  These are missing from the CSS engine's EOSSDK distribution (which omits
+//  eos_platform.h entirely).  They are required by EOSSDKLoader.h.
 // ─────────────────────────────────────────────────────────────────────────────
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /** Creates and returns a new platform instance */
 typedef EOS_HPlatform      (EOS_CALL *EOS_Platform_Create_t)(const EOS_Platform_Options* Options);
+
+/** Initialises the EOS SDK (called before EOS_Platform_Create) */
+typedef EOS_EResult        (EOS_CALL *EOS_Initialize_t)(const EOS_InitializeOptions* Options);
+
+/** Shuts down the EOS SDK (called after all platforms are released) */
+typedef EOS_EResult        (EOS_CALL *EOS_Shutdown_t)(void);
 
 /** Releases a platform instance previously created with EOS_Platform_Create */
 typedef void               (EOS_CALL *EOS_Platform_Release_t)(EOS_HPlatform Handle);
@@ -279,8 +240,7 @@ typedef EOS_EpicAccountId  (EOS_CALL *EOS_EpicAccountId_FromString_t)(const char
 // ─────────────────────────────────────────────────────────────────────────────
 //  Actual C-linkage function declarations
 //  These mirror the real EOS C SDK ABI so that any translation unit that
-//  processes this header (rather than EOSDirectSDK's eos_platform.h stub) still
-//  has the EOS_Platform_Get*Interface declarations that EOSDirectSDK.h calls.
+//  processes this header still has the EOS_Platform_Get*Interface declarations.
 // ─────────────────────────────────────────────────────────────────────────────
 
 EOS_HMetrics     EOS_Platform_GetMetricsInterface(EOS_HPlatform Handle);
@@ -305,7 +265,7 @@ EOS_HRTC         EOS_Platform_GetRTCInterface(EOS_HPlatform Handle);
 EOS_HRTCAdmin    EOS_Platform_GetRTCAdminInterface(EOS_HPlatform Handle);
 
 #ifdef __cplusplus
-}
+} // extern "C"
 #endif
 
 #endif // EOS_Platform_H

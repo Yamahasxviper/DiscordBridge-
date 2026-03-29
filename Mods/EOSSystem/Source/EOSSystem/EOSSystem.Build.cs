@@ -1,5 +1,4 @@
 // Copyright Yamahasxviper. All Rights Reserved.
-// Standalone EOS System mod — zero dependency on engine EOSSDK / EOSShared.
 using UnrealBuildTool;
 
 public class EOSSystem : ModuleRules
@@ -22,6 +21,14 @@ public class EOSSystem : ModuleRules
             // FJsonObject/FJsonSerializer are from Json; FJsonObjectConverter is from JsonUtilities.
             "Json",
             "JsonUtilities",
+            // EOSSDK — provides the engine's ThirdParty EOS C SDK headers via angle-bracket
+            // includes (<eos_common.h>, <eos_init.h>, <eos_types.h>, etc.).  The EOSSDK
+            // module's include path is used by the Public/EOSSDK/ delegation wrappers to
+            // forward all type definitions to the canonical engine headers, preventing
+            // C2371/C2011/C3431 redefinition conflicts when BanSystem includes both
+            // EOSSystem and EOSDirectSDK (which also pulls in real EOSSDK headers via
+            // EOSShared) in the same translation unit.
+            "EOSSDK",
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]
