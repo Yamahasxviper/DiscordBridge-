@@ -4,9 +4,22 @@
 // only public EOS SDK documentation (https://dev.epicgames.com/docs).
 // No UE EOSSDK module, no EOSShared, and no CSS FactoryGame headers are
 // referenced anywhere in this file.
+//
+// INCLUDE GUARD NOTE
+// ──────────────────
+// EOS_INIT_H matches the named guard used by the CSS engine's EOSSDK
+// eos_init.h.  Whichever version is processed first sets the guard and
+// prevents the other from re-defining EOS_Initialize_ThreadAffinity and
+// EOS_InitializeOptions — eliminating the C2371 redefinition errors that
+// occur when BanSystem's translation units include both EOSSystem and
+// EOSDirectSDK (engine EOSSDK) headers.
 
 #pragma once
 
+#ifndef EOS_INIT_H
+#define EOS_INIT_H
+
+#include "eos_common.h"  // provides EOS_EResult (moved from eos_base.h)
 #include "eos_logging.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -79,3 +92,5 @@ typedef EOS_EResult (EOS_CALL *EOS_Shutdown_t)(void);
 #ifdef __cplusplus
 }
 #endif
+
+#endif // EOS_INIT_H
