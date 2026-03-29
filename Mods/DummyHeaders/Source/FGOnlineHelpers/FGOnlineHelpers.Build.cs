@@ -20,9 +20,6 @@ public class FGOnlineHelpers : ModuleRules
             // OnlineServicesEOSGS provides UE::Online::GetProductUserId(FAccountId)
             // for the V2 (FAccountId) EOS identity path.
             "OnlineServicesEOSGS",
-            // OnlineSubsystemEOS provides IUniqueNetIdEOS for the V1 "EOS"-typed
-            // FUniqueNetId identity path.
-            "OnlineSubsystemEOS",
             // EOSShared provides LexToString(EOS_ProductUserId) -> FString.
             "EOSShared",
             // EOSSDK provides EOS_ProductUserId, EOS_ProductUserId_IsValid, etc.
