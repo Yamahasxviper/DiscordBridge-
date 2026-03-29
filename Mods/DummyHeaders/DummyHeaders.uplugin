@@ -37,10 +37,6 @@
 		{
 			"Name": "EOSShared",
 			"Enabled": true
-		},
-		{
-			"Name": "EOSSDK",
-			"Enabled": true
 		}
 	]
 }
