@@ -8,16 +8,13 @@
 // so that relative includes from within the EOSSDK/ subdirectory continue
 // to resolve correctly.
 //
-// INCLUDE GUARD
-// ─────────────
-// EOS_BASE_H matches the named guard used by the engine's ThirdParty EOSSDK
-// eos_base.h.  Whichever file is processed first sets the guard and prevents
-// the other from re-defining the same types.
+// NOTE: Do NOT add a named include guard matching the real SDK's guard here.
+// Defining EOS_BASE_H before #include <eos_base.h> causes the real header's
+// own guard check to see it already set and skip all content — leaving
+// EOS_CALL, EOS_MEMORY_CALL, etc. undefined.  #pragma once is sufficient to
+// prevent this wrapper from being processed twice.
 
 #pragma once
-
-#ifndef EOS_BASE_H
-#define EOS_BASE_H
 
 // Delegate to the real EOS SDK's eos_base.h via the EOSSDK module include
 // path.  Angle-bracket form is used so the compiler searches /I paths
@@ -30,5 +27,3 @@
 #ifndef EOS_HPlatform_DEFINED
 #define EOS_HPlatform_DEFINED
 #endif
-
-#endif // EOS_BASE_H

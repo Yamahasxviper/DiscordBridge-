@@ -20,6 +20,18 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogEOSConnect, Log, All);
 
+// ─── QueryExternalAccountMappings context ────────────────────────────────────
+// EOS_Connect_QueryExternalAccountMappingsCallbackInfo does not carry the
+// queried IDs or account type back in the callback.  We store them here and
+// pass the struct as ClientData so the callback can call
+// EOS_Connect_GetExternalAccountMapping for each ID.
+struct FQueryExternalMappingsContext
+{
+    TWeakObjectPtr<UEOSConnectSubsystem> Subsystem;
+    TArray<std::string>                 ExternalAccountIds;   // UTF-8 copies kept alive
+    EOS_EExternalAccountType            AccountIdType;
+};
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 static FString PUIDToStr(EOS_ProductUserId Id)
 {
@@ -168,13 +180,17 @@ void UEOSConnectSubsystem::InternalLookupBatch(const TArray<FString>& ExternalAc
     EOS_ProductUserId LocalId = Connect_PUIDFromStr(LocalServerPUID);
     if (!LocalId) { UE_LOG(LogEOSConnect, Warning, TEXT("LookupPUIDBatch: no local server PUID yet")); return; }
 
-    // Build a char* array; pointers into the FString data are valid for the scope of this call.
+    // Build a char* array whose backing storage lives in the context struct so
+    // it remains valid until the async callback fires and deletes the context.
+    auto* Ctx = new FQueryExternalMappingsContext();
+    Ctx->Subsystem     = this;
+    Ctx->AccountIdType = AccountIdType;
+
     TArray<const char*> IdPtrs;
-    TArray<std::string> IdStorage;
     for (const FString& Id : ExternalAccountIds)
     {
-        IdStorage.Add(TCHAR_TO_UTF8(*Id));
-        IdPtrs.Add(IdStorage.Last().c_str());
+        Ctx->ExternalAccountIds.Add(TCHAR_TO_UTF8(*Id));
+        IdPtrs.Add(Ctx->ExternalAccountIds.Last().c_str());
     }
 
     EOS_Connect_QueryExternalAccountMappingsOptions O = {};
@@ -183,7 +199,7 @@ void UEOSConnectSubsystem::InternalLookupBatch(const TArray<FString>& ExternalAc
     O.AccountIdType         = AccountIdType;
     O.ExternalAccountIds    = IdPtrs.GetData();
     O.ExternalAccountIdCount= (uint32_t)IdPtrs.Num();
-    SDK.fp_EOS_Connect_QueryExternalAccountMappings(H, &O, this, &UEOSConnectSubsystem::OnQueryExternalMappingsCallback);
+    SDK.fp_EOS_Connect_QueryExternalAccountMappings(H, &O, Ctx, &UEOSConnectSubsystem::OnQueryExternalMappingsCallback);
     UE_LOG(LogEOSConnect, Log, TEXT("LookupPUIDBatch: querying %d account(s) of type %d"), IdPtrs.Num(), (int32)AccountIdType);
 }
 
@@ -354,29 +370,40 @@ void EOS_CALL UEOSConnectSubsystem::OnAuthExpirationCallback(const EOS_Connect_A
 void EOS_CALL UEOSConnectSubsystem::OnQueryExternalMappingsCallback(const EOS_Connect_QueryExternalAccountMappingsCallbackInfo* Data)
 {
     if (!Data) return;
-    UEOSConnectSubsystem* Self = static_cast<UEOSConnectSubsystem*>(Data->ClientData);
-    if (!Self) return;
+    auto* Ctx = static_cast<FQueryExternalMappingsContext*>(Data->ClientData);
+    UEOSConnectSubsystem* Self = Ctx ? Ctx->Subsystem.Get() : nullptr;
 
     if (Data->ResultCode != EOS_Success)
     {
         UE_LOG(LogEOSConnect, Warning, TEXT("QueryExternalAccountMappings failed: %s"), *FEOSSDKLoader::ResultToString(Data->ResultCode));
+        delete Ctx;
+        return;
+    }
+
+    if (!Self)
+    {
+        delete Ctx;
         return;
     }
 
     // Fetch cached mappings and broadcast for each
     FEOSSDKLoader& SDK = FEOSSDKLoader::Get();
     EOS_HConnect H = Self->GetConnectHandle();
-    if (!H || !SDK.fp_EOS_Connect_GetExternalAccountMapping) return;
-
-    for (uint32_t i = 0; i < Data->ExternalAccountIdCount; ++i)
+    if (!H || !SDK.fp_EOS_Connect_GetExternalAccountMapping)
     {
-        const char* ExtId = Data->ExternalAccountIds[i];
-        if (!ExtId) continue;
+        delete Ctx;
+        return;
+    }
+
+    for (const std::string& ExtIdUtf8 : Ctx->ExternalAccountIds)
+    {
+        const char* ExtId = ExtIdUtf8.c_str();
+        if (!ExtId || ExtIdUtf8.empty()) continue;
 
         EOS_Connect_GetExternalAccountMappingsOptions GO = {};
         GO.ApiVersion            = EOS_CONNECT_GETEXTERNALACCOUNTMAPPINGS_API_LATEST;
         GO.LocalUserId           = Data->LocalUserId;
-        GO.AccountIdType         = Data->AccountIdType;
+        GO.AccountIdType         = Ctx->AccountIdType;
         GO.TargetExternalUserId  = ExtId;
 
         EOS_ProductUserId Mapped = SDK.fp_EOS_Connect_GetExternalAccountMapping(H, &GO);
@@ -389,6 +416,8 @@ void EOS_CALL UEOSConnectSubsystem::OnQueryExternalMappingsCallback(const EOS_Co
         // Auto-register into tracked list if valid
         if (!PUID.IsEmpty()) Self->RegisterPlayerPUID(PUID);
     }
+
+    delete Ctx;
 }
 
 // ─── Reverse-lookup callback: PUID → external accounts ──────────────────────
