@@ -134,6 +134,10 @@ private:
 	void HandlePlayerIdsCommand(const FString& Args,
 	                            const FString& ChannelId);
 
+	/** !checkban <Steam64Id|EOSProductUserId|PlayerName> */
+	void HandleCheckBanCommand(const FString& Args,
+	                           const FString& ChannelId);
+
 	// ── Helpers ───────────────────────────────────────────────────────────────
 
 	/** Send a response message (no-op when neither standalone nor external provider). */

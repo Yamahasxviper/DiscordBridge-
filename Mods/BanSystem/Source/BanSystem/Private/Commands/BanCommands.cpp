@@ -731,3 +731,153 @@ EExecutionStatus APlayerIdsCommand::ExecuteCommand_Implementation(
     return EExecutionStatus::COMPLETED;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  /checkban  — check a player's ban status
+// ─────────────────────────────────────────────────────────────────────────────
+ACheckBanCommand::ACheckBanCommand()
+{
+    CommandName          = TEXT("checkban");
+    MinNumberOfArguments = 1;
+    bOnlyUsableByPlayer  = false;
+    Usage = FText::FromString(TEXT("checkban <Steam64Id|EOSProductUserId|PlayerName>"));
+}
+
+EExecutionStatus ACheckBanCommand::ExecuteCommand_Implementation(
+    UCommandSender*        Sender,
+    const TArray<FString>& Arguments,
+    const FString&         Label)
+{
+    const FString Input = Arguments[0];
+
+    UWorld* World = GetWorld();
+    UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
+
+    // ── Try Steam64 ID ────────────────────────────────────────────────────────
+    if (USteamBanSubsystem::IsValidSteam64Id(Input))
+    {
+        USteamBanSubsystem* SteamBans = BanCmdHelper::GetSteamBans(this);
+        FBanEntry Entry;
+        if (SteamBans && SteamBans->CheckPlayerBan(Input, Entry) == EBanCheckResult::Banned)
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanSystem] Steam ID %s is BANNED — Reason: %s | Expires: %s | By: %s"),
+                    *Input, *Entry.Reason, *Entry.GetExpiryString(), *Entry.BannedBy),
+                FLinearColor::Red);
+        }
+        else
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanSystem] Steam ID %s is not banned."), *Input),
+                FLinearColor::Green);
+        }
+        return EExecutionStatus::COMPLETED;
+    }
+
+    // ── Try EOS PUID ──────────────────────────────────────────────────────────
+    if (UEOSBanSubsystem::IsValidEOSProductUserId(Input))
+    {
+        const FString EOSPUID = Input.ToLower();
+        UEOSBanSubsystem* EOSBans = BanCmdHelper::GetEOSBans(this);
+        FBanEntry Entry;
+        if (EOSBans && EOSBans->CheckPlayerBan(EOSPUID, Entry) == EBanCheckResult::Banned)
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanSystem] EOS PUID %s is BANNED — Reason: %s | Expires: %s | By: %s"),
+                    *EOSPUID, *Entry.Reason, *Entry.GetExpiryString(), *Entry.BannedBy),
+                FLinearColor::Red);
+        }
+        else
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanSystem] EOS PUID %s is not banned."), *EOSPUID),
+                FLinearColor::Green);
+        }
+        return EExecutionStatus::COMPLETED;
+    }
+
+    // ── Try player name (online players only) ─────────────────────────────────
+    if (!World)
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanSystem] '%s' is not a valid Steam64 ID or EOS PUID. "
+                "Provide a raw ID to check offline players."), *Input),
+            FLinearColor::Red);
+        return EExecutionStatus::BAD_ARGUMENTS;
+    }
+
+    FResolvedBanId   Ids;
+    FString          PlayerName;
+    TArray<FString>  Ambiguous;
+
+    if (!FBanPlayerLookup::FindPlayerByName(World, Input, Ids, PlayerName, Ambiguous))
+    {
+        if (Ambiguous.Num() > 1)
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanSystem] Ambiguous name '%s'. Matching players: %s"),
+                    *Input, *FString::Join(Ambiguous, TEXT(", "))),
+                FLinearColor::Yellow);
+        }
+        else
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanSystem] '%s' is not a valid ID and no online player "
+                    "with that name was found. Use a raw ID to check offline players."), *Input),
+                FLinearColor::Red);
+        }
+        return EExecutionStatus::BAD_ARGUMENTS;
+    }
+
+    // Player found — check every platform they have an ID for.
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("[BanSystem] Ban status for '%s':"), *PlayerName),
+        FLinearColor::White);
+
+    USteamBanSubsystem* SteamBans = BanCmdHelper::GetSteamBans(this);
+    UEOSBanSubsystem*   EOSBans   = BanCmdHelper::GetEOSBans(this);
+
+    if (Ids.HasSteamId() && SteamBans)
+    {
+        FBanEntry Entry;
+        if (SteamBans->CheckPlayerBan(Ids.Steam64Id, Entry) == EBanCheckResult::Banned)
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("  Steam %s: BANNED — %s | Expires: %s | By: %s"),
+                    *Ids.Steam64Id, *Entry.Reason, *Entry.GetExpiryString(), *Entry.BannedBy),
+                FLinearColor::Red);
+        }
+        else
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("  Steam %s: not banned"), *Ids.Steam64Id),
+                FLinearColor::Green);
+        }
+    }
+
+    if (Ids.HasEOSPuid() && EOSBans)
+    {
+        FBanEntry Entry;
+        if (EOSBans->CheckPlayerBan(Ids.EOSProductUserId, Entry) == EBanCheckResult::Banned)
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("  EOS %s: BANNED — %s | Expires: %s | By: %s"),
+                    *Ids.EOSProductUserId, *Entry.Reason, *Entry.GetExpiryString(), *Entry.BannedBy),
+                FLinearColor::Red);
+        }
+        else
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("  EOS %s: not banned"), *Ids.EOSProductUserId),
+                FLinearColor::Green);
+        }
+    }
+
+    if (!Ids.IsValid())
+    {
+        Sender->SendChatMessage(
+            TEXT("[BanSystem] No platform IDs resolved — cannot check ban status."),
+            FLinearColor::Yellow);
+    }
+
+    return EExecutionStatus::COMPLETED;
+}

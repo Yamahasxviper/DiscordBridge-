@@ -45,6 +45,7 @@ void UBanEnforcementSubsystem::Initialize(FSubsystemCollectionBase& Collection)
         EOS->OnPlayerPUIDRegistered.AddDynamic(this, &UBanEnforcementSubsystem::OnPUIDRegistered);
         EOS->OnPUIDLookupComplete.AddDynamic(this,   &UBanEnforcementSubsystem::OnPUIDLookupDone);
         EOS->OnReverseLookupComplete.AddDynamic(this, &UBanEnforcementSubsystem::OnReverseLookupDone);
+        EOS->OnReverseLookupAllComplete.AddDynamic(this, &UBanEnforcementSubsystem::OnReverseLookupAllDone);
 
         UE_LOG(LogBanEnforcement, Log,
             TEXT("BanEnforcementSubsystem: Subscribed to EOSSystem events — "
@@ -72,6 +73,29 @@ void UBanEnforcementSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     UE_LOG(LogBanEnforcement, Log,
         TEXT("BanEnforcementSubsystem: Initialized. "
              "PreLogin + PostLogin + Logout ban enforcement active."));
+
+    // ── Periodic expired-ban pruning ───────────────────────────────────────
+    // Prune expired timed bans from both subsystems every 10 minutes so that
+    // long-running servers do not accumulate stale entries in memory or on disk.
+    TWeakObjectPtr<UBanEnforcementSubsystem> WeakThis(this);
+    ExpiryPruneTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+        FTickerDelegate::CreateLambda([WeakThis](float) -> bool
+        {
+            if (UBanEnforcementSubsystem* Self = WeakThis.Get())
+            {
+                UGameInstance* GI = Self->GetGameInstance();
+                if (GI)
+                {
+                    if (USteamBanSubsystem* SteamBans = GI->GetSubsystem<USteamBanSubsystem>())
+                        SteamBans->PruneExpiredBans();
+                    if (UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>())
+                        EOSBans->PruneExpiredBans();
+                }
+                return true; // Keep ticking.
+            }
+            return false; // Subsystem destroyed — stop ticking.
+        }),
+        600.0f); // 10-minute interval
 }
 
 void UBanEnforcementSubsystem::Deinitialize()
@@ -84,6 +108,13 @@ void UBanEnforcementSubsystem::Deinitialize()
     PostLoginHandle.Reset();
     LogoutHandle.Reset();
 
+    // Stop the periodic expiry prune ticker.
+    if (ExpiryPruneTickerHandle.IsValid())
+    {
+        FTSTicker::GetCoreTicker().RemoveTicker(ExpiryPruneTickerHandle);
+        ExpiryPruneTickerHandle.Reset();
+    }
+
     // Unsubscribe from EOSSystem and ban-issued events.
     if (UGameInstance* GI = GetGameInstance())
     {
@@ -92,6 +123,7 @@ void UBanEnforcementSubsystem::Deinitialize()
             EOS->OnPlayerPUIDRegistered.RemoveDynamic(this, &UBanEnforcementSubsystem::OnPUIDRegistered);
             EOS->OnPUIDLookupComplete.RemoveDynamic(this,   &UBanEnforcementSubsystem::OnPUIDLookupDone);
             EOS->OnReverseLookupComplete.RemoveDynamic(this, &UBanEnforcementSubsystem::OnReverseLookupDone);
+            EOS->OnReverseLookupAllComplete.RemoveDynamic(this, &UBanEnforcementSubsystem::OnReverseLookupAllDone);
         }
 
         if (USteamBanSubsystem* SteamBans = GI->GetSubsystem<USteamBanSubsystem>())
@@ -508,6 +540,38 @@ void UBanEnforcementSubsystem::OnReverseLookupDone(const FString&          PUID,
                     *ExternalAccountId, *PUID);
             }
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Reverse lookup fully complete — clean up stuck propagation entries
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanEnforcementSubsystem::OnReverseLookupAllDone(const FString& PUID)
+{
+    // This callback fires after ALL external accounts for a queried PUID have
+    // been enumerated.  If PendingSteamPropagation or PendingSteamUnban still
+    // have an entry for this PUID at this point, it means no Steam account was
+    // found (otherwise OnReverseLookupDone would have handled and removed it).
+    // Clean up the stale entries to avoid a memory leak and to log that the
+    // cross-platform operation could not be completed.
+
+    if (PendingSteamPropagation.Contains(PUID))
+    {
+        PendingSteamPropagation.Remove(PUID);
+        UE_LOG(LogBanEnforcement, Log,
+            TEXT("OnReverseLookupAllDone: PUID '%s' has no linked Steam account — "
+                 "cross-platform Steam ban could not be applied."),
+            *PUID);
+    }
+
+    if (PendingSteamUnban.Contains(PUID))
+    {
+        PendingSteamUnban.Remove(PUID);
+        UE_LOG(LogBanEnforcement, Log,
+            TEXT("OnReverseLookupAllDone: PUID '%s' has no linked Steam account — "
+                 "cross-platform Steam unban could not be applied."),
+            *PUID);
     }
 }
 

@@ -188,13 +188,23 @@ bool USteamBanSubsystem::IsPlayerBanned(const FString& Steam64Id, FString& OutRe
 TArray<FBanEntry> USteamBanSubsystem::GetAllBans() const
 {
     TArray<FBanEntry> Out;
-    BanMap.GenerateValueArray(Out);
+    for (const auto& Pair : BanMap)
+    {
+        if (!Pair.Value.IsExpired())
+            Out.Add(Pair.Value);
+    }
     return Out;
 }
 
 int32 USteamBanSubsystem::GetBanCount() const
 {
-    return BanMap.Num();
+    int32 Count = 0;
+    for (const auto& Pair : BanMap)
+    {
+        if (!Pair.Value.IsExpired())
+            ++Count;
+    }
+    return Count;
 }
 
 void USteamBanSubsystem::PruneExpiredBans()
