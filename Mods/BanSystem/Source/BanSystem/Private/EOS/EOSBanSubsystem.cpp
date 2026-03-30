@@ -82,6 +82,14 @@ bool UEOSBanSubsystem::BanPlayer(const FString& EOSProductUserId,
         return false;
     }
 
+    if (!IsValidEOSProductUserId(EOSProductUserId))
+    {
+        UE_LOG(LogEOSBanSystem, Warning,
+            TEXT("BanPlayer: '%s' is not a valid EOS Product User ID (must be 32 hex chars)."),
+            *EOSProductUserId);
+        return false;
+    }
+
     FBanEntry Entry;
     Entry.PlayerId     = EOSProductUserId.ToLower();
     Entry.Reason       = Reason.IsEmpty() ? TEXT("Banned by server administrator") : Reason;

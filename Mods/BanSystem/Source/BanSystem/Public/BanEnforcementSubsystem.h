@@ -6,6 +6,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "GameFramework/OnlineReplStructs.h"
 #include "EOSTypes.h"
+#include "BanTypes.h"
 #include "BanEnforcementSubsystem.generated.h"
 
 class AGameModeBase;
@@ -112,6 +113,16 @@ private:
      *  when triggered by a manual RegisterPlayerPUID() call. */
     UFUNCTION()
     void OnPUIDRegistered(const FString& PUID, APlayerController* Controller);
+
+    // ── Ban-issued callbacks — kick currently-connected banned players ─────────
+
+    /** Called when a Steam ban is issued; kicks the player if they are online. */
+    UFUNCTION()
+    void OnSteamPlayerBanned(const FString& Steam64Id, const FBanEntry& Entry);
+
+    /** Called when an EOS ban is issued; kicks the player if they are online. */
+    UFUNCTION()
+    void OnEOSPlayerBanned(const FString& EOSProductUserId, const FBanEntry& Entry);
 
     /**
      * Called when an async Steam64→PUID lookup completes.

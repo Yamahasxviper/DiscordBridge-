@@ -660,6 +660,8 @@ void UBanDiscordSubsystem::SendGatewayPayload(const TSharedPtr<FJsonObject>& Pay
 {
 	if (!WebSocketClient || !WebSocketClient->IsConnected())
 	{
+		UE_LOG(LogBanDiscord, Warning,
+		       TEXT("BanDiscordSubsystem: SendGatewayPayload called but WebSocket is not connected — payload dropped."));
 		return;
 	}
 
@@ -1433,8 +1435,8 @@ void UBanDiscordSubsystem::HandleBanByNameCommand(const FString& Args,
 	if (BannedOn.Num() == 0)
 	{
 		Reply(ChannelId,
-		      FString::Printf(TEXT(":yellow_circle: Player `%s` is already banned on all "
-		                          "available platforms."),
+		      FString::Printf(TEXT(":x: Player `%s` could not be banned — "
+		                          "no ban subsystem is available."),
 		                      *PlayerName));
 		return;
 	}
@@ -1475,6 +1477,7 @@ void UBanDiscordSubsystem::HandlePlayerIdsCommand(const FString& Args,
 	}
 
 	FString ListMsg;
+	int32 MatchCount = 0;
 
 	for (const TPair<FString, FResolvedBanId>& KV : AllPlayers)
 	{
@@ -1502,6 +1505,7 @@ void UBanDiscordSubsystem::HandlePlayerIdsCommand(const FString& Args,
 			IdLine += TEXT(" — *no platform IDs resolved*");
 		}
 		ListMsg += IdLine + TEXT("\n");
+		++MatchCount;
 	}
 
 	if (ListMsg.IsEmpty())
@@ -1513,8 +1517,8 @@ void UBanDiscordSubsystem::HandlePlayerIdsCommand(const FString& Args,
 	}
 
 	const FString Header = NameFilter.IsEmpty()
-		? FString::Printf(TEXT(":id: **Connected Players (%d):**\n"), AllPlayers.Num())
-		: FString::Printf(TEXT(":id: **Players matching `%s`:**\n"), *NameFilter);
+		? FString::Printf(TEXT(":id: **Connected Players (%d):**\n"), MatchCount)
+		: FString::Printf(TEXT(":id: **Players matching `%s` (%d):**\n"), *NameFilter, MatchCount);
 
 	FString FullMsg = Header + ListMsg;
 	if (FullMsg.Len() > 1900)
