@@ -57,6 +57,18 @@ void UBanEnforcementSubsystem::Initialize(FSubsystemCollectionBase& Collection)
                  "async PUID lookups and cross-platform ban propagation disabled."));
     }
 
+    // Subscribe to ban-issued events so that a newly-banned player who is
+    // currently connected gets kicked immediately rather than being allowed
+    // to keep playing until they disconnect and reconnect.
+    if (USteamBanSubsystem* SteamBans = GetGameInstance()->GetSubsystem<USteamBanSubsystem>())
+    {
+        SteamBans->OnPlayerBanned.AddDynamic(this, &UBanEnforcementSubsystem::OnSteamPlayerBanned);
+    }
+    if (UEOSBanSubsystem* EOSBans = GetGameInstance()->GetSubsystem<UEOSBanSubsystem>())
+    {
+        EOSBans->OnPlayerBanned.AddDynamic(this, &UBanEnforcementSubsystem::OnEOSPlayerBanned);
+    }
+
     UE_LOG(LogBanEnforcement, Log,
         TEXT("BanEnforcementSubsystem: Initialized. "
              "PreLogin + PostLogin + Logout ban enforcement active."));
@@ -78,6 +90,16 @@ void UBanEnforcementSubsystem::Deinitialize()
         EOS->OnPlayerPUIDRegistered.RemoveDynamic(this, &UBanEnforcementSubsystem::OnPUIDRegistered);
         EOS->OnPUIDLookupComplete.RemoveDynamic(this,   &UBanEnforcementSubsystem::OnPUIDLookupDone);
         EOS->OnReverseLookupComplete.RemoveDynamic(this, &UBanEnforcementSubsystem::OnReverseLookupDone);
+    }
+
+    // Unsubscribe from ban-issued events.
+    if (USteamBanSubsystem* SteamBans = GetGameInstance()->GetSubsystem<USteamBanSubsystem>())
+    {
+        SteamBans->OnPlayerBanned.RemoveDynamic(this, &UBanEnforcementSubsystem::OnSteamPlayerBanned);
+    }
+    if (UEOSBanSubsystem* EOSBans = GetGameInstance()->GetSubsystem<UEOSBanSubsystem>())
+    {
+        EOSBans->OnPlayerBanned.RemoveDynamic(this, &UBanEnforcementSubsystem::OnEOSPlayerBanned);
     }
 
     PendingBySteam64.Empty();
@@ -445,6 +467,62 @@ void UBanEnforcementSubsystem::OnLogout(AGameModeBase* GameMode, AController* Co
         {
             It.RemoveCurrent();
             break;
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Ban-issued callbacks — kick currently-connected banned players immediately
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanEnforcementSubsystem::OnSteamPlayerBanned(const FString& Steam64Id,
+                                                     const FBanEntry& Entry)
+{
+    if (Steam64Id.IsEmpty()) return;
+
+    UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr;
+    if (!World) return;
+
+    for (TPlayerControllerIterator<APlayerController>::ServerAll It(World); It; ++It)
+    {
+        APlayerController* PC = *It;
+        if (!PC || !PC->PlayerState) continue;
+
+        FResolvedBanId Ids = FBanIdResolver::Resolve(PC->PlayerState->GetUniqueId());
+        if (Ids.Steam64Id == Steam64Id)
+        {
+            UE_LOG(LogBanEnforcement, Log,
+                TEXT("OnSteamPlayerBanned: kicking currently-connected Steam-banned player %s — Reason: %s"),
+                *Steam64Id, *Entry.Reason);
+            KickBannedPlayer(PC, Steam64Id, BuildKickMessage(false, Entry.Reason));
+            PostBanKickDiscordNotification(Steam64Id, Entry.Reason);
+            return;
+        }
+    }
+}
+
+void UBanEnforcementSubsystem::OnEOSPlayerBanned(const FString& EOSProductUserId,
+                                                   const FBanEntry& Entry)
+{
+    if (EOSProductUserId.IsEmpty()) return;
+
+    UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr;
+    if (!World) return;
+
+    for (TPlayerControllerIterator<APlayerController>::ServerAll It(World); It; ++It)
+    {
+        APlayerController* PC = *It;
+        if (!PC || !PC->PlayerState) continue;
+
+        FResolvedBanId Ids = FBanIdResolver::Resolve(PC->PlayerState->GetUniqueId());
+        if (Ids.EOSProductUserId == EOSProductUserId)
+        {
+            UE_LOG(LogBanEnforcement, Log,
+                TEXT("OnEOSPlayerBanned: kicking currently-connected EOS-banned player %s — Reason: %s"),
+                *EOSProductUserId, *Entry.Reason);
+            KickBannedPlayer(PC, EOSProductUserId, BuildKickMessage(true, Entry.Reason));
+            PostBanKickDiscordNotification(EOSProductUserId, Entry.Reason);
+            return;
         }
     }
 }

@@ -82,6 +82,14 @@ bool USteamBanSubsystem::BanPlayer(const FString& Steam64Id,
         return false;
     }
 
+    if (!IsValidSteam64Id(Steam64Id))
+    {
+        UE_LOG(LogSteamBanSystem, Warning,
+            TEXT("BanPlayer: '%s' is not a valid Steam64 ID (must be 17 digits starting with 7656119)."),
+            *Steam64Id);
+        return false;
+    }
+
     FBanEntry Entry;
     Entry.PlayerId     = Steam64Id;
     Entry.Reason       = Reason.IsEmpty() ? TEXT("Banned by server administrator") : Reason;
