@@ -207,3 +207,28 @@ public:
         const FString& Label) override;
 };
 
+/**
+ * /checkban <Steam64Id|EOSProductUserId|PlayerName>
+ *
+ * Checks whether a player is on the Steam or EOS ban list.
+ * Accepts a raw Steam64 ID, a raw EOS Product User ID, or the in-game name
+ * of a currently-connected player.
+ * A raw ID can be used to check offline players.
+ *
+ * Examples:
+ *   /checkban 76561198000000000
+ *   /checkban 00020aed06f0a6958c3c067fb4b73d51
+ *   /checkban SomePlayer
+ */
+UCLASS()
+class BANSYSTEM_API ACheckBanCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    ACheckBanCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+

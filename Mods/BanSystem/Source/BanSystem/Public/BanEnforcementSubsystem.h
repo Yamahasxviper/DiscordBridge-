@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Containers/Ticker.h"
 #include "GameFramework/OnlineReplStructs.h"
 #include "EOSTypes.h"
 #include "BanTypes.h"
@@ -156,6 +157,16 @@ private:
                              const FString& ExternalAccountId,
                              EEOSExternalAccountType AccountType);
 
+    /**
+     * Called after ALL external accounts for a queried PUID have been enumerated
+     * (including when the PUID has no linked external accounts at all).
+     * Cleans up any pending Steam ban/unban propagation entries for this PUID
+     * that were not already resolved by OnReverseLookupDone (i.e. the PUID has
+     * no Steam account linked and no Steam ban/unban can be applied).
+     */
+    UFUNCTION()
+    void OnReverseLookupAllDone(const FString& PUID);
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /** Kick a player who is on the ban list after they have already joined. */
@@ -209,4 +220,7 @@ private:
     FDelegateHandle PreLoginHandle;
     FDelegateHandle PostLoginHandle;
     FDelegateHandle LogoutHandle;
+
+    /** Periodic ticker that prunes expired bans from both subsystems. */
+    FTSTicker::FDelegateHandle ExpiryPruneTickerHandle;
 };

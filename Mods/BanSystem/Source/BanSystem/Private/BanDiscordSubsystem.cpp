@@ -878,6 +878,11 @@ void UBanDiscordSubsystem::OnDiscordMessageReceived(const TSharedPtr<FJsonObject
 	{
 		return;
 	}
+	if (TryCommand(Config.CheckBanCommandPrefix, true, [&](const FString& Args)
+	               { HandleCheckBanCommand(Args, MsgChannelId); }))
+	{
+		return;
+	}
 }
 
 bool UBanDiscordSubsystem::HasCommandPermission(const TSharedPtr<FJsonObject>& MessageObj,
@@ -1024,7 +1029,13 @@ void UBanDiscordSubsystem::HandleSteamBanCommand(const FString& Args,
 		return;
 	}
 
-	Bans->BanPlayer(Steam64Id, Reason, Duration, IssuedBy);
+	if (!Bans->BanPlayer(Steam64Id, Reason, Duration, IssuedBy))
+	{
+		Reply(ChannelId,
+		      FString::Printf(TEXT(":x: Failed to ban Steam ID `%s` — the ID may be invalid."),
+		                      *Steam64Id));
+		return;
+	}
 
 	FString Msg = Config.SteamBanResponseMessage;
 	Msg.ReplaceInline(TEXT("%PlayerId%"),  *Steam64Id, ESearchCase::CaseSensitive);
@@ -1119,18 +1130,20 @@ void UBanDiscordSubsystem::HandleSteamBanListCommand(const FString& ChannelId)
 
 	for (const FBanEntry& Entry : AllBans)
 	{
-		ListMsg += FString::Printf(
+		const FString Line = FString::Printf(
 			TEXT("• `%s` — Reason: %s | Expires: %s | Banned by: %s\n"),
 			*Entry.PlayerId,
 			*Entry.Reason,
 			*Entry.GetExpiryString(),
 			*Entry.BannedBy);
-	}
 
-	// Discord message length limit is 2000 chars; truncate with a notice if needed.
-	if (ListMsg.Len() > 1900)
-	{
-		ListMsg = ListMsg.Left(1900) + TEXT("\n… (list truncated — too many bans to display)");
+		// Discord message length limit is 2000 chars; truncate at line boundaries.
+		if (ListMsg.Len() + Line.Len() > 1900)
+		{
+			ListMsg += TEXT("… (list truncated — too many bans to display)");
+			break;
+		}
+		ListMsg += Line;
 	}
 
 	Reply(ChannelId, ListMsg);
@@ -1237,7 +1250,13 @@ void UBanDiscordSubsystem::HandleEOSBanCommand(const FString& Args,
 		return;
 	}
 
-	Bans->BanPlayer(EOSPUID, Reason, Duration, IssuedBy);
+	if (!Bans->BanPlayer(EOSPUID, Reason, Duration, IssuedBy))
+	{
+		Reply(ChannelId,
+		      FString::Printf(TEXT(":x: Failed to ban EOS PUID `%s` — the ID may be invalid."),
+		                      *EOSPUID));
+		return;
+	}
 
 	FString Msg = Config.EOSBanResponseMessage;
 	Msg.ReplaceInline(TEXT("%PlayerId%"), *EOSPUID,            ESearchCase::CaseSensitive);
@@ -1332,17 +1351,20 @@ void UBanDiscordSubsystem::HandleEOSBanListCommand(const FString& ChannelId)
 
 	for (const FBanEntry& Entry : AllBans)
 	{
-		ListMsg += FString::Printf(
+		const FString Line = FString::Printf(
 			TEXT("• `%s` — Reason: %s | Expires: %s | Banned by: %s\n"),
 			*Entry.PlayerId,
 			*Entry.Reason,
 			*Entry.GetExpiryString(),
 			*Entry.BannedBy);
-	}
 
-	if (ListMsg.Len() > 1900)
-	{
-		ListMsg = ListMsg.Left(1900) + TEXT("\n… (list truncated — too many bans to display)");
+		// Discord message length limit is 2000 chars; truncate at line boundaries.
+		if (ListMsg.Len() + Line.Len() > 1900)
+		{
+			ListMsg += TEXT("… (list truncated — too many bans to display)");
+			break;
+		}
+		ListMsg += Line;
 	}
 
 	Reply(ChannelId, ListMsg);
@@ -1510,6 +1532,7 @@ void UBanDiscordSubsystem::HandlePlayerIdsCommand(const FString& Args,
 
 	FString ListMsg;
 	int32 MatchCount = 0;
+	bool  bTruncated = false;
 
 	for (const TPair<FString, FResolvedBanId>& KV : AllPlayers)
 	{
@@ -1536,7 +1559,15 @@ void UBanDiscordSubsystem::HandlePlayerIdsCommand(const FString& Args,
 		{
 			IdLine += TEXT(" — *no platform IDs resolved*");
 		}
-		ListMsg += IdLine + TEXT("\n");
+		IdLine += TEXT("\n");
+
+		// Discord message limit: truncate at line boundaries, not mid-line.
+		if (ListMsg.Len() + IdLine.Len() > 1800)
+		{
+			bTruncated = true;
+			break;
+		}
+		ListMsg += IdLine;
 		++MatchCount;
 	}
 
@@ -1553,12 +1584,150 @@ void UBanDiscordSubsystem::HandlePlayerIdsCommand(const FString& Args,
 		: FString::Printf(TEXT(":id: **Players matching `%s` (%d):**\n"), *NameFilter, MatchCount);
 
 	FString FullMsg = Header + ListMsg;
-	if (FullMsg.Len() > 1900)
+	if (bTruncated)
 	{
-		FullMsg = FullMsg.Left(1900) + TEXT("\n… (list truncated)");
+		FullMsg += TEXT("… (list truncated)");
 	}
 
 	Reply(ChannelId, FullMsg);
+}
+
+void UBanDiscordSubsystem::HandleCheckBanCommand(const FString& Args,
+                                                  const FString& ChannelId)
+{
+	TArray<FString> Parts = SplitArgs(Args);
+	if (Parts.Num() == 0)
+	{
+		Reply(ChannelId,
+		      FString::Printf(TEXT(":warning: Usage: `%s <Steam64Id|EOSProductUserId|PlayerName>`"),
+		                      *Config.CheckBanCommandPrefix));
+		return;
+	}
+
+	const FString Input = Parts[0];
+	UGameInstance* GI = GetGameInstance();
+
+	// ── Try Steam64 ID ────────────────────────────────────────────────────────
+	if (USteamBanSubsystem::IsValidSteam64Id(Input))
+	{
+		USteamBanSubsystem* SteamBans = GI ? GI->GetSubsystem<USteamBanSubsystem>() : nullptr;
+		FBanEntry Entry;
+		if (SteamBans && SteamBans->CheckPlayerBan(Input, Entry) == EBanCheckResult::Banned)
+		{
+			Reply(ChannelId,
+			      FString::Printf(TEXT(":hammer: Steam ID `%s` is **banned**.\n"
+			                          "• Reason: %s\n• Expires: %s\n• Banned by: %s"),
+			                      *Input, *Entry.Reason,
+			                      *Entry.GetExpiryString(), *Entry.BannedBy));
+		}
+		else
+		{
+			Reply(ChannelId,
+			      FString::Printf(TEXT(":white_check_mark: Steam ID `%s` is **not banned**."), *Input));
+		}
+		return;
+	}
+
+	// ── Try EOS PUID ──────────────────────────────────────────────────────────
+	if (UEOSBanSubsystem::IsValidEOSProductUserId(Input))
+	{
+		const FString EOSPUID = Input.ToLower();
+		UEOSBanSubsystem* EOSBans = GI ? GI->GetSubsystem<UEOSBanSubsystem>() : nullptr;
+		FBanEntry Entry;
+		if (EOSBans && EOSBans->CheckPlayerBan(EOSPUID, Entry) == EBanCheckResult::Banned)
+		{
+			Reply(ChannelId,
+			      FString::Printf(TEXT(":hammer: EOS PUID `%s` is **banned**.\n"
+			                          "• Reason: %s\n• Expires: %s\n• Banned by: %s"),
+			                      *EOSPUID, *Entry.Reason,
+			                      *Entry.GetExpiryString(), *Entry.BannedBy));
+		}
+		else
+		{
+			Reply(ChannelId,
+			      FString::Printf(TEXT(":white_check_mark: EOS PUID `%s` is **not banned**."), *EOSPUID));
+		}
+		return;
+	}
+
+	// ── Try player name (online players only) ─────────────────────────────────
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		Reply(ChannelId,
+		      FString::Printf(TEXT(":x: `%s` is not a valid Steam64 ID or EOS PUID, "
+		                          "and the world is unavailable to resolve a player name."),
+		                      *Input));
+		return;
+	}
+
+	FResolvedBanId   Ids;
+	FString          PlayerName;
+	TArray<FString>  Ambiguous;
+
+	if (!FBanPlayerLookup::FindPlayerByName(World, Input, Ids, PlayerName, Ambiguous))
+	{
+		if (Ambiguous.Num() > 1)
+		{
+			Reply(ChannelId,
+			      FString::Printf(TEXT(":warning: Ambiguous name `%s`. Matching players: %s"),
+			                      *Input, *FString::Join(Ambiguous, TEXT(", "))));
+		}
+		else
+		{
+			Reply(ChannelId,
+			      FString::Printf(TEXT(":x: `%s` is not a valid Steam64 ID or EOS PUID, "
+			                          "and no online player with that name was found.\n"
+			                          "Tip: use a raw ID to check offline players."),
+			                      *Input));
+		}
+		return;
+	}
+
+	// Player found — check every platform they have an ID for.
+	FString Response = FString::Printf(TEXT(":id: Ban status for **%s**:\n"), *PlayerName);
+
+	USteamBanSubsystem* SteamBans = GI ? GI->GetSubsystem<USteamBanSubsystem>() : nullptr;
+	UEOSBanSubsystem*   EOSBans   = GI ? GI->GetSubsystem<UEOSBanSubsystem>()   : nullptr;
+
+	if (Ids.HasSteamId() && SteamBans)
+	{
+		FBanEntry Entry;
+		if (SteamBans->CheckPlayerBan(Ids.Steam64Id, Entry) == EBanCheckResult::Banned)
+		{
+			Response += FString::Printf(
+				TEXT("• Steam `%s`: :hammer: **BANNED** — %s | Expires: %s | By: %s\n"),
+				*Ids.Steam64Id, *Entry.Reason, *Entry.GetExpiryString(), *Entry.BannedBy);
+		}
+		else
+		{
+			Response += FString::Printf(
+				TEXT("• Steam `%s`: :white_check_mark: not banned\n"), *Ids.Steam64Id);
+		}
+	}
+
+	if (Ids.HasEOSPuid() && EOSBans)
+	{
+		FBanEntry Entry;
+		if (EOSBans->CheckPlayerBan(Ids.EOSProductUserId, Entry) == EBanCheckResult::Banned)
+		{
+			Response += FString::Printf(
+				TEXT("• EOS `%s`: :hammer: **BANNED** — %s | Expires: %s | By: %s\n"),
+				*Ids.EOSProductUserId, *Entry.Reason, *Entry.GetExpiryString(), *Entry.BannedBy);
+		}
+		else
+		{
+			Response += FString::Printf(
+				TEXT("• EOS `%s`: :white_check_mark: not banned\n"), *Ids.EOSProductUserId);
+		}
+	}
+
+	if (!Ids.IsValid())
+	{
+		Response += TEXT("• *No platform IDs resolved — cannot check ban status.*\n");
+	}
+
+	Reply(ChannelId, Response.TrimEnd());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

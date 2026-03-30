@@ -68,9 +68,10 @@ void FBanSystemModule::StartupModule()
             // Cross-platform name-based commands
             CmdSys->RegisterCommand(TEXT("BanSystem"), ABanByNameCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanSystem"), APlayerIdsCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanSystem"), ACheckBanCommand::StaticClass());
 
             UE_LOG(LogBanSystem, Log,
-                TEXT("BanSystem: Registered 8 ban commands (3 Steam + 3 EOS + banbyname + playerids)."));
+                TEXT("BanSystem: Registered 9 ban commands (3 Steam + 3 EOS + banbyname + playerids + checkban)."));
         }
     );
 
