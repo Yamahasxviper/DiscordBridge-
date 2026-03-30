@@ -1,10 +1,19 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 //
-// eos_sdk.h — Master include for the self-written EOS C SDK headers.
-// Written from scratch using only public EOS SDK documentation
-// (https://dev.epicgames.com/docs).
-// No UE EOSSDK module, no EOSShared, and no CSS FactoryGame headers are
-// referenced anywhere in this file.
+// eos_sdk.h — Master include for the EOS C SDK delegation wrapper headers.
+//
+// All sub-headers delegate to the real engine EOSSDK headers via angle-bracket
+// includes (e.g. <eos_auth.h>).  EOSSystem.Build.cs lists "EOSSDK" as a public
+// dependency so UBT adds the engine's ThirdParty EOSSDK include path.
+//
+// Delegating to the canonical engine headers prevents C2371/C2011/C3431 type
+// redefinition conflicts when BanSystem includes both EOSSystem and EOSDirectSDK
+// (which also pulls in the real EOSSDK headers via EOSShared) in the same TU.
+//
+// eos_platform.h is the sole exception: the CSS engine ships eos_types.h but
+// omits eos_platform.h, so that file remains a hand-written wrapper around
+// <eos_types.h> and provides the missing function-pointer typedefs and
+// C-linkage function declarations.
 //
 // Include this single header to pull in all EOS SDK type definitions
 // used by the EOSSystem mod.
