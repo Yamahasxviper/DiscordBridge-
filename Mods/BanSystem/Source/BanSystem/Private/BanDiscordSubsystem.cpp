@@ -1072,6 +1072,12 @@ void UBanDiscordSubsystem::HandleSteamUnbanCommand(const FString& Args,
 		FString Msg = Config.SteamUnbanResponseMessage;
 		Msg.ReplaceInline(TEXT("%PlayerId%"), *Steam64Id, ESearchCase::CaseSensitive);
 		Reply(ChannelId, Msg);
+
+		// Cross-platform: remove any linked EOS ban.
+		if (UBanEnforcementSubsystem* Enforcement = GI ? GI->GetSubsystem<UBanEnforcementSubsystem>() : nullptr)
+		{
+			Enforcement->PropagateUnbanToEOSAsync(Steam64Id);
+		}
 	}
 	else
 	{
@@ -1269,6 +1275,12 @@ void UBanDiscordSubsystem::HandleEOSUnbanCommand(const FString& Args,
 		FString Msg = Config.EOSUnbanResponseMessage;
 		Msg.ReplaceInline(TEXT("%PlayerId%"), *EOSPUID, ESearchCase::CaseSensitive);
 		Reply(ChannelId, Msg);
+
+		// Cross-platform: remove any linked Steam ban.
+		if (UBanEnforcementSubsystem* Enforcement = GI ? GI->GetSubsystem<UBanEnforcementSubsystem>() : nullptr)
+		{
+			Enforcement->PropagateUnbanToSteamAsync(EOSPUID.ToLower());
+		}
 	}
 	else
 	{

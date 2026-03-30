@@ -92,6 +92,22 @@ public:
                                int32          DurationMinutes,
                                const FString& BannedBy);
 
+    /**
+     * After unbanning by Steam64 ID, asynchronously look up the linked EOS PUID
+     * and also remove any EOS ban for that player.
+     * Checks the EOSSystem sync cache first; falls back to an async EOS query.
+     * No-op when EOSSystem is unavailable or no PUID can be resolved.
+     */
+    void PropagateUnbanToEOSAsync(const FString& Steam64Id);
+
+    /**
+     * After unbanning by EOS PUID, asynchronously look up the linked Steam64 ID
+     * and also remove any Steam ban for that player.
+     * Checks the EOSSystem sync cache first; falls back to an async reverse lookup.
+     * No-op when EOSSystem is unavailable or no Steam64 ID can be resolved.
+     */
+    void PropagateUnbanToSteamAsync(const FString& PUID);
+
 private:
     // ── GameMode event handlers ───────────────────────────────────────────────
 
@@ -181,6 +197,12 @@ private:
 
     /** Reverse propagation: PUID → pending Steam ban.  Set by PropagateToSteamAsync. */
     TMap<FString, FPropagationEntry> PendingSteamPropagation;
+
+    /** Forward unban propagation: Steam64Id set — unban EOS player when PUID lookup completes. */
+    TSet<FString> PendingEOSUnban;
+
+    /** Reverse unban propagation: PUID set — unban Steam player when reverse lookup completes. */
+    TSet<FString> PendingSteamUnban;
 
     // ── Delegate handles ──────────────────────────────────────────────────────
 
