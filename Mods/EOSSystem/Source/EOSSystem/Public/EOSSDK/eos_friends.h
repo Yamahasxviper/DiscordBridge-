@@ -1,17 +1,30 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 //
-// eos_friends.h — delegates to the real EOS SDK eos_friends.h.
+// eos_friends.h — delegates to the real EOS SDK eos_friends.h, with fallback
+// definitions for the CSS UE5.3.2 engine which may ship a minimal EOSSDK that
+// omits EOS_EFriendsStatus enum value constants (EOS_FS_NotFriends etc.).
 //
-// EOSSystem now lists EOSSDK as a public dependency, making the engine's
-// ThirdParty EOSSDK headers available via angle-bracket includes.
+// See eos_common.h for the rationale behind the #ifndef-per-value fallback
+// pattern (handles cases where the real SDK defines types-only, without values).
 // Delegating here prevents C3431/C5257 conflicts when EOSShared.h (included
 // via EOSDirectSDK) tries to redeclare EOS_EFriendsStatus as a scoped enum
 // after our unscoped definition was processed first.
 
 #pragma once
 
-// Delegate to the real EOS SDK's eos_friends.h via the EOSSDK module include path.
-#include <eos_friends.h>
+#if defined(__has_include) && __has_include(<eos_friends.h>)
+#  include <eos_friends.h>
+#endif
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Fallback EOS_EFriendsStatus value constants (matching EOS SDK 1.15.x).
+// ─────────────────────────────────────────────────────────────────────────────
+#ifndef EOS_FS_NotFriends
+#  define EOS_FS_NotFriends        0
+#  define EOS_FS_InviteSent        1
+#  define EOS_FS_InviteReceived    2
+#  define EOS_FS_Friends           3
+#endif // EOS_FS_NotFriends
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Friends interface function pointer typedefs

@@ -1,16 +1,43 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 //
-// eos_connect.h — delegates to the real EOS SDK eos_connect.h.
+// eos_connect.h — delegates to the real EOS SDK eos_connect.h, with fallback
+// definitions for the CSS UE5.3.2 engine which may ship a minimal EOSSDK that
+// omits EOS_EExternalCredentialType enum value constants.
 //
-// EOSSystem now lists EOSSDK as a public dependency, making the engine's
-// ThirdParty EOSSDK headers available via angle-bracket includes.
+// See eos_common.h for the rationale behind the #ifndef-per-value fallback
+// pattern (handles cases where the real SDK defines types-only, without values).
 // Delegating here prevents C2011 conflicts for EOS_EExternalCredentialType
 // when BanSystem includes both EOSSystem and EOSDirectSDK headers.
 
 #pragma once
 
-// Delegate to the real EOS SDK's eos_connect.h via the EOSSDK module include path.
-#include <eos_connect.h>
+#if defined(__has_include) && __has_include(<eos_connect.h>)
+#  include <eos_connect.h>
+#endif
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Fallback EOS_EExternalCredentialType value constants (matching EOS SDK 1.15.x).
+// ─────────────────────────────────────────────────────────────────────────────
+#ifndef EOS_ECT_EPIC
+#  define EOS_ECT_EPIC                        0
+#  define EOS_ECT_STEAM_APP_TICKET            1
+#  define EOS_ECT_PSN_ID_TOKEN                2
+#  define EOS_ECT_XBL_XSTS_TOKEN              3
+#  define EOS_ECT_DISCORD_ACCESS_TOKEN        4
+#  define EOS_ECT_GOG_SESSION_TICKET          5
+#  define EOS_ECT_NINTENDO_ID_TOKEN           6
+#  define EOS_ECT_NINTENDO_NSA_ID_TOKEN       7
+#  define EOS_ECT_UPLAY_ACCESS_TOKEN          8
+#  define EOS_ECT_OPENID_ACCESS_TOKEN         9
+#  define EOS_ECT_DEVICEID_ACCESS_TOKEN       10
+#  define EOS_ECT_APPLE                       11
+#  define EOS_ECT_GOOGLE                      12
+#  define EOS_ECT_OCULUS_USERID_NONCE         13
+#  define EOS_ECT_ITCHIO_JWT                  14
+#  define EOS_ECT_ITCHIO_KEY                  15
+#  define EOS_ECT_EPIC_ID_TOKEN               16
+#  define EOS_ECT_AMAZON_ACCESS_TOKEN         17
+#endif // EOS_ECT_EPIC
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Connect interface function pointer typedefs

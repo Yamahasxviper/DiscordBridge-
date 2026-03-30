@@ -1,17 +1,38 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 //
-// eos_sessions.h — delegates to the real EOS SDK eos_sessions.h.
+// eos_sessions.h — delegates to the real EOS SDK eos_sessions.h, with fallback
+// definitions for the CSS UE5.3.2 engine which may ship a minimal EOSSDK that
+// omits EOS_EAttributeType and EOS_ESessionAttributeAdvertisementType constants.
 //
-// EOSSystem now lists EOSSDK as a public dependency, making the engine's
-// ThirdParty EOSSDK headers available via angle-bracket includes.
+// See eos_common.h for the rationale behind the #ifndef-per-value fallback
+// pattern (handles cases where the real SDK defines types-only, without values).
 // Delegating here prevents C2011 conflicts for EOS_EAttributeType and
 // EOS_EOnlineComparisonOp (which the CSS engine places in eos_common.h)
 // when BanSystem includes both EOSSystem and EOSDirectSDK headers.
 
 #pragma once
 
-// Delegate to the real EOS SDK's eos_sessions.h via the EOSSDK module include path.
-#include <eos_sessions.h>
+#if defined(__has_include) && __has_include(<eos_sessions.h>)
+#  include <eos_sessions.h>
+#endif
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Fallback EOS_EAttributeType value constants (matching EOS SDK 1.15.x).
+// ─────────────────────────────────────────────────────────────────────────────
+#ifndef EOS_AT_BOOLEAN
+#  define EOS_AT_BOOLEAN    0
+#  define EOS_AT_INT64      1
+#  define EOS_AT_DOUBLE     2
+#  define EOS_AT_STRING     3
+#endif // EOS_AT_BOOLEAN
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Fallback EOS_ESessionAttributeAdvertisementType value constants.
+// ─────────────────────────────────────────────────────────────────────────────
+#ifndef EOS_SAAT_DontAdvertise
+#  define EOS_SAAT_DontAdvertise  0
+#  define EOS_SAAT_Advertise      1
+#endif // EOS_SAAT_DontAdvertise
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Sessions interface function pointer typedefs
