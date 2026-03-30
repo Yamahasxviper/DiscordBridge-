@@ -138,5 +138,5 @@ void EOS_CALL UEOSFriendsSubsystem::OnAcceptInviteCb(const EOS_Friends_AcceptInv
 { if (D) { auto* Cb = static_cast<FFriendInviteCbData*>(D->ClientData); UE_LOG(LogEOSFriends, Log, TEXT("AcceptInvite for %s: %s"), Cb?*Cb->TargetId:TEXT("?"), *FEOSSDKLoader::ResultToString(D->ResultCode)); if (Cb) delete Cb; } }
 void EOS_CALL UEOSFriendsSubsystem::OnRejectInviteCb(const EOS_Friends_RejectInviteCallbackInfo* D)
 { if (D) { auto* Cb = static_cast<FFriendInviteCbData*>(D->ClientData); UE_LOG(LogEOSFriends, Log, TEXT("RejectInvite for %s: %s"), Cb?*Cb->TargetId:TEXT("?"), *FEOSSDKLoader::ResultToString(D->ResultCode)); if (Cb) delete Cb; } }
-void EOS_CALL UEOSFriendsSubsystem::OnFriendsUpdateCb(const EOS_Friends_FriendsUpdateInfo* D)
+void EOS_CALL UEOSFriendsSubsystem::OnFriendsUpdateCb(const EOS_Friends_OnFriendsUpdateInfo* D)
 { if (D) UE_LOG(LogEOSFriends, Log, TEXT("Friends list updated (prev=%d new=%d)"), (int)D->PreviousStatus, (int)D->CurrentStatus); }
