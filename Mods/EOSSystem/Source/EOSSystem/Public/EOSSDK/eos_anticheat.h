@@ -10,6 +10,19 @@
 #endif
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Fallback async session callback types for CSS engine EOS SDK.
+//  The CSS UE5.3.2 engine ships an EOS SDK that may omit the async BeginSession
+//  and EndSession callback types introduced in EOS SDK 1.15.  Guard on the API
+//  version constant that the real SDK defines alongside those callback structs.
+// ─────────────────────────────────────────────────────────────────────────────
+#ifndef EOS_ANTICHEATSERVER_BEGINSESSIONCALLBACKINFO_API_LATEST
+struct EOS_AntiCheatServer_BeginSessionCallbackInfo;
+typedef void (EOS_CALL *EOS_AntiCheatServer_OnBeginSessionCallback)(const EOS_AntiCheatServer_BeginSessionCallbackInfo* Data);
+struct EOS_AntiCheatServer_EndSessionCallbackInfo;
+typedef void (EOS_CALL *EOS_AntiCheatServer_OnEndSessionCallback)(const EOS_AntiCheatServer_EndSessionCallbackInfo* Data);
+#endif // EOS_ANTICHEATSERVER_BEGINSESSIONCALLBACKINFO_API_LATEST
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  AntiCheatServer interface function pointer typedefs
 //  These _t aliases are used by FEOSSDKLoader for dynamic DLL symbol loading.
 // ─────────────────────────────────────────────────────────────────────────────

@@ -57,6 +57,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam (FOnEOSPlayerUnregistered,    const 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEOSPUIDLookupComplete,    const FString&, ExternalId,      const FString&,     PUID);
 // Reverse lookup: fires with (PUID, ExternalAccountId, Type) once per linked account.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnEOSReverseLookupComplete, const FString&, PUID, const FString&, ExternalAccountId, EEOSExternalAccountType, AccountType);
+// Reverse lookup: fires with (PUID) once after ALL linked accounts for a queried PUID have
+// been enumerated (including when the PUID has no linked external accounts at all).
+// Subscribers can use this to clean up any pending work that depended on finding a specific
+// external account type (e.g. Steam) without having to handle the "no Steam account" case
+// inside the per-account callback.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEOSReverseLookupAllComplete, const FString&, PUID);
 
 // ─── External account info (returned from reverse lookup cache) ───────────
 USTRUCT(BlueprintType)

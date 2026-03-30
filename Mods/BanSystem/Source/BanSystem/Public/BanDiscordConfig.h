@@ -112,6 +112,14 @@ struct BANSYSTEM_API FBanDiscordConfig
 	 */
 	FString PlayerIdsCommandPrefix{ TEXT("!playerids") };
 
+	/**
+	 * Prefix for the ban status check command.
+	 * Syntax: !checkban <Steam64Id|EOSProductUserId|PlayerName>
+	 * Checks whether a player is currently on the Steam or EOS ban list.
+	 * Does NOT require the player to be online — raw IDs can be checked offline.
+	 */
+	FString CheckBanCommandPrefix{ TEXT("!checkban") };
+
 	// ── Response message formats ──────────────────────────────────────────────
 
 	/**

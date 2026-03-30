@@ -190,13 +190,23 @@ bool UEOSBanSubsystem::IsPlayerBanned(const FString& EOSProductUserId, FString& 
 TArray<FBanEntry> UEOSBanSubsystem::GetAllBans() const
 {
     TArray<FBanEntry> Out;
-    BanMap.GenerateValueArray(Out);
+    for (const auto& Pair : BanMap)
+    {
+        if (!Pair.Value.IsExpired())
+            Out.Add(Pair.Value);
+    }
     return Out;
 }
 
 int32 UEOSBanSubsystem::GetBanCount() const
 {
-    return BanMap.Num();
+    int32 Count = 0;
+    for (const auto& Pair : BanMap)
+    {
+        if (!Pair.Value.IsExpired())
+            ++Count;
+    }
+    return Count;
 }
 
 void UEOSBanSubsystem::PruneExpiredBans()

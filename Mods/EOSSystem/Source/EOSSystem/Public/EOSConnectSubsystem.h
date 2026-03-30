@@ -88,6 +88,10 @@ public:
     UPROPERTY(BlueprintAssignable, Category="EOS|Connect") FOnEOSPUIDLookupComplete  OnPUIDLookupComplete;
     // Reverse lookup: fires with (PUID, ExternalAccountId, AccountType) once per linked account.
     UPROPERTY(BlueprintAssignable, Category="EOS|Connect") FOnEOSReverseLookupComplete OnReverseLookupComplete;
+    // Reverse lookup completion: fires with (PUID) once after ALL linked accounts for a
+    // specifically-queried PUID have been enumerated (or immediately when none exist).
+    // Use this to detect "no Steam account linked" without relying on absence of Steam callbacks.
+    UPROPERTY(BlueprintAssignable, Category="EOS|Connect") FOnEOSReverseLookupAllComplete OnReverseLookupAllComplete;
 
     EOS_HConnect GetConnectHandle() const;
 

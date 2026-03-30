@@ -36,6 +36,18 @@ struct FQueryExternalMappingsContext
     EOS_EExternalAccountType            AccountIdType;
 };
 
+// ─── QueryProductUserIdMappings context ──────────────────────────────────────
+// Carries the set of PUIDs that were the SUBJECT of a specific reverse-lookup
+// query so the callback can fire OnReverseLookupAllComplete only for those
+// PUIDs rather than for every tracked PUID processed by the callback.
+// This prevents false "no Steam account" notifications for PUIDs whose OWN
+// query has not yet completed (avoids a race condition).
+struct FReverseLookupContext
+{
+    TWeakObjectPtr<UEOSConnectSubsystem> Subsystem;
+    TArray<FString>                      QueriedPUIDs;
+};
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 static FString PUIDToStr(EOS_ProductUserId Id)
 {
@@ -269,7 +281,15 @@ void UEOSConnectSubsystem::InternalReverseLookupBatch(const TArray<FString>& PUI
     O.AccountIdType_DEPRECATED = EOS_EAT_EPIC;
     O.ProductUserIds      = IdArr.GetData();
     O.ProductUserIdCount  = (uint32_t)IdArr.Num();
-    SDK.fp_EOS_Connect_QueryProductUserIdMappings(H, &O, this, &UEOSConnectSubsystem::OnQueryProductUserIdMappingsCallback);
+
+    // Pass the queried PUIDs in a heap-allocated context so the callback can
+    // broadcast OnReverseLookupAllComplete ONLY for the PUIDs that were the
+    // subject of THIS specific query.  Ownership is transferred to the callback.
+    FReverseLookupContext* Ctx = new FReverseLookupContext();
+    Ctx->Subsystem    = this;
+    Ctx->QueriedPUIDs = PUIDs;
+
+    SDK.fp_EOS_Connect_QueryProductUserIdMappings(H, &O, Ctx, &UEOSConnectSubsystem::OnQueryProductUserIdMappingsCallback);
     UE_LOG(LogEOSConnect, Log, TEXT("QueryExternalAccountsForPUID: querying %d PUID(s)"), IdArr.Num());
 }
 
@@ -479,7 +499,13 @@ void EOS_CALL UEOSConnectSubsystem::OnQueryExternalMappingsCallback(const EOS_Co
 void EOS_CALL UEOSConnectSubsystem::OnQueryProductUserIdMappingsCallback(const EOS_Connect_QueryProductUserIdMappingsCallbackInfo* Data)
 {
     if (!Data) return;
-    UEOSConnectSubsystem* Self = static_cast<UEOSConnectSubsystem*>(Data->ClientData);
+
+    // Retrieve and take ownership of the context (always delete, even on failure).
+    FReverseLookupContext* Ctx = static_cast<FReverseLookupContext*>(Data->ClientData);
+    UEOSConnectSubsystem* Self = Ctx ? Ctx->Subsystem.Get() : nullptr;
+    TArray<FString> QueriedPUIDs = Ctx ? MoveTemp(Ctx->QueriedPUIDs) : TArray<FString>();
+    delete Ctx;
+
     if (!Self) return;
 
     if (Data->ResultCode != EOS_Success)
@@ -538,8 +564,19 @@ void EOS_CALL UEOSConnectSubsystem::OnQueryProductUserIdMappingsCallback(const E
         if (Infos.Num() > 0)
             Self->ReverseLookupCache.Add(PUIDStr, MoveTemp(Infos));
     }
+
     // Persist the updated cache immediately so mappings survive a crash or fast restart.
     Self->SaveCacheToDisk();
+
+    // Fire the "all complete" notification for each PUID that was the SUBJECT of
+    // this specific query.  This allows subscribers (e.g. BanEnforcementSubsystem)
+    // to clean up pending work for PUIDs that turned out to have no Steam account,
+    // WITHOUT prematurely cancelling pending work for OTHER PUIDs whose own query
+    // has not yet completed (avoids race conditions with concurrent queries).
+    for (const FString& PUID : QueriedPUIDs)
+    {
+        Self->OnReverseLookupAllComplete.Broadcast(PUID);
+    }
 }
 
 // ─── JSON cache persistence ──────────────────────────────────────────────────

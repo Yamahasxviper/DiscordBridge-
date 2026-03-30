@@ -234,7 +234,7 @@ inline bool IsValidHandle(EOS_ProductUserId PUID)
  * NOTE — IEOSSDKManager / IEOSPlatformHandle API
  *   IEOSSDKManager::GetAllPlatformHandles() returns a TArray of TSharedRef
  *   to IEOSPlatformHandle.  The raw EOS_HPlatform is exposed via the public
- *   accessor GetHandle() on IEOSPlatformHandle.
+ *   accessor GetHandle() on IEOSPlatformHandle (PlatformHandle is protected).
  *   Reference: Engine/Plugins/Online/EOSShared/Source/EOSShared/Public/IEOSSDKManager.h
  */
 inline EOS_HPlatform GetPlatformHandle()

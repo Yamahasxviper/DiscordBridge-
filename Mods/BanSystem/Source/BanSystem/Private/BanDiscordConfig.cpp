@@ -92,6 +92,10 @@ namespace
 		"# Syntax: !playerids [PlayerName]\r\n"
 		"PlayerIdsCommandPrefix=!playerids\r\n"
 		"#\r\n"
+		"# Check whether a player is currently banned (works offline by raw ID).\r\n"
+		"# Syntax: !checkban <Steam64Id|EOSProductUserId|PlayerName>\r\n"
+		"CheckBanCommandPrefix=!checkban\r\n"
+		"#\r\n"
 		"# -- JOIN-KICK ENFORCEMENT ----------------------------------------------------\r\n"
 		"#\r\n"
 		"# Text shown in-game when a Steam-banned player is kicked on join.\r\n"
@@ -175,6 +179,7 @@ FBanDiscordConfig FBanDiscordConfig::LoadOrCreate()
 	Out.EOSBanListCommandPrefix    = GetIniStringOrDefault(Cfg, TEXT("EOSBanListCommandPrefix"),    TEXT("!eosbanlist"));
 	Out.BanByNameCommandPrefix     = GetIniStringOrDefault(Cfg, TEXT("BanByNameCommandPrefix"),     TEXT("!banbyname"));
 	Out.PlayerIdsCommandPrefix     = GetIniStringOrDefault(Cfg, TEXT("PlayerIdsCommandPrefix"),     TEXT("!playerids"));
+	Out.CheckBanCommandPrefix      = GetIniStringOrDefault(Cfg, TEXT("CheckBanCommandPrefix"),      TEXT("!checkban"));
 
 	// Response message formats (fall back to defaults when left empty in the INI)
 	Out.SteamBanResponseMessage = GetIniStringOrFallback(
