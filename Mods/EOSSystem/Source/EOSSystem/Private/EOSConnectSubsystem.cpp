@@ -6,8 +6,12 @@
 #include "GameFramework/GameMode.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
+#include "GameFramework/OnlineReplStructs.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
+// V2 EOS PUID extraction: UE::Online::GetProductUserId(FAccountId) and FAccountId
+#include "Online/OnlineIdEOSGS.h"
 // JSON serialisation — Dom, Serialization (Json module) + FJsonObjectConverter (JsonUtilities)
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -287,10 +291,16 @@ FString UEOSConnectSubsystem::GetCachedSteam64ForPUID(const FString& PUID) const
 // ─── tracked PUIDs ───────────────────────────────────────────────────────────
 void UEOSConnectSubsystem::RegisterPlayerPUID(const FString& PUID)
 {
+    // Public UFUNCTION path: no associated PlayerController available.
+    RegisterPlayerPUIDInternal(PUID, nullptr);
+}
+
+void UEOSConnectSubsystem::RegisterPlayerPUIDInternal(const FString& PUID, APlayerController* PC)
+{
     if (!TrackedPUIDs.Contains(PUID))
     {
         TrackedPUIDs.Add(PUID);
-        OnPlayerPUIDRegistered.Broadcast(PUID);
+        OnPlayerPUIDRegistered.Broadcast(PUID, PC);
         UE_LOG(LogEOSConnect, Log, TEXT("Registered PUID: %s"), *PUID);
     }
 }
@@ -306,22 +316,67 @@ void UEOSConnectSubsystem::UnregisterPlayerPUID(const FString& PUID)
 
 void UEOSConnectSubsystem::HandlePostLogin(AGameModeBase* GM, APlayerController* PC)
 {
-    if (!PC) return;
-    if (ULocalPlayer* LP = PC->GetLocalPlayer())
+    if (!PC || !PC->PlayerState) return;
+
+    // Extract the EOS PUID from the player's replicated identity using the
+    // engine's V2 OnlineServices path (UE::Online::GetProductUserId).
+    //
+    // We do NOT use GetLocalPlayer() here — on a dedicated server every
+    // remote player has GetLocalPlayer() == nullptr, so that path never fires.
+    // We also do NOT use UniqueId.ToString() — for V2 FAccountId that returns
+    // an opaque handle string, not the 32-char hex PUID.
+    //
+    // For Steam players without a linked Epic account (V1 "Steam" type):
+    // UniqueId.IsV2() returns false; we skip registration here and let
+    // BanEnforcementSubsystem's async Steam64→PUID lookup path handle them.
+
+    const FUniqueNetIdRepl& UniqueId = PC->PlayerState->GetUniqueId();
+    if (!UniqueId.IsValid()) return;
+
+    if (UniqueId.IsV2())
     {
-        const FString Id = LP->GetPreferredUniqueNetId().ToString();
-        if (!Id.IsEmpty()) RegisterPlayerPUID(Id);
+        const UE::Online::FAccountId& AccountId = UniqueId.GetV2Unsafe();
+        if (!AccountId.IsValid()) return;
+
+        // UE::Online::GetProductUserId looks up the EOS_ProductUserId from the
+        // engine's OnlineServicesEOSGS registry (populated when the player
+        // authenticated via EOS).  This is the authoritative V2 path for all
+        // EOS-connected players, including Steam players with linked Epic accounts.
+        const EOS_ProductUserId Handle = UE::Online::GetProductUserId(AccountId);
+        if (!Handle || EOS_ProductUserId_IsValid(Handle) != EOS_TRUE) return;
+
+        const FString PUID = PUIDToStr(Handle);
+        if (!PUID.IsEmpty())
+        {
+            // Pass the PlayerController so BanEnforcementSubsystem::OnPUIDRegistered
+            // can act directly without a world scan.
+            RegisterPlayerPUIDInternal(PUID, PC);
+        }
     }
 }
 
 void UEOSConnectSubsystem::HandleLogout(AGameModeBase* GM, AController* C)
 {
-    if (APlayerController* PC = Cast<APlayerController>(C))
-        if (ULocalPlayer* LP = PC->GetLocalPlayer())
-        {
-            const FString Id = LP->GetPreferredUniqueNetId().ToString();
-            if (!Id.IsEmpty()) UnregisterPlayerPUID(Id);
-        }
+    APlayerController* PC = Cast<APlayerController>(C);
+    if (!PC || !PC->PlayerState) return;
+
+    // Mirror the logic from HandlePostLogin: extract the PUID the same way
+    // we registered it so that TrackedPUIDs stays consistent.
+    const FUniqueNetIdRepl& UniqueId = PC->PlayerState->GetUniqueId();
+    if (!UniqueId.IsValid()) return;
+
+    if (UniqueId.IsV2())
+    {
+        const UE::Online::FAccountId& AccountId = UniqueId.GetV2Unsafe();
+        if (!AccountId.IsValid()) return;
+
+        const EOS_ProductUserId Handle = UE::Online::GetProductUserId(AccountId);
+        if (!Handle || EOS_ProductUserId_IsValid(Handle) != EOS_TRUE) return;
+
+        const FString PUID = PUIDToStr(Handle);
+        if (!PUID.IsEmpty())
+            UnregisterPlayerPUID(PUID);
+    }
 }
 
 // ─── callbacks ───────────────────────────────────────────────────────────────

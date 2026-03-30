@@ -2,8 +2,19 @@
 
 #include "BanIdResolver.h"
 
-// EOSIdHelper — custom plugin providing EOS Product User ID extraction via
-// the UE5 OnlineServicesEOSGS V2 path (OnlineSubsystemEOS is disabled in
+// ── EOSSystem headers first ────────────────────────────────────────────────
+// Including EOSConnectSubsystem.h (which pulls EOSSDK/eos_sdk.h → eos_platform.h)
+// BEFORE EOSBanSDK.h (which pulls DummyHeaders' eos_platform.h) ensures that
+// EOSSystem's eos_platform.h wins the EOS_Platform_H include-guard race.
+// EOSSystem's version is preferred because it also does #include <eos_types.h>,
+// making EOS_Platform_Options and other platform-creation types available.
+// EOSSystem — provides UEOSConnectSubsystem for cross-platform cache lookups.
+#include "EOSConnectSubsystem.h"
+#include "EOSTypes.h"
+
+// ── DummyHeaders EOS helpers ───────────────────────────────────────────────
+// EOSIdHelper — CSS FactoryGame helper providing EOS Product User ID extraction
+// via the UE5 OnlineServicesEOSGS V2 path (OnlineSubsystemEOS is disabled in
 // Satisfactory, so this plugin replaces the DummyHeaders/FGOnlineHelpers path).
 #include "EOSIdHelper.h"
 
@@ -11,10 +22,6 @@
 // EOS_ProductUserId handles, validates them via the EOS C SDK, and exposes the
 // EOS platform handle for direct SDK calls.
 #include "EOSBanSDK.h"
-
-// EOSSystem — provides UEOSConnectSubsystem for cross-platform cache lookups.
-#include "EOSConnectSubsystem.h"
-#include "EOSTypes.h"
 
 // Ban subsystem validators
 #include "Steam/SteamBanSubsystem.h"

@@ -16,6 +16,17 @@ public class EOSSystem : ModuleRules
             "CoreUObject",
             "Engine",
             "DeveloperSettings",
+            // FUniqueNetIdRepl, IsV1/IsV2, GetV2Unsafe — needed in EOSConnectSubsystem
+            // HandlePostLogin to extract the EOS PUID from the player's replicated identity.
+            "CoreOnline",
+            // IOnlineAccountIdRegistry, FAccountId
+            "OnlineServicesInterface",
+            // UE::Online::GetProductUserId(FAccountId) — V2 EOS PUID extraction used in
+            // HandlePostLogin so that PUIDs are registered correctly on dedicated servers
+            // (GetLocalPlayer() returns nullptr on dedicated servers and cannot be used).
+            "OnlineServicesEOSGS",
+            // LexToString(EOS_ProductUserId) → FString
+            "EOSShared",
             // Json + JsonUtilities — used in UEOSConnectSubsystem to persist the
             // PUID↔external-account reverse-lookup cache to disk across server restarts.
             // FJsonObject/FJsonSerializer are from Json; FJsonObjectConverter is from JsonUtilities.

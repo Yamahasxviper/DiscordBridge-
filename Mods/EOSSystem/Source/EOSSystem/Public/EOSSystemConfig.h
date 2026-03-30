@@ -5,6 +5,16 @@
 #include "Engine/DeveloperSettings.h"
 #include "EOSSystemConfig.generated.h"
 
+/**
+ * Configuration for the EOSSystem mod.
+ * Trimmed to the fields required by the ban system:
+ *   • EOS credentials (ProductId, SandboxId, DeploymentId, ClientId, ClientSecret)
+ *   • Platform options (overlay, cache dir, log level)
+ *   • Connect subsystem toggle (bEnableConnect)
+ *
+ * Edit in <ServerRoot>/FactoryGame/Mods/EOSSystem/Config/DefaultEOSSystem.ini
+ * under the [/Script/EOSSystem.EOSSystemConfig] section.
+ */
 UCLASS(config=Game, defaultconfig, meta=(DisplayName="EOS System"))
 class EOSSYSTEM_API UEOSSystemConfig : public UDeveloperSettings
 {
@@ -47,32 +57,8 @@ public:
     UPROPERTY(config, EditAnywhere, Category="EOS System|Platform", meta=(Tooltip="Off/Fatal/Error/Warning/Info/Verbose/VeryVerbose"))
     FString LogLevel = TEXT("Warning");
 
-    // ── Features ──────────────────────────────────────────────────────────
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Features") bool bEnableConnect      = true;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Features") bool bEnableAuth         = false;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Features") bool bEnableSessions     = true;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Features") bool bEnableAntiCheat    = false;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Features") bool bEnableSanctions    = true;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Features") bool bEnableMetrics      = true;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Features") bool bEnableReports      = true;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Features") bool bEnableStats        = true;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Features") bool bEnableAchievements = false;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Features") bool bEnableLeaderboards = false;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Features") bool bEnableStorage      = false;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Features") bool bEnableFriends      = false;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Features") bool bEnablePresence     = false;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Features") bool bEnableEcom         = false;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Features") bool bEnableLobby        = false;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Features") bool bEnableRTC          = false;
-
-    // ── Sessions ──────────────────────────────────────────────────────────
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Sessions") FString SessionName            = TEXT("ServerSession");
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Sessions") FString BucketId               = TEXT("Game:Live");
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Sessions", meta=(Tooltip="Public IP:Port. Empty = skip HostAddress")) FString ServerIpAddress;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Sessions") uint32  MaxPlayers             = 64;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Sessions") bool    bSanctionsEnabled      = true;
-    UPROPERTY(config, EditAnywhere, Category="EOS System|Sessions") bool    bJoinInProgressAllowed = true;
-
-    // ── AntiCheat ─────────────────────────────────────────────────────────
-    UPROPERTY(config, EditAnywhere, Category="EOS System|AntiCheat") FString AntiCheatServerName = TEXT("EOSServer");
+    // ── Connect ───────────────────────────────────────────────────────────
+    // Enable the EOS Connect subsystem for Steam64↔PUID cross-platform ban mapping.
+    UPROPERTY(config, EditAnywhere, Category="EOS System|Connect")
+    bool bEnableConnect = true;
 };

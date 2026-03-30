@@ -5,12 +5,8 @@
 #include "BanDiscordSubsystem.h"
 #include "Steam/SteamBanSubsystem.h"
 #include "EOS/EOSBanSubsystem.h"
-// EOSSystem subsystems
+// EOSSystem — cross-platform PUID↔Steam64 lookup
 #include "EOSConnectSubsystem.h"
-#include "EOSSanctionsSubsystem.h"
-#include "EOSMetricsSubsystem.h"
-#include "EOSSessionsSubsystem.h"
-#include "EOSAntiCheatSubsystem.h"
 #include "EOSTypes.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/GameSession.h"
@@ -61,16 +57,6 @@ void UBanEnforcementSubsystem::Initialize(FSubsystemCollectionBase& Collection)
                  "async PUID lookups and cross-platform ban propagation disabled."));
     }
 
-    // Subscribe to EOS Sanctions results.  Fires async when a sanctions query
-    // completes; we kick any still-connected player who has active sanctions.
-    if (UEOSSanctionsSubsystem* Sanctions = GetGameInstance()->GetSubsystem<UEOSSanctionsSubsystem>())
-    {
-        Sanctions->OnSanctionsQueried.AddDynamic(this, &UBanEnforcementSubsystem::OnSanctionsQueryResult);
-        UE_LOG(LogBanEnforcement, Log,
-            TEXT("BanEnforcementSubsystem: Subscribed to EOS Sanctions — "
-                 "platform-level sanctions will be enforced at join."));
-    }
-
     UE_LOG(LogBanEnforcement, Log,
         TEXT("BanEnforcementSubsystem: Initialized. "
              "PreLogin + PostLogin + Logout ban enforcement active."));
@@ -94,13 +80,6 @@ void UBanEnforcementSubsystem::Deinitialize()
         EOS->OnReverseLookupComplete.RemoveDynamic(this, &UBanEnforcementSubsystem::OnReverseLookupDone);
     }
 
-    // Unsubscribe from EOS Sanctions.
-    if (UEOSSanctionsSubsystem* Sanctions = GetGameInstance()->GetSubsystem<UEOSSanctionsSubsystem>())
-    {
-        Sanctions->OnSanctionsQueried.RemoveDynamic(this, &UBanEnforcementSubsystem::OnSanctionsQueryResult);
-    }
-
-    ActivePlayersByPUID.Empty();
     PendingBySteam64.Empty();
     PendingEOSPropagation.Empty();
     PendingSteamPropagation.Empty();
@@ -231,9 +210,7 @@ void UBanEnforcementSubsystem::OnPostLogin(AGameModeBase*    GameMode,
             }
         }
 
-        // PUID is present and player is not banned — register with EOS services.
-        OnPlayerPUIDConfirmed(ResolvedId.EOSProductUserId, NewPlayer,
-            NewPlayer->PlayerState->GetPlayerName());
+        // PUID is present and player is not banned.
         return;
     }
 
@@ -265,8 +242,7 @@ void UBanEnforcementSubsystem::OnPostLogin(AGameModeBase*    GameMode,
                     return;
                 }
             }
-            // Cached PUID is not banned — register with EOS services.
-            OnPlayerPUIDConfirmed(CachedPUID, NewPlayer, NewPlayer->PlayerState->GetPlayerName());
+            // Cached PUID is not banned.
         }
         else
         {
@@ -290,43 +266,57 @@ void UBanEnforcementSubsystem::OnPostLogin(AGameModeBase*    GameMode,
 //  PUID registered — catch late EOS PUID registrations after PostLogin
 // ─────────────────────────────────────────────────────────────────────────────
 
-void UBanEnforcementSubsystem::OnPUIDRegistered(const FString& PUID)
+void UBanEnforcementSubsystem::OnPUIDRegistered(const FString& PUID, APlayerController* Controller)
 {
     if (PUID.IsEmpty()) return;
 
     UGameInstance* GI = GetGameInstance();
     UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>();
 
-    UWorld* World = GI->GetWorld();
-    if (!World) return;
+    // ── Fast path: use the PlayerController supplied by EOSConnectSubsystem ──
+    // HandlePostLogin now extracts the PUID via UE::Online::GetProductUserId()
+    // and passes the matching PC directly, so we can skip the world scan.
+    APlayerController* PC = Controller;
 
-    // Find the PlayerController with this PUID by scanning the world.
-    for (TPlayerControllerIterator<APlayerController>::ServerAll It(World); It; ++It)
+    // ── Fallback: world scan (manual RegisterPlayerPUID calls, PC == nullptr) ─
+    // This path is a safety net for calls that don't originate from PostLogin.
+    // It relies on FBanIdResolver::Resolve() succeeding (V2 FAccountId players).
+    if (!PC)
     {
-        APlayerController* PC = *It;
-        if (!PC || !PC->PlayerState) continue;
+        UWorld* World = GI->GetWorld();
+        if (!World) return;
 
-        FResolvedBanId Ids = FBanIdResolver::Resolve(PC->PlayerState->GetUniqueId());
-        if (Ids.EOSProductUserId != PUID) continue;
-
-        // ── EOS ban check ──────────────────────────────────────────────────
-        if (EOSBans)
+        for (TPlayerControllerIterator<APlayerController>::ServerAll It(World); It; ++It)
         {
-            FString Reason;
-            if (EOSBans->IsPlayerBanned(PUID, Reason))
+            APlayerController* Candidate = *It;
+            if (!Candidate || !Candidate->PlayerState) continue;
+
+            FResolvedBanId Ids = FBanIdResolver::Resolve(Candidate->PlayerState->GetUniqueId());
+            if (Ids.EOSProductUserId == PUID)
             {
-                UE_LOG(LogBanEnforcement, Log,
-                    TEXT("OnPUIDRegistered: kicking EOS-banned player (PUID %s)."), *PUID);
-                KickBannedPlayer(PC, PUID, BuildKickMessage(true, Reason));
-                PostBanKickDiscordNotification(PUID, Reason);
-                return;
+                PC = Candidate;
+                break;
             }
         }
-
-        // Player is not banned — register with EOS services (sanctions/metrics/etc.)
-        OnPlayerPUIDConfirmed(PUID, PC, PC->PlayerState->GetPlayerName());
-        return;
     }
+
+    if (!PC) return;  // Player not (yet) in world — ban will be caught by PostLogin
+
+    // ── EOS ban check ──────────────────────────────────────────────────────
+    if (EOSBans)
+    {
+        FString Reason;
+        if (EOSBans->IsPlayerBanned(PUID, Reason))
+        {
+            UE_LOG(LogBanEnforcement, Log,
+                TEXT("OnPUIDRegistered: kicking EOS-banned player (PUID %s)."), *PUID);
+            KickBannedPlayer(PC, PUID, BuildKickMessage(true, Reason));
+            PostBanKickDiscordNotification(PUID, Reason);
+            return;
+        }
+    }
+
+    // Player is not banned.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -364,11 +354,9 @@ void UBanEnforcementSubsystem::OnPUIDLookupDone(const FString& ExternalAccountId
                 }
                 else
                 {
-                    // Player is not banned — register with EOS services.
-                    const FString DisplayName = PC->PlayerState
-                        ? PC->PlayerState->GetPlayerName()
-                        : FString();
-                    OnPlayerPUIDConfirmed(PUID, PC, DisplayName);
+                    // Player is not banned.
+                    UE_LOG(LogBanEnforcement, Verbose,
+                        TEXT("OnPUIDLookupDone: PUID %s confirmed not banned."), *PUID);
                 }
             }
         }
@@ -449,181 +437,14 @@ void UBanEnforcementSubsystem::OnLogout(AGameModeBase* GameMode, AController* Co
     APlayerController* PC = Cast<APlayerController>(Controller);
     if (!PC) return;
 
-    // Find the PUID tracked for this controller.
-    FString LoggingOutPUID;
-    for (auto It = ActivePlayersByPUID.CreateIterator(); It; ++It)
+    // Remove any pending ban checks for this PC (player disconnected before
+    // the async PUID lookup finished).
+    for (auto It = PendingBySteam64.CreateIterator(); It; ++It)
     {
-        if (It.Value().Get() == PC)
+        if (It.Value().Controller.Get() == PC)
         {
-            LoggingOutPUID = It.Key();
             It.RemoveCurrent();
             break;
-        }
-    }
-
-    // Prune any stale (disconnected) entries while we're iterating.
-    for (auto It = ActivePlayersByPUID.CreateIterator(); It; ++It)
-    {
-        if (!It.Value().IsValid()) It.RemoveCurrent();
-    }
-
-    if (LoggingOutPUID.IsEmpty())
-    {
-        // Also remove any pending ban checks for this PC (player disconnected
-        // before the async PUID lookup finished).
-        for (auto It = PendingBySteam64.CreateIterator(); It; ++It)
-        {
-            if (It.Value().Controller.Get() == PC)
-            {
-                It.RemoveCurrent();
-                break;
-            }
-        }
-        return;
-    }
-
-    UE_LOG(LogBanEnforcement, Log,
-        TEXT("OnLogout: cleaning up EOS session for PUID %s."), *LoggingOutPUID);
-
-    UGameInstance* GI = GetGameInstance();
-
-    // ── EOS Metrics: end player session ──────────────────────────────────────
-    if (UEOSMetricsSubsystem* Metrics = GI->GetSubsystem<UEOSMetricsSubsystem>())
-    {
-        Metrics->EndPlayerSession(LoggingOutPUID);
-    }
-
-    // ── EOS Sessions: unregister player ──────────────────────────────────────
-    if (UEOSSessionsSubsystem* Sessions = GI->GetSubsystem<UEOSSessionsSubsystem>())
-    {
-        if (Sessions->HasActiveSession())
-        {
-            Sessions->UnregisterPlayers({ LoggingOutPUID });
-        }
-    }
-
-    // ── EOS Anti-Cheat: unregister client ─────────────────────────────────────
-    if (UEOSAntiCheatSubsystem* AC = GI->GetSubsystem<UEOSAntiCheatSubsystem>())
-    {
-        if (AC->IsSessionActive())
-        {
-            AC->UnregisterClient(LoggingOutPUID);
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  EOS Sanctions enforcement
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UBanEnforcementSubsystem::OnSanctionsQueryResult(const FString&                  PUID,
-                                                        const TArray<FEOSSanctionInfo>& Sanctions)
-{
-    if (Sanctions.Num() == 0) return;
-
-    // Is the player still connected?
-    TWeakObjectPtr<APlayerController>* PCWeakPtr = ActivePlayersByPUID.Find(PUID);
-    if (!PCWeakPtr) return;
-    APlayerController* PC = PCWeakPtr->Get();
-    if (!PC) return;
-
-    // Build a concise summary of the active sanctions.
-    FString SanctionList;
-    for (const FEOSSanctionInfo& S : Sanctions)
-    {
-        if (!SanctionList.IsEmpty()) SanctionList += TEXT(", ");
-        SanctionList += S.Action;
-    }
-
-    UE_LOG(LogBanEnforcement, Warning,
-        TEXT("OnSanctionsQueryResult: kicking EOS-sanctioned player %s — %d sanction(s): %s"),
-        *PUID, Sanctions.Num(), *SanctionList);
-
-    const FString KickMsg = FString::Printf(
-        TEXT("[EOS Sanction] Your account has %d active EOS platform sanction(s): %s"),
-        Sanctions.Num(), *SanctionList);
-
-    KickBannedPlayer(PC, PUID, KickMsg);
-    PostBanKickDiscordNotification(PUID,
-        FString::Printf(TEXT("EOS sanctions: %s"), *SanctionList));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  PUID confirmed — register with EOS services
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UBanEnforcementSubsystem::OnPlayerPUIDConfirmed(const FString&     PUID,
-                                                       APlayerController* PC,
-                                                       const FString&     DisplayName)
-{
-    if (PUID.IsEmpty() || !PC) return;
-
-    // Guard against double-registration (e.g. both OnPostLogin and OnPUIDRegistered
-    // can fire for the same player when the PUID is immediately available).
-    if (TWeakObjectPtr<APlayerController>* Existing = ActivePlayersByPUID.Find(PUID))
-    {
-        if (Existing->IsValid())
-        {
-            UE_LOG(LogBanEnforcement, Verbose,
-                TEXT("OnPlayerPUIDConfirmed: %s already tracked — skipping duplicate registration."),
-                *PUID);
-            return;
-        }
-    }
-
-    // Track the player.
-    ActivePlayersByPUID.Add(PUID, PC);
-    UE_LOG(LogBanEnforcement, Log,
-        TEXT("OnPlayerPUIDConfirmed: %s ('%s') — starting EOS session services."),
-        *PUID, *DisplayName);
-
-    UGameInstance* GI = GetGameInstance();
-
-    // ── EOS Sanctions check ───────────────────────────────────────────────────
-    // Check the cache first (free, no EOS call).  When not cached, request an
-    // async query; result handled in OnSanctionsQueryResult.
-    if (UEOSSanctionsSubsystem* Sanctions = GI->GetSubsystem<UEOSSanctionsSubsystem>())
-    {
-        if (Sanctions->HasActiveSanction(PUID))
-        {
-            // Already cached and sanctioned — kick immediately.
-            const TArray<FEOSSanctionInfo> Cached = Sanctions->GetCachedSanctions(PUID);
-            OnSanctionsQueryResult(PUID, Cached);
-            return; // Player will be kicked; skip registrations.
-        }
-        Sanctions->QuerySanctions(PUID);
-    }
-
-    // ── EOS Metrics: begin player session ─────────────────────────────────────
-    if (UEOSMetricsSubsystem* Metrics = GI->GetSubsystem<UEOSMetricsSubsystem>())
-    {
-        if (!Metrics->IsPlayerSessionActive(PUID))
-        {
-            // Use the EOS session ID for telemetry correlation if available.
-            FString SessionId;
-            if (UEOSSessionsSubsystem* Sessions = GI->GetSubsystem<UEOSSessionsSubsystem>())
-            {
-                SessionId = Sessions->GetCurrentSessionInfo().SessionId;
-            }
-            Metrics->BeginPlayerSession(PUID, DisplayName, SessionId);
-        }
-    }
-
-    // ── EOS Sessions: register player in the matchmaking session ──────────────
-    if (UEOSSessionsSubsystem* Sessions = GI->GetSubsystem<UEOSSessionsSubsystem>())
-    {
-        if (Sessions->HasActiveSession())
-        {
-            Sessions->RegisterPlayers({ PUID });
-        }
-    }
-
-    // ── EOS Anti-Cheat: register client ───────────────────────────────────────
-    if (UEOSAntiCheatSubsystem* AC = GI->GetSubsystem<UEOSAntiCheatSubsystem>())
-    {
-        if (AC->IsSessionActive())
-        {
-            AC->RegisterClient(PUID, TEXT(""));
         }
     }
 }

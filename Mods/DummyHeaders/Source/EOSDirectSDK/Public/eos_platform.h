@@ -48,6 +48,18 @@
 // EOS_ProductUserId, and all other primitive EOS types used below.
 #include "eos_common.h"
 
+// eos_types.h provides EOS_Platform_Options, EOS_Platform_ClientCredentials,
+// EOS_Platform_RTCOptions and other platform-creation structs.  The CSS engine
+// may ship these in <eos_types.h> only; the real EOS SDK eos_platform.h pulls
+// them in via #include <eos_types.h>.  When this stub wins the EOS_Platform_H
+// guard race (because EOSDirectSDK.h is included before any EOSSystem header),
+// <eos_types.h> would otherwise be skipped entirely.  Pull it in here so that
+// any translation unit that includes EOSDirectSDK.h first still has the full
+// set of platform types available when EOSSystem headers are processed later.
+#if defined(__has_include) && __has_include(<eos_types.h>)
+#  include <eos_types.h>
+#endif
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Opaque interface handle typedefs
 //  (matching the real EOS SDK 1.x declarations in eos_platform.h)

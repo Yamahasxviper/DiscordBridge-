@@ -103,6 +103,9 @@ private:
     void PerformConnectLogin();
     void HandlePostLogin(AGameModeBase* GM, APlayerController* PC);
     void HandleLogout(AGameModeBase* GM, AController* C);
+    // Internal registration: broadcasts OnPlayerPUIDRegistered with the associated
+    // PlayerController (may be nullptr when called from the public UFUNCTION path).
+    void RegisterPlayerPUIDInternal(const FString& PUID, APlayerController* PC);
     void InternalLookupBatch(const TArray<FString>& ExternalAccountIds, EOS_EExternalAccountType AccountIdType);
     void InternalReverseLookupBatch(const TArray<FString>& PUIDs);
     // JSON cache persistence helpers (use Json + JsonUtilities modules)
