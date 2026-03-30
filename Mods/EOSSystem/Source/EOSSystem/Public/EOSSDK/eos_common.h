@@ -6,20 +6,18 @@
 // constants (EOS_Success, EOS_InvalidParameters, EOS_Duplicate, etc.).
 //
 // The real EOS SDK eos_common.h defines these as C enum values in EOS_EResult.
-// If the CSS engine's eos_common.h instead typedef's EOS_EResult as int32_t
-// (providing the TYPE without named values), the constants are simply absent.
+// The CSS engine may define EOS_EResult as a C++ scoped enum class (enum class
+// EOS_EResult : int32_t), which does NOT allow implicit comparison with integer
+// literals — requiring an explicit cast when the constant is not a named member.
 //
 // Strategy:
 //   1. Attempt to include <eos_common.h> via __has_include (avoids C1083 if
 //      the file is absent from the CSS EOSSDK distribution).
 //   2. Provide each enum value constant as a fallback #define macro, guarded by
-//      #ifndef.  This guard is INTENTIONALLY a macro check, not an enum check:
-//      - If the real header defines the constant as a macro: #ifndef is FALSE →
-//        our definition is skipped (correct, avoid C4005 redefinition warning).
-//      - If the real header defines the constant as an enum value: #ifndef is
-//        TRUE → we still define the macro.  The macro (same integer value)
-//        safely shadows the enum value — no type difference in practice.
-//      - If the constant is simply absent: #ifndef is TRUE → we define it.
+//      #ifndef so an existing macro definition from the real SDK wins (avoiding
+//      C4005 redefinition warnings).  Constants are defined using C-style casts
+//      (e.g. ((EOS_EResult)0)) so they are type-compatible whether EOS_EResult
+//      is a plain typedef, a C unscoped enum, or a C++ scoped enum class.
 //
 // NOTE: Do NOT define EOS_COMMON_H BEFORE the #include — that would cause
 // the real header's own guard to skip its contents.
@@ -34,51 +32,55 @@
 //  Fallback EOS_EResult value constants.
 //  Each is guarded by #ifndef so an existing macro (from the real SDK) wins.
 //  If the real SDK defines these only as enum values (not macros), the guards
-//  are vacuously true and the macros are added; the integer values are identical
-//  to what the real SDK enum uses, so all comparisons remain correct.
+//  evaluate to true and the macros are added using explicit C-style casts so
+//  comparisons work whether EOS_EResult is a typedef-int, C enum, or C++ enum
+//  class.
 // ─────────────────────────────────────────────────────────────────────────────
 #ifndef EOS_Success
-#  define EOS_Success                  0
-#  define EOS_NoConnection             1
-#  define EOS_InvalidCredentials       2
-#  define EOS_InvalidUser              3
-#  define EOS_InvalidAuth              4
-#  define EOS_AccessDenied             5
-#  define EOS_MissingPermissions       6
-#  define EOS_TokenNotAccount          7
-#  define EOS_TooManyRequests          8
-#  define EOS_AlreadyPending           9
-#  define EOS_InvalidParameters        10
-#  define EOS_InvalidRequest           11
-#  define EOS_UnrecognizedResponse     12
-#  define EOS_IncompatibleVersion      13
-#  define EOS_NotConfigured            14
-#  define EOS_AlreadyConfigured        15
-#  define EOS_NotImplemented           16
-#  define EOS_Canceled                 17
-#  define EOS_NotFound                 18
-#  define EOS_OperationWillRetry       19
-#  define EOS_NoChange                 20
-#  define EOS_VersionMismatch          21
-#  define EOS_LimitExceeded            22
-#  define EOS_Duplicate                23
-#  define EOS_MissingParameters        24
-#  define EOS_InvalidSandboxId         25
-#  define EOS_TimedOut                 26
-#  define EOS_PartialResult            27
-#  define EOS_Missing_Role             28
-#  define EOS_Missing_Feature          29
-#  define EOS_Invalid_Sandbox          30
-#  define EOS_Invalid_Deployment       31
-#  define EOS_Invalid_Product          32
-#  define EOS_Invalid_ProductUserID    33
-#  define EOS_ServiceFailure           34
-#  define EOS_CacheDirectoryMissing    35
-#  define EOS_CacheDirectoryInvalid    36
-#  define EOS_InvalidState             37
-#  define EOS_RequestInProgress        38
-#  define EOS_ApplicationSuspended     39
-#  define EOS_NetworkChanged           40
+// Use explicit casts to EOS_EResult so these macros work whether the engine
+// defines EOS_EResult as a plain typedef-int, a C unscoped enum, or a C++
+// scoped enum class (which does not allow implicit integer comparisons).
+#  define EOS_Success                  ((EOS_EResult)0)
+#  define EOS_NoConnection             ((EOS_EResult)1)
+#  define EOS_InvalidCredentials       ((EOS_EResult)2)
+#  define EOS_InvalidUser              ((EOS_EResult)3)
+#  define EOS_InvalidAuth              ((EOS_EResult)4)
+#  define EOS_AccessDenied             ((EOS_EResult)5)
+#  define EOS_MissingPermissions       ((EOS_EResult)6)
+#  define EOS_TokenNotAccount          ((EOS_EResult)7)
+#  define EOS_TooManyRequests          ((EOS_EResult)8)
+#  define EOS_AlreadyPending           ((EOS_EResult)9)
+#  define EOS_InvalidParameters        ((EOS_EResult)10)
+#  define EOS_InvalidRequest           ((EOS_EResult)11)
+#  define EOS_UnrecognizedResponse     ((EOS_EResult)12)
+#  define EOS_IncompatibleVersion      ((EOS_EResult)13)
+#  define EOS_NotConfigured            ((EOS_EResult)14)
+#  define EOS_AlreadyConfigured        ((EOS_EResult)15)
+#  define EOS_NotImplemented           ((EOS_EResult)16)
+#  define EOS_Canceled                 ((EOS_EResult)17)
+#  define EOS_NotFound                 ((EOS_EResult)18)
+#  define EOS_OperationWillRetry       ((EOS_EResult)19)
+#  define EOS_NoChange                 ((EOS_EResult)20)
+#  define EOS_VersionMismatch          ((EOS_EResult)21)
+#  define EOS_LimitExceeded            ((EOS_EResult)22)
+#  define EOS_Duplicate                ((EOS_EResult)23)
+#  define EOS_MissingParameters        ((EOS_EResult)24)
+#  define EOS_InvalidSandboxId         ((EOS_EResult)25)
+#  define EOS_TimedOut                 ((EOS_EResult)26)
+#  define EOS_PartialResult            ((EOS_EResult)27)
+#  define EOS_Missing_Role             ((EOS_EResult)28)
+#  define EOS_Missing_Feature          ((EOS_EResult)29)
+#  define EOS_Invalid_Sandbox          ((EOS_EResult)30)
+#  define EOS_Invalid_Deployment       ((EOS_EResult)31)
+#  define EOS_Invalid_Product          ((EOS_EResult)32)
+#  define EOS_Invalid_ProductUserID    ((EOS_EResult)33)
+#  define EOS_ServiceFailure           ((EOS_EResult)34)
+#  define EOS_CacheDirectoryMissing    ((EOS_EResult)35)
+#  define EOS_CacheDirectoryInvalid    ((EOS_EResult)36)
+#  define EOS_InvalidState             ((EOS_EResult)37)
+#  define EOS_RequestInProgress        ((EOS_EResult)38)
+#  define EOS_ApplicationSuspended     ((EOS_EResult)39)
+#  define EOS_NetworkChanged           ((EOS_EResult)40)
 #endif // EOS_Success
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,20 +88,21 @@
 //  Used by the Connect subsystem for external account mapping queries.
 // ─────────────────────────────────────────────────────────────────────────────
 #ifndef EOS_EAT_EPIC
-#  define EOS_EAT_EPIC            0
-#  define EOS_EAT_STEAM           1
-#  define EOS_EAT_PSN             2
-#  define EOS_EAT_XBL             3
-#  define EOS_EAT_DISCORD         4
-#  define EOS_EAT_GOG             5
-#  define EOS_EAT_NINTENDO        6
-#  define EOS_EAT_UPLAY           7
-#  define EOS_EAT_OPENID          8
-#  define EOS_EAT_APPLE           9
-#  define EOS_EAT_GOOGLE          10
-#  define EOS_EAT_OCULUS          11
-#  define EOS_EAT_ITCHIO          12
-#  define EOS_EAT_AMAZON          13
+// Use explicit casts so these constants work with a C++ scoped enum class.
+#  define EOS_EAT_EPIC            ((EOS_EExternalAccountType)0)
+#  define EOS_EAT_STEAM           ((EOS_EExternalAccountType)1)
+#  define EOS_EAT_PSN             ((EOS_EExternalAccountType)2)
+#  define EOS_EAT_XBL             ((EOS_EExternalAccountType)3)
+#  define EOS_EAT_DISCORD         ((EOS_EExternalAccountType)4)
+#  define EOS_EAT_GOG             ((EOS_EExternalAccountType)5)
+#  define EOS_EAT_NINTENDO        ((EOS_EExternalAccountType)6)
+#  define EOS_EAT_UPLAY           ((EOS_EExternalAccountType)7)
+#  define EOS_EAT_OPENID          ((EOS_EExternalAccountType)8)
+#  define EOS_EAT_APPLE           ((EOS_EExternalAccountType)9)
+#  define EOS_EAT_GOOGLE          ((EOS_EExternalAccountType)10)
+#  define EOS_EAT_OCULUS          ((EOS_EExternalAccountType)11)
+#  define EOS_EAT_ITCHIO          ((EOS_EExternalAccountType)12)
+#  define EOS_EAT_AMAZON          ((EOS_EExternalAccountType)13)
 #endif // EOS_EAT_EPIC
 
 // ─────────────────────────────────────────────────────────────────────────────
