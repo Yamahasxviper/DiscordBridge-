@@ -354,7 +354,18 @@ void UBanEnforcementSubsystem::OnPUIDRegistered(const FString& PUID, APlayerCont
 void UBanEnforcementSubsystem::OnPUIDLookupDone(const FString& ExternalAccountId,
                                                   const FString& PUID)
 {
-    if (PUID.IsEmpty()) return;
+    if (PUID.IsEmpty())
+    {
+        // Lookup failed — clean up pending entries so they don't leak
+        // if EOS can never resolve a PUID for this external account.
+        PendingBySteam64.Remove(ExternalAccountId);
+        PendingEOSPropagation.Remove(ExternalAccountId);
+        PendingEOSUnban.Remove(ExternalAccountId);
+        UE_LOG(LogBanEnforcement, Verbose,
+            TEXT("OnPUIDLookupDone: empty PUID for '%s' — cleared pending entries."),
+            *ExternalAccountId);
+        return;
+    }
 
     UGameInstance* GI = GetGameInstance();
 

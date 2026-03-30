@@ -296,6 +296,15 @@ EExecutionStatus ASteamUnbanCommand::ExecuteCommand_Implementation(
 {
     const FString Steam64Id = Arguments[0];
 
+    if (!USteamBanSubsystem::IsValidSteam64Id(Steam64Id))
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanSystem] '%s' is not a valid Steam64 ID "
+                "(must be 17 digits starting with 7656119)."), *Steam64Id),
+            FLinearColor::Red);
+        return EExecutionStatus::BAD_ARGUMENTS;
+    }
+
     USteamBanSubsystem* Bans = BanCmdHelper::GetSteamBans(this);
     if (!Bans)
     {
@@ -442,7 +451,16 @@ EExecutionStatus AEOSUnbanCommand::ExecuteCommand_Implementation(
     const TArray<FString>& Arguments,
     const FString&         Label)
 {
-    const FString EOSID = Arguments[0];
+    const FString EOSID = Arguments[0].ToLower();
+
+    if (!UEOSBanSubsystem::IsValidEOSProductUserId(EOSID))
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanSystem] '%s' is not a valid EOS Product User ID "
+                "(must be 32 lowercase hex chars)."), *Arguments[0]),
+            FLinearColor::Red);
+        return EExecutionStatus::BAD_ARGUMENTS;
+    }
 
     UEOSBanSubsystem* Bans = BanCmdHelper::GetEOSBans(this);
     if (!Bans)
@@ -463,7 +481,7 @@ EExecutionStatus AEOSUnbanCommand::ExecuteCommand_Implementation(
             UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
             if (UBanEnforcementSubsystem* Enforcement = GI ? GI->GetSubsystem<UBanEnforcementSubsystem>() : nullptr)
             {
-                Enforcement->PropagateUnbanToSteamAsync(EOSID.ToLower());
+                Enforcement->PropagateUnbanToSteamAsync(EOSID);
             }
         }
 
