@@ -120,6 +120,15 @@ private:
     UFUNCTION()
     void OnPUIDLookupDone(const FString& ExternalAccountId, const FString& PUID);
 
+    /**
+     * Called when an async PUID→external account reverse lookup completes.
+     * Handles cross-platform Steam ban propagation (PropagateToSteamAsync path).
+     */
+    UFUNCTION()
+    void OnReverseLookupDone(const FString& PUID,
+                             const FString& ExternalAccountId,
+                             EEOSExternalAccountType AccountType);
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /** Kick a player who is on the ban list after they have already joined. */

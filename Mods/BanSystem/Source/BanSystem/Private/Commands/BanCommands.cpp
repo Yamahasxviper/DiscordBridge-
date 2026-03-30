@@ -559,6 +559,9 @@ EExecutionStatus ABanByNameCommand::ExecuteCommand_Implementation(
     const FString DurStr  = BanCmdHelper::FormatDuration(Duration);
     int32         BanCount = 0;
 
+    UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+    UBanEnforcementSubsystem* Enforcement = GI ? GI->GetSubsystem<UBanEnforcementSubsystem>() : nullptr;
+
     // ── Steam ban ──────────────────────────────────────────────────────────
     if (Ids.HasSteamId())
     {
@@ -571,6 +574,14 @@ EExecutionStatus ABanByNameCommand::ExecuteCommand_Implementation(
                     *Ids.Steam64Id, *DurStr),
                 FLinearColor::Green);
             ++BanCount;
+
+            // Cross-platform: if the EOS PUID was not immediately available,
+            // propagate the ban asynchronously via EOSSystem (cache-first, then
+            // async EOS query) so linked Epic accounts are also banned.
+            if (!Ids.HasEOSPuid() && Enforcement)
+            {
+                Enforcement->PropagateToEOSAsync(Ids.Steam64Id, Reason, Duration, Admin);
+            }
         }
     }
 
@@ -586,6 +597,14 @@ EExecutionStatus ABanByNameCommand::ExecuteCommand_Implementation(
                     *Ids.EOSProductUserId, *DurStr),
                 FLinearColor::Green);
             ++BanCount;
+
+            // Cross-platform: if the Steam64 ID was not immediately available,
+            // propagate the ban asynchronously via EOSSystem (cache-first, then
+            // async reverse lookup) so linked Steam accounts are also banned.
+            if (!Ids.HasSteamId() && Enforcement)
+            {
+                Enforcement->PropagateToSteamAsync(Ids.EOSProductUserId, Reason, Duration, Admin);
+            }
         }
     }
 
