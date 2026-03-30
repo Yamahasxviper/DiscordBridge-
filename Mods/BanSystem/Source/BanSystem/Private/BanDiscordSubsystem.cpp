@@ -1050,12 +1050,22 @@ void UBanDiscordSubsystem::HandleSteamBanCommand(const FString& Args,
 void UBanDiscordSubsystem::HandleSteamUnbanCommand(const FString& Args,
                                                     const FString& ChannelId)
 {
-	const FString Steam64Id = Args.TrimStartAndEnd();
-	if (Steam64Id.IsEmpty())
+	TArray<FString> Parts = SplitArgs(Args);
+	if (Parts.Num() == 0)
 	{
 		Reply(ChannelId,
 		      FString::Printf(TEXT(":warning: Usage: `%s <Steam64Id>`"),
 		                      *Config.SteamUnbanCommandPrefix));
+		return;
+	}
+
+	const FString Steam64Id = Parts[0];
+	if (!USteamBanSubsystem::IsValidSteam64Id(Steam64Id))
+	{
+		Reply(ChannelId,
+		      FString::Printf(TEXT(":x: `%s` is not a valid Steam64 ID "
+		                          "(must be 17 digits starting with 7656119)."),
+		                      *Steam64Id));
 		return;
 	}
 
@@ -1253,12 +1263,22 @@ void UBanDiscordSubsystem::HandleEOSBanCommand(const FString& Args,
 void UBanDiscordSubsystem::HandleEOSUnbanCommand(const FString& Args,
                                                   const FString& ChannelId)
 {
-	const FString EOSPUID = Args.TrimStartAndEnd();
-	if (EOSPUID.IsEmpty())
+	TArray<FString> Parts = SplitArgs(Args);
+	if (Parts.Num() == 0)
 	{
 		Reply(ChannelId,
 		      FString::Printf(TEXT(":warning: Usage: `%s <EOSProductUserId>`"),
 		                      *Config.EOSUnbanCommandPrefix));
+		return;
+	}
+
+	const FString EOSPUID = Parts[0].ToLower();
+	if (!UEOSBanSubsystem::IsValidEOSProductUserId(EOSPUID))
+	{
+		Reply(ChannelId,
+		      FString::Printf(TEXT(":x: `%s` is not a valid EOS Product User ID "
+		                          "(must be 32 lowercase hex chars)."),
+		                      *Parts[0]));
 		return;
 	}
 
@@ -1279,7 +1299,7 @@ void UBanDiscordSubsystem::HandleEOSUnbanCommand(const FString& Args,
 		// Cross-platform: remove any linked Steam ban.
 		if (UBanEnforcementSubsystem* Enforcement = GI ? GI->GetSubsystem<UBanEnforcementSubsystem>() : nullptr)
 		{
-			Enforcement->PropagateUnbanToSteamAsync(EOSPUID.ToLower());
+			Enforcement->PropagateUnbanToSteamAsync(EOSPUID);
 		}
 	}
 	else
