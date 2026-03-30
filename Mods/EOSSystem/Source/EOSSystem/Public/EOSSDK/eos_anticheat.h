@@ -14,8 +14,8 @@
 //  These _t aliases are used by FEOSSDKLoader for dynamic DLL symbol loading.
 // ─────────────────────────────────────────────────────────────────────────────
 
-typedef void        (EOS_CALL *EOS_AntiCheatServer_BeginSession_t)(EOS_HAntiCheatServer Handle, const EOS_AntiCheatServer_BeginSessionOptions* Options, void* ClientData, EOS_AntiCheatServer_OnBeginSessionCallback CompletionDelegate);
-typedef void        (EOS_CALL *EOS_AntiCheatServer_EndSession_t)(EOS_HAntiCheatServer Handle, const EOS_AntiCheatServer_EndSessionOptions* Options, void* ClientData, EOS_AntiCheatServer_OnEndSessionCallback CompletionDelegate);
+typedef EOS_EResult (EOS_CALL *EOS_AntiCheatServer_BeginSession_t)(EOS_HAntiCheatServer Handle, const EOS_AntiCheatServer_BeginSessionOptions* Options);
+typedef EOS_EResult (EOS_CALL *EOS_AntiCheatServer_EndSession_t)(EOS_HAntiCheatServer Handle, const EOS_AntiCheatServer_EndSessionOptions* Options);
 typedef void        (EOS_CALL *EOS_AntiCheatServer_RegisterConnectedClient_t)(EOS_HAntiCheatServer Handle, const EOS_AntiCheatServer_RegisterConnectedClientOptions* Options, void* ClientData, EOS_AntiCheatServer_OnClientConnectedCallback CompletionDelegate);
 typedef void        (EOS_CALL *EOS_AntiCheatServer_UnregisterConnectedClient_t)(EOS_HAntiCheatServer Handle, const EOS_AntiCheatServer_UnregisterConnectedClientOptions* Options, void* ClientData, EOS_AntiCheatServer_OnClientDisconnectedCallback CompletionDelegate);
 typedef EOS_EResult (EOS_CALL *EOS_AntiCheatServer_ReceiveMessageFromClient_t)(EOS_HAntiCheatServer Handle, const EOS_AntiCheatServer_ReceiveMessageFromClientOptions* Options);
