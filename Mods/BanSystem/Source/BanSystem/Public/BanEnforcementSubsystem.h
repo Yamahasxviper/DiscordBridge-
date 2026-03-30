@@ -44,11 +44,6 @@ class APlayerController;
  *    Triggered when PropagateToSteamAsync() issues a PUID→Steam64 query.
  *    Applies the complementary Steam ban once the Steam64 ID is resolved.
  *
- * 6. EOS Sanctions  (UEOSSanctionsSubsystem::OnSanctionsQueried)
- *    Fired asynchronously after every successful sanctions query.  When a
- *    player has active EOS platform sanctions, they are kicked even if they
- *    have no local ban entry.
- *
  * CROSS-PLATFORM BAN PROPAGATION
  * ──────────────────────────────
  * Call PropagateToEOSAsync() after issuing a Steam ban.
@@ -58,15 +53,6 @@ class APlayerController;
  * If the ID is not cached, an async EOS query is started and the ban is applied
  * automatically when the result arrives.  Both are no-ops if EOSSystem is not
  * installed or not ready.
- *
- * EOS SESSION LIFECYCLE
- * ─────────────────────
- * When a player's PUID is confirmed (after PostLogin or async lookup), the
- * subsystem calls three EOSSystem subsystems automatically:
- *   • UEOSMetricsSubsystem::BeginPlayerSession  — reports session start to Epic.
- *   • UEOSSessionsSubsystem::RegisterPlayers    — adds player to matchmaking session.
- *   • UEOSAntiCheatSubsystem::RegisterClient    — registers player with EOS Easy AC.
- * On player logout, the complementary End/Unregister calls are made automatically.
  */
 UCLASS()
 class BANSYSTEM_API UBanEnforcementSubsystem : public UGameInstanceSubsystem
@@ -134,39 +120,6 @@ private:
     UFUNCTION()
     void OnPUIDLookupDone(const FString& ExternalAccountId, const FString& PUID);
 
-    /**
-     * Called once per linked external account when an async PUID→external
-     * accounts reverse lookup completes.  Used to apply Steam bans after an
-     * EOS ban is issued (cross-platform propagation).
-     */
-    UFUNCTION()
-    void OnReverseLookupDone(const FString&           PUID,
-                             const FString&           ExternalAccountId,
-                             EEOSExternalAccountType  AccountType);
-
-    /**
-     * Called when UEOSSanctionsSubsystem::QuerySanctions completes.
-     * Kicks any still-connected player who has active EOS platform sanctions.
-     */
-    UFUNCTION()
-    void OnSanctionsQueryResult(const FString&                  PUID,
-                                const TArray<FEOSSanctionInfo>& Sanctions);
-
-    // ── EOSSystem session lifecycle ───────────────────────────────────────────
-
-    /**
-     * Called when a player's PUID has been confirmed (not banned, fully
-     * authenticated).  Registers the player with EOS Metrics, Sessions, and
-     * AntiCheat, and starts an async EOS sanctions check.
-     *
-     * @param PUID         32-char hex EOS Product User ID.
-     * @param PC           PlayerController for this player.
-     * @param DisplayName  In-game display name for Metrics telemetry.
-     */
-    void OnPlayerPUIDConfirmed(const FString& PUID,
-                               APlayerController* PC,
-                               const FString& DisplayName);
-
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /** Kick a player who is on the ban list after they have already joined. */
@@ -180,15 +133,6 @@ private:
     /** Optionally post a ban-kick notification to Discord if configured. */
     void PostBanKickDiscordNotification(const FString& PlayerId,
                                         const FString& Reason) const;
-
-    // ── Active player tracking ────────────────────────────────────────────────
-    //
-    // Maps EOS PUID → PlayerController for every player whose PUID has been
-    // confirmed this session.  Used to:
-    //   - Look up which PlayerController to kick when a sanctions query fires.
-    //   - Clean up Metrics/Sessions/AntiCheat registrations on logout.
-
-    TMap<FString, TWeakObjectPtr<APlayerController>> ActivePlayersByPUID;
 
     // ── Pending join-time ban checks ──────────────────────────────────────────
     // When a Steam player joins without an immediately-resolved EOS PUID, we
