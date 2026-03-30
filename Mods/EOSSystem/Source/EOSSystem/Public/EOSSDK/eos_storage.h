@@ -15,6 +15,21 @@
 #endif
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Fallback forward declarations for CSS engine EOS SDK.
+//  The CSS UE5.3.2 engine may ship an EOS SDK that omits the FileMetadata struct
+//  definitions used as out-parameters in the CopyFileMetadataByIndex functions.
+//  Guard on the API version constants defined alongside those structs in the
+//  real SDK so that we forward-declare only when the structs are absent.
+// ─────────────────────────────────────────────────────────────────────────────
+#ifndef EOS_PLAYERDATASTORAGE_FILEMETADATA_API_LATEST
+struct EOS_PlayerDataStorage_FileMetadata;
+#endif // EOS_PLAYERDATASTORAGE_FILEMETADATA_API_LATEST
+
+#ifndef EOS_TITLESTORAGE_FILEMETADATA_API_LATEST
+struct EOS_TitleStorage_FileMetadata;
+#endif // EOS_TITLESTORAGE_FILEMETADATA_API_LATEST
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  PlayerDataStorage interface function pointer typedefs
 //  These _t aliases are used by FEOSSDKLoader for dynamic DLL symbol loading.
 // ─────────────────────────────────────────────────────────────────────────────
