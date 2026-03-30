@@ -1,6 +1,6 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 //
-// EOSIdHelper.h  (module: EOSIdHelper, plugin: DummyHeaders)
+// EOSIdHelper.h  (module: EOSIdHelper, plugin: EOSSystem)
 //
 // Provides EOSId::GetProductUserId — a helper that extracts a player's EOS
 // Product User ID (PUID) from their FUniqueNetIdRepl for use in Satisfactory

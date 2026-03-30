@@ -35,7 +35,7 @@
 			"SemVersion": "^3.11.3"
 		},
 		{
-			"Name": "DummyHeaders",
+			"Name": "EOSSystem",
 			"Enabled": true,
 			"Optional": false,
 			"SemVersion": "^1.0.0"
