@@ -19,24 +19,25 @@
 //  Fallback EOS_EExternalCredentialType value constants (matching EOS SDK 1.15.x).
 // ─────────────────────────────────────────────────────────────────────────────
 #ifndef EOS_ECT_EPIC
-#  define EOS_ECT_EPIC                        0
-#  define EOS_ECT_STEAM_APP_TICKET            1
-#  define EOS_ECT_PSN_ID_TOKEN                2
-#  define EOS_ECT_XBL_XSTS_TOKEN              3
-#  define EOS_ECT_DISCORD_ACCESS_TOKEN        4
-#  define EOS_ECT_GOG_SESSION_TICKET          5
-#  define EOS_ECT_NINTENDO_ID_TOKEN           6
-#  define EOS_ECT_NINTENDO_NSA_ID_TOKEN       7
-#  define EOS_ECT_UPLAY_ACCESS_TOKEN          8
-#  define EOS_ECT_OPENID_ACCESS_TOKEN         9
-#  define EOS_ECT_DEVICEID_ACCESS_TOKEN       10
-#  define EOS_ECT_APPLE                       11
-#  define EOS_ECT_GOOGLE                      12
-#  define EOS_ECT_OCULUS_USERID_NONCE         13
-#  define EOS_ECT_ITCHIO_JWT                  14
-#  define EOS_ECT_ITCHIO_KEY                  15
-#  define EOS_ECT_EPIC_ID_TOKEN               16
-#  define EOS_ECT_AMAZON_ACCESS_TOKEN         17
+// Use explicit casts so these constants work with a C++ scoped enum class.
+#  define EOS_ECT_EPIC                        ((EOS_EExternalCredentialType)0)
+#  define EOS_ECT_STEAM_APP_TICKET            ((EOS_EExternalCredentialType)1)
+#  define EOS_ECT_PSN_ID_TOKEN                ((EOS_EExternalCredentialType)2)
+#  define EOS_ECT_XBL_XSTS_TOKEN              ((EOS_EExternalCredentialType)3)
+#  define EOS_ECT_DISCORD_ACCESS_TOKEN        ((EOS_EExternalCredentialType)4)
+#  define EOS_ECT_GOG_SESSION_TICKET          ((EOS_EExternalCredentialType)5)
+#  define EOS_ECT_NINTENDO_ID_TOKEN           ((EOS_EExternalCredentialType)6)
+#  define EOS_ECT_NINTENDO_NSA_ID_TOKEN       ((EOS_EExternalCredentialType)7)
+#  define EOS_ECT_UPLAY_ACCESS_TOKEN          ((EOS_EExternalCredentialType)8)
+#  define EOS_ECT_OPENID_ACCESS_TOKEN         ((EOS_EExternalCredentialType)9)
+#  define EOS_ECT_DEVICEID_ACCESS_TOKEN       ((EOS_EExternalCredentialType)10)
+#  define EOS_ECT_APPLE                       ((EOS_EExternalCredentialType)11)
+#  define EOS_ECT_GOOGLE                      ((EOS_EExternalCredentialType)12)
+#  define EOS_ECT_OCULUS_USERID_NONCE         ((EOS_EExternalCredentialType)13)
+#  define EOS_ECT_ITCHIO_JWT                  ((EOS_EExternalCredentialType)14)
+#  define EOS_ECT_ITCHIO_KEY                  ((EOS_EExternalCredentialType)15)
+#  define EOS_ECT_EPIC_ID_TOKEN               ((EOS_EExternalCredentialType)16)
+#  define EOS_ECT_AMAZON_ACCESS_TOKEN         ((EOS_EExternalCredentialType)17)
 #endif // EOS_ECT_EPIC
 
 // ─────────────────────────────────────────────────────────────────────────────
