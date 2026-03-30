@@ -1,6 +1,6 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 //
-// eos_platform.h  (module: EOSDirectSDK, plugin: DummyHeaders)
+// eos_platform.h  (module: EOSDirectSDK, plugin: EOSSystem)
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // STUB REPLACEMENT FOR THE MISSING EOS C SDK eos_platform.h

@@ -23,6 +23,21 @@
 	],
 	"Modules": [
 		{
+			"Name": "FGOnlineHelpers",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "EOSIdHelper",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "EOSDirectSDK",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
 			"Name": "EOSSystem",
 			"Type": "ServerOnly",
 			"LoadingPhase": "PostDefault"
@@ -33,6 +48,18 @@
 			"Name": "SML",
 			"Enabled": true,
 			"SemVersion": "^3.11.3"
+		},
+		{
+			"Name": "OnlineServices",
+			"Enabled": true
+		},
+		{
+			"Name": "OnlineServicesEOSGS",
+			"Enabled": true
+		},
+		{
+			"Name": "EOSShared",
+			"Enabled": true
 		}
 	]
 }

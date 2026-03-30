@@ -1,6 +1,6 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 //
-// EOSDirectSDK.h  (module: EOSDirectSDK, plugin: DummyHeaders)
+// EOSDirectSDK.h  (module: EOSDirectSDK, plugin: EOSSystem)
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // DEDICATED DIRECT EOS C SDK ACCESS MODULE FOR BANSYSTEM

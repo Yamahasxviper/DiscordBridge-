@@ -1,11 +1,11 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 //
-// EOSBanSDK.h  (module: EOSIdHelper, plugin: DummyHeaders)
+// EOSBanSDK.h  (module: EOSIdHelper, plugin: EOSSystem)
 //
 // COMPATIBILITY FORWARDER
 // ────────────────────────
 // Direct EOS C SDK access has been moved to its own dedicated module:
-//   EOSDirectSDK  (Mods/DummyHeaders/Source/EOSDirectSDK/)
+//   EOSDirectSDK  (Mods/EOSSystem/Source/EOSDirectSDK/)
 //
 // This header is kept so that any existing code using EOSBanSDK.h / the
 // EOSBanSDK:: namespace continues to compile without modification.

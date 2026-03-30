@@ -53,7 +53,7 @@ public class PLUGIN_NAME : ModuleRules
 
 		// Header stubs
 		PublicDependencyModuleNames.AddRange(new string[] {
-			"DummyHeaders",
+			"FGOnlineHelpers",
 		});
 
 		if (Target.Type == TargetRules.TargetType.Editor) {

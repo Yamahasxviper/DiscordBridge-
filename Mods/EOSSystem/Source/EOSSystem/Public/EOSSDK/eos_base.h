@@ -22,7 +22,7 @@
 // than the current directory (Public/EOSSDK/ is not an /I root).
 #include <eos_base.h>
 
-// Sentinel used by DummyHeaders' eos_platform.h to prevent EOS_HPlatform
+// Sentinel used by EOSSystem's EOSDirectSDK/eos_platform.h to prevent EOS_HPlatform
 // from being re-defined after this header has been processed.
 #ifndef EOS_HPlatform_DEFINED
 #define EOS_HPlatform_DEFINED
