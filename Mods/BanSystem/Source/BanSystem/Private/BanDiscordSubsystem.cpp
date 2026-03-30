@@ -1394,12 +1394,22 @@ void UBanDiscordSubsystem::HandleBanByNameCommand(const FString& Args,
 	UGameInstance* GI = GetGameInstance();
 	TArray<FString> BannedOn;
 
+	UBanEnforcementSubsystem* Enforcement = GI ? GI->GetSubsystem<UBanEnforcementSubsystem>() : nullptr;
+
 	if (Ids.HasSteamId())
 	{
 		USteamBanSubsystem* SteamBans = GI ? GI->GetSubsystem<USteamBanSubsystem>() : nullptr;
 		if (SteamBans && SteamBans->BanPlayer(Ids.Steam64Id, Reason, Duration, IssuedBy))
 		{
 			BannedOn.Add(FString::Printf(TEXT("Steam (`%s`)"), *Ids.Steam64Id));
+
+			// Cross-platform: if the EOS PUID was not immediately available,
+			// propagate the ban asynchronously via EOSSystem so linked Epic
+			// accounts are also banned.
+			if (!Ids.HasEOSPuid() && Enforcement)
+			{
+				Enforcement->PropagateToEOSAsync(Ids.Steam64Id, Reason, Duration, IssuedBy);
+			}
 		}
 	}
 
@@ -1409,6 +1419,14 @@ void UBanDiscordSubsystem::HandleBanByNameCommand(const FString& Args,
 		if (EOSBans && EOSBans->BanPlayer(Ids.EOSProductUserId, Reason, Duration, IssuedBy))
 		{
 			BannedOn.Add(FString::Printf(TEXT("EOS (`%s`)"), *Ids.EOSProductUserId));
+
+			// Cross-platform: if the Steam64 ID was not immediately available,
+			// propagate the ban asynchronously via EOSSystem so linked Steam
+			// accounts are also banned.
+			if (!Ids.HasSteamId() && Enforcement)
+			{
+				Enforcement->PropagateToSteamAsync(Ids.EOSProductUserId, Reason, Duration, IssuedBy);
+			}
 		}
 	}
 
