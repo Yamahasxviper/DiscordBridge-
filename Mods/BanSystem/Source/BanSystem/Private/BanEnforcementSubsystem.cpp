@@ -84,27 +84,31 @@ void UBanEnforcementSubsystem::Deinitialize()
     PostLoginHandle.Reset();
     LogoutHandle.Reset();
 
-    // Unsubscribe from EOSSystem events.
-    if (UEOSConnectSubsystem* EOS = GetGameInstance()->GetSubsystem<UEOSConnectSubsystem>())
+    // Unsubscribe from EOSSystem and ban-issued events.
+    if (UGameInstance* GI = GetGameInstance())
     {
-        EOS->OnPlayerPUIDRegistered.RemoveDynamic(this, &UBanEnforcementSubsystem::OnPUIDRegistered);
-        EOS->OnPUIDLookupComplete.RemoveDynamic(this,   &UBanEnforcementSubsystem::OnPUIDLookupDone);
-        EOS->OnReverseLookupComplete.RemoveDynamic(this, &UBanEnforcementSubsystem::OnReverseLookupDone);
-    }
+        if (UEOSConnectSubsystem* EOS = GI->GetSubsystem<UEOSConnectSubsystem>())
+        {
+            EOS->OnPlayerPUIDRegistered.RemoveDynamic(this, &UBanEnforcementSubsystem::OnPUIDRegistered);
+            EOS->OnPUIDLookupComplete.RemoveDynamic(this,   &UBanEnforcementSubsystem::OnPUIDLookupDone);
+            EOS->OnReverseLookupComplete.RemoveDynamic(this, &UBanEnforcementSubsystem::OnReverseLookupDone);
+        }
 
-    // Unsubscribe from ban-issued events.
-    if (USteamBanSubsystem* SteamBans = GetGameInstance()->GetSubsystem<USteamBanSubsystem>())
-    {
-        SteamBans->OnPlayerBanned.RemoveDynamic(this, &UBanEnforcementSubsystem::OnSteamPlayerBanned);
-    }
-    if (UEOSBanSubsystem* EOSBans = GetGameInstance()->GetSubsystem<UEOSBanSubsystem>())
-    {
-        EOSBans->OnPlayerBanned.RemoveDynamic(this, &UBanEnforcementSubsystem::OnEOSPlayerBanned);
+        if (USteamBanSubsystem* SteamBans = GI->GetSubsystem<USteamBanSubsystem>())
+        {
+            SteamBans->OnPlayerBanned.RemoveDynamic(this, &UBanEnforcementSubsystem::OnSteamPlayerBanned);
+        }
+        if (UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>())
+        {
+            EOSBans->OnPlayerBanned.RemoveDynamic(this, &UBanEnforcementSubsystem::OnEOSPlayerBanned);
+        }
     }
 
     PendingBySteam64.Empty();
     PendingEOSPropagation.Empty();
     PendingSteamPropagation.Empty();
+    PendingEOSUnban.Empty();
+    PendingSteamUnban.Empty();
 
     Super::Deinitialize();
 }
@@ -293,6 +297,8 @@ void UBanEnforcementSubsystem::OnPUIDRegistered(const FString& PUID, APlayerCont
     if (PUID.IsEmpty()) return;
 
     UGameInstance* GI = GetGameInstance();
+    if (!GI) return;
+
     UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>();
 
     // ── Fast path: use the PlayerController supplied by EOSConnectSubsystem ──
@@ -410,6 +416,26 @@ void UBanEnforcementSubsystem::OnPUIDLookupDone(const FString& ExternalAccountId
             }
         }
     }
+
+    // ── Cross-platform unban propagation ───────────────────────────────────
+    // Check whether a Steam unban was issued for this Steam64 ID and we should
+    // now remove the complementary EOS ban.
+    if (PendingEOSUnban.Contains(ExternalAccountId))
+    {
+        PendingEOSUnban.Remove(ExternalAccountId);
+
+        UEOSBanSubsystem* EOSBans = GI ? GI->GetSubsystem<UEOSBanSubsystem>() : nullptr;
+        if (EOSBans)
+        {
+            if (EOSBans->UnbanPlayer(PUID))
+            {
+                UE_LOG(LogBanEnforcement, Log,
+                    TEXT("OnPUIDLookupDone: cross-platform EOS unban applied — "
+                         "PUID %s (from Steam64 %s)."),
+                    *PUID, *ExternalAccountId);
+            }
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -423,6 +449,8 @@ void UBanEnforcementSubsystem::OnReverseLookupDone(const FString&          PUID,
     // We only need Steam accounts for cross-platform Steam ban propagation.
     if (AccountType != EEOSExternalAccountType::Steam || ExternalAccountId.IsEmpty()) return;
 
+    UGameInstance* GI = GetGameInstance();
+
     if (FPropagationEntry* Entry = PendingSteamPropagation.Find(PUID))
     {
         const FPropagationEntry Prop = *Entry;
@@ -430,7 +458,7 @@ void UBanEnforcementSubsystem::OnReverseLookupDone(const FString&          PUID,
 
         if (!USteamBanSubsystem::IsValidSteam64Id(ExternalAccountId)) return;
 
-        USteamBanSubsystem* SteamBans = GetGameInstance()->GetSubsystem<USteamBanSubsystem>();
+        USteamBanSubsystem* SteamBans = GI ? GI->GetSubsystem<USteamBanSubsystem>() : nullptr;
         if (SteamBans)
         {
             if (SteamBans->BanPlayer(ExternalAccountId, Prop.Reason, Prop.DurationMinutes, Prop.BannedBy))
@@ -445,6 +473,28 @@ void UBanEnforcementSubsystem::OnReverseLookupDone(const FString&          PUID,
                 UE_LOG(LogBanEnforcement, Warning,
                     TEXT("OnReverseLookupDone: failed to apply cross-platform Steam ban for %s."),
                     *ExternalAccountId);
+            }
+        }
+    }
+
+    // ── Cross-platform unban propagation ───────────────────────────────────
+    // Check whether an EOS unban was issued for this PUID and we should now
+    // remove the complementary Steam ban.
+    if (PendingSteamUnban.Contains(PUID))
+    {
+        PendingSteamUnban.Remove(PUID);
+
+        if (!USteamBanSubsystem::IsValidSteam64Id(ExternalAccountId)) return;
+
+        USteamBanSubsystem* SteamBans = GI ? GI->GetSubsystem<USteamBanSubsystem>() : nullptr;
+        if (SteamBans)
+        {
+            if (SteamBans->UnbanPlayer(ExternalAccountId))
+            {
+                UE_LOG(LogBanEnforcement, Log,
+                    TEXT("OnReverseLookupDone: cross-platform Steam unban applied — "
+                         "Steam64 %s (from PUID %s)."),
+                    *ExternalAccountId, *PUID);
             }
         }
     }
@@ -603,6 +653,64 @@ void UBanEnforcementSubsystem::PropagateToSteamAsync(const FString& PUID,
         TEXT("PropagateToSteamAsync: async reverse lookup triggered for PUID %s."), *PUID);
 }
 
+void UBanEnforcementSubsystem::PropagateUnbanToEOSAsync(const FString& Steam64Id)
+{
+    UGameInstance* GI = GetGameInstance();
+    UEOSConnectSubsystem* EOS = GI ? GI->GetSubsystem<UEOSConnectSubsystem>() : nullptr;
+    if (!EOS) return;
+
+    // Fast path: check the sync cache first.
+    FString CachedPUID;
+    if (FBanIdResolver::TryGetCachedPUIDFromSteam64(GI, Steam64Id, CachedPUID))
+    {
+        UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>();
+        if (EOSBans)
+        {
+            EOSBans->UnbanPlayer(CachedPUID);
+            UE_LOG(LogBanEnforcement, Log,
+                TEXT("PropagateUnbanToEOSAsync: cache hit — EOS unban applied for PUID %s (Steam64 %s)."),
+                *CachedPUID, *Steam64Id);
+        }
+        return;
+    }
+
+    // No cache hit — schedule the unban and trigger an async EOS lookup.
+    PendingEOSUnban.Add(Steam64Id);
+    EOS->LookupPUIDBySteam64(Steam64Id);
+
+    UE_LOG(LogBanEnforcement, Log,
+        TEXT("PropagateUnbanToEOSAsync: async PUID lookup triggered for Steam64 %s."), *Steam64Id);
+}
+
+void UBanEnforcementSubsystem::PropagateUnbanToSteamAsync(const FString& PUID)
+{
+    UGameInstance* GI = GetGameInstance();
+    UEOSConnectSubsystem* EOS = GI ? GI->GetSubsystem<UEOSConnectSubsystem>() : nullptr;
+    if (!EOS) return;
+
+    // Fast path: check the sync cache first.
+    FString CachedSteam64;
+    if (FBanIdResolver::TryGetCachedSteam64FromPUID(GI, PUID, CachedSteam64))
+    {
+        USteamBanSubsystem* SteamBans = GI->GetSubsystem<USteamBanSubsystem>();
+        if (SteamBans)
+        {
+            SteamBans->UnbanPlayer(CachedSteam64);
+            UE_LOG(LogBanEnforcement, Log,
+                TEXT("PropagateUnbanToSteamAsync: cache hit — Steam unban applied for %s (PUID %s)."),
+                *CachedSteam64, *PUID);
+        }
+        return;
+    }
+
+    // No cache hit — schedule the unban and trigger an async reverse lookup.
+    PendingSteamUnban.Add(PUID);
+    EOS->QueryExternalAccountsForPUID(PUID);
+
+    UE_LOG(LogBanEnforcement, Log,
+        TEXT("PropagateUnbanToSteamAsync: async reverse lookup triggered for PUID %s."), *PUID);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -626,8 +734,9 @@ FString UBanEnforcementSubsystem::BuildKickMessage(bool bIsEOSBan,
                                                      const FString& Reason) const
 {
     // Check for a custom kick reason override in BanDiscordSubsystem config.
+    UGameInstance* GI = GetGameInstance();
     UBanDiscordSubsystem* BanDiscord =
-        GetGameInstance()->GetSubsystem<UBanDiscordSubsystem>();
+        GI ? GI->GetSubsystem<UBanDiscordSubsystem>() : nullptr;
     if (BanDiscord)
     {
         const FString& Override = bIsEOSBan
@@ -644,8 +753,9 @@ FString UBanEnforcementSubsystem::BuildKickMessage(bool bIsEOSBan,
 void UBanEnforcementSubsystem::PostBanKickDiscordNotification(const FString& PlayerId,
                                                                const FString& Reason) const
 {
+    UGameInstance* GI = GetGameInstance();
     UBanDiscordSubsystem* BanDiscord =
-        GetGameInstance()->GetSubsystem<UBanDiscordSubsystem>();
+        GI ? GI->GetSubsystem<UBanDiscordSubsystem>() : nullptr;
     if (!BanDiscord) return;
 
     const FString& NotifyFmt = BanDiscord->GetConfig().BanKickDiscordMessage;

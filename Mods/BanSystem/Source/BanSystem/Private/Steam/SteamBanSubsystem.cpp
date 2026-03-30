@@ -38,14 +38,32 @@ namespace SteamBanJson
     static bool JsonToEntry(const TSharedPtr<FJsonObject>& Obj, FBanEntry& OutEntry)
     {
         if (!Obj) return false;
-        OutEntry.PlayerId     = Obj->GetStringField(KeyId);
-        OutEntry.Reason       = Obj->GetStringField(KeyReason);
-        OutEntry.BannedBy     = Obj->GetStringField(KeyBannedBy);
-        OutEntry.bIsPermanent = Obj->GetBoolField(KeyIsPermanent);
 
-        FDateTime::ParseIso8601(*Obj->GetStringField(KeyBannedAt),  OutEntry.BannedAt);
-        FDateTime::ParseIso8601(*Obj->GetStringField(KeyExpiresAt), OutEntry.ExpiresAt);
-        return !OutEntry.PlayerId.IsEmpty();
+        FString IdStr;
+        if (!Obj->TryGetStringField(KeyId, IdStr) || IdStr.IsEmpty()) return false;
+        OutEntry.PlayerId = IdStr;
+
+        FString ReasonStr;
+        Obj->TryGetStringField(KeyReason, ReasonStr);
+        OutEntry.Reason = ReasonStr;
+
+        FString BannedByStr;
+        Obj->TryGetStringField(KeyBannedBy, BannedByStr);
+        OutEntry.BannedBy = BannedByStr;
+
+        bool bIsPermanent = false;
+        Obj->TryGetBoolField(KeyIsPermanent, bIsPermanent);
+        OutEntry.bIsPermanent = bIsPermanent;
+
+        FString BannedAtStr;
+        if (Obj->TryGetStringField(KeyBannedAt, BannedAtStr))
+            FDateTime::ParseIso8601(*BannedAtStr, OutEntry.BannedAt);
+
+        FString ExpiresAtStr;
+        if (Obj->TryGetStringField(KeyExpiresAt, ExpiresAtStr))
+            FDateTime::ParseIso8601(*ExpiresAtStr, OutEntry.ExpiresAt);
+
+        return true;
     }
 } // namespace SteamBanJson
 

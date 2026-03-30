@@ -308,6 +308,17 @@ EExecutionStatus ASteamUnbanCommand::ExecuteCommand_Implementation(
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanSystem] Steam player %s has been unbanned."), *Steam64Id),
             FLinearColor::Green);
+
+        // Cross-platform: remove any linked EOS ban.
+        {
+            UWorld* World = GetWorld();
+            UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
+            if (UBanEnforcementSubsystem* Enforcement = GI ? GI->GetSubsystem<UBanEnforcementSubsystem>() : nullptr)
+            {
+                Enforcement->PropagateUnbanToEOSAsync(Steam64Id);
+            }
+        }
+
         return EExecutionStatus::COMPLETED;
     }
 
@@ -445,6 +456,17 @@ EExecutionStatus AEOSUnbanCommand::ExecuteCommand_Implementation(
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanSystem] EOS player %s has been unbanned."), *EOSID),
             FLinearColor::Green);
+
+        // Cross-platform: remove any linked Steam ban.
+        {
+            UWorld* World = GetWorld();
+            UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
+            if (UBanEnforcementSubsystem* Enforcement = GI ? GI->GetSubsystem<UBanEnforcementSubsystem>() : nullptr)
+            {
+                Enforcement->PropagateUnbanToSteamAsync(EOSID.ToLower());
+            }
+        }
+
         return EExecutionStatus::COMPLETED;
     }
 
