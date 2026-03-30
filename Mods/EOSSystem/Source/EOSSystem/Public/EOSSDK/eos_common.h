@@ -101,3 +101,14 @@
 #  define EOS_EAT_ITCHIO          12
 #  define EOS_EAT_AMAZON          13
 #endif // EOS_EAT_EPIC
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  EOS_INVALID_NOTIFICATIONID — sentinel value for invalid notification handles.
+//  Defined in the EOS SDK as 0.  The CSS engine's minimal eos_common.h may omit
+//  it; guard with #ifndef so the real SDK definition wins when present.
+//  Required by EOSConnectSubsystem.h member initialiser:
+//    EOS_NotificationId AuthExpiryNotif = EOS_INVALID_NOTIFICATIONID;
+// ─────────────────────────────────────────────────────────────────────────────
+#ifndef EOS_INVALID_NOTIFICATIONID
+#  define EOS_INVALID_NOTIFICATIONID 0
+#endif

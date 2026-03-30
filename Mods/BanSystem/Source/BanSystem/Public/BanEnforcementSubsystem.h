@@ -121,9 +121,11 @@ private:
     // ── EOSSystem dynamic delegate callbacks ──────────────────────────────────
     // Marked UFUNCTION so AddDynamic/RemoveDynamic work correctly.
 
-    /** Called by EOSSystem when a new PUID is tracked (on or just after PostLogin). */
+    /** Called by EOSSystem when a new PUID is tracked (on or just after PostLogin).
+     *  Controller is the PlayerController associated with this login, or nullptr
+     *  when triggered by a manual RegisterPlayerPUID() call. */
     UFUNCTION()
-    void OnPUIDRegistered(const FString& PUID);
+    void OnPUIDRegistered(const FString& PUID, APlayerController* Controller);
 
     /**
      * Called when an async Steam64→PUID lookup completes.

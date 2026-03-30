@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "EOSSDK/eos_sdk.h"
+#include "GameFramework/PlayerController.h"
 #include "EOSTypes.generated.h"
 
 // ─── Result wrapper ────────────────────────────────────────────────────────
@@ -22,19 +23,26 @@ enum class EEOSResult : uint8
 // Blueprint-friendly mirror of EOS_EExternalAccountType.
 // Values match the EOS C SDK enum exactly so they can be cast directly:
 //   static_cast<EOS_EExternalAccountType>(EEOSExternalAccountType::Steam)
+// Full mapping (EOS SDK 1.15.x):
+//   Epic=0, Steam=1, PSN=2, XBL=3, Discord=4, GOG=5, Nintendo=6,
+//   Uplay=7, OpenID=8, Apple=9, Google=10, Oculus=11, Itchio=12, Amazon=13
 UENUM(BlueprintType)
 enum class EEOSExternalAccountType : uint8
 {
-    Epic        = 0  UMETA(DisplayName="Epic Games"),
-    Steam       = 1  UMETA(DisplayName="Steam"),
-    PSN         = 2  UMETA(DisplayName="PlayStation Network"),
-    XBL         = 3  UMETA(DisplayName="Xbox Live"),
-    Discord     = 4  UMETA(DisplayName="Discord"),
-    GOG         = 5  UMETA(DisplayName="GOG"),
-    Nintendo    = 6  UMETA(DisplayName="Nintendo"),
-    Oculus      = 7  UMETA(DisplayName="Oculus/Meta"),
-    Itchio      = 8  UMETA(DisplayName="itch.io"),
-    Amazon      = 9  UMETA(DisplayName="Amazon"),
+    Epic        = 0   UMETA(DisplayName="Epic Games"),
+    Steam       = 1   UMETA(DisplayName="Steam"),
+    PSN         = 2   UMETA(DisplayName="PlayStation Network"),
+    XBL         = 3   UMETA(DisplayName="Xbox Live"),
+    Discord     = 4   UMETA(DisplayName="Discord"),
+    GOG         = 5   UMETA(DisplayName="GOG"),
+    Nintendo    = 6   UMETA(DisplayName="Nintendo"),
+    Uplay       = 7   UMETA(DisplayName="Ubisoft Connect"),
+    OpenID      = 8   UMETA(DisplayName="OpenID"),
+    Apple       = 9   UMETA(DisplayName="Apple"),
+    Google      = 10  UMETA(DisplayName="Google"),
+    Oculus      = 11  UMETA(DisplayName="Oculus/Meta"),
+    Itchio      = 12  UMETA(DisplayName="itch.io"),
+    Amazon      = 13  UMETA(DisplayName="Amazon"),
 };
 
 // ─── PUID wrapper ──────────────────────────────────────────────────────────
@@ -122,7 +130,11 @@ struct EOSSYSTEM_API FEOSFileInfo
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam (FOnEOSInitialized,         bool,                            bSuccess);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEOSSanctionsQueried,    const FString&,                  PUID,       const TArray<FEOSSanctionInfo>&, Sanctions);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEOSSessionUpdated,      const FString&,                  SessionName,bool,                           bSuccess);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam (FOnEOSPlayerRegistered,    const FString&,                  PUID);
+// FOnEOSPlayerRegistered carries the PlayerController so subscribers (e.g.
+// BanEnforcementSubsystem) can act on the matching player directly without
+// needing a world scan + FBanIdResolver re-resolve.  Controller may be nullptr
+// when RegisterPlayerPUID() is called manually (non-PostLogin path).
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEOSPlayerRegistered,    const FString&,                  PUID,       APlayerController*,             Controller);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam (FOnEOSPlayerUnregistered,  const FString&,                  PUID);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEOSStatIngested,        const FString&,                  StatName,   bool,                           bSuccess);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEOSAchievementUnlocked, const FString&,                  Id,         bool,                           bSuccess);

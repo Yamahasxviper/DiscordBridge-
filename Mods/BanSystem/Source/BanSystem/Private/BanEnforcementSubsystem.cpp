@@ -290,43 +290,59 @@ void UBanEnforcementSubsystem::OnPostLogin(AGameModeBase*    GameMode,
 //  PUID registered — catch late EOS PUID registrations after PostLogin
 // ─────────────────────────────────────────────────────────────────────────────
 
-void UBanEnforcementSubsystem::OnPUIDRegistered(const FString& PUID)
+void UBanEnforcementSubsystem::OnPUIDRegistered(const FString& PUID, APlayerController* Controller)
 {
     if (PUID.IsEmpty()) return;
 
     UGameInstance* GI = GetGameInstance();
     UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>();
 
-    UWorld* World = GI->GetWorld();
-    if (!World) return;
+    // ── Fast path: use the PlayerController supplied by EOSConnectSubsystem ──
+    // HandlePostLogin now extracts the PUID via UE::Online::GetProductUserId()
+    // and passes the matching PC directly, so we can skip the world scan.
+    APlayerController* PC = Controller;
 
-    // Find the PlayerController with this PUID by scanning the world.
-    for (TPlayerControllerIterator<APlayerController>::ServerAll It(World); It; ++It)
+    // ── Fallback: world scan (manual RegisterPlayerPUID calls, PC == nullptr) ─
+    // This path is a safety net for calls that don't originate from PostLogin.
+    // It relies on FBanIdResolver::Resolve() succeeding (V2 FAccountId players).
+    if (!PC)
     {
-        APlayerController* PC = *It;
-        if (!PC || !PC->PlayerState) continue;
+        UWorld* World = GI->GetWorld();
+        if (!World) return;
 
-        FResolvedBanId Ids = FBanIdResolver::Resolve(PC->PlayerState->GetUniqueId());
-        if (Ids.EOSProductUserId != PUID) continue;
-
-        // ── EOS ban check ──────────────────────────────────────────────────
-        if (EOSBans)
+        for (TPlayerControllerIterator<APlayerController>::ServerAll It(World); It; ++It)
         {
-            FString Reason;
-            if (EOSBans->IsPlayerBanned(PUID, Reason))
+            APlayerController* Candidate = *It;
+            if (!Candidate || !Candidate->PlayerState) continue;
+
+            FResolvedBanId Ids = FBanIdResolver::Resolve(Candidate->PlayerState->GetUniqueId());
+            if (Ids.EOSProductUserId == PUID)
             {
-                UE_LOG(LogBanEnforcement, Log,
-                    TEXT("OnPUIDRegistered: kicking EOS-banned player (PUID %s)."), *PUID);
-                KickBannedPlayer(PC, PUID, BuildKickMessage(true, Reason));
-                PostBanKickDiscordNotification(PUID, Reason);
-                return;
+                PC = Candidate;
+                break;
             }
         }
-
-        // Player is not banned — register with EOS services (sanctions/metrics/etc.)
-        OnPlayerPUIDConfirmed(PUID, PC, PC->PlayerState->GetPlayerName());
-        return;
     }
+
+    if (!PC) return;  // Player not (yet) in world — ban will be caught by PostLogin
+
+    // ── EOS ban check ──────────────────────────────────────────────────────
+    if (EOSBans)
+    {
+        FString Reason;
+        if (EOSBans->IsPlayerBanned(PUID, Reason))
+        {
+            UE_LOG(LogBanEnforcement, Log,
+                TEXT("OnPUIDRegistered: kicking EOS-banned player (PUID %s)."), *PUID);
+            KickBannedPlayer(PC, PUID, BuildKickMessage(true, Reason));
+            PostBanKickDiscordNotification(PUID, Reason);
+            return;
+        }
+    }
+
+    // Player is not banned — register with EOS services (sanctions/metrics/etc.)
+    OnPlayerPUIDConfirmed(PUID, PC,
+        (PC->PlayerState ? PC->PlayerState->GetPlayerName() : FString()));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
