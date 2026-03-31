@@ -1265,7 +1265,6 @@ void FSMLWebSocketRunnable::FlushOutboundQueue()
 			       TEXT("SMLWebSocket: SendWsFrame failed in FlushOutboundQueue — "
 			            "triggering reconnect."));
 			// Stop draining and let the run-loop detect the broken connection.
-			bStopRequested = false; // preserve reconnect eligibility
 			// Re-queue the failed message so it is not silently lost.
 			OutboundMessages.Enqueue(MoveTemp(Msg));
 			break;

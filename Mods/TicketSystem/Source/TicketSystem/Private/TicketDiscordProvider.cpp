@@ -52,9 +52,9 @@ void UTicketDiscordProvider::Connect(const FString& InBotToken,
 		GuildId = GuildIdOverride;
 	}
 
-	if (WebSocketClient && WebSocketClient->IsConnected())
+	if (WebSocketClient)
 	{
-		return; // Already connected.
+		return; // Already has a running socket (connected or reconnecting).
 	}
 
 	WebSocketClient = USMLWebSocketClient::CreateWebSocketClient(this);
@@ -106,6 +106,9 @@ void UTicketDiscordProvider::Disconnect()
 		WebSocketClient->OnError.RemoveDynamic(this,        &UTicketDiscordProvider::OnWebSocketError);
 		WebSocketClient->OnReconnecting.RemoveDynamic(this, &UTicketDiscordProvider::OnWebSocketReconnecting);
 
+		// Prevent the SMLWebSocket auto-reconnect runnable from silently
+		// re-opening the connection after we explicitly close it.
+		WebSocketClient->bAutoReconnect = false;
 		WebSocketClient->Close(1000, TEXT("TicketDiscordProvider shutting down"));
 		WebSocketClient = nullptr;
 	}
@@ -297,6 +300,11 @@ void UTicketDiscordProvider::HandleHello(const TSharedPtr<FJsonObject>& DataObj)
 	FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
 	bPendingHeartbeatAck = false;
 
+	// Cancel any pending deferred re-identify/resume ticker — Hello starts a
+	// fresh auth handshake so the old deferred operation is obsolete.
+	FTSTicker::GetCoreTicker().RemoveTicker(PendingReidentifyHandle);
+	PendingReidentifyHandle.Reset();
+
 	// One-shot ticker with random jitter before the first heartbeat, then start
 	// the regular interval ticker – mirrors the DiscordBridge approach.
 	const float JitterSeconds = FMath::FRandRange(0.0f, HeartbeatIntervalSeconds);
@@ -304,12 +312,18 @@ void UTicketDiscordProvider::HandleHello(const TSharedPtr<FJsonObject>& DataObj)
 		FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
 		{
 			SendHeartbeat();
-			HeartbeatTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
-				FTickerDelegate::CreateWeakLambda(this, [this](float DeltaTime) -> bool
-				{
-					return HeartbeatTick(DeltaTime);
-				}),
-				HeartbeatIntervalSeconds);
+			// Guard against the zombie-detection path in SendHeartbeat() having
+			// already reset HeartbeatTickerHandle to reconnect — in that case
+			// skip creating a new ticker here and let the next Hello do so.
+			if (HeartbeatTickerHandle.IsValid())
+			{
+				HeartbeatTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+					FTickerDelegate::CreateWeakLambda(this, [this](float DeltaTime) -> bool
+					{
+						return HeartbeatTick(DeltaTime);
+					}),
+					HeartbeatIntervalSeconds);
+			}
 			return false; // one-shot
 		}),
 		JitterSeconds);
@@ -407,6 +421,11 @@ void UTicketDiscordProvider::HandleReconnect()
 
 	FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
 	HeartbeatTickerHandle.Reset();
+	// Cancel any deferred re-identify timer from a prior op=9 to prevent a
+	// stale Identify firing on the freshly reconnected (and already
+	// authenticating) session, which would result in Discord close 4005.
+	FTSTicker::GetCoreTicker().RemoveTicker(PendingReidentifyHandle);
+	PendingReidentifyHandle.Reset();
 	bPendingHeartbeatAck = false;
 	bGatewayReady        = false;
 	BotUserId.Empty();

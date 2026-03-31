@@ -517,6 +517,11 @@ void UDiscordBridgeSubsystem::HandleHello(const TSharedPtr<FJsonObject>& DataObj
 	       TEXT("DiscordBridge: Hello received. Heartbeat interval: %.2f s"),
 	       HeartbeatIntervalSeconds);
 
+	// Cancel any pending deferred re-identify/resume ticker — Hello starts a
+	// fresh auth handshake so the old deferred operation is obsolete.
+	FTSTicker::GetCoreTicker().RemoveTicker(PendingReidentifyHandle);
+	PendingReidentifyHandle.Reset();
+
 	// Start heartbeating with a random jitter so that all bots don't hammer the
 	// Gateway simultaneously on mass-reconnects (Discord "thundering herd" concern).
 	// Strategy: one-shot ticker after a random [0, interval] delay fires the first
@@ -532,9 +537,15 @@ void UDiscordBridgeSubsystem::HandleHello(const TSharedPtr<FJsonObject>& DataObj
 		{
 			SendHeartbeat();
 			// Replace the one-shot handle with the regular repeating ticker.
-			HeartbeatTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
-				FTickerDelegate::CreateUObject(this, &UDiscordBridgeSubsystem::HeartbeatTick),
-				HeartbeatIntervalSeconds);
+			// Guard against the zombie-detection path in SendHeartbeat() having
+			// already reset HeartbeatTickerHandle to reconnect — in that case
+			// skip creating a new ticker here and let the next Hello do so.
+			if (HeartbeatTickerHandle.IsValid())
+			{
+				HeartbeatTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+					FTickerDelegate::CreateUObject(this, &UDiscordBridgeSubsystem::HeartbeatTick),
+					HeartbeatIntervalSeconds);
+			}
 			return false; // one-shot – do not repeat
 		}),
 		JitterSeconds);
@@ -636,6 +647,11 @@ void UDiscordBridgeSubsystem::HandleReconnect()
 	// so HandleHello can attempt op=6 Resume instead of a full Identify.
 	FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
 	HeartbeatTickerHandle.Reset();
+	// Cancel any deferred re-identify timer from a prior op=9 to prevent a
+	// stale Identify firing on the freshly reconnected (and already
+	// authenticating) session, which would result in Discord close 4005.
+	FTSTicker::GetCoreTicker().RemoveTicker(PendingReidentifyHandle);
+	PendingReidentifyHandle.Reset();
 	bPendingHeartbeatAck = false;
 	bGatewayReady        = false;
 	BotUserId.Empty();
@@ -940,13 +956,17 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 	       TEXT("DiscordBridge: Discord message received from '%s' (channel %s): %s"),
 	       *Username, *MsgChannelId, *Content);
 
-	// Helper: returns true if the Discord member holds the given required role.
-	// When RequiredRoleId is empty the command is disabled entirely – nobody
-	// can run it until a role ID is configured.  Note: WhitelistCommandRoleId
-	// does NOT grant game-join bypass; only WhitelistRoleId holders receive that
-	// via the role-member cache checked in OnPostLogin.
+	// Helper: returns true if the Discord member holds the given required role
+	// OR is the guild owner (who always has permission regardless of role config).
+	// When RequiredRoleId is empty and the sender is not the guild owner the
+	// command is disabled entirely — nobody can run it until a role ID is configured.
 	auto HasRequiredRole = [&](const FString& RequiredRoleId) -> bool
 	{
+		// Guild owner always has permission, even without a role configured.
+		if (!GuildOwnerId.IsEmpty() && AuthorId == GuildOwnerId)
+		{
+			return true;
+		}
 		if (RequiredRoleId.IsEmpty())
 		{
 			return false; // No role configured – command is disabled.

@@ -379,6 +379,19 @@ void UBanEnforcementSubsystem::OnPUIDRegistered(const FString& PUID, APlayerCont
 
     if (!PC) return;  // Player not (yet) in world — ban will be caught by PostLogin
 
+    // ── Clean up PendingBySteam64 for this player ─────────────────────────────
+    // OnPUIDLookupDone may fire later for the same Steam64 ID.  Remove the pending
+    // entry now so that OnPUIDLookupDone does not perform a redundant second ban
+    // check (and potentially a second kick) on the same PC.
+    if (PC->PlayerState)
+    {
+        FResolvedBanId PlayerIds = FBanIdResolver::Resolve(PC->PlayerState->GetUniqueId());
+        if (!PlayerIds.Steam64Id.IsEmpty())
+        {
+            PendingBySteam64.Remove(PlayerIds.Steam64Id);
+        }
+    }
+
     // ── EOS ban check ──────────────────────────────────────────────────────
     if (EOSBans)
     {
@@ -714,15 +727,26 @@ void UBanEnforcementSubsystem::PropagateToEOSAsync(const FString& Steam64Id,
     }
 
     // No cache hit — schedule the propagation and trigger an async EOS lookup.
+    // Guard against a concurrent call for the same Steam64 — in that case the
+    // lookup is already in flight, so just update the entry (second call's
+    // parameters win) without triggering a redundant second lookup.
+    const bool bAlreadyPending = PendingEOSPropagation.Contains(Steam64Id);
     FPropagationEntry& Entry = PendingEOSPropagation.FindOrAdd(Steam64Id);
     Entry.Reason          = Reason;
     Entry.DurationMinutes = DurationMinutes;
     Entry.BannedBy        = BannedBy;
 
-    EOS->LookupPUIDBySteam64(Steam64Id);
-
-    UE_LOG(LogBanEnforcement, Log,
-        TEXT("PropagateToEOSAsync: async PUID lookup triggered for Steam64 %s."), *Steam64Id);
+    if (!bAlreadyPending)
+    {
+        EOS->LookupPUIDBySteam64(Steam64Id);
+        UE_LOG(LogBanEnforcement, Log,
+            TEXT("PropagateToEOSAsync: async PUID lookup triggered for Steam64 %s."), *Steam64Id);
+    }
+    else
+    {
+        UE_LOG(LogBanEnforcement, Verbose,
+            TEXT("PropagateToEOSAsync: lookup already in flight for Steam64 %s — updated pending entry."), *Steam64Id);
+    }
 }
 
 void UBanEnforcementSubsystem::PropagateToSteamAsync(const FString& PUID,
@@ -750,15 +774,26 @@ void UBanEnforcementSubsystem::PropagateToSteamAsync(const FString& PUID,
     }
 
     // No cache hit — schedule the propagation and trigger an async reverse lookup.
+    // Guard against a concurrent call for the same PUID — in that case the
+    // lookup is already in flight, so just update the entry without triggering
+    // a redundant second lookup.
+    const bool bAlreadyPending = PendingSteamPropagation.Contains(PUID);
     FPropagationEntry& Entry = PendingSteamPropagation.FindOrAdd(PUID);
     Entry.Reason          = Reason;
     Entry.DurationMinutes = DurationMinutes;
     Entry.BannedBy        = BannedBy;
 
-    EOS->QueryExternalAccountsForPUID(PUID);
-
-    UE_LOG(LogBanEnforcement, Log,
-        TEXT("PropagateToSteamAsync: async reverse lookup triggered for PUID %s."), *PUID);
+    if (!bAlreadyPending)
+    {
+        EOS->QueryExternalAccountsForPUID(PUID);
+        UE_LOG(LogBanEnforcement, Log,
+            TEXT("PropagateToSteamAsync: async reverse lookup triggered for PUID %s."), *PUID);
+    }
+    else
+    {
+        UE_LOG(LogBanEnforcement, Verbose,
+            TEXT("PropagateToSteamAsync: lookup already in flight for PUID %s — updated pending entry."), *PUID);
+    }
 }
 
 void UBanEnforcementSubsystem::PropagateUnbanToEOSAsync(const FString& Steam64Id)
