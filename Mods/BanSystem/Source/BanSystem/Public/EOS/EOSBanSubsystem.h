@@ -127,6 +127,9 @@ public:
 private:
     void LoadBans();
     void SaveBans() const;
+    /** Creates a timestamped backup of the ban file in the Backups/ sub-directory
+     *  and prunes all but the most recent MaxBackups files. */
+    void BackupBans() const;
     FString GetBanFilePath() const;
 
     /** In-memory ban map: EOSProductUserId → FBanEntry */
