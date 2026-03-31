@@ -34,14 +34,6 @@ struct EOS_PlayerDataStorage_FileMetadata;
 struct EOS_TitleStorage_FileMetadata;
 #endif // EOS_TITLESTORAGE_FILEMETADATA_API_LATEST
 
-#ifndef EOS_PLAYERDATASTORAGE_COPYFILEMETADATABYINDEX_API_LATEST
-struct EOS_PlayerDataStorage_CopyFileMetadataByIndexOptions;
-#endif // EOS_PLAYERDATASTORAGE_COPYFILEMETADATABYINDEX_API_LATEST
-
-#ifndef EOS_TITLESTORAGE_COPYFILEMETADATABYINDEX_API_LATEST
-struct EOS_TitleStorage_CopyFileMetadataByIndexOptions;
-#endif // EOS_TITLESTORAGE_COPYFILEMETADATABYINDEX_API_LATEST
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  Fallback forward declarations for CopyFileMetadataByIndex options structs.
 //  The CSS UE5.3.2 engine may ship an EOS SDK that omits these option structs
