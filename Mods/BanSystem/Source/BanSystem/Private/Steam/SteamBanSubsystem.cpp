@@ -220,6 +220,14 @@ void USteamBanSubsystem::PruneExpiredBans()
         BanMap.Remove(Id);
         UE_LOG(LogSteamBanSystem, Log,
             TEXT("Pruned expired Steam ban for %s."), *Id);
+
+        // Notify subscribers that this player is no longer banned so that
+        // external mods (e.g. Discord notification bridges) can react.
+        OnPlayerUnbanned.Broadcast(Id);
+        if (NotificationProvider)
+        {
+            NotificationProvider->OnSteamPlayerUnbanned(Id);
+        }
     }
     if (ToRemove.Num() > 0)
         SaveBans();

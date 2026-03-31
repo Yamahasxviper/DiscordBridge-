@@ -146,7 +146,17 @@ private:
 	/** Format ban duration for user-facing messages. */
 	static FString FormatDuration(int32 DurationMinutes);
 
-	/** Split "arg0 arg1 arg2…" into an array of tokens. */
+	/**
+	 * Split a Discord command argument string into an array of tokens.
+	 *
+	 * Supports quoted strings so that multi-word player names can be passed as a
+	 * single token.  Double-quoted sequences are kept together with the surrounding
+	 * quotes removed, e.g.:
+	 *   Input:  !banbyname "John Doe" 60 reason
+	 *   Result: ["John Doe", "60", "reason"]
+	 *
+	 * Unquoted tokens are split on any whitespace (unchanged behaviour).
+	 */
 	static TArray<FString> SplitArgs(const FString& Input);
 
 	// ── Standalone Discord Gateway ────────────────────────────────────────────

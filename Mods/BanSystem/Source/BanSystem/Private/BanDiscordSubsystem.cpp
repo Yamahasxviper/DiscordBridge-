@@ -1378,8 +1378,9 @@ void UBanDiscordSubsystem::HandleBanByNameCommand(const FString& Args,
 	if (Parts.Num() == 0)
 	{
 		Reply(ChannelId,
-		      FString::Printf(TEXT(":warning: Usage: `%s <PlayerName> [duration_minutes] [reason]`"),
-		                      *Config.BanByNameCommandPrefix));
+		      FString::Printf(TEXT(":warning: Usage: `%s <PlayerName> [duration_minutes] [reason]`\n"
+		                           "Tip: wrap multi-word names in quotes — `%s \"John Doe\" 60 reason`"),
+		                      *Config.BanByNameCommandPrefix, *Config.BanByNameCommandPrefix));
 		return;
 	}
 
@@ -1390,7 +1391,46 @@ void UBanDiscordSubsystem::HandleBanByNameCommand(const FString& Args,
 		return;
 	}
 
-	const FString NameQuery = Parts[0];
+	// ── Resolve the player name from Parts ───────────────────────────────────
+	//
+	// Two approaches are tried in order:
+	//
+	// 1. Quoted names (recommended): The admin wraps the name in double quotes,
+	//    e.g. !banbyname "John Doe" 60 reason.  SplitArgs already stripped the
+	//    quotes, so Parts[0] is the full name and Parts[1..] hold duration/reason.
+	//
+	// 2. First-numeric heuristic (unquoted fallback): The first all-digit token
+	//    is treated as the start of the optional duration.  All Parts before it
+	//    are joined as the player name.  If no digit token exists, every Part is
+	//    the name (no duration or reason).
+
+	int32 DurationPartIdx = -1;
+	for (int32 i = 1; i < Parts.Num(); ++i) // start at 1 — Part[0] is always part of the name
+	{
+		if (Parts[i].IsNumeric())
+		{
+			DurationPartIdx = i;
+			break;
+		}
+	}
+
+	FString NameQuery;
+	int32   PartsStartForDuration;
+	if (DurationPartIdx < 0)
+	{
+		// No numeric part — all parts form the player name.
+		NameQuery             = FString::Join(Parts, TEXT(" "));
+		PartsStartForDuration = Parts.Num();
+	}
+	else
+	{
+		// Join everything before the first numeric part as the name.
+		TArray<FString> NameParts;
+		for (int32 i = 0; i < DurationPartIdx; ++i) NameParts.Add(Parts[i]);
+		NameQuery             = FString::Join(NameParts, TEXT(" "));
+		PartsStartForDuration = DurationPartIdx;
+	}
+
 	FResolvedBanId Ids;
 	FString PlayerName;
 	TArray<FString> Ambiguous;
@@ -1418,31 +1458,27 @@ void UBanDiscordSubsystem::HandleBanByNameCommand(const FString& Args,
 		return;
 	}
 
-	// Parse optional duration and reason.
+	// Parse optional duration and reason from Parts starting at PartsStartForDuration.
 	int32   Duration = 0;
 	FString Reason   = TEXT("Banned by server administrator");
-	if (Parts.Num() > 1)
+	if (PartsStartForDuration < Parts.Num())
 	{
-		if (Parts[1].IsNumeric())
+		if (Parts[PartsStartForDuration].IsNumeric())
 		{
-			Duration = FCString::Atoi(*Parts[1]);
-			if (Parts.Num() > 2)
+			Duration = FCString::Atoi(*Parts[PartsStartForDuration]);
+			if (PartsStartForDuration + 1 < Parts.Num())
 			{
 				TArray<FString> ReasonParts;
-				for (int32 i = 2; i < Parts.Num(); ++i)
-				{
+				for (int32 i = PartsStartForDuration + 1; i < Parts.Num(); ++i)
 					ReasonParts.Add(Parts[i]);
-				}
 				Reason = FString::Join(ReasonParts, TEXT(" "));
 			}
 		}
 		else
 		{
 			TArray<FString> ReasonParts;
-			for (int32 i = 1; i < Parts.Num(); ++i)
-			{
+			for (int32 i = PartsStartForDuration; i < Parts.Num(); ++i)
 				ReasonParts.Add(Parts[i]);
-			}
 			Reason = FString::Join(ReasonParts, TEXT(" "));
 		}
 	}
@@ -1755,6 +1791,42 @@ FString UBanDiscordSubsystem::FormatDuration(int32 DurationMinutes)
 TArray<FString> UBanDiscordSubsystem::SplitArgs(const FString& Input)
 {
 	TArray<FString> Parts;
-	Input.TrimStartAndEnd().ParseIntoArrayWS(Parts);
+	const FString Trimmed = Input.TrimStartAndEnd();
+	if (Trimmed.IsEmpty()) return Parts;
+
+	int32 i = 0;
+	const int32 Len = Trimmed.Len();
+	while (i < Len)
+	{
+		// Skip leading whitespace.
+		while (i < Len && FChar::IsWhitespace(Trimmed[i])) ++i;
+		if (i >= Len) break;
+
+		if (Trimmed[i] == TEXT('"'))
+		{
+			// Quoted token — collect characters until the matching closing quote
+			// or the end of the string.  This lets multi-word player names be
+			// passed as a single argument, e.g.:
+			//   !banbyname "John Doe" 60 reason
+			++i; // skip opening quote
+			FString Token;
+			while (i < Len && Trimmed[i] != TEXT('"'))
+			{
+				Token += Trimmed[i++];
+			}
+			if (i < Len) ++i; // skip closing quote
+			Parts.Add(Token);
+		}
+		else
+		{
+			// Unquoted token — collect until the next whitespace character.
+			FString Token;
+			while (i < Len && !FChar::IsWhitespace(Trimmed[i]))
+			{
+				Token += Trimmed[i++];
+			}
+			Parts.Add(Token);
+		}
+	}
 	return Parts;
 }
