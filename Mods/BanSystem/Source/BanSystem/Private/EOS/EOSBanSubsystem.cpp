@@ -2,6 +2,7 @@
 
 #include "EOS/EOSBanSubsystem.h"
 #include "Misc/FileHelper.h"
+#include "Misc/FileManager.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformFileManager.h"
 #include "Serialization/JsonReader.h"
@@ -77,6 +78,7 @@ void UEOSBanSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
     LoadBans();
+    BackupBans();
     PruneExpiredBans();
     UE_LOG(LogEOSBanSystem, Log,
         TEXT("EOS ban subsystem initialised — %d active ban(s) loaded from disk."),
@@ -344,6 +346,52 @@ void UEOSBanSubsystem::LoadBans()
         else
             UE_LOG(LogEOSBanSystem, Warning,
                 TEXT("LoadBans: failed to parse entry[%d] — skipped."), Idx);
+    }
+}
+
+void UEOSBanSubsystem::BackupBans() const
+{
+    const FString FilePath = GetBanFilePath();
+    IPlatformFile& PF = FPlatformFileManager::Get().GetPlatformFile();
+
+    // Nothing to back up if the live ban file does not exist yet.
+    if (!PF.FileExists(*FilePath))
+        return;
+
+    // Build the backup directory: <BanSystem>/Backups/
+    const FString BackupDir = FPaths::GetPath(FilePath) / TEXT("Backups");
+    if (!PF.DirectoryExists(*BackupDir))
+        PF.CreateDirectoryTree(*BackupDir);
+
+    // Timestamped filename — lexicographically sortable, filesystem-safe.
+    const FDateTime Now = FDateTime::UtcNow();
+    const FString Stamp = FString::Printf(TEXT("%04d-%02d-%02d_%02d-%02d-%02d"),
+        Now.GetYear(), Now.GetMonth(), Now.GetDay(),
+        Now.GetHour(), Now.GetMinute(), Now.GetSecond());
+    const FString BackupPath = BackupDir / FString::Printf(TEXT("EOSBans_%s.json"), *Stamp);
+
+    if (!PF.CopyFile(*BackupPath, *FilePath))
+    {
+        UE_LOG(LogEOSBanSystem, Warning,
+            TEXT("BackupBans: failed to create backup at %s"), *BackupPath);
+        return;
+    }
+
+    UE_LOG(LogEOSBanSystem, Log,
+        TEXT("BackupBans: ban list backed up to %s"), *BackupPath);
+
+    // Prune old backups — keep only the most recent MaxBackups files.
+    static constexpr int32 MaxBackups = 5;
+    TArray<FString> BackupFiles;
+    IFileManager::Get().FindFiles(BackupFiles, *(BackupDir / TEXT("*.json")), true, false);
+    BackupFiles.Sort();
+
+    const int32 NumToDelete = BackupFiles.Num() - MaxBackups;
+    for (int32 i = 0; i < NumToDelete; ++i)
+    {
+        PF.DeleteFile(*(BackupDir / BackupFiles[i]));
+        UE_LOG(LogEOSBanSystem, Verbose,
+            TEXT("BackupBans: pruned old backup %s"), *BackupFiles[i]);
     }
 }
 
