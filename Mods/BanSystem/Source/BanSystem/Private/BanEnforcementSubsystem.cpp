@@ -818,11 +818,23 @@ void UBanEnforcementSubsystem::PropagateUnbanToEOSAsync(const FString& Steam64Id
     }
 
     // No cache hit — schedule the unban and trigger an async EOS lookup.
+    // Guard against a concurrent call for the same Steam64 — in that case the
+    // lookup is already in flight, so just ensure the entry is present without
+    // triggering a redundant second lookup.
+    const bool bAlreadyPending = PendingEOSUnban.Contains(Steam64Id);
     PendingEOSUnban.Add(Steam64Id);
-    EOS->LookupPUIDBySteam64(Steam64Id);
 
-    UE_LOG(LogBanEnforcement, Log,
-        TEXT("PropagateUnbanToEOSAsync: async PUID lookup triggered for Steam64 %s."), *Steam64Id);
+    if (!bAlreadyPending)
+    {
+        EOS->LookupPUIDBySteam64(Steam64Id);
+        UE_LOG(LogBanEnforcement, Log,
+            TEXT("PropagateUnbanToEOSAsync: async PUID lookup triggered for Steam64 %s."), *Steam64Id);
+    }
+    else
+    {
+        UE_LOG(LogBanEnforcement, Verbose,
+            TEXT("PropagateUnbanToEOSAsync: lookup already in flight for Steam64 %s — skipped duplicate trigger."), *Steam64Id);
+    }
 }
 
 void UBanEnforcementSubsystem::PropagateUnbanToSteamAsync(const FString& PUID)
@@ -847,11 +859,23 @@ void UBanEnforcementSubsystem::PropagateUnbanToSteamAsync(const FString& PUID)
     }
 
     // No cache hit — schedule the unban and trigger an async reverse lookup.
+    // Guard against a concurrent call for the same PUID — in that case the
+    // lookup is already in flight, so just ensure the entry is present without
+    // triggering a redundant second lookup.
+    const bool bAlreadyPending = PendingSteamUnban.Contains(PUID);
     PendingSteamUnban.Add(PUID);
-    EOS->QueryExternalAccountsForPUID(PUID);
 
-    UE_LOG(LogBanEnforcement, Log,
-        TEXT("PropagateUnbanToSteamAsync: async reverse lookup triggered for PUID %s."), *PUID);
+    if (!bAlreadyPending)
+    {
+        EOS->QueryExternalAccountsForPUID(PUID);
+        UE_LOG(LogBanEnforcement, Log,
+            TEXT("PropagateUnbanToSteamAsync: async reverse lookup triggered for PUID %s."), *PUID);
+    }
+    else
+    {
+        UE_LOG(LogBanEnforcement, Verbose,
+            TEXT("PropagateUnbanToSteamAsync: lookup already in flight for PUID %s — skipped duplicate trigger."), *PUID);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
