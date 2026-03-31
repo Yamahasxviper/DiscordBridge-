@@ -18,35 +18,20 @@
 //       LNK1181: cannot open input file 'UnrealEditor-OnlineSubsystemEOS.lib'
 //   To re-enable: set OnlineSubsystemEOS enabled in FactoryGame.uproject, then
 //   set WITH_EOS_SUBSYSTEM_V1=1 in EOSIdHelper.Build.cs.
+//
+// IMPLEMENTATION NOTE
+// ────────────────────
+// GetProductUserId is a non-inline exported function (EOSIDHELPER_API).
+// The implementation lives in EOSIdHelper.cpp, which is the only translation
+// unit that includes OnlineIdEOSGS.h and EOSShared.h.  This prevents the
+// DLL-import symbols for UE::Online::GetProductUserId, EOS_ProductUserId_IsValid,
+// and LexToString from being pulled into every caller's .obj file and causing
+// unresolved-external linker errors (LNK2019) in consumer modules (e.g. BanSystem).
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/OnlineReplStructs.h"   // FUniqueNetIdRepl, IsV1/IsV2, GetV1/V2Unsafe
-
-#if WITH_EOS_SDK
-
-// EOS SDK — EOS_ProductUserId, EOS_EpicAccountId, EOS_ProductUserId_IsValid
-#if defined(EOS_PLATFORM_BASE_FILE_NAME)
-#include EOS_PLATFORM_BASE_FILE_NAME
-#endif
-#include "eos_common.h"
-
-// UE5 V2 — UE::Online::GetProductUserId(FAccountId) -> EOS_ProductUserId
-#include "Online/OnlineIdEOSGS.h"
-
-// EOSShared — LexToString(EOS_ProductUserId) -> FString
-#include "EOSShared.h"
-
-// V1 — IUniqueNetIdEOS interface for the legacy OnlineSubsystemEOS path.
-// Only compiled when WITH_EOS_SUBSYSTEM_V1=1 (controlled in EOSIdHelper.Build.cs).
-// OnlineSubsystemEOS is disabled in FactoryGame.uproject; keeping this guarded
-// lets the V1 code exist and compile without producing LNK1181.
-#if WITH_EOS_SUBSYSTEM_V1
-#include "OnlineSubsystemEOSTypesPublic.h"
-#endif
-
-#endif // WITH_EOS_SDK
+#include "GameFramework/OnlineReplStructs.h"   // FUniqueNetIdRepl
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOSId namespace
@@ -64,7 +49,7 @@
  *
  *   "00020aed06f0a6958c3c067fb4b73d51"
  *
- * Both the V2 (current) and V1 (legacy) paths are implemented below.
+ * Both the V2 (current) and V1 (legacy) paths are implemented in EOSIdHelper.cpp.
  * The V1 path is guarded by WITH_EOS_SUBSYSTEM_V1 (see EOSIdHelper.Build.cs).
  *
  * Usage in any server-side mod:
@@ -88,65 +73,7 @@ namespace EOSId
  * @param OutProductUserId  Receives the 32-char lowercase hex PUID on success.
  * @return true if a valid PUID was extracted; false otherwise.
  */
-inline bool GetProductUserId(const FUniqueNetIdRepl& UniqueId, FString& OutProductUserId)
-{
-    OutProductUserId.Empty();
-
-    if (!UniqueId.IsValid())
-        return false;
-
-#if WITH_EOS_SDK
-
-    // ── V2 path: FAccountId (OnlineServicesEOSGS) ────────────────────────────
-    // Every Satisfactory player with an active EOS session holds a V2 FAccountId.
-    if (UniqueId.IsV2())
-    {
-        const UE::Online::FAccountId& AccountId = UniqueId.GetV2Unsafe();
-        if (!AccountId.IsValid())
-            return false;
-
-        // Resolve FAccountId -> EOS_ProductUserId via the EOSGS registry.
-        const EOS_ProductUserId ProductUserId = UE::Online::GetProductUserId(AccountId);
-        if (!EOS_ProductUserId_IsValid(ProductUserId))
-            return false;
-
-        OutProductUserId = LexToString(ProductUserId);
-        return !OutProductUserId.IsEmpty();
-    }
-
-#if WITH_EOS_SUBSYSTEM_V1
-    // ── V1 path: FUniqueNetId of EOS type (OnlineSubsystemEOS) ──────────────
-    // Only compiled when OnlineSubsystemEOS is enabled and WITH_EOS_SUBSYSTEM_V1=1.
-    // Guards against static_cast to IUniqueNetIdEOS on non-EOS IDs (Steam, Null).
-    if (UniqueId.IsV1())
-    {
-        static const FName EosTypeName(TEXT("EOS"));
-        const FUniqueNetIdPtr& Ptr = UniqueId.GetV1Unsafe();
-        if (!Ptr.IsValid())
-            return false;
-
-        if (Ptr->GetType() != EosTypeName)
-            return false;  // Not a V1 EOS id (e.g. Steam, Null) — no PUID
-
-        // IUniqueNetIdEOS is the shared interface for all V1 EOS net-ids.
-        // The static_cast is safe here because GetType() == "EOS" confirms the type.
-        const IUniqueNetIdEOS* EosId = static_cast<const IUniqueNetIdEOS*>(Ptr.Get());
-        if (!EosId)
-            return false;
-
-        const EOS_ProductUserId ProductUserId = EosId->GetProductUserId();
-        if (!EOS_ProductUserId_IsValid(ProductUserId))
-            return false;
-
-        OutProductUserId = LexToString(ProductUserId);
-        return !OutProductUserId.IsEmpty();
-    }
-#endif // WITH_EOS_SUBSYSTEM_V1
-
-#endif // WITH_EOS_SDK
-
-    return false;
-}
+EOSIDHELPER_API bool GetProductUserId(const FUniqueNetIdRepl& UniqueId, FString& OutProductUserId);
 
 } // namespace EOSId
 

@@ -251,13 +251,7 @@ namespace EOSDirectSDK
  * @return Parsed EOS_ProductUserId handle; invalid (null) if PUIDStr is empty
  *         or malformed.
  */
-inline EOS_ProductUserId PUIDFromString(const FString& PUIDStr)
-{
-    if (PUIDStr.IsEmpty())
-        return nullptr;
-
-    return EOS_ProductUserId_FromString(TCHAR_TO_UTF8(*PUIDStr.ToLower()));
-}
+EOSDIRECTSDK_API EOS_ProductUserId PUIDFromString(const FString& PUIDStr);
 
 /**
  * Convert an EOS_ProductUserId handle to its 32-char lowercase hex string.
@@ -267,19 +261,7 @@ inline EOS_ProductUserId PUIDFromString(const FString& PUIDStr)
  * @param PUID  Handle to stringify.
  * @return 32-char lowercase hex string, or empty FString when PUID is invalid.
  */
-inline FString PUIDToString(EOS_ProductUserId PUID)
-{
-    if (EOS_ProductUserId_IsValid(PUID) != EOS_TRUE)
-        return FString();
-
-    // EOS_PRODUCTUSERID_MAX_LENGTH is 32 hex chars; 64 is a safe buffer.
-    char Buf[64] = {};
-    int32_t Len  = static_cast<int32_t>(sizeof(Buf));
-    if (EOS_ProductUserId_ToString(PUID, Buf, &Len) == EOS_Success)
-        return UTF8_TO_TCHAR(Buf);
-
-    return FString();
-}
+EOSDIRECTSDK_API FString PUIDToString(EOS_ProductUserId PUID);
 
 /**
  * Returns true when the EOS C SDK considers the handle to be a valid,
@@ -289,10 +271,7 @@ inline FString PUIDToString(EOS_ProductUserId PUID)
  *
  * @param PUID  Handle to validate.
  */
-inline bool IsValidHandle(EOS_ProductUserId PUID)
-{
-    return EOS_ProductUserId_IsValid(PUID) == EOS_TRUE;
-}
+EOSDIRECTSDK_API bool IsValidHandle(EOS_ProductUserId PUID);
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  2. EOS Platform Handle

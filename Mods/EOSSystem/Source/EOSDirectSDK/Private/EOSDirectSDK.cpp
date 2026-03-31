@@ -41,4 +41,35 @@ void UnregisterPlatformHandle()
     GEOSDirectSDKPlatform = nullptr;
 }
 
+#if WITH_EOS_SDK
+
+EOS_ProductUserId PUIDFromString(const FString& PUIDStr)
+{
+    if (PUIDStr.IsEmpty())
+        return nullptr;
+
+    return EOS_ProductUserId_FromString(TCHAR_TO_UTF8(*PUIDStr.ToLower()));
+}
+
+FString PUIDToString(EOS_ProductUserId PUID)
+{
+    if (EOS_ProductUserId_IsValid(PUID) != EOS_TRUE)
+        return FString();
+
+    // EOS_PRODUCTUSERID_MAX_LENGTH is 32 hex chars; 64 is a safe buffer.
+    char Buf[64] = {};
+    int32_t Len  = static_cast<int32_t>(sizeof(Buf));
+    if (EOS_ProductUserId_ToString(PUID, Buf, &Len) == EOS_Success)
+        return UTF8_TO_TCHAR(Buf);
+
+    return FString();
+}
+
+bool IsValidHandle(EOS_ProductUserId PUID)
+{
+    return EOS_ProductUserId_IsValid(PUID) == EOS_TRUE;
+}
+
+#endif // WITH_EOS_SDK
+
 } // namespace EOSDirectSDK
