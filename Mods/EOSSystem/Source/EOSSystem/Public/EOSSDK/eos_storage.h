@@ -35,6 +35,21 @@ struct EOS_TitleStorage_FileMetadata;
 #endif // EOS_TITLESTORAGE_FILEMETADATA_API_LATEST
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Fallback forward declarations for CopyFileMetadataByIndex options structs.
+//  The CSS UE5.3.2 engine may ship an EOS SDK that omits the CopyFileMetadataByIndex
+//  function and its associated options struct (added in later EOS SDK versions).
+//  Guard on the API version constant defined alongside those options structs in
+//  the real SDK so that we forward-declare only when the types are absent.
+// ─────────────────────────────────────────────────────────────────────────────
+#ifndef EOS_PLAYERDATASTORAGE_COPYFILEMETADATABYINDEX_API_LATEST
+struct EOS_PlayerDataStorage_CopyFileMetadataByIndexOptions;
+#endif // EOS_PLAYERDATASTORAGE_COPYFILEMETADATABYINDEX_API_LATEST
+
+#ifndef EOS_TITLESTORAGE_COPYFILEMETADATABYINDEX_API_LATEST
+struct EOS_TitleStorage_CopyFileMetadataByIndexOptions;
+#endif // EOS_TITLESTORAGE_COPYFILEMETADATABYINDEX_API_LATEST
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  PlayerDataStorage interface function pointer typedefs
 //  These _t aliases are used by FEOSSDKLoader for dynamic DLL symbol loading.
 // ─────────────────────────────────────────────────────────────────────────────

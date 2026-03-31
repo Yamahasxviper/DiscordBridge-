@@ -23,6 +23,22 @@ typedef void (EOS_CALL *EOS_AntiCheatServer_OnEndSessionCallback)(const EOS_Anti
 #endif // EOS_ANTICHEATSERVER_BEGINSESSIONCALLBACKINFO_API_LATEST
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Fallback callback types for RegisterConnectedClient / UnregisterConnectedClient.
+//  The CSS UE5.3.2 engine's EOS SDK may omit these callback typedefs introduced
+//  in later EOS SDK versions.  Guard on the API version constant defined
+//  alongside the ClientConnectedCallbackInfo struct in the real SDK.
+// ─────────────────────────────────────────────────────────────────────────────
+#ifndef EOS_ANTICHEATSERVER_CLIENTCONNECTEDCALLBACKINFO_API_LATEST
+struct EOS_AntiCheatServer_ClientConnectedCallbackInfo;
+typedef void (EOS_CALL *EOS_AntiCheatServer_OnClientConnectedCallback)(const EOS_AntiCheatServer_ClientConnectedCallbackInfo* Data);
+#endif // EOS_ANTICHEATSERVER_CLIENTCONNECTEDCALLBACKINFO_API_LATEST
+
+#ifndef EOS_ANTICHEATSERVER_CLIENTDISCONNECTEDCALLBACKINFO_API_LATEST
+struct EOS_AntiCheatServer_ClientDisconnectedCallbackInfo;
+typedef void (EOS_CALL *EOS_AntiCheatServer_OnClientDisconnectedCallback)(const EOS_AntiCheatServer_ClientDisconnectedCallbackInfo* Data);
+#endif // EOS_ANTICHEATSERVER_CLIENTDISCONNECTEDCALLBACKINFO_API_LATEST
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  AntiCheatServer interface function pointer typedefs
 //  These _t aliases are used by FEOSSDKLoader for dynamic DLL symbol loading.
 // ─────────────────────────────────────────────────────────────────────────────
