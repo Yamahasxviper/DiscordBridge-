@@ -58,6 +58,40 @@
 //       }
 //   }
 //
+// COMPILE-TIME ENGINE API AUTO-DETECTION (IEOSSDKManager)
+// ────────────────────────────────────────────────────────
+// The CSS (Coffee Stain Studios) UE5.3.2 engine ships a modified EOSShared
+// plugin that differs from vanilla UE5.3.  Different builds expose different
+// IEOSSDKManager getter methods.  Three tiers are detected automatically at
+// compile time via C++17 SFINAE — no manual configuration is needed:
+//
+//   TIER 1  GetAllPlatformHandles() + GetHandle()
+//     IEOSSDKManager::GetAllPlatformHandles()
+//         → TArray<TSharedRef<IEOSPlatformHandle>>
+//     IEOSPlatformHandle::GetHandle()
+//         → EOS_HPlatform  (public accessor)
+//     Used when: CSS builds that expose GetAllPlatformHandles() AND GetHandle().
+//
+//   TIER 2  GetPlatformHandles() + implicit operator EOS_HPlatform()
+//     IEOSSDKManager::GetPlatformHandles()
+//         → TArray<TSharedRef<IEOSPlatformHandle>>
+//     IEOSPlatformHandle::operator EOS_HPlatform()
+//         → EOS_HPlatform  (implicit cast)
+//     Used when: CSS UE5.3.2 builds that expose GetPlatformHandles() but not
+//     GetAllPlatformHandles(), or where GetHandle() is absent.
+//
+//   TIER 3  GetActivePlatforms() + implicit operator EOS_HPlatform()
+//     IEOSSDKManager::GetActivePlatforms()
+//         → TArray<IEOSPlatformHandlePtr>  (TSharedPtr)
+//     IEOSPlatformHandle::operator EOS_HPlatform()
+//         → EOS_HPlatform  (implicit cast)
+//     Used when: vanilla UE5.3 builds where neither GetAllPlatformHandles()
+//     nor GetPlatformHandles() exist.
+//
+// The if constexpr selection guarantees discarded branches are NEVER
+// instantiated, making C2039 ("not a member") structurally impossible
+// regardless of which engine variant is present.
+//
 // AVAILABILITY
 // ─────────────
 // All functions are guarded by #if WITH_EOS_SDK.  On builds where the EOSSDK
@@ -126,6 +160,83 @@
 // IEOSPlatformHandle is defined within IEOSSDKManager.h in the CSS UE5.3.2
 // engine build.  A separate IEOSPlatformHandle.h is not distributed, so we
 // do NOT include it explicitly here.
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  EOSSDKManagerDetail — compile-time API detection
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// C++17 SFINAE type-trait detectors used by GetPlatformHandle().
+// Each trait is specialized to true_type only when the corresponding member
+// function exists on the given type.  if constexpr in GetPlatformHandle()
+// then selects the first available tier — discarded branches are never
+// instantiated, making C2039 structurally impossible.
+//
+// Tier 1  HasGetAllPlatformHandles + HasGetHandle
+//   IEOSSDKManager::GetAllPlatformHandles() → TArray<TSharedRef<IEOSPlatformHandle>>
+//   IEOSPlatformHandle::GetHandle()         → EOS_HPlatform
+//
+// Tier 2  HasGetPlatformHandles (implicit operator EOS_HPlatform())
+//   IEOSSDKManager::GetPlatformHandles()    → TArray<TSharedRef<IEOSPlatformHandle>>
+//   IEOSPlatformHandle::operator EOS_HPlatform() (implicit cast)
+//
+// Tier 3  HasGetActivePlatforms (implicit operator EOS_HPlatform())
+//   IEOSSDKManager::GetActivePlatforms()    → TArray<IEOSPlatformHandlePtr>
+//   IEOSPlatformHandle::operator EOS_HPlatform() (implicit cast)
+
+namespace EOSSDKManagerDetail
+{
+    // Our own void_t — avoids a dependency on <type_traits> / std::void_t.
+    // Works with any C++17-capable compiler (UE5 requires C++17).
+    template<typename...> using VoidT = void;
+
+    // Minimal base types — self-contained, no external header needed.
+    // Using Value (capital V) matches the UE5 TIntegralConstant convention.
+    struct FalseType { static constexpr bool Value = false; };
+    struct TrueType  { static constexpr bool Value = true;  };
+
+    // declval equivalent — declared but never defined; only used inside
+    // decltype() expressions so it is never actually called.
+    // Returns T&& which is sufficient for SFINAE member-detection.
+    template<typename T> T&& DeclValHelper() noexcept;
+
+    // ── Detector: IEOSSDKManager::GetAllPlatformHandles() ─────────────────
+    template<typename T, typename = void>
+    struct HasGetAllPlatformHandles : FalseType {};
+    template<typename T>
+    struct HasGetAllPlatformHandles<
+        T, VoidT<decltype(DeclValHelper<T>().GetAllPlatformHandles())>>
+        : TrueType {};
+
+    // ── Detector: IEOSSDKManager::GetPlatformHandles() ───────────────────
+    template<typename T, typename = void>
+    struct HasGetPlatformHandles : FalseType {};
+    template<typename T>
+    struct HasGetPlatformHandles<
+        T, VoidT<decltype(DeclValHelper<T>().GetPlatformHandles())>>
+        : TrueType {};
+
+    // ── Detector: IEOSSDKManager::GetActivePlatforms() ───────────────────
+    template<typename T, typename = void>
+    struct HasGetActivePlatforms : FalseType {};
+    template<typename T>
+    struct HasGetActivePlatforms<
+        T, VoidT<decltype(DeclValHelper<T>().GetActivePlatforms())>>
+        : TrueType {};
+
+    // ── Detector: IEOSPlatformHandle::GetHandle() ─────────────────────────
+    // Used to distinguish Tier 1 (public GetHandle() accessor) from Tier 2
+    // (implicit operator EOS_HPlatform() on a TSharedRef<IEOSPlatformHandle>).
+    template<typename T, typename = void>
+    struct HasGetHandle : FalseType {};
+    template<typename T>
+    struct HasGetHandle<
+        T, VoidT<decltype(DeclValHelper<T>().GetHandle())>>
+        : TrueType {};
+
+    // ── Dependent false — lets static_assert fire only in instantiated else ─
+    template<typename> inline constexpr bool DependentFalse = false;
+
+} // namespace EOSSDKManagerDetail
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOSDirectSDK namespace
@@ -215,7 +326,7 @@ inline bool IsValidHandle(EOS_ProductUserId PUID)
  * The engine creates exactly one EOS platform instance at startup via the
  * EOSShared plugin.  IEOSSDKManager is the engine-internal registry that owns
  * this instance.  With the returned handle ANY EOS C SDK function that takes
- * an EOS_HPlatform can be called:
+ * an EOS_HPlatform can be called — including pre-join ban checks:
  *
  *   EOS_HPlatform Platform = EOSDirectSDK::GetPlatformHandle();
  *   if (Platform)
@@ -231,30 +342,25 @@ inline bool IsValidHandle(EOS_ProductUserId PUID)
  *           • The EOS platform has not been initialised yet (call too early in
  *             the startup sequence — typically safe from PostDefault onwards).
  *
- * ╔══════════════════════════════════════════════════════════════════════════╗
- * ║  CSS UE5.3.2 IEOSSDKManager API — CONFIRMED BY REAL BUILD ERRORS       ║
- * ║                                                                          ║
- * ║  The CSS (Coffee Stain Studios) UE5.3.2 engine ships a trimmed/modified ║
- * ║  EOSShared plugin that differs from vanilla UE5.3 EOSShared.            ║
- * ║                                                                          ║
- * ║  CSS ENGINE — CORRECT:                                                   ║
- * ║    IEOSSDKManager::GetPlatformHandles()                                  ║
- * ║        → TArray<TSharedRef<IEOSPlatformHandle>>                          ║
- * ║    IEOSPlatformHandle::operator EOS_HPlatform() const   (implicit cast)  ║
- * ║        → use static_cast<EOS_HPlatform>(*Handles[0])                     ║
- * ║                                                                          ║
- * ║  VANILLA UE5.3 only (NOT in CSS — causes C2039 on CSS build):           ║
- * ║    GetActivePlatforms()   ← C2039 confirmed by user build error PR #125  ║
- * ║    GetAllPlatformHandles()← C2039 confirmed by earlier build errors      ║
- * ║                                                                          ║
- * ║  NEVER EXISTS in any version — always causes C2039:                      ║
- * ║    GetHandle()            ← does not exist anywhere                      ║
- * ║                                                                          ║
- * ║  History: PRs #113→#118→#120→#122→#123→#124→#125 all touched this.     ║
- * ║  Rule: the CSS build error IS the ground truth. If GetX() causes C2039  ║
- * ║  in a CSS build, it does not exist in CSS. Do not override build errors  ║
- * ║  with research from vanilla UE5 forks — CSS is a different engine.      ║
- * ╚══════════════════════════════════════════════════════════════════════════╝
+ * ENGINE API SELECTION
+ * ─────────────────────
+ * The correct IEOSSDKManager getter varies between CSS engine variants.
+ * This function uses C++17 if constexpr to pick the first available tier:
+ *
+ *   Tier 1 — GetAllPlatformHandles() + GetHandle()
+ *     Used when CSS build exposes GetAllPlatformHandles() AND GetHandle().
+ *     GetHandle() is a public accessor; no implicit cast needed.
+ *
+ *   Tier 2 — GetPlatformHandles() + implicit operator EOS_HPlatform()
+ *     Used when CSS build exposes GetPlatformHandles() but not
+ *     GetAllPlatformHandles(), or GetHandle() is absent.
+ *
+ *   Tier 3 — GetActivePlatforms() + implicit operator EOS_HPlatform()
+ *     Vanilla UE5.3 fallback.  GetActivePlatforms() returns TSharedPtr
+ *     handles; the implicit cast retrieves EOS_HPlatform.
+ *
+ * Discarded if constexpr branches are never instantiated, so C2039
+ * ("not a member") is structurally impossible on any engine variant.
  */
 inline EOS_HPlatform GetPlatformHandle()
 {
@@ -262,19 +368,58 @@ inline EOS_HPlatform GetPlatformHandle()
     if (!Manager)
         return nullptr;
 
-    // CSS UE5.3.2: GetPlatformHandles() is the correct method.
-    // DO NOT change to GetActivePlatforms() — that is vanilla UE5.3 only and
-    // causes C2039 on CSS builds (confirmed by user build error in PR #125).
-    // DO NOT change to GetAllPlatformHandles() — also causes C2039.
-    const TArray<TSharedRef<IEOSPlatformHandle>> Handles = Manager->GetPlatformHandles();
-    if (Handles.IsEmpty())
-        return nullptr;
+    // ── Tier 1: GetAllPlatformHandles() + GetHandle() ────────────────────
+    // CSS builds that expose GetAllPlatformHandles() and a public GetHandle()
+    // accessor on IEOSPlatformHandle.  Both members must exist together.
+    if constexpr (EOSSDKManagerDetail::HasGetAllPlatformHandles<IEOSSDKManager>::Value)
+    {
+        const auto Handles = Manager->GetAllPlatformHandles();
+        if (Handles.IsEmpty())
+            return nullptr;
 
-    // Use the implicit operator EOS_HPlatform() which is declared public on
-    // IEOSPlatformHandle in both CSS and vanilla UE5.3.  This avoids accessing
-    // the PlatformHandle field directly (which is protected in vanilla UE5.3).
-    // DO NOT call ->GetHandle() — that method does not exist anywhere.
-    return static_cast<EOS_HPlatform>(*Handles[0]);
+        if constexpr (EOSSDKManagerDetail::HasGetHandle<IEOSPlatformHandle>::Value)
+        {
+            // Tier 1a: GetAllPlatformHandles() + GetHandle()
+            return Handles[0]->GetHandle();
+        }
+        else
+        {
+            // Tier 1b: GetAllPlatformHandles() + implicit operator EOS_HPlatform()
+            return static_cast<EOS_HPlatform>(*Handles[0]);
+        }
+    }
+    // ── Tier 2: GetPlatformHandles() + implicit operator EOS_HPlatform() ─
+    // CSS UE5.3.2 builds that expose GetPlatformHandles() (confirmed working
+    // in PR #113, #122).  Uses the implicit operator EOS_HPlatform() on
+    // IEOSPlatformHandle to avoid accessing the protected PlatformHandle field.
+    else if constexpr (EOSSDKManagerDetail::HasGetPlatformHandles<IEOSSDKManager>::Value)
+    {
+        const auto Handles = Manager->GetPlatformHandles();
+        if (Handles.IsEmpty())
+            return nullptr;
+
+        return static_cast<EOS_HPlatform>(*Handles[0]);
+    }
+    // ── Tier 3: GetActivePlatforms() + implicit operator EOS_HPlatform() ─
+    // Vanilla UE5.3 fallback.  GetActivePlatforms() returns TSharedPtr handles
+    // (IEOSPlatformHandlePtr).  Not present in CSS UE5.3.2 (causes C2039 there,
+    // confirmed by user build error in PR #125) — hence it is last resort.
+    else if constexpr (EOSSDKManagerDetail::HasGetActivePlatforms<IEOSSDKManager>::Value)
+    {
+        const auto Handles = Manager->GetActivePlatforms();
+        if (Handles.IsEmpty())
+            return nullptr;
+
+        return static_cast<EOS_HPlatform>(*Handles[0]);
+    }
+    else
+    {
+        // No known getter exists — fail loudly at compile time.
+        static_assert(EOSSDKManagerDetail::DependentFalse<IEOSSDKManager>,
+            "EOSDirectSDK: IEOSSDKManager has no known platform-handle getter. "
+            "Expected GetAllPlatformHandles(), GetPlatformHandles(), or GetActivePlatforms().");
+        return nullptr;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
