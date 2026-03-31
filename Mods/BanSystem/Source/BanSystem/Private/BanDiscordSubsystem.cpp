@@ -1640,7 +1640,13 @@ void UBanDiscordSubsystem::HandleCheckBanCommand(const FString& Args,
 		return;
 	}
 
-	const FString Input = Parts[0];
+	// For raw IDs (Steam64 / EOS PUID) the first token is the whole ID.
+	// For player name lookups we join all tokens so that multi-word names
+	// such as "John Doe" work without requiring quotes, matching the
+	// behaviour of the in-game /checkban command.
+	const FString Input = (Parts.Num() == 1)
+		? Parts[0]
+		: FString::Join(Parts, TEXT(" "));
 	UGameInstance* GI = GetGameInstance();
 
 	// ── Try Steam64 ID ────────────────────────────────────────────────────────
