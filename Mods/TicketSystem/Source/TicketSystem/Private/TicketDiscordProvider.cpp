@@ -81,6 +81,11 @@ void UTicketDiscordProvider::Disconnect()
 	FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
 	HeartbeatTickerHandle.Reset();
 
+	// Cancel any pending one-shot re-identify/resume ticker so it does not
+	// fire on a disconnected or GC'd object.
+	FTSTicker::GetCoreTicker().RemoveTicker(PendingReidentifyHandle);
+	PendingReidentifyHandle.Reset();
+
 	bGatewayReady        = false;
 	bPendingHeartbeatAck = false;
 	LastSequenceNumber   = -1;
@@ -92,6 +97,15 @@ void UTicketDiscordProvider::Disconnect()
 
 	if (WebSocketClient)
 	{
+		// Unbind all dynamic delegates BEFORE calling Close() — Close() may
+		// fire OnClosed synchronously, which would otherwise dereference the
+		// delegate bindings after we null the pointer below.
+		WebSocketClient->OnConnected.RemoveDynamic(this,    &UTicketDiscordProvider::OnWebSocketConnected);
+		WebSocketClient->OnMessage.RemoveDynamic(this,      &UTicketDiscordProvider::OnWebSocketMessage);
+		WebSocketClient->OnClosed.RemoveDynamic(this,       &UTicketDiscordProvider::OnWebSocketClosed);
+		WebSocketClient->OnError.RemoveDynamic(this,        &UTicketDiscordProvider::OnWebSocketError);
+		WebSocketClient->OnReconnecting.RemoveDynamic(this, &UTicketDiscordProvider::OnWebSocketReconnecting);
+
 		WebSocketClient->Close(1000, TEXT("TicketDiscordProvider shutting down"));
 		WebSocketClient = nullptr;
 	}
@@ -291,7 +305,10 @@ void UTicketDiscordProvider::HandleHello(const TSharedPtr<FJsonObject>& DataObj)
 		{
 			SendHeartbeat();
 			HeartbeatTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
-				FTickerDelegate::CreateUObject(this, &UTicketDiscordProvider::HeartbeatTick),
+				FTickerDelegate::CreateWeakLambda(this, [this](float DeltaTime) -> bool
+				{
+					return HeartbeatTick(DeltaTime);
+				}),
 				HeartbeatIntervalSeconds);
 			return false; // one-shot
 		}),
@@ -410,6 +427,23 @@ void UTicketDiscordProvider::HandleReconnect()
 
 void UTicketDiscordProvider::HandleInvalidSession(bool bResumable)
 {
+	// Stop the current heartbeat ticker.  Not stopping it here means that
+	// after HandleHello registers a new ticker (post-reconnect) both the old
+	// and new tickers run simultaneously, sending double heartbeats and risking
+	// Discord rate-limiting (4008) or unknown-opcode (4001) disconnects.
+	if (HeartbeatTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
+		HeartbeatTickerHandle.Reset();
+	}
+	// Also cancel any previous pending re-identify so we do not queue up
+	// multiple deferred reconnect callbacks.
+	if (PendingReidentifyHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(PendingReidentifyHandle);
+		PendingReidentifyHandle.Reset();
+	}
+
 	bGatewayReady = false;
 	BotUserId.Empty();
 
@@ -418,9 +452,10 @@ void UTicketDiscordProvider::HandleInvalidSession(bool bResumable)
 		UE_LOG(LogTicketDiscordProvider, Log,
 		       TEXT("TicketDiscordProvider: Invalid session (resumable) — "
 		            "scheduling Resume in 2 s."));
-		FTSTicker::GetCoreTicker().AddTicker(
+		PendingReidentifyHandle = FTSTicker::GetCoreTicker().AddTicker(
 			FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
 			{
+				PendingReidentifyHandle.Reset();
 				SendResume();
 				return false;
 			}),
@@ -440,9 +475,10 @@ void UTicketDiscordProvider::HandleInvalidSession(bool bResumable)
 		UE_LOG(LogTicketDiscordProvider, Warning,
 		       TEXT("TicketDiscordProvider: Invalid session (not resumable) — "
 		            "re-identifying in 2 s."));
-		FTSTicker::GetCoreTicker().AddTicker(
+		PendingReidentifyHandle = FTSTicker::GetCoreTicker().AddTicker(
 			FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
 			{
+				PendingReidentifyHandle.Reset();
 				SendIdentify();
 				return false;
 			}),

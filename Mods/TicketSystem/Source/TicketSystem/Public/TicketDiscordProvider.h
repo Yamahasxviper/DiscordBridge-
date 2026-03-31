@@ -168,6 +168,7 @@ private:
 	float HeartbeatIntervalSeconds = 41.25f;
 
 	FTSTicker::FDelegateHandle HeartbeatTickerHandle;
+	FTSTicker::FDelegateHandle PendingReidentifyHandle; ///< Deferred re-identify/resume one-shot ticker.
 
 	FTicketProviderInteractionDelegate OnInteraction;
 	FTicketProviderRawMessageDelegate  OnRawMessage;

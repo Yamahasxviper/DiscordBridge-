@@ -85,6 +85,10 @@ void UEOSBanSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UEOSBanSubsystem::Deinitialize()
 {
+    // Clear the notification provider BEFORE saving bans.  If PruneExpiredBans
+    // fires inside SaveBans it must not call back into a potentially torn-down
+    // UDiscordBridgeSubsystem via the dangling raw pointer.
+    NotificationProvider = nullptr;
     SaveBans();
     Super::Deinitialize();
 }

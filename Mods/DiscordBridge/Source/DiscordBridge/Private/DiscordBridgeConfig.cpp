@@ -855,6 +855,11 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 									+ (bHasCR ? TEXT("\r\n") : TEXT("\n"))
 									+ PrimaryContent.Mid(NL + 1);
 							}
+							else
+							{
+								// Last line in the file with no trailing newline — replace to end.
+								PrimaryContent = PrimaryContent.Left(At) + Prefix + Value;
+							}
 							return;
 						}
 						From = At + 1;
