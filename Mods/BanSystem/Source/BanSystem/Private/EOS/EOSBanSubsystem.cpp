@@ -376,14 +376,25 @@ void UEOSBanSubsystem::SaveBans() const
             TEXT("SaveBans: could not write temp file %s"), *TempPath);
         return;
     }
-    if (PF.FileExists(*FilePath))
-    {
-        PF.DeleteFile(*FilePath);
-    }
+
+    // Try the atomic rename first.  On POSIX the rename(2) syscall replaces the
+    // destination in a single atomic step; we never need to pre-delete.
+    // On Windows, MoveFile fails when the destination already exists, so we
+    // delete the old file and retry — but only after the temp write succeeded.
     if (!PF.MoveFile(*FilePath, *TempPath))
     {
-        UE_LOG(LogEOSBanSystem, Error,
-            TEXT("SaveBans: could not rename temp file to %s"), *FilePath);
-        PF.DeleteFile(*TempPath);
+        // Pre-delete the existing file (Windows path) and retry.
+        if (PF.FileExists(*FilePath))
+            PF.DeleteFile(*FilePath);
+
+        if (!PF.MoveFile(*FilePath, *TempPath))
+        {
+            // Leave the temp file in place — it contains the latest ban data and
+            // can be recovered manually.  Deleting it here would cause data loss.
+            UE_LOG(LogEOSBanSystem, Error,
+                TEXT("SaveBans: could not rename temp file to %s — "
+                     "ban data preserved in %s"),
+                *FilePath, *TempPath);
+        }
     }
 }
