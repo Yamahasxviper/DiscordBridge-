@@ -2,6 +2,7 @@
 #include "EOSSystemSubsystem.h"
 #include "EOSSDKLoader.h"
 #include "EOSSystemConfig.h"
+#include "EOSDirectSDK.h"
 #include "Engine/GameInstance.h"
 #include "Misc/Paths.h"
 #include "Math/UnrealMathUtility.h"
@@ -89,6 +90,10 @@ void UEOSSystemSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     PlatformHandle = SDK.fp_EOS_Platform_Create(&PlatOpts);
     if (!PlatformHandle) { UE_LOG(LogEOSSystemSub, Error, TEXT("EOS_Platform_Create returned null.")); return; }
 
+    // Register the handle so EOSDirectSDK::GetPlatformHandle() can return it
+    // without relying on IEOSSDKManager (absent in some CSS engine builds).
+    EOSDirectSDK::RegisterPlatformHandle(PlatformHandle);
+
     bPlatformReady = true;
     UE_LOG(LogEOSSystemSub, Log, TEXT("EOS Platform created successfully."));
     OnEOSInitialized.Broadcast(true);
@@ -97,6 +102,10 @@ void UEOSSystemSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 void UEOSSystemSubsystem::Deinitialize()
 {
     FEOSSDKLoader& SDK = FEOSSDKLoader::Get();
+
+    // Clear the registry before releasing — callers get nullptr immediately.
+    EOSDirectSDK::UnregisterPlatformHandle();
+
     if (PlatformHandle && SDK.fp_EOS_Platform_Release)
         SDK.fp_EOS_Platform_Release(PlatformHandle);
     PlatformHandle = nullptr;
