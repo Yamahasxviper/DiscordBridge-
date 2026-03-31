@@ -16,21 +16,43 @@
 //        EOSDirectSDK::PUIDToString(Handle)
 //        EOSDirectSDK::IsValidHandle(Handle)
 //
-//   2. ENGINE-OWNED EOS PLATFORM HANDLE
-//      Retrieves the EOS_HPlatform that Satisfactory's engine initialised.
-//      With this any EOS C SDK function can be called:
+//   2. EOS PLATFORM HANDLE
+//      Returns the EOS_HPlatform created and managed by UEOSSystemSubsystem.
+//      With this handle any EOS C SDK function can be called:
 //        EOSDirectSDK::GetPlatformHandle()   →  EOS_HPlatform
 //
 //   3. CONNECT INTERFACE SHORTCUT
 //      Direct access to EOS_HConnect for identity operations:
 //        EOSDirectSDK::GetConnectInterface() →  EOS_HConnect
 //
+//   4. PLATFORM REGISTRATION (called by UEOSSystemSubsystem only)
+//      The platform handle is registered once after EOS_Platform_Create and
+//      cleared before EOS_Platform_Release.  Callers other than
+//      UEOSSystemSubsystem must NOT call these:
+//        EOSDirectSDK::RegisterPlatformHandle(Handle)
+//        EOSDirectSDK::UnregisterPlatformHandle()
+//
+// ENGINE-AGNOSTIC DESIGN
+// ───────────────────────
+// Earlier revisions attempted to retrieve the engine's EOS platform via the
+// UE EOSShared plugin (IEOSSDKManager::Get()).  That API is absent or
+// structurally different in many CSS UE5.3.2 builds, causing recurring C2039
+// build errors regardless of which SFINAE tier was used.
+//
+// This revision takes a fully engine-agnostic approach:
+//   • UEOSSystemSubsystem creates its own EOS_HPlatform via FEOSSDKLoader
+//     (dynamic DLL loader, no dependency on any CSS engine EOS abstractions).
+//   • After creation it calls EOSDirectSDK::RegisterPlatformHandle(handle) to
+//     store the handle in a module-static variable defined in EOSDirectSDK.cpp.
+//   • GetPlatformHandle() reads that static — zero dependency on IEOSSDKManager,
+//     IEOSPlatformHandle, EOSShared, or any other engine-variant type.
+//
 // SEPARATION FROM EOSIdHelper
 // ────────────────────────────
 // EOSIdHelper extracts EOS PUIDs from UE's OnlineServices abstraction layer
 // (FUniqueNetIdRepl → PUID string).  EOSDirectSDK is conceptually different:
 // it skips the UE layer entirely and speaks directly to the EOS C SDK using
-// the engine-owned EOS_HPlatform handle.
+// the registered EOS_HPlatform handle.
 //
 // USAGE IN BANSYSTEM
 // ───────────────────
@@ -40,7 +62,7 @@
 //   EOS_ProductUserId PUIDHandle = EOSDirectSDK::PUIDFromString(StoredPUID);
 //   if (EOSDirectSDK::IsValidHandle(PUIDHandle))
 //   {
-//       // 2. Get the engine's EOS_HPlatform to call any EOS C SDK function:
+//       // 2. Get the registered EOS_HPlatform to call any EOS C SDK function:
 //       EOS_HPlatform Platform = EOSDirectSDK::GetPlatformHandle();
 //       if (Platform)
 //       {
@@ -60,9 +82,11 @@
 //
 // AVAILABILITY
 // ─────────────
-// All functions are guarded by #if WITH_EOS_SDK.  On builds where the EOSSDK
-// module is absent the header is a no-op — no compilation errors.  All
-// functions are inline — zero additional DLL calls.
+// PUID conversion helpers and platform accessors are guarded by #if WITH_EOS_SDK.
+// On builds where the EOSSDK module is absent the header is a no-op — no
+// compilation errors.  PUID helpers are inline; platform functions are
+// non-inline (defined in EOSDirectSDK.cpp) to keep the static registry
+// isolated from consumer translation units.
 
 #pragma once
 
@@ -117,118 +141,12 @@
 // real SDK uses) prevents any redeclaration conflicts.
 #include "eos_platform.h"
 
-// EOSShared helpers:
-//   LexToString(EOS_ProductUserId)  →  FString (32-char lowercase hex)
-//   IEOSSDKManager::Get()          →  singleton owning all engine EOS platforms
-//   IEOSPlatformHandle             →  thin wrapper around EOS_HPlatform
-#include "EOSShared.h"
-#include "IEOSSDKManager.h"
-// IEOSPlatformHandle is defined within IEOSSDKManager.h in the CSS UE5.3.2
-// engine build.  A separate IEOSPlatformHandle.h is not distributed, so we
-// do NOT include it explicitly here.
-
-// C++17 type traits — needed for the compile-time API-detection helper below.
-#include <type_traits>
-#include <utility>
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Compile-time IEOSSDKManager API detection
-//
-//  Satisfactory migrated from UE4 → UE5, so the CSS (Coffee Stain Studios)
-//  engine may carry older UE5 code alongside UE5.3.2 code.  Three API tiers
-//  are known across all UE4→UE5 EOSShared variants:
-//
-//  TIER 1 — CSS UE5.3.2 (CSS-specific, absent from vanilla UE5):
-//      GetPlatformHandles()  →  TArray<TSharedRef<IEOSPlatformHandle>>
-//
-//  TIER 2 — Vanilla UE 5.2 / UE5.3 (standard, absent from CSS):
-//      GetActivePlatforms()  →  TArray<IEOSPlatformHandlePtr>  (TSharedPtr)
-//
-//  TIER 3 — Early UE5 / UE4-era hybrid (no enumeration method at all):
-//      CreatePlatform(GetDefaultPlatformConfigName())  →  IEOSPlatformHandlePtr
-//      CreatePlatform() is idempotent — it returns the existing handle when a
-//      platform for that config name was already created, so calling it here
-//      is safe and has no side-effects on a running game.
-//
-//  GetPlatformHandle() below uses C++17 if-constexpr + these traits to pick
-//  the correct tier.  The discarded branches are never compiled, so none of
-//  them trigger C2039 on an engine that lacks that method.
-// ─────────────────────────────────────────────────────────────────────────────
-namespace EOSSDKManagerDetail
-{
-    // Tier 1: CSS UE5.3.2 — GetPlatformHandles() exists.
-    template <class T, class = void>
-    struct THasGetPlatformHandles : std::false_type {};
-    template <class T>
-    struct THasGetPlatformHandles<T,
-        std::void_t<decltype(std::declval<T&>().GetPlatformHandles())>>
-        : std::true_type {};
-
-    // Tier 2: Vanilla UE5.2+ — GetActivePlatforms() exists.
-    template <class T, class = void>
-    struct THasGetActivePlatforms : std::false_type {};
-    template <class T>
-    struct THasGetActivePlatforms<T,
-        std::void_t<decltype(std::declval<T&>().GetActivePlatforms())>>
-        : std::true_type {};
-
-    // Tier 3: Early UE5 / UE4-era hybrid — CreatePlatform(FString) exists.
-    // (CreatePlatform is present in every known UE5 and CSS variant as the
-    //  lowest-common-denominator platform-creation API.)
-    template <class T, class = void>
-    struct THasCreatePlatformByName : std::false_type {};
-    template <class T>
-    struct THasCreatePlatformByName<T,
-        std::void_t<decltype(std::declval<T&>().CreatePlatform(std::declval<const FString&>()))>>
-        : std::true_type {};
-
-    // -------------------------------------------------------------------------
-    //  Template dispatch helper
-    //
-    //  if constexpr only discards branches inside a TEMPLATE instantiation.
-    //  Placing the multi-tier selection inside this function template ensures
-    //  MSVC/Clang never compile — and therefore never report C2039 for —
-    //  methods that do not exist in the current engine's IEOSSDKManager.
-    // -------------------------------------------------------------------------
-    template <typename T>
-    inline EOS_HPlatform GetPlatformHandleFromManager(T* Manager)
-    {
-        if constexpr (THasGetPlatformHandles<T>::value)
-        {
-            // Tier 1 — CSS UE5.3.2: GetPlatformHandles() → TArray<TSharedRef<IEOSPlatformHandle>>
-            // TSharedRef is never null; IsEmpty() guard alone is sufficient.
-            const auto Handles = Manager->GetPlatformHandles();
-            if (Handles.IsEmpty())
-                return nullptr;
-            return static_cast<EOS_HPlatform>(*Handles[0]);
-        }
-        else if constexpr (THasGetActivePlatforms<T>::value)
-        {
-            // Tier 2 — Vanilla UE5.2+: GetActivePlatforms() → TArray<IEOSPlatformHandlePtr>
-            // IEOSPlatformHandlePtr is TSharedPtr — validate before dereferencing.
-            const auto Handles = Manager->GetActivePlatforms();
-            if (Handles.IsEmpty() || !Handles[0].IsValid())
-                return nullptr;
-            return static_cast<EOS_HPlatform>(*Handles[0]);
-        }
-        else if constexpr (THasCreatePlatformByName<T>::value)
-        {
-            // Tier 3 — Early UE5 / UE4-era hybrid: no list method available.
-            // CreatePlatform() is idempotent — returns the existing handle when
-            // the platform for that config name was already created by the engine.
-            const auto Handle = Manager->CreatePlatform(Manager->GetDefaultPlatformConfigName());
-            if (!Handle.IsValid())
-                return nullptr;
-            return static_cast<EOS_HPlatform>(*Handle);
-        }
-        else
-        {
-            // No known IEOSSDKManager enumeration API found.  Return nullptr so
-            // callers degrade gracefully rather than crashing.
-            return nullptr;
-        }
-    }
-} // namespace EOSSDKManagerDetail
+// NOTE: EOSShared.h and IEOSSDKManager.h are intentionally NOT included here.
+// The CSS UE5.3.2 engine ships varying versions of IEOSSDKManager — some
+// builds omit the header entirely, others have different method signatures.
+// Depending on either header caused recurring C2039 build failures.
+// GetPlatformHandle() now uses a module-static registry (EOSDirectSDK.cpp)
+// populated by UEOSSystemSubsystem, which is fully engine-agnostic.
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOSDirectSDK namespace
@@ -240,10 +158,15 @@ namespace EOSSDKManagerDetail
  * Dedicated namespace providing direct EOS C SDK access for BanSystem and
  * other Satisfactory server mods.
  *
- * All functions are inline.  Thread safety follows the EOS C SDK's own rules:
- * the stateless PUID helpers are safe on any thread; handle-based calls
- * (GetPlatformHandle, GetConnectInterface) must be made on the game thread
- * or under the same thread model that the engine uses for EOS operations.
+ * PUID conversion helpers (PUIDFromString, PUIDToString, IsValidHandle) are
+ * inline — they call EOS C SDK functions directly and require no platform.
+ *
+ * Platform functions (GetPlatformHandle, RegisterPlatformHandle,
+ * UnregisterPlatformHandle, GetConnectInterface) are non-inline; they are
+ * defined in EOSDirectSDK.cpp and exported from the EOSDirectSDK DLL.
+ *
+ * Thread safety: PUID helpers are safe on any thread.  Platform functions
+ * must be called on the game thread.
  *
  * PUID STRING FORMAT
  * ──────────────────
@@ -281,18 +204,23 @@ inline EOS_ProductUserId PUIDFromString(const FString& PUIDStr)
 /**
  * Convert an EOS_ProductUserId handle to its 32-char lowercase hex string.
  *
- * Uses LexToString() from EOSShared — the canonical UE5 way to render an
- * EOS_ProductUserId as a string.
+ * Uses EOS_ProductUserId_ToString() directly — no EOSShared dependency.
  *
  * @param PUID  Handle to stringify.
  * @return 32-char lowercase hex string, or empty FString when PUID is invalid.
  */
 inline FString PUIDToString(EOS_ProductUserId PUID)
 {
-    if (!EOS_ProductUserId_IsValid(PUID))
+    if (EOS_ProductUserId_IsValid(PUID) != EOS_TRUE)
         return FString();
 
-    return LexToString(PUID);
+    // EOS_PRODUCTUSERID_MAX_LENGTH is 32 hex chars; 64 is a safe buffer.
+    char Buf[64] = {};
+    int32_t Len  = static_cast<int32_t>(sizeof(Buf));
+    if (EOS_ProductUserId_ToString(PUID, Buf, &Len) == EOS_Success)
+        return UTF8_TO_TCHAR(Buf);
+
+    return FString();
 }
 
 /**
@@ -309,16 +237,22 @@ inline bool IsValidHandle(EOS_ProductUserId PUID)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  2. Engine EOS Platform Handle
+//  2. EOS Platform Handle
+//
+//  The handle is registered by UEOSSystemSubsystem after it calls
+//  EOS_Platform_Create() via FEOSSDKLoader.  This approach is fully
+//  engine-agnostic — it requires no IEOSSDKManager, IEOSPlatformHandle, or
+//  any other CSS engine-variant header.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Returns the EOS_HPlatform handle that Satisfactory's engine initialised.
+ * Returns the EOS_HPlatform handle registered by UEOSSystemSubsystem.
  *
- * The engine creates exactly one EOS platform instance at startup via the
- * EOSShared plugin.  IEOSSDKManager is the engine-internal registry that owns
- * this instance.  With the returned handle ANY EOS C SDK function that takes
- * an EOS_HPlatform can be called:
+ * The handle is valid once UEOSSystemSubsystem::Initialize() has completed
+ * successfully.  It becomes null again after UEOSSystemSubsystem::Deinitialize().
+ *
+ * With the returned handle ANY EOS C SDK function that takes an EOS_HPlatform
+ * can be called:
  *
  *   EOS_HPlatform Platform = EOSDirectSDK::GetPlatformHandle();
  *   if (Platform)
@@ -329,41 +263,36 @@ inline bool IsValidHandle(EOS_ProductUserId PUID)
  *       // ... call any EOS_<Interface>_* function
  *   }
  *
- * @return EOS_HPlatform handle owned by the engine.  Returns nullptr when:
- *           • EOSShared / IEOSSDKManager is not loaded, or
- *           • The EOS platform has not been initialised yet (call too early in
- *             the startup sequence — typically safe from PostDefault onwards).
- *
- * NOTE ON ENGINE-VARIANT API (three tiers — do NOT hardcode a single call)
- * ─────────────────────────────────────────────────────────────────────────
- * Satisfactory migrated UE4 → UE5, so the CSS engine may carry code from
- * multiple EOSShared generations.  Three tiers are detected at compile time
- * via if-constexpr (see EOSSDKManagerDetail above):
- *
- *   Tier 1  CSS UE5.3.2:   GetPlatformHandles()  → TArray<TSharedRef<…>>
- *   Tier 2  Vanilla UE5.2+: GetActivePlatforms() → TArray<IEOSPlatformHandlePtr>
- *   Tier 3  Early UE5/UE4: CreatePlatform(name)  → IEOSPlatformHandlePtr
- *
- * Only the matching tier is compiled; discarded branches never cause C2039.
+ * @return EOS_HPlatform handle owned by UEOSSystemSubsystem.  Returns nullptr
+ *         when UEOSSystemSubsystem has not yet created the platform or has
+ *         already released it.
  */
-inline EOS_HPlatform GetPlatformHandle()
-{
-    IEOSSDKManager* Manager = IEOSSDKManager::Get();
-    if (!Manager)
-        return nullptr;
+EOSDIRECTSDK_API EOS_HPlatform GetPlatformHandle();
 
-    // Delegate to the template helper so if constexpr operates inside a
-    // template instantiation — the only context where MSVC/Clang truly
-    // discards non-matching branches and never emits C2039 for them.
-    return EOSSDKManagerDetail::GetPlatformHandleFromManager(Manager);
-}
+/**
+ * Register the EOS_HPlatform handle created by UEOSSystemSubsystem.
+ *
+ * ONLY UEOSSystemSubsystem::Initialize() should call this.  Must be called
+ * immediately after EOS_Platform_Create() succeeds.
+ *
+ * @param Platform  The handle returned by EOS_Platform_Create().
+ */
+EOSDIRECTSDK_API void RegisterPlatformHandle(EOS_HPlatform Platform);
+
+/**
+ * Clear the registered EOS_HPlatform handle.
+ *
+ * ONLY UEOSSystemSubsystem::Deinitialize() should call this.  Must be called
+ * before EOS_Platform_Release().
+ */
+EOSDIRECTSDK_API void UnregisterPlatformHandle();
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  3. EOS Interface shortcuts
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Returns the EOS_HConnect interface for the engine's active EOS platform.
+ * Returns the EOS_HConnect interface for the registered EOS platform.
  *
  * EOS_HConnect is the entry point for EOS identity operations:
  *   • EOS_Connect_QueryExternalAccountMappings  — map external IDs to PUIDs
