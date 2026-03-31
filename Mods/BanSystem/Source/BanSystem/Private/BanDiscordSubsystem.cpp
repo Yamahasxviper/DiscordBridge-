@@ -103,8 +103,12 @@ void UBanDiscordSubsystem::SetCommandProvider(IBanDiscordCommandProvider* InProv
 		UE_LOG(LogBanDiscord, Log,
 		       TEXT("BanDiscordSubsystem: External provider cleared."));
 
-		// If we have a standalone bot token, reconnect the built-in Gateway.
-		if (!Config.BotToken.IsEmpty() && !bGatewayReady)
+		// If we have a standalone bot token, reconnect the built-in Gateway —
+		// but only when no WebSocket is already connecting or connected.
+		// Without the !WebSocketClient guard, clearing and immediately
+		// re-setting a provider would call Connect() while a previous
+		// connection was still in progress, potentially creating two sockets.
+		if (!Config.BotToken.IsEmpty() && !bGatewayReady && !WebSocketClient)
 		{
 			Connect();
 		}
@@ -309,12 +313,13 @@ void UBanDiscordSubsystem::OnWebSocketClosed(int32 StatusCode, const FString& Re
 	if (bTerminal && WebSocketClient)
 	{
 		// Disable auto-reconnect so the SMLWebSocket runnable does not
-		// silently re-open the connection after we force-close it here.
+		// silently re-open the connection after this close event.
 		// Without this the bot would loop endlessly, e.g. reconnecting
 		// every few seconds with an invalid token (close code 4004).
+		// We do NOT call Close() here — the connection is already closed
+		// (this IS the OnClosed callback); calling Close() again would be
+		// a no-op at best and could confuse the underlying transport.
 		WebSocketClient->bAutoReconnect = false;
-		WebSocketClient->Close(1000,
-			FString::Printf(TEXT("Terminal Discord close code %d"), StatusCode));
 	}
 
 	bGatewayReady        = false;
