@@ -6,6 +6,11 @@
 
 #pragma once
 
+// Ensure EOS_EResult, EOS_CALL, and other primitive EOS types are available
+// even when the real SDK headers omit eos_common.h from their transitive
+// includes (as seen in some CSS UE5.3.2 engine EOSSDK distributions).
+#include "eos_common.h"
+
 #if defined(__has_include) && __has_include(<eos_playerdatastorage.h>)
 #  include <eos_playerdatastorage.h>
 #endif
