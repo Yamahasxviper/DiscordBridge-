@@ -236,6 +236,16 @@ void UBanDiscordSubsystem::Disconnect()
 
 	if (WebSocketClient)
 	{
+		// Unbind all dynamic delegates BEFORE calling Close() — Close() may
+		// fire OnClosed synchronously (or very shortly after on the game
+		// thread), which would otherwise invoke a delegate on an object that
+		// is already being torn down, causing a crash or use-after-free when
+		// WebSocketClient has been set to nullptr.
+		WebSocketClient->OnConnected.RemoveDynamic(this, &UBanDiscordSubsystem::OnWebSocketConnected);
+		WebSocketClient->OnMessage.RemoveDynamic(this,   &UBanDiscordSubsystem::OnWebSocketMessage);
+		WebSocketClient->OnClosed.RemoveDynamic(this,    &UBanDiscordSubsystem::OnWebSocketClosed);
+		WebSocketClient->OnError.RemoveDynamic(this,     &UBanDiscordSubsystem::OnWebSocketError);
+
 		// Prevent the SMLWebSocket auto-reconnect runnable from silently
 		// re-opening the connection after we explicitly close it (e.g. when
 		// an external provider takes over, or during subsystem deinitialisation).

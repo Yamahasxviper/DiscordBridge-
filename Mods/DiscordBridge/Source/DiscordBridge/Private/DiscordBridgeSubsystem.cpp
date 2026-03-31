@@ -300,6 +300,16 @@ void UDiscordBridgeSubsystem::Disconnect()
 
 	if (WebSocketClient)
 	{
+		// Unbind all dynamic delegates BEFORE calling Close() — Close() may
+		// fire OnClosed synchronously, which would otherwise invoke a delegate
+		// on an object that is already being torn down.
+		WebSocketClient->OnConnected.RemoveDynamic(this,    &UDiscordBridgeSubsystem::OnWebSocketConnected);
+		WebSocketClient->OnMessage.RemoveDynamic(this,      &UDiscordBridgeSubsystem::OnWebSocketMessage);
+		WebSocketClient->OnClosed.RemoveDynamic(this,       &UDiscordBridgeSubsystem::OnWebSocketClosed);
+		WebSocketClient->OnError.RemoveDynamic(this,        &UDiscordBridgeSubsystem::OnWebSocketError);
+		WebSocketClient->OnReconnecting.RemoveDynamic(this, &UDiscordBridgeSubsystem::OnWebSocketReconnecting);
+
+		WebSocketClient->bAutoReconnect = false;
 		WebSocketClient->Close(1000, TEXT("Client shutting down"));
 		WebSocketClient = nullptr;
 	}

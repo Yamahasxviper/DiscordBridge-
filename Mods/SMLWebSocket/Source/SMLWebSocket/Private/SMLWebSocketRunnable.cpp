@@ -669,7 +669,11 @@ int32 FSMLWebSocketRunnable::SslRead(uint8* Buffer, int32 BufferSize)
 		const int32 Ret = SSL_read(SslInstance, Buffer, BufferSize);
 		if (Ret > 0)
 		{
-			FlushSslWriteBio(); // send any renegotiation records
+			// Send any TLS renegotiation records that SSL_read may have generated.
+			if (!FlushSslWriteBio())
+			{
+				return -1; // socket broken during renegotiation flush
+			}
 			return Ret;
 		}
 
@@ -734,7 +738,10 @@ bool FSMLWebSocketRunnable::SslWrite(const uint8* Data, int32 DataSize)
 		if (Ret > 0)
 		{
 			Written += Ret;
-			FlushSslWriteBio();
+			if (!FlushSslWriteBio())
+			{
+				return false; // socket broken; data flushed to BIO but not sent
+			}
 		}
 		else
 		{
