@@ -2,7 +2,7 @@
 
 #include "EOS/EOSBanSubsystem.h"
 #include "Misc/FileHelper.h"
-#include "Misc/FileManager.h"
+#include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformFileManager.h"
 #include "Serialization/JsonReader.h"
