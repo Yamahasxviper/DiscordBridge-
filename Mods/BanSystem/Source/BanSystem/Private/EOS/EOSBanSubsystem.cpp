@@ -168,6 +168,15 @@ EBanCheckResult UEOSBanSubsystem::CheckPlayerBan(const FString& EOSProductUserId
             TEXT("Timed ban for %s has expired — removing."), *Key);
         BanMap.Remove(Key);
         SaveBans();
+
+        // Notify subscribers so that external mods (e.g. Discord notification
+        // bridges) react to the expiry, consistent with PruneExpiredBans().
+        OnPlayerUnbanned.Broadcast(Key);
+        if (NotificationProvider)
+        {
+            NotificationProvider->OnEOSPlayerUnbanned(Key);
+        }
+
         return EBanCheckResult::BanExpired;
     }
 

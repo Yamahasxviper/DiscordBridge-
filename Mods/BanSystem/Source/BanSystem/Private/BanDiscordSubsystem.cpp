@@ -1774,10 +1774,24 @@ void UBanDiscordSubsystem::Reply(const FString& ChannelId, const FString& Messag
 {
 	if (!ChannelId.IsEmpty())
 	{
-		// SendDiscordChannelMessage is a virtual method on this subsystem — it
-		// routes to the external provider when one is active, otherwise uses the
-		// built-in standalone HTTP implementation.
-		SendDiscordChannelMessage(ChannelId, Message);
+		// Discord message content limit is 2000 characters.  Truncate here so
+		// that the REST call never receives a payload that would be rejected with
+		// a 400 error; the admin can always retrieve full details from the server
+		// logs or the ban-list command.
+		const int32 MaxLen = 2000;
+		if (Message.Len() > MaxLen)
+		{
+			static const FString Ellipsis = TEXT(" … (truncated)");
+			const FString Truncated = Message.Left(MaxLen - Ellipsis.Len()) + Ellipsis;
+			SendDiscordChannelMessage(ChannelId, Truncated);
+		}
+		else
+		{
+			// SendDiscordChannelMessage is a virtual method on this subsystem — it
+			// routes to the external provider when one is active, otherwise uses the
+			// built-in standalone HTTP implementation.
+			SendDiscordChannelMessage(ChannelId, Message);
+		}
 	}
 }
 

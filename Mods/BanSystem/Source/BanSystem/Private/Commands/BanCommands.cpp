@@ -255,7 +255,15 @@ EExecutionStatus ASteamBanCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::UNCOMPLETED;
     }
 
-    Bans->BanPlayer(Steam64Id, Reason, Duration, Sender->GetSenderName());
+    if (!Bans->BanPlayer(Steam64Id, Reason, Duration, Sender->GetSenderName()))
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanSystem] Failed to ban Steam ID %s — "
+                "the ID may be invalid or the subsystem encountered an error."),
+                *Steam64Id),
+            FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
 
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanSystem] Steam player %s banned %s. Reason: %s"),
@@ -413,7 +421,15 @@ EExecutionStatus AEOSBanCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::UNCOMPLETED;
     }
 
-    Bans->BanPlayer(EOSID, Reason, Duration, Sender->GetSenderName());
+    if (!Bans->BanPlayer(EOSID, Reason, Duration, Sender->GetSenderName()))
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanSystem] Failed to ban EOS PUID %s — "
+                "the ID may be invalid or the subsystem encountered an error."),
+                *EOSID),
+            FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
 
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanSystem] EOS player %s banned %s. Reason: %s"),
@@ -655,9 +671,8 @@ EExecutionStatus ABanByNameCommand::ExecuteCommand_Implementation(
     if (Ids.HasSteamId())
     {
         USteamBanSubsystem* SteamBans = BanCmdHelper::GetSteamBans(this);
-        if (SteamBans)
+        if (SteamBans && SteamBans->BanPlayer(Ids.Steam64Id, Reason, Duration, Admin))
         {
-            SteamBans->BanPlayer(Ids.Steam64Id, Reason, Duration, Admin);
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanSystem] Steam ID %s banned %s."),
                     *Ids.Steam64Id, *DurStr),
@@ -678,9 +693,8 @@ EExecutionStatus ABanByNameCommand::ExecuteCommand_Implementation(
     if (Ids.HasEOSPuid())
     {
         UEOSBanSubsystem* EOSBans = BanCmdHelper::GetEOSBans(this);
-        if (EOSBans)
+        if (EOSBans && EOSBans->BanPlayer(Ids.EOSProductUserId, Reason, Duration, Admin))
         {
-            EOSBans->BanPlayer(Ids.EOSProductUserId, Reason, Duration, Admin);
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanSystem] EOS PUID %s banned %s."),
                     *Ids.EOSProductUserId, *DurStr),

@@ -166,6 +166,15 @@ EBanCheckResult USteamBanSubsystem::CheckPlayerBan(const FString& Steam64Id, FBa
             TEXT("Timed ban for %s has expired — removing."), *Steam64Id);
         BanMap.Remove(Steam64Id);
         SaveBans();
+
+        // Notify subscribers so that external mods (e.g. Discord notification
+        // bridges) react to the expiry, consistent with PruneExpiredBans().
+        OnPlayerUnbanned.Broadcast(Steam64Id);
+        if (NotificationProvider)
+        {
+            NotificationProvider->OnSteamPlayerUnbanned(Steam64Id);
+        }
+
         return EBanCheckResult::BanExpired;
     }
 
