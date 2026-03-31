@@ -122,6 +122,38 @@ private:
     UFUNCTION()
     void OnLogout(AGameModeBase* GameMode, AController* Controller);
 
+    // ── Pre-join hook (Options string path) ──────────────────────────────────
+    //
+    // The CSS custom UE5.3.2 engine may not populate FUniqueNetIdRepl at
+    // PreLogin time with Steam or EOS identities, because the engine's online
+    // identity layer is not yet ready at that early stage.  To ensure banned
+    // players are still rejected before they enter the game world, we also hook
+    // AGameModeBase::PreLogin() directly — which exposes the raw connection
+    // Options string — and parse platform IDs from it as a fallback.
+    //
+    // The AFTER hook fires after ApproveLogin and the FGameModePreLoginEvent,
+    // so it sees the final ErrorMessage state and adds the Options-based check
+    // on top of the standard UniqueId-based check as a complementary layer.
+
+    /**
+     * Hook handler for AGameModeBase::PreLogin() (AFTER hook).
+     *
+     * Runs AFTER the original PreLogin body has completed (i.e., after
+     * ApproveLogin and the FGameModePreLoginEvent broadcast).
+     *
+     * Provides a complementary ban check for the CSS custom engine:
+     *  1. Returns early when ErrorMessage is already set (already rejected).
+     *  2. Attempts FBanIdResolver::Resolve(UniqueId) — standard UE5 path.
+     *  3. Falls back to FBanIdResolver::ParseIdsFromOptions(Options) when
+     *     FUniqueNetIdRepl is not populated by the CSS custom engine.
+     *  4. Sets ErrorMessage to reject the connection when the player is banned.
+     */
+    void OnPreLoginHook(AGameModeBase*         GameMode,
+                        const FString&         Options,
+                        const FString&         Address,
+                        const FUniqueNetIdRepl& UniqueId,
+                        FString&               ErrorMessage);
+
     // ── EOSSystem dynamic delegate callbacks ──────────────────────────────────
     // Marked UFUNCTION so AddDynamic/RemoveDynamic work correctly.
 
@@ -220,6 +252,15 @@ private:
     FDelegateHandle PreLoginHandle;
     FDelegateHandle PostLoginHandle;
     FDelegateHandle LogoutHandle;
+
+    /**
+     * Handle returned by SUBSCRIBE_METHOD_VIRTUAL on AGameModeBase::PreLogin.
+     * Installed in Initialize(); removed in Deinitialize() via UNSUBSCRIBE_METHOD.
+     * Provides access to the raw connection Options string so that player IDs
+     * can be parsed as a fallback when FUniqueNetIdRepl is not populated by the
+     * CSS custom engine at early PreLogin time.
+     */
+    FDelegateHandle PreLoginHookHandle;
 
     /** Periodic ticker that prunes expired bans from both subsystems. */
     FTSTicker::FDelegateHandle ExpiryPruneTickerHandle;

@@ -26,6 +26,9 @@
 #include "Steam/SteamBanSubsystem.h"
 #include "EOS/EOSBanSubsystem.h"
 #include "Engine/GameInstance.h"
+// UGameplayStatics::ParseOption — parses individual key=value pairs from a
+// URL-style options string (the format used by AGameModeBase::PreLogin Options).
+#include "Kismet/GameplayStatics.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogBanIdResolver, Log, All);
 
@@ -210,4 +213,72 @@ bool FBanIdResolver::TryGetCachedSteam64FromPUID(UGameInstance* GameInstance,
         TEXT("TryGetCachedSteam64FromPUID: EOSSystem cache hit — PUID '%s' → Steam64 '%s'"),
         *PUID, *OutSteam64Id);
     return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Connection options parsing (pre-join identity extraction)
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool FBanIdResolver::ParseIdsFromOptions(const FString& Options, FResolvedBanId& OutIds)
+{
+    if (Options.IsEmpty()) return false;
+
+    // Parameter names that may contain a player's platform identity in the
+    // connection options string passed to AGameModeBase::PreLogin().
+    // The CSS custom engine may use any of these; we try all of them so that
+    // both standard UE5 and CSS-specific encodings are covered.
+    static const TArray<FString> KnownKeys =
+    {
+        TEXT("UniqueId"),          // Standard UE5: ?UniqueId=Steam:765... or ?UniqueId=00020a...
+        TEXT("SteamId"),           // CSS fallback: explicit Steam64 parameter
+        TEXT("EpicAccountId"),     // CSS fallback: explicit EOS PUID parameter
+        TEXT("EosProductUserId"),  // CSS fallback: explicit EOS PUID parameter
+    };
+
+    for (const FString& Key : KnownKeys)
+    {
+        const FString RawValue = UGameplayStatics::ParseOption(Options, Key);
+        if (RawValue.IsEmpty()) continue;
+
+        // Strip known platform prefixes so we get the raw ID value.
+        // Standard UE5 encodes these as "Steam:76561198..." or "EOS:00020a...".
+        FString Value = RawValue;
+        if (Value.StartsWith(TEXT("Steam:"), ESearchCase::IgnoreCase))
+        {
+            Value = Value.Mid(6); // strip "Steam:"
+        }
+        else if (Value.StartsWith(TEXT("EOS:"), ESearchCase::IgnoreCase))
+        {
+            Value = Value.Mid(4); // strip "EOS:"
+        }
+
+        if (Value.IsEmpty()) continue;
+
+        // ── Try as Steam64 ID ────────────────────────────────────────────
+        if (OutIds.Steam64Id.IsEmpty() && USteamBanSubsystem::IsValidSteam64Id(Value))
+        {
+            OutIds.Steam64Id = Value;
+            UE_LOG(LogBanIdResolver, Verbose,
+                TEXT("ParseIdsFromOptions: extracted Steam64 '%s' from option '%s'"),
+                *Value, *Key);
+            continue;
+        }
+
+        // ── Try as EOS Product User ID ───────────────────────────────────
+        if (OutIds.EOSProductUserId.IsEmpty() && UEOSBanSubsystem::IsValidEOSProductUserId(Value))
+        {
+            OutIds.EOSProductUserId = Value.ToLower();
+            UE_LOG(LogBanIdResolver, Verbose,
+                TEXT("ParseIdsFromOptions: extracted EOS PUID '%s' from option '%s'"),
+                *OutIds.EOSProductUserId, *Key);
+            continue;
+        }
+    }
+
+    if (!OutIds.IsValid())
+    {
+        UE_LOG(LogBanIdResolver, Verbose,
+            TEXT("ParseIdsFromOptions: no recognisable player IDs found in Options."));
+    }
+    return OutIds.IsValid();
 }

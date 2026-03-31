@@ -14,6 +14,11 @@
 #include "GameFramework/PlayerState.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+// SML NativeHookManager — used to hook AGameModeBase::PreLogin() directly so that
+// the raw connection Options string is available for fallback player ID parsing.
+// This is necessary on the CSS custom UE5.3.2 engine where FUniqueNetIdRepl may
+// not be populated with Steam/EOS identities at PreLogin time.
+#include "Patching/NativeHookManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogBanEnforcement, Log, All);
 
@@ -83,6 +88,43 @@ void UBanEnforcementSubsystem::Initialize(FSubsystemCollectionBase& Collection)
         TEXT("BanEnforcementSubsystem: Initialized. "
              "PreLogin + PostLogin + Logout ban enforcement active."));
 
+    // ── Direct PreLogin hook (Options string fallback) ──────────────────────
+    // The FGameModePreLoginEvent only exposes FUniqueNetIdRepl, which may be
+    // empty in the CSS custom UE5.3.2 engine at PreLogin time.  We install an
+    // AFTER hook on AGameModeBase::PreLogin() directly so that we also have
+    // access to the raw connection Options string, which always contains the
+    // player's platform identity parameters (e.g. "?UniqueId=Steam:76561...").
+    //
+    // The AFTER hook fires after AGameModeBase::PreLogin's own body runs
+    // (including ApproveLogin and the FGameModePreLoginEvent broadcast), which
+    // means we see the final ErrorMessage state and can append our ban check on
+    // top.  If the connection is already rejected for any reason (e.g. server
+    // full), ErrorMessage will be non-empty and OnPreLoginHook will skip the ban
+    // check.  If it is empty (approved), OnPreLoginHook applies the ban check
+    // using the full Options string as a fallback for player ID resolution.
+    {
+        TWeakObjectPtr<UBanEnforcementSubsystem> WeakThis(this);
+        PreLoginHookHandle = SUBSCRIBE_METHOD_VIRTUAL_AFTER(
+            AGameModeBase::PreLogin,
+            GetMutableDefault<AGameModeBase>(),
+            [WeakThis](
+                AGameModeBase*          GameMode,
+                const FString&          Options,
+                const FString&          Address,
+                const FUniqueNetIdRepl& UniqueId,
+                FString&                ErrorMessage)
+            {
+                if (UBanEnforcementSubsystem* Self = WeakThis.Get())
+                {
+                    Self->OnPreLoginHook(GameMode, Options, Address, UniqueId, ErrorMessage);
+                }
+            });
+
+        UE_LOG(LogBanEnforcement, Log,
+            TEXT("BanEnforcementSubsystem: AGameModeBase::PreLogin hook installed — "
+                 "connection Options string will be used as fallback for player ID resolution."));
+    }
+
     // ── Periodic expired-ban pruning ───────────────────────────────────────
     // Prune expired timed bans from both subsystems every 10 minutes so that
     // long-running servers do not accumulate stale entries in memory or on disk.
@@ -151,6 +193,13 @@ void UBanEnforcementSubsystem::Deinitialize()
     PendingEOSUnban.Empty();
     PendingSteamUnban.Empty();
 
+    // Remove the direct PreLogin vtable hook.
+    if (PreLoginHookHandle.IsValid())
+    {
+        UNSUBSCRIBE_METHOD(AGameModeBase::PreLogin, PreLoginHookHandle);
+        PreLoginHookHandle.Reset();
+    }
+
     Super::Deinitialize();
 }
 
@@ -207,6 +256,91 @@ void UBanEnforcementSubsystem::OnPreLogin(AGameModeBase*          GameMode,
             {
                 UE_LOG(LogBanEnforcement, Log,
                     TEXT("PreLogin: rejecting EOS-banned player %s — Reason: %s"),
+                    *ResolvedId.EOSProductUserId, *Reason);
+                ErrorMessage = BuildKickMessage(true, Reason);
+                PostBanKickDiscordNotification(ResolvedId.EOSProductUserId, Reason);
+                return;
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  PreLogin hook — direct hook with Options string (CSS engine fallback)
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanEnforcementSubsystem::OnPreLoginHook(AGameModeBase*         GameMode,
+                                               const FString&         Options,
+                                               const FString&         Address,
+                                               const FUniqueNetIdRepl& UniqueId,
+                                               FString&               ErrorMessage)
+{
+    // Preserve an existing error message (e.g. server is full).
+    if (!ErrorMessage.IsEmpty() || !GameMode) return;
+
+    UGameInstance* GI = GameMode->GetGameInstance();
+    if (!GI) return;
+
+    // ── Step 1: Standard resolution via FUniqueNetIdRepl ──────────────────
+    // Try the normal path first.  This works correctly on standard UE5 engines
+    // and on CSS engine builds where the UniqueNetId is properly populated.
+    FResolvedBanId ResolvedId = FBanIdResolver::Resolve(UniqueId);
+
+    // ── Step 2: Fallback — parse Options string directly ──────────────────
+    // On the CSS custom UE5.3.2 engine the FUniqueNetIdRepl at PreLogin may not
+    // yet hold a valid Steam or EOS identity because the engine's online identity
+    // layer has not processed the connection.  The raw connection options string
+    // always contains the player's platform identity parameters, so we parse it
+    // as a reliable fallback.
+    if (!ResolvedId.IsValid())
+    {
+        if (FBanIdResolver::ParseIdsFromOptions(Options, ResolvedId))
+        {
+            UE_LOG(LogBanEnforcement, Verbose,
+                TEXT("OnPreLoginHook: FUniqueNetIdRepl resolve returned empty — "
+                     "fell back to Options string parsing. "
+                     "Steam64='%s' PUID='%s'"),
+                *ResolvedId.Steam64Id, *ResolvedId.EOSProductUserId);
+        }
+        else
+        {
+            UE_LOG(LogBanEnforcement, Verbose,
+                TEXT("OnPreLoginHook: no player IDs resolved from UniqueId or Options — "
+                     "pre-join ban check skipped (PostLogin will still enforce)."));
+            return;
+        }
+    }
+
+    // ── Steam ban check ────────────────────────────────────────────────────
+    if (ResolvedId.HasSteamId())
+    {
+        USteamBanSubsystem* SteamBans = GI->GetSubsystem<USteamBanSubsystem>();
+        if (SteamBans)
+        {
+            FString Reason;
+            if (SteamBans->IsPlayerBanned(ResolvedId.Steam64Id, Reason))
+            {
+                UE_LOG(LogBanEnforcement, Log,
+                    TEXT("OnPreLoginHook: rejecting Steam-banned player %s — Reason: %s"),
+                    *ResolvedId.Steam64Id, *Reason);
+                ErrorMessage = BuildKickMessage(false, Reason);
+                PostBanKickDiscordNotification(ResolvedId.Steam64Id, Reason);
+                return;
+            }
+        }
+    }
+
+    // ── EOS ban check ──────────────────────────────────────────────────────
+    if (ResolvedId.HasEOSPuid())
+    {
+        UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>();
+        if (EOSBans)
+        {
+            FString Reason;
+            if (EOSBans->IsPlayerBanned(ResolvedId.EOSProductUserId, Reason))
+            {
+                UE_LOG(LogBanEnforcement, Log,
+                    TEXT("OnPreLoginHook: rejecting EOS-banned player %s — Reason: %s"),
                     *ResolvedId.EOSProductUserId, *Reason);
                 ErrorMessage = BuildKickMessage(true, Reason);
                 PostBanKickDiscordNotification(ResolvedId.EOSProductUserId, Reason);

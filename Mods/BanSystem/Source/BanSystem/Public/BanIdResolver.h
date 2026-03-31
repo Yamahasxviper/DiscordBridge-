@@ -180,4 +180,30 @@ public:
     static bool TryGetCachedSteam64FromPUID(UGameInstance* GameInstance,
                                              const FString& PUID,
                                              FString&       OutSteam64Id);
+
+    /**
+     * Attempt to parse both Steam64 ID and EOS PUID from the raw connection
+     * options string passed to AGameModeBase::PreLogin().
+     *
+     * In the CSS custom UE5.3.2 engine, FUniqueNetIdRepl at PreLogin time may
+     * not be properly populated with Steam or EOS identities because the engine's
+     * online identity layer has not yet processed the connection request.  This
+     * method provides a fallback by parsing the raw Options string directly.
+     *
+     * The connection options string is the URL-encoded parameter list from the
+     * client's join request (e.g. "?UniqueId=Steam:76561198000000000?listen").
+     * All keys are matched case-insensitively.
+     *
+     * Recognised parameter names:
+     *   UniqueId         — raw Steam64 decimal string, "Steam:76561198...",
+     *                      raw 32-char hex EOS PUID, or "EOS:00020a..."
+     *   SteamId          — raw Steam64 decimal string
+     *   EpicAccountId    — raw 32-char hex EOS Product User ID
+     *   EosProductUserId — raw 32-char hex EOS Product User ID
+     *
+     * @param Options  The raw connection options string from PreLogin().
+     * @param OutIds   Populated with any resolved IDs on return.
+     * @return true when at least one platform ID was successfully parsed.
+     */
+    static bool ParseIdsFromOptions(const FString& Options, FResolvedBanId& OutIds);
 };
