@@ -320,14 +320,18 @@ void UBanDiscordSubsystem::OnWebSocketClosed(int32 StatusCode, const FString& Re
 
 	if (bTerminal && WebSocketClient)
 	{
-		// Disable auto-reconnect so the SMLWebSocket runnable does not
-		// silently re-open the connection after this close event.
-		// Without this the bot would loop endlessly, e.g. reconnecting
-		// every few seconds with an invalid token (close code 4004).
-		// We do NOT call Close() here — the connection is already closed
-		// (this IS the OnClosed callback); calling Close() again would be
-		// a no-op at best and could confuse the underlying transport.
-		WebSocketClient->bAutoReconnect = false;
+		// Call Close() to set bUserInitiatedClose on the I/O thread, which
+		// causes the SMLWebSocket reconnect loop to exit permanently after
+		// this close event.  Without this, the runnable's own copy of
+		// ReconnectCfg.bAutoReconnect is still true and it will keep
+		// reconnecting; Discord rejects with the same terminal code again
+		// and the bot loops endlessly (e.g. with an invalid token for 4004).
+		// Calling Close() is safe here: EnqueueClose() sets bUserInitiatedClose
+		// atomically (checked in the runnable's 100 ms back-off sleep); the
+		// queued Close frame itself is never sent because the connected inner
+		// loop has already exited after the server close frame.
+		WebSocketClient->Close(1000,
+			FString::Printf(TEXT("Terminal Discord close code %d"), StatusCode));
 	}
 
 	bGatewayReady        = false;

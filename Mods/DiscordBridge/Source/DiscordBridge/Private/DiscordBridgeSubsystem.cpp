@@ -264,6 +264,11 @@ void UDiscordBridgeSubsystem::Disconnect()
 	FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
 	HeartbeatTickerHandle.Reset();
 
+	// Cancel any pending deferred re-identify/resume so it does not fire
+	// against a closed or replaced WebSocket after shutdown.
+	FTSTicker::GetCoreTicker().RemoveTicker(PendingReidentifyHandle);
+	PendingReidentifyHandle.Reset();
+
 	// Stop player count presence ticker.
 	FTSTicker::GetCoreTicker().RemoveTicker(PlayerCountTickerHandle);
 	PlayerCountTickerHandle.Reset();
@@ -656,6 +661,12 @@ void UDiscordBridgeSubsystem::HandleInvalidSession(bool bResumable)
 	HeartbeatTickerHandle.Reset();
 	bPendingHeartbeatAck = false;
 
+	// Cancel any previously scheduled re-identify/resume to avoid queuing
+	// multiple deferred callbacks if op=9 is received more than once before
+	// the deferred action fires.
+	FTSTicker::GetCoreTicker().RemoveTicker(PendingReidentifyHandle);
+	PendingReidentifyHandle.Reset();
+
 	// Clear all per-session gateway state so stale IDs are never used.
 	bGatewayReady      = false;
 	BotUserId.Empty();
@@ -668,9 +679,10 @@ void UDiscordBridgeSubsystem::HandleInvalidSession(bool bResumable)
 		UE_LOG(LogTemp, Log,
 		       TEXT("DiscordBridge: Scheduling Resume attempt for session %s in 2s."),
 		       *SessionId);
-		FTSTicker::GetCoreTicker().AddTicker(
+		PendingReidentifyHandle = FTSTicker::GetCoreTicker().AddTicker(
 			FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
 			{
+				PendingReidentifyHandle.Reset();
 				SendResume();
 				return false; // one-shot – do not repeat
 			}),
@@ -686,9 +698,10 @@ void UDiscordBridgeSubsystem::HandleInvalidSession(bool bResumable)
 
 		UE_LOG(LogTemp, Log,
 		       TEXT("DiscordBridge: Session expired — scheduling fresh Identify in 2s."));
-		FTSTicker::GetCoreTicker().AddTicker(
+		PendingReidentifyHandle = FTSTicker::GetCoreTicker().AddTicker(
 			FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
 			{
+				PendingReidentifyHandle.Reset();
 				SendIdentify();
 				return false; // one-shot – do not repeat
 			}),
