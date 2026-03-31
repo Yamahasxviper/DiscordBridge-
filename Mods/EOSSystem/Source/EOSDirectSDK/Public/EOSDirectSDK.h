@@ -232,24 +232,28 @@ inline bool IsValidHandle(EOS_ProductUserId PUID)
  *             the startup sequence — typically safe from PostDefault onwards).
  *
  * ╔══════════════════════════════════════════════════════════════════════════╗
- * ║  CSS UE5.3.2 ENGINE API — DO NOT CHANGE WITHOUT VERIFYING CSS SOURCE   ║
+ * ║  IEOSSDKManager / IEOSPlatformHandle API — VERIFIED FROM ENGINE SOURCE ║
  * ║                                                                          ║
- * ║  The CSS (Coffee Stain Studios) UE5.3.2 engine ships a trimmed version  ║
- * ║  of the EOSShared plugin.  Its IEOSSDKManager and IEOSPlatformHandle    ║
- * ║  interfaces differ from vanilla UE5:                                     ║
+ * ║  Confirmed from two independent UE5.3 engine forks:                     ║
+ * ║    Engine/Plugins/Online/EOSShared/Source/EOSShared/Public/             ║
+ * ║    IEOSSDKManager.h                                                      ║
  * ║                                                                          ║
- * ║  CORRECT (CSS engine):                                                   ║
- * ║    IEOSSDKManager::GetPlatformHandles()  — returns                       ║
- * ║        TArray<TSharedRef<IEOSPlatformHandle>>                            ║
- * ║    IEOSPlatformHandle::PlatformHandle    — public EOS_HPlatform member   ║
+ * ║  CORRECT API:                                                            ║
+ * ║    IEOSSDKManager::GetActivePlatforms()                                  ║
+ * ║        → TArray<IEOSPlatformHandlePtr>                                   ║
+ * ║           (TSharedPtr<IEOSPlatformHandle, ESPMode::ThreadSafe>)          ║
+ * ║    IEOSPlatformHandle::operator EOS_HPlatform() const                    ║
+ * ║        → implicit conversion; use static_cast<EOS_HPlatform>(*handle)   ║
  * ║                                                                          ║
- * ║  WRONG (vanilla UE5, NOT present in CSS engine — causes C2039):         ║
- * ║    IEOSSDKManager::GetAllPlatformHandles()  ← does NOT exist in CSS     ║
- * ║    IEOSSDKManager::GetActivePlatforms()     ← does NOT exist in CSS     ║
- * ║    IEOSPlatformHandle::GetHandle()          ← does NOT exist in CSS     ║
+ * ║  WRONG — causes C2039 (these methods/members DO NOT EXIST):             ║
+ * ║    GetAllPlatformHandles()  ← never existed in any UE5 version          ║
+ * ║    GetPlatformHandles()     ← never existed in any UE5 version          ║
+ * ║    GetHandle()              ← never existed in any UE5 version          ║
+ * ║    PlatformHandle (direct)  ← is PROTECTED; cannot be accessed directly ║
  * ║                                                                          ║
- * ║  This distinction has caused repeated breakage (PRs #113 → #118 → #122)║
- * ║  GetPlatformHandles + PlatformHandle are the correct CSS API.           ║
+ * ║  History: PRs #113→#118→#120→#122→#123→#124 all touched this code.     ║
+ * ║  Root cause of every regression: an agent assumed GetAllPlatformHandles ║
+ * ║  or GetPlatformHandles or GetHandle existed and "fixed" working code.   ║
  * ╚══════════════════════════════════════════════════════════════════════════╝
  */
 inline EOS_HPlatform GetPlatformHandle()
@@ -258,17 +262,19 @@ inline EOS_HPlatform GetPlatformHandle()
     if (!Manager)
         return nullptr;
 
-    // CSS UE5.3.2: use GetPlatformHandles() (NOT GetAllPlatformHandles or
-    // GetActivePlatforms — those methods do not exist in the CSS engine and
-    // cause C2039).
-    const TArray<TSharedRef<IEOSPlatformHandle>> Handles = Manager->GetPlatformHandles();
+    // GetActivePlatforms() is the only platform-list accessor on IEOSSDKManager.
+    // It returns TArray<IEOSPlatformHandlePtr> (TSharedPtr<IEOSPlatformHandle>).
+    // DO NOT change this to GetAllPlatformHandles / GetPlatformHandles — those
+    // do not exist and will produce C2039.
+    const TArray<IEOSPlatformHandlePtr> Handles = Manager->GetActivePlatforms();
     if (Handles.IsEmpty())
         return nullptr;
 
-    // CSS UE5.3.2: PlatformHandle is a public data member of IEOSPlatformHandle.
-    // Do NOT call ->GetHandle() — that method does not exist in the CSS engine
-    // and causes C2039.
-    return Handles[0]->PlatformHandle;
+    // IEOSPlatformHandle exposes EOS_HPlatform via implicit operator EOS_HPlatform().
+    // The raw PlatformHandle field is PROTECTED and cannot be accessed here.
+    // DO NOT call ->GetHandle() — that method does not exist and causes C2039.
+    // DO NOT access ->PlatformHandle directly — it is protected and causes C2248.
+    return static_cast<EOS_HPlatform>(*Handles[0]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
