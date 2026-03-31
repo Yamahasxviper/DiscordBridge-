@@ -446,6 +446,7 @@ void UTicketDiscordProvider::HandleInvalidSession(bool bResumable)
 
 	bGatewayReady = false;
 	BotUserId.Empty();
+	GuildOwnerId.Empty(); // stale owner ID must not survive into the resumed/new session
 
 	if (bResumable && !SessionId.IsEmpty())
 	{
@@ -471,7 +472,6 @@ void UTicketDiscordProvider::HandleInvalidSession(bool bResumable)
 		{
 			GuildId.Empty();
 		}
-		GuildOwnerId.Empty();
 		UE_LOG(LogTicketDiscordProvider, Warning,
 		       TEXT("TicketDiscordProvider: Invalid session (not resumable) — "
 		            "re-identifying in 2 s."));
