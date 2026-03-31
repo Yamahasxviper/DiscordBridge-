@@ -41,7 +41,10 @@ namespace EOSBanJson
 
         FString IdStr;
         if (!Obj->TryGetStringField(KeyId, IdStr) || IdStr.IsEmpty()) return false;
-        OutEntry.PlayerId = IdStr;
+        // Normalize to lowercase to match BanPlayer() and CheckPlayerBan() which
+        // always use ToLower() on EOS PUIDs.  This prevents a ban-bypass if the
+        // JSON file was written or edited externally with mixed-case IDs.
+        OutEntry.PlayerId = IdStr.ToLower();
 
         FString ReasonStr;
         Obj->TryGetStringField(KeyReason, ReasonStr);
