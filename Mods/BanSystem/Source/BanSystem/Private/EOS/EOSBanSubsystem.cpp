@@ -221,6 +221,14 @@ void UEOSBanSubsystem::PruneExpiredBans()
     {
         BanMap.Remove(Id);
         UE_LOG(LogEOSBanSystem, Log, TEXT("Pruned expired EOS ban for %s."), *Id);
+
+        // Notify subscribers that this player is no longer banned so that
+        // external mods (e.g. Discord notification bridges) can react.
+        OnPlayerUnbanned.Broadcast(Id);
+        if (NotificationProvider)
+        {
+            NotificationProvider->OnEOSPlayerUnbanned(Id);
+        }
     }
     if (ToRemove.Num() > 0)
         SaveBans();

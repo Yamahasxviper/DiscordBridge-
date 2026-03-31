@@ -562,7 +562,56 @@ EExecutionStatus ABanByNameCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::UNCOMPLETED;
     }
 
-    const FString NameQuery = Arguments[0];
+    // ── Resolve player name and optional duration/reason ──────────────────────
+    //
+    // The Arguments array is whitespace-split by the SML command framework, so
+    // a player whose display name contains spaces (e.g. "John Doe") will have
+    // their name spread across multiple entries.
+    //
+    // Strategy: find the first all-digit argument — that is the optional duration.
+    // Everything before it is joined as the player name; everything after is the
+    // reason.  When no all-digit argument is present, all arguments form the name.
+    //
+    // Examples:
+    //   banbyname John Doe 60 Griefing  → name="John Doe", dur=60, reason="Griefing"
+    //   banbyname John Doe              → name="John Doe", dur=0,  reason=default
+    //   banbyname PlayerXYZ 0 reason    → name="PlayerXYZ", dur=0, reason="reason"
+
+    int32 DurationArgIdx = -1;
+    for (int32 i = 0; i < Arguments.Num(); ++i)
+    {
+        if (Arguments[i].IsNumeric())
+        {
+            DurationArgIdx = i;
+            break;
+        }
+    }
+
+    if (DurationArgIdx == 0)
+    {
+        Sender->SendChatMessage(
+            TEXT("[BanSystem] Please provide a player name before the optional duration."),
+            FLinearColor::Red);
+        return EExecutionStatus::BAD_ARGUMENTS;
+    }
+
+    FString NameQuery;
+    int32   ArgsStartForDuration;
+    if (DurationArgIdx < 0)
+    {
+        // No numeric arg found — all arguments are the player name.
+        NameQuery            = FString::Join(Arguments, TEXT(" "));
+        ArgsStartForDuration = Arguments.Num();
+    }
+    else
+    {
+        // Join everything before the first numeric arg as the name.
+        TArray<FString> NameParts;
+        for (int32 i = 0; i < DurationArgIdx; ++i)
+            NameParts.Add(Arguments[i]);
+        NameQuery            = FString::Join(NameParts, TEXT(" "));
+        ArgsStartForDuration = DurationArgIdx;
+    }
 
     FResolvedBanId   Ids;
     FString          PlayerName;
@@ -593,7 +642,7 @@ EExecutionStatus ABanByNameCommand::ExecuteCommand_Implementation(
 
     int32   Duration;
     FString Reason;
-    BanCmdHelper::ParseDurationAndReason(Arguments, 1, Duration, Reason);
+    BanCmdHelper::ParseDurationAndReason(Arguments, ArgsStartForDuration, Duration, Reason);
 
     const FString Admin   = Sender->GetSenderName();
     const FString DurStr  = BanCmdHelper::FormatDuration(Duration);
@@ -688,9 +737,10 @@ EExecutionStatus APlayerIdsCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::UNCOMPLETED;
     }
 
-    // Optional: filter by name
+    // Optional: filter by name — join all arguments so that multi-word player
+    // names (e.g. "John Doe") work correctly: /playerids John Doe
     const bool    bFilter    = Arguments.Num() >= 1;
-    const FString NameFilter = bFilter ? Arguments[0] : FString();
+    const FString NameFilter = bFilter ? FString::Join(Arguments, TEXT(" ")) : FString();
 
     auto AllPlayers = FBanPlayerLookup::GetAllConnectedPlayers(World);
 
@@ -747,7 +797,9 @@ EExecutionStatus ACheckBanCommand::ExecuteCommand_Implementation(
     const TArray<FString>& Arguments,
     const FString&         Label)
 {
-    const FString Input = Arguments[0];
+    // Join all arguments into a single query string so that multi-word player
+    // names (e.g. "John Doe") work correctly: /checkban John Doe
+    const FString Input = FString::Join(Arguments, TEXT(" "));
 
     UWorld* World = GetWorld();
     UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
