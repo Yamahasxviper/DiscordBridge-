@@ -469,6 +469,12 @@ private:
 	FTSTicker::FDelegateHandle HeartbeatTickerHandle;
 	float HeartbeatIntervalSeconds{0.0f};
 
+	/** Deferred one-shot ticker scheduled by HandleInvalidSession to send a
+	 *  Resume or fresh Identify after the Discord-mandated 1–5 s back-off.
+	 *  Stored so that Disconnect() can cancel it if the subsystem shuts down
+	 *  or a new op=9 arrives before the previous deferred action fires. */
+	FTSTicker::FDelegateHandle PendingReidentifyHandle;
+
 	// ── Player count presence ─────────────────────────────────────────────────
 
 	/**
