@@ -420,6 +420,14 @@ void UBanDiscordSubsystem::HandleGatewayPayload(const FString& RawJson)
 			FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
 			HeartbeatTickerHandle.Reset();
 		}
+		// Cancel any deferred re-identify timer from a prior op=9 to prevent a
+		// stale Identify firing on the freshly reconnected (and already
+		// authenticating) session, which would result in Discord close 4005.
+		if (PendingReidentifyHandle.IsValid())
+		{
+			FTSTicker::GetCoreTicker().RemoveTicker(PendingReidentifyHandle);
+			PendingReidentifyHandle.Reset();
+		}
 		bPendingHeartbeatAck = false;
 		bGatewayReady        = false;
 		BotUserId.Empty();
@@ -450,6 +458,14 @@ void UBanDiscordSubsystem::HandleHello(const TSharedPtr<FJsonObject>& DataObj)
 	DataObj->TryGetNumberField(TEXT("heartbeat_interval"), HeartbeatMs);
 	HeartbeatIntervalSeconds = static_cast<float>(HeartbeatMs) / 1000.0f;
 
+	// Cancel any pending deferred re-identify/resume ticker — Hello starts a
+	// fresh auth handshake so the old deferred operation is obsolete.
+	if (PendingReidentifyHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(PendingReidentifyHandle);
+		PendingReidentifyHandle.Reset();
+	}
+
 	// Start the heartbeat ticker.
 	// Per Discord spec: jitter the FIRST heartbeat by a random [0, interval]
 	// delay to prevent thundering-herd reconnect spikes.  After the first
@@ -466,9 +482,15 @@ void UBanDiscordSubsystem::HandleHello(const TSharedPtr<FJsonObject>& DataObj)
 		{
 			SendHeartbeat();
 			// Re-register at the full interval for subsequent beats.
-			HeartbeatTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
-				FTickerDelegate::CreateUObject(this, &UBanDiscordSubsystem::HeartbeatTick),
-				HeartbeatIntervalSeconds);
+			// Guard against the zombie-detection path in SendHeartbeat() having
+			// already reset HeartbeatTickerHandle to reconnect — in that case
+			// skip creating a new ticker here and let the next Hello do so.
+			if (HeartbeatTickerHandle.IsValid())
+			{
+				HeartbeatTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+					FTickerDelegate::CreateUObject(this, &UBanDiscordSubsystem::HeartbeatTick),
+					HeartbeatIntervalSeconds);
+			}
 			return false; // one-shot jitter tick
 		}),
 		JitterSeconds);
