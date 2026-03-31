@@ -127,6 +127,64 @@
 // EOS_ProductUserId_IsValid, EOS_ProductUserId_ToString
 #include "eos_common.h"
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  EOS_EResult value constants — fallback macros
+//
+//  The CSS UE5.3.2 engine may ship eos_common.h with EOS_EResult defined as a
+//  C++ scoped enum class (enum class EOS_EResult : int32_t).  Scoped enum
+//  values are NOT injected into the enclosing namespace, so bare names such as
+//  EOS_Success are undeclared identifiers (C2065) unless provided as macros.
+//
+//  Each constant is guarded by #ifndef so the real SDK definition wins when
+//  present (e.g. on builds where EOS_EResult is a plain C enum and the values
+//  are already exposed as macro aliases).  Explicit C-style casts ensure these
+//  macros work whether EOS_EResult is a typedef-int, C enum, or C++ scoped
+//  enum class.
+// ─────────────────────────────────────────────────────────────────────────────
+#ifndef EOS_Success
+#  define EOS_Success                  ((EOS_EResult)0)
+#  define EOS_NoConnection             ((EOS_EResult)1)
+#  define EOS_InvalidCredentials       ((EOS_EResult)2)
+#  define EOS_InvalidUser              ((EOS_EResult)3)
+#  define EOS_InvalidAuth              ((EOS_EResult)4)
+#  define EOS_AccessDenied             ((EOS_EResult)5)
+#  define EOS_MissingPermissions       ((EOS_EResult)6)
+#  define EOS_TokenNotAccount          ((EOS_EResult)7)
+#  define EOS_TooManyRequests          ((EOS_EResult)8)
+#  define EOS_AlreadyPending           ((EOS_EResult)9)
+#  define EOS_InvalidParameters        ((EOS_EResult)10)
+#  define EOS_InvalidRequest           ((EOS_EResult)11)
+#  define EOS_UnrecognizedResponse     ((EOS_EResult)12)
+#  define EOS_IncompatibleVersion      ((EOS_EResult)13)
+#  define EOS_NotConfigured            ((EOS_EResult)14)
+#  define EOS_AlreadyConfigured        ((EOS_EResult)15)
+#  define EOS_NotImplemented           ((EOS_EResult)16)
+#  define EOS_Canceled                 ((EOS_EResult)17)
+#  define EOS_NotFound                 ((EOS_EResult)18)
+#  define EOS_OperationWillRetry       ((EOS_EResult)19)
+#  define EOS_NoChange                 ((EOS_EResult)20)
+#  define EOS_VersionMismatch          ((EOS_EResult)21)
+#  define EOS_LimitExceeded            ((EOS_EResult)22)
+#  define EOS_Duplicate                ((EOS_EResult)23)
+#  define EOS_MissingParameters        ((EOS_EResult)24)
+#  define EOS_InvalidSandboxId         ((EOS_EResult)25)
+#  define EOS_TimedOut                 ((EOS_EResult)26)
+#  define EOS_PartialResult            ((EOS_EResult)27)
+#  define EOS_Missing_Role             ((EOS_EResult)28)
+#  define EOS_Missing_Feature          ((EOS_EResult)29)
+#  define EOS_Invalid_Sandbox          ((EOS_EResult)30)
+#  define EOS_Invalid_Deployment       ((EOS_EResult)31)
+#  define EOS_Invalid_Product          ((EOS_EResult)32)
+#  define EOS_Invalid_ProductUserID    ((EOS_EResult)33)
+#  define EOS_ServiceFailure           ((EOS_EResult)34)
+#  define EOS_CacheDirectoryMissing    ((EOS_EResult)35)
+#  define EOS_CacheDirectoryInvalid    ((EOS_EResult)36)
+#  define EOS_InvalidState             ((EOS_EResult)37)
+#  define EOS_RequestInProgress        ((EOS_EResult)38)
+#  define EOS_ApplicationSuspended     ((EOS_EResult)39)
+#  define EOS_NetworkChanged           ((EOS_EResult)40)
+#endif // EOS_Success
+
 // EOS Platform interface accessors:
 //   EOS_Platform_GetConnectInterface(platform)    →  EOS_HConnect
 //   EOS_Platform_GetUserInfoInterface(platform)   →  EOS_HUserInfo
