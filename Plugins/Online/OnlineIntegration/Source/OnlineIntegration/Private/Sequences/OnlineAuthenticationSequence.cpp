@@ -2,7 +2,7 @@
 
 #include "Sequences/OnlineAuthenticationSequence.h"
 
-void UOnlineAuthenticationSequence::Initialize(FPlatformUserId PlatformUserId){ }
+void UOnlineAuthenticationSequence::Initialize(FPlatformUserId InPlatformUserId){ }
 void UOnlineAuthenticationSequence::Start(FOnOnlineAsyncOperationCompleted_Native::FDelegate&& CompleteDelegate){ }
 bool UOnlineAuthenticationSequence::HasErrors() const{ return bool(); }
 void UOnlineAuthenticationSequence::OverridePerObjectConfigSection(FString& SectionName){ }

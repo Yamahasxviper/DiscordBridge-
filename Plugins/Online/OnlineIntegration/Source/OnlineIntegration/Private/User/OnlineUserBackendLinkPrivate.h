@@ -17,7 +17,7 @@ class UOnlineUserBackendLinkPrivate : public UOnlineUserBackendLink
 {
 	GENERATED_BODY()
 public:
-	void Initialize(UOnlineIntegrationBackend* OnlineBackend);
+	void Initialize(UOnlineIntegrationBackend* InOnlineBackend);
 
 	void SetLoginStatus(ECommonUserLoginStatus InLoginStatus);
 	void SetNickname(const FString& InNickname);
