@@ -503,28 +503,43 @@ void UBanEnforcementSubsystem::OnReverseLookupDone(const FString&          PUID,
 
     UGameInstance* GI = GetGameInstance();
 
+    // Validate the Steam64 ID once, shared by both the ban and unban blocks below.
+    // If EOS returned a non-standard Steam account ID, we cannot apply either
+    // operation, but we must still remove both pending entries so they do not
+    // accumulate.  We deliberately do NOT return early here so that both blocks
+    // are always reached regardless of whether the ID passes validation.
+    const bool bSteamIdValid = USteamBanSubsystem::IsValidSteam64Id(ExternalAccountId);
+    if (!bSteamIdValid)
+    {
+        UE_LOG(LogBanEnforcement, Warning,
+            TEXT("OnReverseLookupDone: EOS returned Steam account '%s' for PUID '%s' "
+                 "which failed Steam64 format validation — skipping Steam ban/unban."),
+            *ExternalAccountId, *PUID);
+    }
+
     if (FPropagationEntry* Entry = PendingSteamPropagation.Find(PUID))
     {
         const FPropagationEntry Prop = *Entry;
         PendingSteamPropagation.Remove(PUID);
 
-        if (!USteamBanSubsystem::IsValidSteam64Id(ExternalAccountId)) return;
-
-        USteamBanSubsystem* SteamBans = GI ? GI->GetSubsystem<USteamBanSubsystem>() : nullptr;
-        if (SteamBans)
+        if (bSteamIdValid)
         {
-            if (SteamBans->BanPlayer(ExternalAccountId, Prop.Reason, Prop.DurationMinutes, Prop.BannedBy))
+            USteamBanSubsystem* SteamBans = GI ? GI->GetSubsystem<USteamBanSubsystem>() : nullptr;
+            if (SteamBans)
             {
-                UE_LOG(LogBanEnforcement, Log,
-                    TEXT("OnReverseLookupDone: cross-platform Steam ban applied — "
-                         "Steam64 %s (from PUID %s)."),
-                    *ExternalAccountId, *PUID);
-            }
-            else
-            {
-                UE_LOG(LogBanEnforcement, Warning,
-                    TEXT("OnReverseLookupDone: failed to apply cross-platform Steam ban for %s."),
-                    *ExternalAccountId);
+                if (SteamBans->BanPlayer(ExternalAccountId, Prop.Reason, Prop.DurationMinutes, Prop.BannedBy))
+                {
+                    UE_LOG(LogBanEnforcement, Log,
+                        TEXT("OnReverseLookupDone: cross-platform Steam ban applied — "
+                             "Steam64 %s (from PUID %s)."),
+                        *ExternalAccountId, *PUID);
+                }
+                else
+                {
+                    UE_LOG(LogBanEnforcement, Warning,
+                        TEXT("OnReverseLookupDone: failed to apply cross-platform Steam ban for %s."),
+                        *ExternalAccountId);
+                }
             }
         }
     }
@@ -536,17 +551,18 @@ void UBanEnforcementSubsystem::OnReverseLookupDone(const FString&          PUID,
     {
         PendingSteamUnban.Remove(PUID);
 
-        if (!USteamBanSubsystem::IsValidSteam64Id(ExternalAccountId)) return;
-
-        USteamBanSubsystem* SteamBans = GI ? GI->GetSubsystem<USteamBanSubsystem>() : nullptr;
-        if (SteamBans)
+        if (bSteamIdValid)
         {
-            if (SteamBans->UnbanPlayer(ExternalAccountId))
+            USteamBanSubsystem* SteamBans = GI ? GI->GetSubsystem<USteamBanSubsystem>() : nullptr;
+            if (SteamBans)
             {
-                UE_LOG(LogBanEnforcement, Log,
-                    TEXT("OnReverseLookupDone: cross-platform Steam unban applied — "
-                         "Steam64 %s (from PUID %s)."),
-                    *ExternalAccountId, *PUID);
+                if (SteamBans->UnbanPlayer(ExternalAccountId))
+                {
+                    UE_LOG(LogBanEnforcement, Log,
+                        TEXT("OnReverseLookupDone: cross-platform Steam unban applied — "
+                             "Steam64 %s (from PUID %s)."),
+                        *ExternalAccountId, *PUID);
+                }
             }
         }
     }
