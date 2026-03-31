@@ -162,7 +162,11 @@ bool FBanIdResolver::TryGetEOSProductUserId(const FUniqueNetIdRepl& UniqueId,
     }
 #endif // WITH_EOS_SDK
 
-    OutPUID = Candidate;
+    // Normalise to lowercase before returning.  All stored EOS PUIDs are
+    // lowercased by UEOSBanSubsystem::BanPlayer(), so callers that compare
+    // the returned value against stored records (e.g. OnEOSPlayerBanned)
+    // must have a matching case to avoid false negatives.
+    OutPUID = Candidate.ToLower();
     UE_LOG(LogBanIdResolver, Verbose,
         TEXT("TryGetEOSProductUserId: resolved EOS PUID '%s'"), *OutPUID);
     return true;

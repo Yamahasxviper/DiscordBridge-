@@ -224,6 +224,10 @@ void UBanDiscordSubsystem::Disconnect()
 
 	if (WebSocketClient)
 	{
+		// Prevent the SMLWebSocket auto-reconnect runnable from silently
+		// re-opening the connection after we explicitly close it (e.g. when
+		// an external provider takes over, or during subsystem deinitialisation).
+		WebSocketClient->bAutoReconnect = false;
 		WebSocketClient->Close();
 		WebSocketClient = nullptr;
 	}
@@ -304,6 +308,11 @@ void UBanDiscordSubsystem::OnWebSocketClosed(int32 StatusCode, const FString& Re
 
 	if (bTerminal && WebSocketClient)
 	{
+		// Disable auto-reconnect so the SMLWebSocket runnable does not
+		// silently re-open the connection after we force-close it here.
+		// Without this the bot would loop endlessly, e.g. reconnecting
+		// every few seconds with an invalid token (close code 4004).
+		WebSocketClient->bAutoReconnect = false;
 		WebSocketClient->Close(1000,
 			FString::Printf(TEXT("Terminal Discord close code %d"), StatusCode));
 	}
