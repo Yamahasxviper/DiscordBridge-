@@ -34,6 +34,14 @@ struct EOS_PlayerDataStorage_FileMetadata;
 struct EOS_TitleStorage_FileMetadata;
 #endif // EOS_TITLESTORAGE_FILEMETADATA_API_LATEST
 
+#ifndef EOS_PLAYERDATASTORAGE_COPYFILEMETADATABYINDEX_API_LATEST
+struct EOS_PlayerDataStorage_CopyFileMetadataByIndexOptions;
+#endif // EOS_PLAYERDATASTORAGE_COPYFILEMETADATABYINDEX_API_LATEST
+
+#ifndef EOS_TITLESTORAGE_COPYFILEMETADATABYINDEX_API_LATEST
+struct EOS_TitleStorage_CopyFileMetadataByIndexOptions;
+#endif // EOS_TITLESTORAGE_COPYFILEMETADATABYINDEX_API_LATEST
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  PlayerDataStorage interface function pointer typedefs
 //  These _t aliases are used by FEOSSDKLoader for dynamic DLL symbol loading.
