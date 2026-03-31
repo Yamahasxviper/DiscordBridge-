@@ -135,8 +135,11 @@
 //  Compile-time IEOSSDKManager API detection
 //
 //  Satisfactory migrated from UE4 → UE5, so the CSS (Coffee Stain Studios)
-//  engine may carry older UE5 code alongside UE5.3.2 code.  Three API tiers
-//  are known across all UE4→UE5 EOSShared variants:
+//  engine may carry older UE5 code alongside UE5.3.2 code.  Four manager
+//  getter tiers and three handle-accessor tiers are known across all
+//  UE4→UE5 EOSShared variants:
+//
+//  MANAGER GETTER TIERS (which method enumerates active EOS platforms):
 //
 //  TIER 1 — CSS UE5.3.2 (CSS-specific, absent from vanilla UE5):
 //      GetPlatformHandles()  →  TArray<TSharedRef<IEOSPlatformHandle>>
@@ -144,18 +147,37 @@
 //  TIER 2 — Vanilla UE 5.2 / UE5.3 (standard, absent from CSS):
 //      GetActivePlatforms()  →  TArray<IEOSPlatformHandlePtr>  (TSharedPtr)
 //
-//  TIER 3 — Early UE5 / UE4-era hybrid (no enumeration method at all):
+//  TIER 3 — Other CSS / older UE5 forks:
+//      GetAllPlatformHandles()  →  TArray<TSharedRef<IEOSPlatformHandle>>
+//
+//  TIER 4 — Early UE5 / UE4-era hybrid (no enumeration method at all):
 //      CreatePlatform(GetDefaultPlatformConfigName())  →  IEOSPlatformHandlePtr
 //      CreatePlatform() is idempotent — it returns the existing handle when a
 //      platform for that config name was already created, so calling it here
 //      is safe and has no side-effects on a running game.
 //
+//  HANDLE ACCESSOR TIERS (how to extract EOS_HPlatform from IEOSPlatformHandle):
+//
+//  ACCESSOR A — Some CSS variants:
+//      EOS_HPlatform GetHandle() const  (explicit public method)
+//
+//  ACCESSOR B — Some CSS UE5.3.2 variants:
+//      PlatformHandle  (public data member of type EOS_HPlatform)
+//
+//  ACCESSOR C — UE5 standard / fallback:
+//      implicit operator EOS_HPlatform() const  (implicit cast)
+//
 //  GetPlatformHandle() below uses C++17 if-constexpr + these traits to pick
-//  the correct tier.  The discarded branches are never compiled, so none of
-//  them trigger C2039 on an engine that lacks that method.
+//  the correct tier automatically at compile time.  The discarded branches
+//  are never compiled, so none of them trigger C2039 / C2248 on an engine
+//  that lacks that method or member.
 // ─────────────────────────────────────────────────────────────────────────────
 namespace EOSSDKManagerDetail
 {
+    // -------------------------------------------------------------------------
+    //  Manager getter detection traits
+    // -------------------------------------------------------------------------
+
     // Tier 1: CSS UE5.3.2 — GetPlatformHandles() exists.
     template <class T, class = void>
     struct THasGetPlatformHandles : std::false_type {};
@@ -172,7 +194,15 @@ namespace EOSSDKManagerDetail
         std::void_t<decltype(std::declval<T&>().GetActivePlatforms())>>
         : std::true_type {};
 
-    // Tier 3: Early UE5 / UE4-era hybrid — CreatePlatform(FString) exists.
+    // Tier 3: Other CSS / older UE5 forks — GetAllPlatformHandles() exists.
+    template <class T, class = void>
+    struct THasGetAllPlatformHandles : std::false_type {};
+    template <class T>
+    struct THasGetAllPlatformHandles<T,
+        std::void_t<decltype(std::declval<T&>().GetAllPlatformHandles())>>
+        : std::true_type {};
+
+    // Tier 4: Early UE5 / UE4-era hybrid — CreatePlatform(FString) exists.
     // (CreatePlatform is present in every known UE5 and CSS variant as the
     //  lowest-common-denominator platform-creation API.)
     template <class T, class = void>
@@ -181,6 +211,51 @@ namespace EOSSDKManagerDetail
     struct THasCreatePlatformByName<T,
         std::void_t<decltype(std::declval<T&>().CreatePlatform(std::declval<const FString&>()))>>
         : std::true_type {};
+
+    // -------------------------------------------------------------------------
+    //  IEOSPlatformHandle accessor detection traits
+    // -------------------------------------------------------------------------
+
+    // Accessor A: explicit GetHandle() public method.
+    template <class T, class = void>
+    struct THasGetHandle : std::false_type {};
+    template <class T>
+    struct THasGetHandle<T, std::void_t<decltype(std::declval<T&>().GetHandle())>>
+        : std::true_type {};
+
+    // Accessor B: public PlatformHandle data member.
+    template <class T, class = void>
+    struct THasPlatformHandleMember : std::false_type {};
+    template <class T>
+    struct THasPlatformHandleMember<T, std::void_t<decltype(std::declval<T&>().PlatformHandle)>>
+        : std::true_type {};
+
+    // -------------------------------------------------------------------------
+    //  Handle extraction helper
+    //
+    //  Accepts a dereferenced IEOSPlatformHandle reference and returns the raw
+    //  EOS_HPlatform by probing the three accessor tiers in order.  Must be a
+    //  template so if constexpr discards non-matching branches (C2039/C2248).
+    // -------------------------------------------------------------------------
+    template <typename H>
+    inline EOS_HPlatform ExtractHandle(H& Handle)
+    {
+        if constexpr (THasGetHandle<H>::value)
+        {
+            // Accessor A — explicit GetHandle() method (some CSS variants).
+            return Handle.GetHandle();
+        }
+        else if constexpr (THasPlatformHandleMember<H>::value)
+        {
+            // Accessor B — public PlatformHandle data member (some CSS UE5.3.2).
+            return Handle.PlatformHandle;
+        }
+        else
+        {
+            // Accessor C — implicit operator EOS_HPlatform() cast (UE5 standard).
+            return static_cast<EOS_HPlatform>(Handle);
+        }
+    }
 
     // -------------------------------------------------------------------------
     //  Template dispatch helper
@@ -200,7 +275,7 @@ namespace EOSSDKManagerDetail
             const auto Handles = Manager->GetPlatformHandles();
             if (Handles.IsEmpty())
                 return nullptr;
-            return static_cast<EOS_HPlatform>(*Handles[0]);
+            return ExtractHandle(*Handles[0]);
         }
         else if constexpr (THasGetActivePlatforms<T>::value)
         {
@@ -209,17 +284,27 @@ namespace EOSSDKManagerDetail
             const auto Handles = Manager->GetActivePlatforms();
             if (Handles.IsEmpty() || !Handles[0].IsValid())
                 return nullptr;
-            return static_cast<EOS_HPlatform>(*Handles[0]);
+            return ExtractHandle(*Handles[0]);
+        }
+        else if constexpr (THasGetAllPlatformHandles<T>::value)
+        {
+            // Tier 3 — Other CSS / older UE5 forks:
+            //   GetAllPlatformHandles() → TArray<TSharedRef<IEOSPlatformHandle>>
+            // TSharedRef is never null; IsEmpty() guard alone is sufficient.
+            const auto Handles = Manager->GetAllPlatformHandles();
+            if (Handles.IsEmpty())
+                return nullptr;
+            return ExtractHandle(*Handles[0]);
         }
         else if constexpr (THasCreatePlatformByName<T>::value)
         {
-            // Tier 3 — Early UE5 / UE4-era hybrid: no list method available.
+            // Tier 4 — Early UE5 / UE4-era hybrid: no list method available.
             // CreatePlatform() is idempotent — returns the existing handle when
             // the platform for that config name was already created by the engine.
             const auto Handle = Manager->CreatePlatform(Manager->GetDefaultPlatformConfigName());
             if (!Handle.IsValid())
                 return nullptr;
-            return static_cast<EOS_HPlatform>(*Handle);
+            return ExtractHandle(*Handle);
         }
         else
         {
@@ -334,17 +419,24 @@ inline bool IsValidHandle(EOS_ProductUserId PUID)
  *           • The EOS platform has not been initialised yet (call too early in
  *             the startup sequence — typically safe from PostDefault onwards).
  *
- * NOTE ON ENGINE-VARIANT API (three tiers — do NOT hardcode a single call)
+ * NOTE ON ENGINE-VARIANT API (four tiers — do NOT hardcode a single call)
  * ─────────────────────────────────────────────────────────────────────────
  * Satisfactory migrated UE4 → UE5, so the CSS engine may carry code from
- * multiple EOSShared generations.  Three tiers are detected at compile time
- * via if-constexpr (see EOSSDKManagerDetail above):
+ * multiple EOSShared generations.  Four manager-getter tiers and three
+ * handle-accessor tiers are detected at compile time via if-constexpr (see
+ * EOSSDKManagerDetail above):
  *
- *   Tier 1  CSS UE5.3.2:   GetPlatformHandles()  → TArray<TSharedRef<…>>
- *   Tier 2  Vanilla UE5.2+: GetActivePlatforms() → TArray<IEOSPlatformHandlePtr>
- *   Tier 3  Early UE5/UE4: CreatePlatform(name)  → IEOSPlatformHandlePtr
+ *   Tier 1  CSS UE5.3.2:        GetPlatformHandles()    → TArray<TSharedRef<…>>
+ *   Tier 2  Vanilla UE5.2+:     GetActivePlatforms()    → TArray<IEOSPlatformHandlePtr>
+ *   Tier 3  Other CSS / forks:  GetAllPlatformHandles() → TArray<TSharedRef<…>>
+ *   Tier 4  Early UE5/UE4:      CreatePlatform(name)    → IEOSPlatformHandlePtr
  *
- * Only the matching tier is compiled; discarded branches never cause C2039.
+ *   Handle accessor A: GetHandle()      (explicit method, some CSS variants)
+ *   Handle accessor B: PlatformHandle   (public member,  some CSS UE5.3.2)
+ *   Handle accessor C: implicit cast    (operator EOS_HPlatform(), UE5 standard)
+ *
+ * Only the matching tier is compiled; discarded branches never cause C2039
+ * or C2248 regardless of which engine variant is active.
  */
 inline EOS_HPlatform GetPlatformHandle()
 {
