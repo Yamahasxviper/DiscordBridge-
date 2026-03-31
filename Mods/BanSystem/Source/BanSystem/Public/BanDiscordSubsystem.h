@@ -264,6 +264,13 @@ private:
 	FTSTicker::FDelegateHandle HeartbeatTickerHandle;
 	float HeartbeatIntervalSeconds{0.0f};
 
+	/**
+	 * Handle for the one-shot re-identify / resume ticker scheduled by
+	 * HandleInvalidSession.  Stored here so that Disconnect() can cancel it
+	 * when the subsystem is torn down before the deferred callback fires.
+	 */
+	FTSTicker::FDelegateHandle PendingReidentifyHandle;
+
 	static const FString DiscordGatewayUrl;
 	static const FString DiscordApiBase;
 };

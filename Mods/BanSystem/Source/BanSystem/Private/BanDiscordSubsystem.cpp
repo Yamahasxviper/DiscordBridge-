@@ -226,6 +226,14 @@ void UBanDiscordSubsystem::Disconnect()
 		HeartbeatTickerHandle.Reset();
 	}
 
+	// Cancel any pending one-shot re-identify/resume ticker so it does not
+	// fire on a disconnected or GC'd object.
+	if (PendingReidentifyHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(PendingReidentifyHandle);
+		PendingReidentifyHandle.Reset();
+	}
+
 	if (WebSocketClient)
 	{
 		// Prevent the SMLWebSocket auto-reconnect runnable from silently
@@ -604,17 +612,33 @@ void UBanDiscordSubsystem::HandleInvalidSession(bool bResumable)
 	BotUserId.Empty();
 	GuildOwnerId.Empty(); // stale owner ID must not survive into the new session
 
+	// Stop the heartbeat — it belongs to the invalidated session and must not
+	// fire while we wait for the deferred re-identify/resume below.
+	if (HeartbeatTickerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
+		HeartbeatTickerHandle.Reset();
+	}
+
+	// Cancel any previously scheduled re-identify ticker before creating a new one.
+	if (PendingReidentifyHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(PendingReidentifyHandle);
+		PendingReidentifyHandle.Reset();
+	}
+
 	if (bResumable && !SessionId.IsEmpty())
 	{
 		UE_LOG(LogBanDiscord, Log,
 		       TEXT("BanDiscordSubsystem: Invalid session (resumable) — "
 		            "scheduling Resume in 2 s."));
 		TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
-		FTSTicker::GetCoreTicker().AddTicker(
+		PendingReidentifyHandle = FTSTicker::GetCoreTicker().AddTicker(
 			FTickerDelegate::CreateLambda([WeakThis](float) -> bool
 			{
 				if (UBanDiscordSubsystem* Self = WeakThis.Get())
 				{
+					Self->PendingReidentifyHandle.Reset();
 					Self->SendResume();
 				}
 				return false;
@@ -631,11 +655,12 @@ void UBanDiscordSubsystem::HandleInvalidSession(bool bResumable)
 		       TEXT("BanDiscordSubsystem: Invalid session (not resumable) — "
 		            "re-identifying in 2 s."));
 		TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
-		FTSTicker::GetCoreTicker().AddTicker(
+		PendingReidentifyHandle = FTSTicker::GetCoreTicker().AddTicker(
 			FTickerDelegate::CreateLambda([WeakThis](float) -> bool
 			{
 				if (UBanDiscordSubsystem* Self = WeakThis.Get())
 				{
+					Self->PendingReidentifyHandle.Reset();
 					Self->SendIdentify();
 				}
 				return false;
