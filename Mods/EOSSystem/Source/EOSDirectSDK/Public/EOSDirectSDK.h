@@ -181,6 +181,53 @@ namespace EOSSDKManagerDetail
     struct THasCreatePlatformByName<T,
         std::void_t<decltype(std::declval<T&>().CreatePlatform(std::declval<const FString&>()))>>
         : std::true_type {};
+
+    // -------------------------------------------------------------------------
+    //  Template dispatch helper
+    //
+    //  if constexpr only discards branches inside a TEMPLATE instantiation.
+    //  Placing the multi-tier selection inside this function template ensures
+    //  MSVC/Clang never compile — and therefore never report C2039 for —
+    //  methods that do not exist in the current engine's IEOSSDKManager.
+    // -------------------------------------------------------------------------
+    template <typename T>
+    inline EOS_HPlatform GetPlatformHandleFromManager(T* Manager)
+    {
+        if constexpr (THasGetPlatformHandles<T>::value)
+        {
+            // Tier 1 — CSS UE5.3.2: GetPlatformHandles() → TArray<TSharedRef<IEOSPlatformHandle>>
+            // TSharedRef is never null; IsEmpty() guard alone is sufficient.
+            const auto Handles = Manager->GetPlatformHandles();
+            if (Handles.IsEmpty())
+                return nullptr;
+            return static_cast<EOS_HPlatform>(*Handles[0]);
+        }
+        else if constexpr (THasGetActivePlatforms<T>::value)
+        {
+            // Tier 2 — Vanilla UE5.2+: GetActivePlatforms() → TArray<IEOSPlatformHandlePtr>
+            // IEOSPlatformHandlePtr is TSharedPtr — validate before dereferencing.
+            const auto Handles = Manager->GetActivePlatforms();
+            if (Handles.IsEmpty() || !Handles[0].IsValid())
+                return nullptr;
+            return static_cast<EOS_HPlatform>(*Handles[0]);
+        }
+        else if constexpr (THasCreatePlatformByName<T>::value)
+        {
+            // Tier 3 — Early UE5 / UE4-era hybrid: no list method available.
+            // CreatePlatform() is idempotent — returns the existing handle when
+            // the platform for that config name was already created by the engine.
+            const auto Handle = Manager->CreatePlatform(Manager->GetDefaultPlatformConfigName());
+            if (!Handle.IsValid())
+                return nullptr;
+            return static_cast<EOS_HPlatform>(*Handle);
+        }
+        else
+        {
+            // No known IEOSSDKManager enumeration API found.  Return nullptr so
+            // callers degrade gracefully rather than crashing.
+            return nullptr;
+        }
+    }
 } // namespace EOSSDKManagerDetail
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -305,42 +352,10 @@ inline EOS_HPlatform GetPlatformHandle()
     if (!Manager)
         return nullptr;
 
-    // Compile-time dispatch across three known IEOSSDKManager API generations.
-    // Only the branch that exists in this engine's IEOSSDKManager.h compiles.
-    if constexpr (EOSSDKManagerDetail::THasGetPlatformHandles<IEOSSDKManager>::value)
-    {
-        // Tier 1 — CSS UE5.3.2: GetPlatformHandles() → TArray<TSharedRef<IEOSPlatformHandle>>
-        // TSharedRef is never null; IsEmpty() guard alone is sufficient.
-        const auto Handles = Manager->GetPlatformHandles();
-        if (Handles.IsEmpty())
-            return nullptr;
-        return static_cast<EOS_HPlatform>(*Handles[0]);
-    }
-    else if constexpr (EOSSDKManagerDetail::THasGetActivePlatforms<IEOSSDKManager>::value)
-    {
-        // Tier 2 — Vanilla UE5.2+: GetActivePlatforms() → TArray<IEOSPlatformHandlePtr>
-        // IEOSPlatformHandlePtr is TSharedPtr — validate before dereferencing.
-        const auto Handles = Manager->GetActivePlatforms();
-        if (Handles.IsEmpty() || !Handles[0].IsValid())
-            return nullptr;
-        return static_cast<EOS_HPlatform>(*Handles[0]);
-    }
-    else if constexpr (EOSSDKManagerDetail::THasCreatePlatformByName<IEOSSDKManager>::value)
-    {
-        // Tier 3 — Early UE5 / UE4-era hybrid: no list method available.
-        // CreatePlatform() is idempotent — returns the existing handle when
-        // the platform for that config name was already created by the engine.
-        const auto Handle = Manager->CreatePlatform(Manager->GetDefaultPlatformConfigName());
-        if (!Handle.IsValid())
-            return nullptr;
-        return static_cast<EOS_HPlatform>(*Handle);
-    }
-    else
-    {
-        // No known IEOSSDKManager enumeration API found.  Return nullptr so
-        // callers degrade gracefully rather than crashing.
-        return nullptr;
-    }
+    // Delegate to the template helper so if constexpr operates inside a
+    // template instantiation — the only context where MSVC/Clang truly
+    // discards non-matching branches and never emits C2039 for them.
+    return EOSSDKManagerDetail::GetPlatformHandleFromManager(Manager);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
