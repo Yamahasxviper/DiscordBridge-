@@ -43,7 +43,7 @@
 		{
 			"Name": "EOSSystem",
 			"Enabled": true,
-			"Optional": false,
+			"Optional": true,
 			"SemVersion": "^1.0.0"
 		}
 	]

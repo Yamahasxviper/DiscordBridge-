@@ -40,34 +40,43 @@ void UBanEnforcementSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     // Subscribe to EOSSystem's PUID events for async join-time enforcement and
     // cross-platform ban propagation.  EOSSystem is optional — if not installed
     // the subsystem still works for Steam-only ban enforcement.
-    if (UEOSConnectSubsystem* EOS = GetGameInstance()->GetSubsystem<UEOSConnectSubsystem>())
+    if (UGameInstance* GI = GetGameInstance())
     {
-        EOS->OnPlayerPUIDRegistered.AddDynamic(this, &UBanEnforcementSubsystem::OnPUIDRegistered);
-        EOS->OnPUIDLookupComplete.AddDynamic(this,   &UBanEnforcementSubsystem::OnPUIDLookupDone);
-        EOS->OnReverseLookupComplete.AddDynamic(this, &UBanEnforcementSubsystem::OnReverseLookupDone);
-        EOS->OnReverseLookupAllComplete.AddDynamic(this, &UBanEnforcementSubsystem::OnReverseLookupAllDone);
+        if (UEOSConnectSubsystem* EOS = GI->GetSubsystem<UEOSConnectSubsystem>())
+        {
+            EOS->OnPlayerPUIDRegistered.AddDynamic(this, &UBanEnforcementSubsystem::OnPUIDRegistered);
+            EOS->OnPUIDLookupComplete.AddDynamic(this,   &UBanEnforcementSubsystem::OnPUIDLookupDone);
+            EOS->OnReverseLookupComplete.AddDynamic(this, &UBanEnforcementSubsystem::OnReverseLookupDone);
+            EOS->OnReverseLookupAllComplete.AddDynamic(this, &UBanEnforcementSubsystem::OnReverseLookupAllDone);
 
-        UE_LOG(LogBanEnforcement, Log,
-            TEXT("BanEnforcementSubsystem: Subscribed to EOSSystem events — "
-                 "async PUID lookup and cross-platform propagation enabled."));
+            UE_LOG(LogBanEnforcement, Log,
+                TEXT("BanEnforcementSubsystem: Subscribed to EOSSystem events — "
+                     "async PUID lookup and cross-platform propagation enabled."));
+        }
+        else
+        {
+            UE_LOG(LogBanEnforcement, Log,
+                TEXT("BanEnforcementSubsystem: EOSSystem not available — "
+                     "async PUID lookups and cross-platform ban propagation disabled."));
+        }
+
+        // Subscribe to ban-issued events so that a newly-banned player who is
+        // currently connected gets kicked immediately rather than being allowed
+        // to keep playing until they disconnect and reconnect.
+        if (USteamBanSubsystem* SteamBans = GI->GetSubsystem<USteamBanSubsystem>())
+        {
+            SteamBans->OnPlayerBanned.AddDynamic(this, &UBanEnforcementSubsystem::OnSteamPlayerBanned);
+        }
+        if (UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>())
+        {
+            EOSBans->OnPlayerBanned.AddDynamic(this, &UBanEnforcementSubsystem::OnEOSPlayerBanned);
+        }
     }
     else
     {
-        UE_LOG(LogBanEnforcement, Log,
-            TEXT("BanEnforcementSubsystem: EOSSystem not available — "
-                 "async PUID lookups and cross-platform ban propagation disabled."));
-    }
-
-    // Subscribe to ban-issued events so that a newly-banned player who is
-    // currently connected gets kicked immediately rather than being allowed
-    // to keep playing until they disconnect and reconnect.
-    if (USteamBanSubsystem* SteamBans = GetGameInstance()->GetSubsystem<USteamBanSubsystem>())
-    {
-        SteamBans->OnPlayerBanned.AddDynamic(this, &UBanEnforcementSubsystem::OnSteamPlayerBanned);
-    }
-    if (UEOSBanSubsystem* EOSBans = GetGameInstance()->GetSubsystem<UEOSBanSubsystem>())
-    {
-        EOSBans->OnPlayerBanned.AddDynamic(this, &UBanEnforcementSubsystem::OnEOSPlayerBanned);
+        UE_LOG(LogBanEnforcement, Warning,
+            TEXT("BanEnforcementSubsystem: GetGameInstance() returned nullptr during "
+                 "Initialize — EOSSystem and ban-event subscriptions skipped."));
     }
 
     UE_LOG(LogBanEnforcement, Log,
