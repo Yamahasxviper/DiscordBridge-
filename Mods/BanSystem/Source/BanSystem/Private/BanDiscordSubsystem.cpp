@@ -351,11 +351,12 @@ void UBanDiscordSubsystem::HandleGatewayPayload(const FString& RawJson)
 		return;
 	}
 
-	int32 Opcode = 0;
-	if (!Root->TryGetNumberField(TEXT("op"), Opcode))
+	double OpcodeD = -1.0;
+	if (!Root->TryGetNumberField(TEXT("op"), OpcodeD))
 	{
 		return;
 	}
+	const int32 Opcode = static_cast<int32>(OpcodeD);
 
 	switch (Opcode)
 	{
@@ -372,12 +373,12 @@ void UBanDiscordSubsystem::HandleGatewayPayload(const FString& RawJson)
 	{
 		FString EventType;
 		Root->TryGetStringField(TEXT("t"), EventType);
-		int32 Seq = 0;
-		Root->TryGetNumberField(TEXT("s"), Seq);
-		if (Seq > 0)
+		double SeqD = -1.0;
+		if (Root->TryGetNumberField(TEXT("s"), SeqD) && SeqD >= 0.0)
 		{
-			LastSequenceNumber = Seq;
+			LastSequenceNumber = static_cast<int32>(SeqD);
 		}
+		const int32 Seq = LastSequenceNumber;
 		const TSharedPtr<FJsonObject>* DataObj = nullptr;
 		if (Root->TryGetObjectField(TEXT("d"), DataObj) && DataObj)
 		{
@@ -428,14 +429,27 @@ void UBanDiscordSubsystem::HandleHello(const TSharedPtr<FJsonObject>& DataObj)
 	HeartbeatIntervalSeconds = static_cast<float>(HeartbeatMs) / 1000.0f;
 
 	// Start the heartbeat ticker.
+	// Per Discord spec: jitter the FIRST heartbeat by a random [0, interval]
+	// delay to prevent thundering-herd reconnect spikes.  After the first
+	// beat, switch to the full repeating interval.
 	if (HeartbeatTickerHandle.IsValid())
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
 	}
-	HeartbeatTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
-		FTickerDelegate::CreateUObject(this, &UBanDiscordSubsystem::HeartbeatTick),
-		HeartbeatIntervalSeconds);
 	bPendingHeartbeatAck = false;
+
+	const float JitterSeconds = FMath::FRandRange(0.0f, HeartbeatIntervalSeconds);
+	HeartbeatTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
+		{
+			SendHeartbeat();
+			// Re-register at the full interval for subsequent beats.
+			HeartbeatTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+				FTickerDelegate::CreateUObject(this, &UBanDiscordSubsystem::HeartbeatTick),
+				HeartbeatIntervalSeconds);
+			return false; // one-shot jitter tick
+		}),
+		JitterSeconds);
 
 	// Attempt Resume if we have a session; otherwise Identify fresh.
 	if (!SessionId.IsEmpty())
@@ -516,11 +530,18 @@ void UBanDiscordSubsystem::HandleGuildCreate(const TSharedPtr<FJsonObject>& Data
 
 void UBanDiscordSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>& DataObj)
 {
-	// Broadcast to internal subscribers (the command handler below).
+	// Broadcast to external API subscribers (e.g. other mods that called
+	// SubscribeDiscordMessages() directly on this subsystem).
 	if (OnRawDiscordMessage.IsBound())
 	{
 		OnRawDiscordMessage.Broadcast(DataObj);
 	}
+
+	// Always route to the internal command handler in standalone mode.
+	// Without this call every ban command typed in Discord is silently
+	// dropped because OnDiscordMessageReceived is only wired up via
+	// SetCommandProvider() in the external-provider path.
+	OnDiscordMessageReceived(DataObj);
 }
 
 void UBanDiscordSubsystem::SendIdentify()
@@ -581,6 +602,7 @@ void UBanDiscordSubsystem::HandleInvalidSession(bool bResumable)
 {
 	bGatewayReady = false;
 	BotUserId.Empty();
+	GuildOwnerId.Empty(); // stale owner ID must not survive into the new session
 
 	if (bResumable && !SessionId.IsEmpty())
 	{

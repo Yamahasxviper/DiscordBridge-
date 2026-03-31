@@ -163,7 +163,7 @@ uint32 FSMLWebSocketRunnable::Run()
 		{
 			// Cap the attempt count against MaxReconnectAttempts before sleeping.
 			if (ReconnectCfg.MaxReconnectAttempts > 0 &&
-			    AttemptNumber > ReconnectCfg.MaxReconnectAttempts)
+			    AttemptNumber >= ReconnectCfg.MaxReconnectAttempts)
 			{
 				NotifyError(FString::Printf(
 					TEXT("SMLWebSocket: Gave up reconnecting after %d attempts"), ReconnectCfg.MaxReconnectAttempts));
@@ -518,6 +518,11 @@ bool FSMLWebSocketRunnable::InitSslContext()
 
 	if (!ReadBio || !WriteBio)
 	{
+		// Free any BIO that was successfully allocated before the check to
+		// avoid a leak: SSL_set_bio has not been called yet so SSL_free will
+		// not release them automatically.
+		if (ReadBio) { BIO_free(ReadBio); ReadBio = nullptr; }
+		if (WriteBio) { BIO_free(WriteBio); WriteBio = nullptr; }
 		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: Failed to create memory BIOs"));
 		return false;
 	}
@@ -574,7 +579,12 @@ bool FSMLWebSocketRunnable::PerformSslHandshake(const FString& Host)
 		if (Ret == 1)
 		{
 			// Handshake complete – flush any final records the library wrote.
-			FlushSslWriteBio();
+			if (!FlushSslWriteBio())
+			{
+				UE_LOG(LogSMLWebSocket, Error,
+				       TEXT("SMLWebSocket: Failed to flush TLS write BIO after handshake"));
+				return false;
+			}
 			break;
 		}
 
@@ -639,7 +649,14 @@ bool FSMLWebSocketRunnable::FeedSslReadBio()
 	{
 		return false;
 	}
-	BIO_write(ReadBio, Tmp, BytesRead);
+	const int32 Written = static_cast<int32>(BIO_write(ReadBio, Tmp, BytesRead));
+	if (Written != BytesRead)
+	{
+		UE_LOG(LogSMLWebSocket, Error,
+		       TEXT("SMLWebSocket: BIO_write underflow in FeedSslReadBio (%d of %d bytes written)"),
+		       Written, BytesRead);
+		return false;
+	}
 	return true;
 }
 
@@ -676,15 +693,28 @@ int32 FSMLWebSocketRunnable::SslRead(uint8* Buffer, int32 BufferSize)
 			{
 				return -1; // hard TCP error
 			}
-			BIO_write(ReadBio, Tmp, BytesRead);
+			const int32 BioWritten = static_cast<int32>(BIO_write(ReadBio, Tmp, BytesRead));
+			if (BioWritten != BytesRead)
+			{
+				UE_LOG(LogSMLWebSocket, Error,
+				       TEXT("SMLWebSocket: BIO_write underflow in SslRead (%d of %d bytes written)"),
+				       BioWritten, BytesRead);
+				return -1;
+			}
 		}
 		else if (Err == SSL_ERROR_WANT_WRITE)
 		{
-			FlushSslWriteBio();
+			if (!FlushSslWriteBio())
+			{
+				return -1; // socket broken during SSL_ERROR_WANT_WRITE flush
+			}
 		}
 		else if (Err == SSL_ERROR_ZERO_RETURN)
 		{
-			return 0; // clean TLS close by server (connection is done)
+			// Peer cleanly closed the TLS session — treat as EOF, not a timeout.
+			// Returning 0 here would cause NetRecvExact to retry forever since it
+			// cannot distinguish timeout (retry) from clean close (stop).
+			return -1;
 		}
 		else
 		{
@@ -711,7 +741,10 @@ bool FSMLWebSocketRunnable::SslWrite(const uint8* Data, int32 DataSize)
 			const int32 Err = SSL_get_error(SslInstance, Ret);
 			if (Err == SSL_ERROR_WANT_WRITE)
 			{
-				FlushSslWriteBio();
+				if (!FlushSslWriteBio())
+				{
+					return false; // socket broken; bail to avoid infinite loop
+				}
 			}
 			else
 			{
@@ -1219,7 +1252,17 @@ void FSMLWebSocketRunnable::FlushOutboundQueue()
 	while (OutboundMessages.Dequeue(Msg))
 	{
 		const uint8 Opcode = Msg.bIsBinary ? WsOpcode::Binary : WsOpcode::Text;
-		SendWsFrame(Opcode, Msg.Payload.GetData(), Msg.Payload.Num());
+		if (!SendWsFrame(Opcode, Msg.Payload.GetData(), Msg.Payload.Num()))
+		{
+			UE_LOG(LogSMLWebSocket, Error,
+			       TEXT("SMLWebSocket: SendWsFrame failed in FlushOutboundQueue — "
+			            "triggering reconnect."));
+			// Stop draining and let the run-loop detect the broken connection.
+			bStopRequested = false; // preserve reconnect eligibility
+			// Re-queue the failed message so it is not silently lost.
+			OutboundMessages.Enqueue(MoveTemp(Msg));
+			break;
+		}
 	}
 }
 

@@ -315,11 +315,19 @@ void UBanEnforcementSubsystem::OnPostLogin(AGameModeBase*    GameMode,
         {
             // No cache hit — add to pending map and trigger async lookup.
             // OnPUIDLookupDone will handle the result.
+            //
+            // If an entry already exists (rapid disconnect/reconnect before the
+            // previous lookup resolved) only update the stored controller to the
+            // latest connection — do not trigger a second redundant lookup.
+            const bool bAlreadyPending = PendingBySteam64.Contains(ResolvedId.Steam64Id);
             FPendingEOSCheck& Pending = PendingBySteam64.FindOrAdd(ResolvedId.Steam64Id);
             Pending.Controller = NewPlayer;
             Pending.Steam64Id  = ResolvedId.Steam64Id;
 
-            EOS->LookupPUIDBySteam64(ResolvedId.Steam64Id);
+            if (!bAlreadyPending)
+            {
+                EOS->LookupPUIDBySteam64(ResolvedId.Steam64Id);
+            }
 
             UE_LOG(LogBanEnforcement, Verbose,
                 TEXT("PostLogin: async EOS PUID lookup triggered for Steam player %s — "

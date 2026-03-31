@@ -759,15 +759,21 @@ void UTicketSubsystem::CreateTicketChannel(
 	const FString DisplayLabelCopy   = DisplayLabel;
 	const FString DisplayDescCopy    = DisplayDesc;
 
+	// Capture a weak pointer so we never dereference a GC'd subsystem if the
+	// HTTP response arrives after UTicketSubsystem has been destroyed.
+	TWeakObjectPtr<UTicketSubsystem> WeakThis(this);
 	Bridge->CreateDiscordGuildTextChannel(
 		ChannelName,
 		Config.TicketCategoryId,
 		Overwrites,
-		[this, NotifyRoleIdCopy, TicketChannelCopy,
+		[WeakThis, NotifyRoleIdCopy, TicketChannelCopy,
 		 OpenerUserIdCopy, OpenerUsernameCopy, TicketTypeCopy,
 		 ExtraInfoCopy, DisplayLabelCopy, DisplayDescCopy]
 		(const FString& NewChannelId)
 		{
+			UTicketSubsystem* Self = WeakThis.Get();
+			if (!Self) return;
+
 			if (NewChannelId.IsEmpty())
 			{
 				UE_LOG(LogTicketSystem, Warning,
@@ -781,10 +787,10 @@ void UTicketSubsystem::CreateTicketChannel(
 			       *NewChannelId, *OpenerUsernameCopy, *OpenerUserIdCopy);
 
 			// Track the channel.
-			TicketChannelToOpener.Add(NewChannelId, OpenerUserIdCopy);
-			OpenerToTicketChannel.Add(OpenerUserIdCopy, NewChannelId);
+			Self->TicketChannelToOpener.Add(NewChannelId, OpenerUserIdCopy);
+			Self->OpenerToTicketChannel.Add(OpenerUserIdCopy, NewChannelId);
 			// Persist the updated state so this ticket survives a server restart.
-			SaveTicketState();
+			Self->SaveTicketState();
 
 			// ── Build the welcome message ─────────────────────────────────────
 			const FString MentionPrefix = NotifyRoleIdCopy.IsEmpty()
@@ -845,7 +851,7 @@ void UTicketSubsystem::CreateTicketChannel(
 			}
 
 			// Post the welcome message (plain text).
-			if (IDiscordBridgeProvider* B = GetBridge())
+			if (IDiscordBridgeProvider* B = Self->GetBridge())
 			{
 				TSharedPtr<FJsonObject> WelcomeMsg = MakeShared<FJsonObject>();
 				WelcomeMsg->SetStringField(TEXT("content"), WelcomeContent);
@@ -853,28 +859,28 @@ void UTicketSubsystem::CreateTicketChannel(
 
 				// Post the close-ticket button.
 				B->SendMessageBodyToChannel(NewChannelId,
-					MakeCloseButtonMessage(OpenerUserIdCopy));
+					Self->MakeCloseButtonMessage(OpenerUserIdCopy));
 
-				// Notify the admin/ticket channel when configured.
+				// Notify EVERY configured admin/ticket channel (not just the first).
 				const TArray<FString> TicketChans =
 					FTicketConfig::ParseChannelIds(TicketChannelCopy);
-				const FString AdminChanId = TicketChans.Num() > 0
-					? TicketChans[0] : TEXT("");
+				const FString NoticeTypeName = DisplayLabelCopy.IsEmpty()
+					? TicketTypeCopy : DisplayLabelCopy;
+				const FString AdminNotice = FString::Printf(
+					TEXT("%s:new: New **%s** ticket from %s: <#%s>"),
+					NotifyRoleIdCopy.IsEmpty()
+						? TEXT("")
+						: *FString::Printf(TEXT("<@&%s> "), *NotifyRoleIdCopy),
+					*NoticeTypeName, *UserMention, *NewChannelId);
 
-				if (!AdminChanId.IsEmpty() && AdminChanId != NewChannelId)
+				for (const FString& AdminChanId : TicketChans)
 				{
-					const FString NoticeTypeName = DisplayLabelCopy.IsEmpty()
-						? TicketTypeCopy : DisplayLabelCopy;
-					const FString AdminNotice = FString::Printf(
-						TEXT("%s:new: New **%s** ticket from %s: <#%s>"),
-						NotifyRoleIdCopy.IsEmpty()
-							? TEXT("")
-							: *FString::Printf(TEXT("<@&%s> "), *NotifyRoleIdCopy),
-						*NoticeTypeName, *UserMention, *NewChannelId);
-
-					TSharedPtr<FJsonObject> NoticeMsg = MakeShared<FJsonObject>();
-					NoticeMsg->SetStringField(TEXT("content"), AdminNotice);
-					B->SendMessageBodyToChannel(AdminChanId, NoticeMsg);
+					if (!AdminChanId.IsEmpty() && AdminChanId != NewChannelId)
+					{
+						TSharedPtr<FJsonObject> NoticeMsg = MakeShared<FJsonObject>();
+						NoticeMsg->SetStringField(TEXT("content"), AdminNotice);
+						B->SendMessageBodyToChannel(AdminChanId, NoticeMsg);
+					}
 				}
 			}
 		});

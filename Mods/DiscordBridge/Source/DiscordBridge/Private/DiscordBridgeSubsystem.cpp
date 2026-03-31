@@ -230,9 +230,13 @@ void UDiscordBridgeSubsystem::Deinitialize()
 
 void UDiscordBridgeSubsystem::Connect()
 {
-	if (WebSocketClient && WebSocketClient->IsConnected())
+	// If a WebSocket client already exists — whether connected, mid-handshake,
+	// or mid-reconnect — do not create a second one.  The old client's dynamic
+	// delegate callbacks are still bound to this subsystem and would fire on top
+	// of the new client's events, causing double Hello / double heartbeat.
+	if (WebSocketClient)
 	{
-		return; // Already connected.
+		return;
 	}
 
 	WebSocketClient = USMLWebSocketClient::CreateWebSocketClient(this);
@@ -421,7 +425,13 @@ void UDiscordBridgeSubsystem::HandleGatewayPayload(const FString& RawJson)
 		return;
 	}
 
-	const int32 OpCode = Root->GetIntegerField(TEXT("op"));
+	double OpCodeD = -1.0;
+	if (!Root->TryGetNumberField(TEXT("op"), OpCodeD))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("DiscordBridge: Gateway payload missing 'op' field: %s"), *RawJson);
+		return;
+	}
+	const int32 OpCode = static_cast<int32>(OpCodeD);
 
 	switch (OpCode)
 	{
@@ -1955,7 +1965,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 							{
 								FallbackGM = W->GetAuthGameMode<AGameModeBase>();
 							}
-							if (FallbackGM && FallbackGM->GameSession)
+							if (FallbackGM && FallbackGM->GameSession && WeakPC.IsValid())
 							{
 								FallbackGM->GameSession->KickPlayer(
 									WeakPC.Get(),
