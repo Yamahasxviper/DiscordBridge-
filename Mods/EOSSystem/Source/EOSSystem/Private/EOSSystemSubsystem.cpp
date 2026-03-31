@@ -135,10 +135,10 @@ void EOS_CALL UEOSSystemSubsystem::OnEOSLog(const EOS_LogMessage* Msg)
 {
     if (!Msg || !Msg->Message) return;
     const FString Text = UTF8_TO_TCHAR(Msg->Message);
-    if      (Msg->Level == EOS_LOG_Fatal)   UE_LOG(LogEOSSystemSub, Fatal,   TEXT("[EOS] %s"), *Text);
-    else if (Msg->Level == EOS_LOG_Error)   UE_LOG(LogEOSSystemSub, Error,   TEXT("[EOS] %s"), *Text);
-    else if (Msg->Level == EOS_LOG_Warning) UE_LOG(LogEOSSystemSub, Warning, TEXT("[EOS] %s"), *Text);
-    else                                    UE_LOG(LogEOSSystemSub, Log,     TEXT("[EOS] %s"), *Text);
+    if      (Msg->Level == EOS_LOG_Fatal)   { UE_LOG(LogEOSSystemSub, Fatal,   TEXT("[EOS] %s"), *Text); }
+    else if (Msg->Level == EOS_LOG_Error)   { UE_LOG(LogEOSSystemSub, Error,   TEXT("[EOS] %s"), *Text); }
+    else if (Msg->Level == EOS_LOG_Warning) { UE_LOG(LogEOSSystemSub, Warning, TEXT("[EOS] %s"), *Text); }
+    else                                    { UE_LOG(LogEOSSystemSub, Log,     TEXT("[EOS] %s"), *Text); }
 }
 
 EOS_ELogLevel UEOSSystemSubsystem::MapLogLevel(const FString& Level)
