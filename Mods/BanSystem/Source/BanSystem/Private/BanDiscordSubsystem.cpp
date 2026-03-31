@@ -1822,11 +1822,20 @@ TArray<FString> UBanDiscordSubsystem::SplitArgs(const FString& Input)
 			// or the end of the string.  This lets multi-word player names be
 			// passed as a single argument, e.g.:
 			//   !banbyname "John Doe" 60 reason
+			// The escape sequence \" produces a literal double-quote inside the token.
 			++i; // skip opening quote
 			FString Token;
 			while (i < Len && Trimmed[i] != TEXT('"'))
 			{
-				Token += Trimmed[i++];
+				if (Trimmed[i] == TEXT('\\') && i + 1 < Len && Trimmed[i + 1] == TEXT('"'))
+				{
+					Token += TEXT('"');
+					i += 2;
+				}
+				else
+				{
+					Token += Trimmed[i++];
+				}
 			}
 			if (i < Len) ++i; // skip closing quote
 			Parts.Add(Token);

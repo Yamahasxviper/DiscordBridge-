@@ -118,6 +118,15 @@ bool USteamBanSubsystem::BanPlayer(const FString& Steam64Id,
                             ? FDateTime(0)
                             : FDateTime::UtcNow() + FTimespan::FromMinutes(DurationMinutes);
 
+    // Warn if we are overwriting an existing active ban record.
+    if (const FBanEntry* Existing = BanMap.Find(Steam64Id))
+    {
+        UE_LOG(LogSteamBanSystem, Warning,
+            TEXT("BanPlayer: overwriting existing ban for %s "
+                 "(was: '%s', expires: %s) with new ban (reason: '%s')."),
+            *Steam64Id, *Existing->Reason, *Existing->GetExpiryString(), *Entry.Reason);
+    }
+
     BanMap.Add(Steam64Id, Entry);
     SaveBans();
 
@@ -309,12 +318,21 @@ void USteamBanSubsystem::LoadBans()
     if (!Root->TryGetArrayField(SteamBanJson::KeyBans, BansArray) || !BansArray)
         return;
 
-    for (const TSharedPtr<FJsonValue>& Val : *BansArray)
+    for (int32 Idx = 0; Idx < BansArray->Num(); ++Idx)
     {
-        if (!Val.IsValid() || Val->Type != EJson::Object) continue;
+        const TSharedPtr<FJsonValue>& Val = (*BansArray)[Idx];
+        if (!Val.IsValid() || Val->Type != EJson::Object)
+        {
+            UE_LOG(LogSteamBanSystem, Warning,
+                TEXT("LoadBans: entry[%d] is not a JSON object — skipped."), Idx);
+            continue;
+        }
         FBanEntry Entry;
         if (SteamBanJson::JsonToEntry(Val->AsObject(), Entry))
             BanMap.Add(Entry.PlayerId, Entry);
+        else
+            UE_LOG(LogSteamBanSystem, Warning,
+                TEXT("LoadBans: failed to parse entry[%d] — skipped."), Idx);
     }
 }
 
@@ -341,9 +359,25 @@ void USteamBanSubsystem::SaveBans() const
         return;
     }
 
-    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath))
+    // Atomic rename: write to a temp file first, then move it over the target.
+    // This ensures the ban file is never left in a partially-written state if
+    // the server is killed mid-write.
+    const FString TempPath = FilePath + TEXT(".tmp");
+    IPlatformFile& PF = FPlatformFileManager::Get().GetPlatformFile();
+    if (!FFileHelper::SaveStringToFile(JsonStr, *TempPath))
     {
         UE_LOG(LogSteamBanSystem, Error,
-            TEXT("SaveBans: could not write %s"), *FilePath);
+            TEXT("SaveBans: could not write temp file %s"), *TempPath);
+        return;
+    }
+    if (PF.FileExists(*FilePath))
+    {
+        PF.DeleteFile(*FilePath);
+    }
+    if (!PF.MoveFile(*FilePath, *TempPath))
+    {
+        UE_LOG(LogSteamBanSystem, Error,
+            TEXT("SaveBans: could not rename temp file to %s"), *FilePath);
+        PF.DeleteFile(*TempPath);
     }
 }
