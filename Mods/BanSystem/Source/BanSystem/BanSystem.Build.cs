@@ -20,13 +20,15 @@ public class BanSystem : ModuleRules
             "SML",
             // SMLWebSocket — for the standalone Discord Gateway (WebSocket) connection.
             "SMLWebSocket",
-            // EOSIdHelper — module (now part of EOSSystem plugin) providing EOS Product
-            // User ID extraction via OnlineServicesEOSGS (V2).
-            "EOSIdHelper",
+            // FGOnlineHelpers — the standard CSS Satisfactory mod helper module used
+            // by every Alpakit C++ mod in this project.  Provides EOSId::GetProductUserId
+            // as a non-inline DLL export (FGONLINEHELPERS_API) so that the EOS SDK
+            // DLL-import symbols resolve inside FGOnlineHelpers.dll rather than in
+            // every consumer's .obj file (which would cause LNK2019).
+            "FGOnlineHelpers",
             // EOSDirectSDK — dedicated module providing direct EOS C SDK access.
             // Exposes EOSDirectSDK::PUIDFromString, PUIDToString, IsValidHandle,
             // GetPlatformHandle (EOS_HPlatform) and GetConnectInterface (EOS_HConnect).
-            // Also accessible as EOSBanSDK:: via the alias in EOSBanSDK.h.
             "EOSDirectSDK",
             // EOSSystem — standalone EOS system providing UEOSConnectSubsystem with
             // forward (Steam64→PUID) and reverse (PUID→Steam64) lookup cache.

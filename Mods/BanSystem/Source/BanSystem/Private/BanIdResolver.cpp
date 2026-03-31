@@ -4,7 +4,7 @@
 
 // ── EOSSystem headers first ────────────────────────────────────────────────
 // Including EOSConnectSubsystem.h (which pulls EOSSDK/eos_sdk.h → eos_platform.h)
-// BEFORE EOSBanSDK.h (which pulls EOSDirectSDK's eos_platform.h) ensures that
+// BEFORE EOSDirectSDK.h (which pulls EOSDirectSDK's eos_platform.h) ensures that
 // EOSSystem's eos_platform.h wins the EOS_Platform_H include-guard race.
 // EOSSystem's version is preferred because it also does #include <eos_types.h>,
 // making EOS_Platform_Options and other platform-creation types available.
@@ -12,15 +12,17 @@
 #include "EOSConnectSubsystem.h"
 #include "EOSTypes.h"
 
-// ── EOSSystem EOS helpers ──────────────────────────────────────────────────
-// EOSIdHelper — module (part of EOSSystem plugin) providing EOS Product User ID
-// extraction via the UE5 OnlineServicesEOSGS V2 path.
-#include "EOSIdHelper.h"
+// ── EOS identity extraction ────────────────────────────────────────────────
+// FGOnlineHelpers — the standard CSS Satisfactory mod helper module used by
+// every Alpakit C++ mod in this project.  Provides EOSId::GetProductUserId as
+// a FGONLINEHELPERS_API non-inline export so that the EOS SDK DLL-import
+// symbols (UE::Online::GetProductUserId, LexToString, EOS_ProductUserId_IsValid)
+// are resolved inside FGOnlineHelpers.dll, not in this module's .obj file.
+#include "Online/FGOnlineHelpers.h"
 
-// EOSBanSDK — custom EOS SDK wrapper that converts stored PUID strings back to
-// EOS_ProductUserId handles, validates them via the EOS C SDK, and exposes the
-// EOS platform handle for direct SDK calls.
-#include "EOSBanSDK.h"
+// EOSDirectSDK — direct EOS C SDK access: PUIDFromString, PUIDToString,
+// IsValidHandle and the registered EOS_HPlatform handle.
+#include "EOSDirectSDK.h"
 
 // Ban subsystem validators
 #include "Steam/SteamBanSubsystem.h"
@@ -143,15 +145,15 @@ bool FBanIdResolver::TryGetEOSProductUserId(const FUniqueNetIdRepl& UniqueId,
     }
 
 #if WITH_EOS_SDK
-    // Secondary validation via the custom EOS SDK:
-    // EOSBanSDK::PUIDFromString() calls EOS_ProductUserId_FromString() to parse
+    // Secondary validation via EOSDirectSDK:
+    // EOSDirectSDK::PUIDFromString() calls EOS_ProductUserId_FromString() to parse
     // the string into an EOS_ProductUserId handle, then IsValidHandle() calls
     // EOS_ProductUserId_IsValid() to confirm the EOS SDK considers it valid.
     // This cross-checks that the PUID produced by the UE OnlineServices layer
     // is accepted by the underlying EOS C SDK.
     {
-        const EOS_ProductUserId PUIDHandle = EOSBanSDK::PUIDFromString(Candidate);
-        if (!EOSBanSDK::IsValidHandle(PUIDHandle))
+        const EOS_ProductUserId PUIDHandle = EOSDirectSDK::PUIDFromString(Candidate);
+        if (!EOSDirectSDK::IsValidHandle(PUIDHandle))
         {
             UE_LOG(LogBanIdResolver, Warning,
                 TEXT("TryGetEOSProductUserId: PUID '%s' passed format validation but "

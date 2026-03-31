@@ -1,9 +1,12 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 //
-// Minimal module implementation for EOSIdHelper.
-// All functional code lives in the public header (EOSIdHelper.h) as an inline
-// function.  This file only satisfies UBT's requirement that every Runtime
-// module produce a loadable DLL.
+// EOSIdHelper.cpp
+//
+// Minimal module stub.
+// EOSId::GetProductUserId has been moved to the FGOnlineHelpers module, which
+// is the standard Alpakit helper module used by every mod in this project.
+// This module is retained for plugin infrastructure but provides no exported
+// API of its own beyond the module entry point.
 
 #include "EOSIdHelper.h"
 #include "Modules/ModuleManager.h"
