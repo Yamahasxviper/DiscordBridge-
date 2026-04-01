@@ -1,6 +1,7 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 
 #include "EOS/EOSBanSubsystem.h"
+#include "Online/FGOnlineHelpers.h"
 #include "Misc/FileHelper.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
@@ -285,15 +286,7 @@ void UEOSBanSubsystem::SetNotificationProvider(IBanNotificationProvider* Provide
 // ─────────────────────────────────────────────────────────────────────────────
 bool UEOSBanSubsystem::IsValidEOSProductUserId(const FString& Id)
 {
-    if (Id.Len() != 32) return false;
-    const FString Lower = Id.ToLower();
-    for (TCHAR C : Lower)
-    {
-        const bool bDigit = (C >= TEXT('0') && C <= TEXT('9'));
-        const bool bHex   = (C >= TEXT('a') && C <= TEXT('f'));
-        if (!bDigit && !bHex) return false;
-    }
-    return true;
+    return EOSId::IsValidEOSProductUserId(Id);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

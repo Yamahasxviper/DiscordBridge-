@@ -12,37 +12,24 @@
 #include "EOSConnectSubsystem.h"
 #include "EOSTypes.h"
 
-// ── EOS identity extraction ────────────────────────────────────────────────
+// ── Player identity extraction ─────────────────────────────────────────────
 // FGOnlineHelpers — the standard CSS Satisfactory mod helper module used by
-// every Alpakit C++ mod in this project.  Provides EOSId::GetProductUserId as
-// a FGONLINEHELPERS_API non-inline export so that the EOS SDK DLL-import
-// symbols (UE::Online::GetProductUserId, LexToString, EOS_ProductUserId_IsValid)
-// are resolved inside FGOnlineHelpers.dll, not in this module's .obj file.
+// every Alpakit C++ mod in this project.  Provides:
+//   • EOSId::GetProductUserId  — extract EOS PUID (FGONLINEHELPERS_API, non-inline)
+//   • EOSId::GetSteam64Id      — extract Steam64 ID (FGONLINEHELPERS_API, non-inline)
+//   • EOSId::IsValidSteam64Id  — validate Steam64 format string (inline)
+//   • EOSId::IsValidEOSProductUserId — validate EOS PUID format string (inline)
+// Non-inline exports ensure EOS SDK DLL-import symbols are resolved inside
+// FGOnlineHelpers.dll rather than in this module's .obj file (avoids LNK2019).
 #include "Online/FGOnlineHelpers.h"
 
 // EOSDirectSDK — direct EOS C SDK access: PUIDFromString, PUIDToString,
 // IsValidHandle and the registered EOS_HPlatform handle.
 #include "EOSDirectSDK.h"
 
-// Ban subsystem validators
-#include "Steam/SteamBanSubsystem.h"
-#include "EOS/EOSBanSubsystem.h"
 #include "Engine/GameInstance.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogBanIdResolver, Log, All);
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Constants
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Type name used by the UE5 Steam online services plugin.
- * When a player authenticates through Steam, FUniqueNetIdRepl::GetType()
- * returns this FName.
- *
- * Reference: UE5 Online::Steam service implementation.
- */
-static const FName SteamTypeName(TEXT("Steam"));
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  FBanIdResolver
@@ -85,24 +72,25 @@ bool FBanIdResolver::TryGetSteam64Id(const FUniqueNetIdRepl& UniqueId,
 {
     if (!UniqueId.IsValid()) return false;
 
-    // The UE5 Steam online services plugin stamps each ID it creates with the
-    // type name "Steam".  Any other type name is not a Steam ID.
-    if (UniqueId.GetType() != SteamTypeName)
-        return false;
-
-    // For Steam IDs, ToString() returns the raw 17-digit Steam64 decimal
-    // string (e.g. "76561198000000000").  Validate the format before use.
-    const FString Candidate = UniqueId.ToString();
-    if (!USteamBanSubsystem::IsValidSteam64Id(Candidate))
+    // Delegate to the centralised FGOnlineHelpers helper which checks the
+    // "Steam" type name and validates the 17-digit Steam64 format.
+    // The type check is performed before format validation inside GetSteam64Id;
+    // any non-Steam identity type returns false silently.
+    if (!EOSId::GetSteam64Id(UniqueId, OutSteam64Id))
     {
-        UE_LOG(LogBanIdResolver, Warning,
-            TEXT("TryGetSteam64Id: UniqueNetId type is 'Steam' but ToString() '%s' "
-                 "failed Steam64 format validation."),
-            *Candidate);
+        // Log a specific warning only when the type IS "Steam" but the string
+        // failed format validation — that is an unexpected malformed identity.
+        static const FName SteamTypeName(TEXT("Steam"));
+        if (UniqueId.GetType() == SteamTypeName)
+        {
+            UE_LOG(LogBanIdResolver, Warning,
+                TEXT("TryGetSteam64Id: UniqueNetId type is 'Steam' but ToString() '%s' "
+                     "failed Steam64 format validation."),
+                *UniqueId.ToString());
+        }
         return false;
     }
 
-    OutSteam64Id = Candidate;
     UE_LOG(LogBanIdResolver, Verbose,
         TEXT("TryGetSteam64Id: resolved Steam64 ID '%s'"), *OutSteam64Id);
     return true;
@@ -135,7 +123,7 @@ bool FBanIdResolver::TryGetEOSProductUserId(const FUniqueNetIdRepl& UniqueId,
 
     // Validate that the returned string matches the 32-char lowercase hex
     // format expected by the EOS ban system.
-    if (!UEOSBanSubsystem::IsValidEOSProductUserId(Candidate))
+    if (!EOSId::IsValidEOSProductUserId(Candidate))
     {
         UE_LOG(LogBanIdResolver, Warning,
             TEXT("TryGetEOSProductUserId: EOSId::GetProductUserId returned '%s' "

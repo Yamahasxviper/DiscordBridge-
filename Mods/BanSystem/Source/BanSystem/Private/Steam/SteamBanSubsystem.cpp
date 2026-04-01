@@ -1,6 +1,7 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 
 #include "Steam/SteamBanSubsystem.h"
+#include "Online/FGOnlineHelpers.h"
 #include "Misc/FileHelper.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
@@ -281,12 +282,7 @@ void USteamBanSubsystem::SetNotificationProvider(IBanNotificationProvider* Provi
 // ─────────────────────────────────────────────────────────────────────────────
 bool USteamBanSubsystem::IsValidSteam64Id(const FString& Id)
 {
-    if (Id.Len() != 17) return false;
-    for (TCHAR C : Id)
-        if (C < TEXT('0') || C > TEXT('9')) return false;
-    // Steam64 IDs live in the range [76561193005069312, 76561202255233023]
-    // A quick prefix check covers the overwhelming majority of real IDs.
-    return Id.StartsWith(TEXT("7656119"));
+    return EOSId::IsValidSteam64Id(Id);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

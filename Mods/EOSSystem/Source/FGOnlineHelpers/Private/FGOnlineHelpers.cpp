@@ -2,7 +2,8 @@
 //
 // FGOnlineHelpers.cpp
 //
-// Implements EOSId::GetProductUserId — exported from the FGOnlineHelpers DLL.
+// Implements EOSId::GetSteam64Id and EOSId::GetProductUserId — both exported
+// from the FGOnlineHelpers DLL.
 //
 // All EOS-specific headers (OnlineIdEOSGS.h, EOSShared.h, eos_common.h) are
 // confined to this translation unit.  This prevents the DLL-import symbols for
@@ -55,6 +56,37 @@ IMPLEMENT_MODULE(FDefaultModuleImpl, FGOnlineHelpers)
 
 namespace EOSId
 {
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Steam 64-bit ID extraction
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool GetSteam64Id(const FUniqueNetIdRepl& UniqueId, FString& OutSteam64Id)
+{
+    OutSteam64Id.Empty();
+
+    if (!UniqueId.IsValid())
+        return false;
+
+    // The UE5 Steam online services plugin stamps every Steam identity with
+    // the type name "Steam".  Any other type is not a Steam64 ID.
+    static const FName SteamTypeName(TEXT("Steam"));
+    if (UniqueId.GetType() != SteamTypeName)
+        return false;
+
+    // For Steam IDs, ToString() returns the raw 17-digit Steam64 decimal
+    // string (e.g. "76561198000000000").  Validate format before returning.
+    const FString Candidate = UniqueId.ToString();
+    if (!IsValidSteam64Id(Candidate))
+        return false;
+
+    OutSteam64Id = Candidate;
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  EOS Product User ID extraction
+// ─────────────────────────────────────────────────────────────────────────────
 
 bool GetProductUserId(const FUniqueNetIdRepl& UniqueId, FString& OutProductUserId)
 {
