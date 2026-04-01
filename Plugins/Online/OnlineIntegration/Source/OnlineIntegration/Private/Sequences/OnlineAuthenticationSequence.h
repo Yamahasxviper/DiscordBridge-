@@ -23,7 +23,7 @@ class UOnlineAuthenticationSequence: public UOnlineAsyncOperation
 {
 	GENERATED_BODY()
 public:
-	void Initialize(FPlatformUserId PlatformUserId);
+	void Initialize(FPlatformUserId InPlatformUserId);
 	void Start(FOnOnlineAsyncOperationCompleted_Native::FDelegate&& CompleteDelegate);
 
 	bool HasErrors() const override;
