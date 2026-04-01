@@ -534,7 +534,15 @@ void EOS_CALL UEOSConnectSubsystem::OnQueryProductUserIdMappingsCallback(const E
                 UE_LOG(LogEOSConnect, Log, TEXT("Reverse lookup: PUID='%s' -> external='%s' (type %d)"),
                     *PUIDStr, *UInfo.AccountId, (int32)UInfo.AccountType);
 
-                Self->OnReverseLookupComplete.Broadcast(PUIDStr, UInfo.AccountId, UInfo.AccountType);
+                // Only broadcast for PUIDs that were the actual subjects of
+                // this query.  Broadcasting for non-queried PUIDs (those in
+                // AllPUIDs whose EOS SDK cache happens to be populated from a
+                // previous query) causes spurious OnReverseLookupComplete events
+                // that can trigger premature enforcement for concurrent lookups.
+                if (QueriedPUIDs.Contains(PUIDStr))
+                {
+                    Self->OnReverseLookupComplete.Broadcast(PUIDStr, UInfo.AccountId, UInfo.AccountType);
+                }
                 Infos.Add(UInfo);
 
                 if (SDK.fp_EOS_Connect_ExternalAccountInfo_Release)

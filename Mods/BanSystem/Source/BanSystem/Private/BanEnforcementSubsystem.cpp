@@ -418,17 +418,25 @@ void UBanEnforcementSubsystem::OnPUIDRegistered(const FString& PUID, APlayerCont
     UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>();
 
     // ── Fast path: use the PlayerController supplied by EOSConnectSubsystem ──
-    // On the CSS dedicated server, EOSConnectSubsystem::HandlePostLogin cannot
-    // directly extract the EOS PUID from FUniqueNetIdRepl (OnlineServicesEOSGS
-    // is absent server-side).  The Controller arg is populated when this event
-    // fires from the ASYNC Steam64→PUID lookup callback (LookupPUIDBySteam64),
-    // at which point the pending-map PC is promoted here.  When Controller is
-    // non-null the world scan below is skipped.
+    // EOSConnectSubsystem::HandlePostLogin calls EOSId::GetProductUserId to extract
+    // the PUID and then calls RegisterPlayerPUIDInternal(PUID, PC) with the
+    // actual PlayerController.  On the CSS dedicated server, HandlePostLogin
+    // always returns early (EOSId::GetProductUserId returns false because
+    // WITH_ONLINE_SERVICES_EOSGSS=0), so this path is non-null ONLY on
+    // non-server (client/editor) builds where EOSGSS is available.
+    //
+    // The async reverse-lookup path (OnQueryExternalMappingsCallback) always calls
+    // RegisterPlayerPUID(PUID) → RegisterPlayerPUIDInternal(PUID, nullptr), so
+    // Controller is nullptr for every server-side PUID registration.
     APlayerController* PC = Controller;
 
-    // ── Fallback: world scan (manual RegisterPlayerPUID calls, PC == nullptr) ─
-    // This path is a safety net for calls that don't originate from PostLogin.
-    // It relies on FBanIdResolver::Resolve() succeeding (V2 FAccountId players).
+    // ── Fallback: world scan (V2 FAccountId / non-server targets only) ───────
+    // On non-server builds where EOSGSS is available, FBanIdResolver::Resolve()
+    // can extract the EOS PUID from the player's V2 FAccountId.  On the
+    // dedicated server WITH_ONLINE_SERVICES_EOSGSS=0, TryGetEOSProductUserId
+    // always returns false, so the scan can never match — guard it to avoid
+    // a useless world iteration on every async PUID registration.
+#if WITH_ONLINE_SERVICES_EOSGSS
     if (!PC)
     {
         UWorld* World = GI->GetWorld();
@@ -447,6 +455,7 @@ void UBanEnforcementSubsystem::OnPUIDRegistered(const FString& PUID, APlayerCont
             }
         }
     }
+#endif // WITH_ONLINE_SERVICES_EOSGSS
 
     if (!PC) return;  // Player not (yet) in world — ban will be caught by PostLogin
 
@@ -801,7 +810,12 @@ void UBanEnforcementSubsystem::PropagateToEOSAsync(const FString& Steam64Id,
     // Guard against a concurrent call for the same Steam64 — in that case the
     // lookup is already in flight, so just update the entry (second call's
     // parameters win) without triggering a redundant second lookup.
-    const bool bAlreadyPending = PendingEOSPropagation.Contains(Steam64Id);
+    // Also guard against an in-flight join-time lookup (PendingBySteam64) for
+    // the same Steam64: that lookup will fire OnPUIDLookupDone which checks both
+    // PendingBySteam64 and PendingEOSPropagation, so we don't need to start a
+    // second parallel LookupPUIDBySteam64 call for the same player.
+    const bool bAlreadyPending = PendingEOSPropagation.Contains(Steam64Id)
+                               || PendingBySteam64.Contains(Steam64Id);
     FPropagationEntry& Entry = PendingEOSPropagation.FindOrAdd(Steam64Id);
     Entry.Reason          = Reason;
     Entry.DurationMinutes = DurationMinutes;

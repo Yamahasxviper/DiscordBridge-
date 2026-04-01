@@ -65,15 +65,23 @@ public:
     /**
      * Full ban check; also removes expired bans in-place.
      * @param OutEntry  Populated with the ban record when Banned is returned.
+     *
+     * NOTE: Not BlueprintPure — this function has observable side effects when
+     * a timed ban has expired: it removes the entry from BanMap, calls SaveBans(),
+     * and broadcasts OnPlayerUnbanned.  Marking it Pure would allow the Blueprint
+     * compiler to share a single evaluation across multiple uses in the same graph,
+     * which would cause the second use to see the post-expiry state (NotBanned)
+     * even though the caller expected Banned from the first evaluation.
      */
-    UFUNCTION(BlueprintPure, Category = "Ban System|EOS")
+    UFUNCTION(BlueprintCallable, Category = "Ban System|EOS")
     EBanCheckResult CheckPlayerBan(const FString& EOSProductUserId, FBanEntry& OutEntry);
 
     /**
      * Convenience wrapper — returns true and fills OutReason if the player
-     * is currently banned.
+     * is currently banned.  Not BlueprintPure: delegates to CheckPlayerBan
+     * which removes expired bans in-place (see CheckPlayerBan note above).
      */
-    UFUNCTION(BlueprintPure, Category = "Ban System|EOS")
+    UFUNCTION(BlueprintCallable, Category = "Ban System|EOS")
     bool IsPlayerBanned(const FString& EOSProductUserId, FString& OutReason);
 
     /** Returns a snapshot of all current (non-expired) ban records. */

@@ -63,11 +63,16 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UBanDiscordSubsystem::Deinitialize()
 {
+	// Disconnect the standalone Gateway connection FIRST so that the subsequent
+	// SetCommandProvider(nullptr) call sees WebSocketClient==nullptr and does NOT
+	// re-invoke Connect() from the "no external provider but bot-token present"
+	// branch.  If we cleared the provider first, that branch would fire and open
+	// a new WebSocket connection that is immediately closed by Disconnect() —
+	// a spurious connect/disconnect cycle at shutdown.
+	Disconnect();
+
 	// Remove any external provider subscription.
 	SetCommandProvider(nullptr);
-
-	// Disconnect the standalone Gateway connection.
-	Disconnect();
 
 	Super::Deinitialize();
 }
@@ -159,10 +164,18 @@ FDelegateHandle UBanDiscordSubsystem::SubscribeDiscordMessages(
 
 void UBanDiscordSubsystem::UnsubscribeDiscordMessages(FDelegateHandle Handle)
 {
+	// Always attempt removal from BOTH locations rather than routing to only one.
+	//
+	// The ExternalProvider may have changed between the SubscribeDiscordMessages
+	// call (which returned a handle from the provider's multicast) and this
+	// Unsubscribe call (which would otherwise route to OnRawDiscordMessage.Remove
+	// — the wrong delegate — if the provider was cleared in between).  Each
+	// Remove() call is a no-op when the handle does not belong to that delegate,
+	// so trying both is always safe and ensures the subscription is cleaned up
+	// regardless of provider state changes.
 	if (ExternalProvider)
 	{
 		ExternalProvider->UnsubscribeDiscordMessages(Handle);
-		return;
 	}
 	OnRawDiscordMessage.Remove(Handle);
 }
