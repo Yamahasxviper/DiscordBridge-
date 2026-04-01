@@ -97,9 +97,10 @@ struct BANSYSTEM_API FResolvedBanId
  *   CSS uses Epic's OnlineServices v2 layer.  Each player with an active EOS
  *   session has an "EOS Product User ID" (PUID) — a 32-char lowercase hex
  *   string (e.g. "00020aed06f0a6958c3c067fb4b73d51").
- *   The PUID is extracted via the FactoryGame EOSId::GetProductUserId()
- *   helper rather than from ToString(), because the raw UniqueNetId string
- *   representation for EOS IDs is not the PUID.
+ *   The PUID is extracted directly via UE::Online::GetProductUserId(FAccountId)
+ *   (from OnlineServicesEOSGS) and EOS_ProductUserId_IsValid + LexToString
+ *   (from EOSSDK/EOSShared) — all called in BanIdResolver.cpp, with no
+ *   dependency on the FGOnlineHelpers or EOSDirectSDK helper mods.
  *
  *   A Steam player who has linked their account to Epic will have BOTH a
  *   Steam64 ID AND a valid EOS PUID.  This resolver returns both.
@@ -131,11 +132,12 @@ public:
     /**
      * Attempt to extract an EOS Product User ID (PUID).
      *
-     * Uses the CSS FactoryGame EOSId::GetProductUserId() helper, which handles
-     * both the V1 FUniqueNetId (OnlineSubsystemEOS) and V2 FAccountId
-     * (OnlineServicesEOSGS) representations.
+     * Uses UE::Online::GetProductUserId(FAccountId) from OnlineServicesEOSGS
+     * directly (no FGOnlineHelpers dependency).  Handles the V2 FAccountId
+     * representation used by Satisfactory's OnlineServicesEOSGS layer.
      * Returns true and populates OutPUID when the player has an active EOS
      * session (including Steam players with a linked Epic account).
+     * Returns false on server builds where OnlineServicesEOSGS is absent.
      */
     static bool TryGetEOSProductUserId(const FUniqueNetIdRepl& UniqueId,
                                        FString&                OutPUID);

@@ -13,6 +13,7 @@ public class BanSystem : ModuleRules
         {
             "Core",
             "CoreUObject",
+            "CoreOnline",       // FUniqueNetIdRepl, FAccountId V1/V2 (IsV2, GetV2Unsafe)
             "Engine",
             "NetCore",
             "Json",
@@ -20,21 +21,44 @@ public class BanSystem : ModuleRules
             "SML",
             // SMLWebSocket — for the standalone Discord Gateway (WebSocket) connection.
             "SMLWebSocket",
-            // FGOnlineHelpers — the standard CSS Satisfactory mod helper module used
-            // by every Alpakit C++ mod in this project.  Provides EOSId::GetProductUserId
-            // as a non-inline DLL export (FGONLINEHELPERS_API) so that the EOS SDK
-            // DLL-import symbols resolve inside FGOnlineHelpers.dll rather than in
-            // every consumer's .obj file (which would cause LNK2019).
-            "FGOnlineHelpers",
-            // EOSDirectSDK — dedicated module providing direct EOS C SDK access.
-            // Exposes EOSDirectSDK::PUIDFromString, PUIDToString, IsValidHandle,
-            // GetPlatformHandle (EOS_HPlatform) and GetConnectInterface (EOS_HConnect).
-            "EOSDirectSDK",
-            // EOSSystem — standalone EOS system providing UEOSConnectSubsystem with
-            // forward (Steam64→PUID) and reverse (PUID→Steam64) lookup cache.
-            // Optional at runtime: used for cross-platform ban ID resolution.
+            // OnlineServicesInterface — EOnlineServices, IOnlineAccountIdRegistry
+            // (standard UE5; required for FAccountId operations in the EOS V2 path).
+            "OnlineServicesInterface",
+            // EOSSystem — standalone mod providing UEOSConnectSubsystem with
+            // forward (Steam64→PUID) and reverse (PUID→Steam64) async lookup and cache.
+            // Optional at runtime (all call sites guard for nullptr); required at
+            // compile time for the cross-platform ban-propagation code paths.
             "EOSSystem",
         });
+
+        // ── EOS Product User ID extraction (non-server only) ──────────────────
+        // OnlineServicesEOSGS provides UE::Online::GetProductUserId(FAccountId)
+        // for the V2 (FAccountId) EOS identity path.  CSS marks this plugin with
+        // TargetDenyList=["Server"] in OnlineIntegration.uplugin, so the server
+        // distribution does not ship the library.  Guard the dependency and all
+        // V2 EOS extraction code behind WITH_ONLINE_SERVICES_EOSGSS so server
+        // builds compile cleanly without the missing library.
+        //
+        // EOSShared provides LexToString(EOS_ProductUserId) -> FString.
+        // EOSSDK provides the EOS C SDK types (EOS_ProductUserId, EOS_ProductUserId_IsValid).
+        //
+        // All calls to these APIs are confined to BanIdResolver.cpp (a single
+        // translation unit) so the DLL-import stubs are emitted only once and no
+        // LNK2019 unresolved-external errors arise in other .obj files.
+        if (Target.Type != TargetType.Server)
+        {
+            PublicDependencyModuleNames.AddRange(new string[]
+            {
+                "OnlineServicesEOSGS",
+                "EOSShared",
+                "EOSSDK",
+            });
+            PublicDefinitions.Add("WITH_ONLINE_SERVICES_EOSGSS=1");
+        }
+        else
+        {
+            PublicDefinitions.Add("WITH_ONLINE_SERVICES_EOSGSS=0");
+        }
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
