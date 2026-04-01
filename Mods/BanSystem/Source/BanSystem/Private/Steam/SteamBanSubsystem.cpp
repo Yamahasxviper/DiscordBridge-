@@ -1,7 +1,8 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 
 #include "Steam/SteamBanSubsystem.h"
-#include "Online/FGOnlineHelpers.h"
+// No CSS/FGOnlineHelpers.h include — the inline validation below is
+// self-contained pure-string logic that requires no platform subsystem.
 #include "Misc/FileHelper.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
@@ -282,7 +283,16 @@ void USteamBanSubsystem::SetNotificationProvider(IBanNotificationProvider* Provi
 // ─────────────────────────────────────────────────────────────────────────────
 bool USteamBanSubsystem::IsValidSteam64Id(const FString& Id)
 {
-    return EOSId::IsValidSteam64Id(Id);
+    // Pure string validation — no platform or engine subsystem required.
+    // Matches the inline logic in EOSId::IsValidSteam64Id (FGOnlineHelpers)
+    // but inlined here to avoid pulling in the CSS FGOnlineHelpers.h include chain
+    // (which cascades through FGNetConstructionFunctionLibrary → FGBuildableSubsystem
+    // → many other CSS headers that are unnecessary for this one check).
+    if (Id.Len() != 17) return false;
+    for (TCHAR C : Id)
+        if (C < TEXT('0') || C > TEXT('9')) return false;
+    // All real Steam64 IDs are in the universe-1 range and share this prefix.
+    return Id.StartsWith(TEXT("7656119"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

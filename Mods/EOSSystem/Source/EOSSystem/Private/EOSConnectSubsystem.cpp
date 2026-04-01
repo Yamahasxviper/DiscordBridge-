@@ -10,8 +10,10 @@
 #include "GameFramework/OnlineReplStructs.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
-// V2 EOS PUID extraction: UE::Online::GetProductUserId(FAccountId) and FAccountId
-#include "Online/OnlineIdEOSGS.h"
+// FGOnlineHelpers — EOSId::GetProductUserId(FUniqueNetIdRepl) handles both the
+// V2 (FAccountId/EOSGSS) and V1 (OnlineSubsystemEOS) identity paths internally,
+// with all OnlineServicesEOSGS guards encapsulated there.
+#include "Online/FGOnlineHelpers.h"
 // JSON serialisation — Dom, Serialization (Json module) + FJsonObjectConverter (JsonUtilities)
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -338,40 +340,27 @@ void UEOSConnectSubsystem::HandlePostLogin(AGameModeBase* GM, APlayerController*
 {
     if (!PC || !PC->PlayerState) return;
 
-    // Extract the EOS PUID from the player's replicated identity using the
-    // engine's V2 OnlineServices path (UE::Online::GetProductUserId).
+    // Delegate PUID extraction to EOSId::GetProductUserId (FGOnlineHelpers module).
+    // This handles both V2 (FAccountId/EOSGSS, guarded inside FGOnlineHelpers) and
+    // V1 (OnlineSubsystemEOS) paths internally.
     //
-    // We do NOT use GetLocalPlayer() here — on a dedicated server every
-    // remote player has GetLocalPlayer() == nullptr, so that path never fires.
-    // We also do NOT use UniqueId.ToString() — for V2 FAccountId that returns
-    // an opaque handle string, not the 32-char hex PUID.
+    // We do NOT use GetLocalPlayer() — on a dedicated server every remote player has
+    // GetLocalPlayer() == nullptr.  We also do NOT call UniqueId.ToString() — for a
+    // V2 FAccountId that returns an opaque handle string, not the 32-char hex PUID.
     //
-    // For Steam players without a linked Epic account (V1 "Steam" type):
-    // UniqueId.IsV2() returns false; we skip registration here and let
-    // BanEnforcementSubsystem's async Steam64→PUID lookup path handle them.
+    // For Steam players without a linked Epic account (V1 "Steam" type),
+    // GetProductUserId returns false; those players are handled by
+    // BanEnforcementSubsystem's async Steam64→PUID lookup path.
 
     const FUniqueNetIdRepl& UniqueId = PC->PlayerState->GetUniqueId();
     if (!UniqueId.IsValid()) return;
 
-    if (UniqueId.IsV2())
+    FString PUID;
+    if (EOSId::GetProductUserId(UniqueId, PUID))
     {
-        const UE::Online::FAccountId& AccountId = UniqueId.GetV2Unsafe();
-        if (!AccountId.IsValid()) return;
-
-        // UE::Online::GetProductUserId looks up the EOS_ProductUserId from the
-        // engine's OnlineServicesEOSGS registry (populated when the player
-        // authenticated via EOS).  This is the authoritative V2 path for all
-        // EOS-connected players, including Steam players with linked Epic accounts.
-        const EOS_ProductUserId Handle = UE::Online::GetProductUserId(AccountId);
-        if (!Handle || EOS_ProductUserId_IsValid(Handle) != EOS_TRUE) return;
-
-        const FString PUID = PUIDToStr(Handle);
-        if (!PUID.IsEmpty())
-        {
-            // Pass the PlayerController so BanEnforcementSubsystem::OnPUIDRegistered
-            // can act directly without a world scan.
-            RegisterPlayerPUIDInternal(PUID, PC);
-        }
+        // Pass the PlayerController so BanEnforcementSubsystem::OnPUIDRegistered
+        // can act directly without a world scan.
+        RegisterPlayerPUIDInternal(PUID, PC);
     }
 }
 
@@ -385,18 +374,9 @@ void UEOSConnectSubsystem::HandleLogout(AGameModeBase* GM, AController* C)
     const FUniqueNetIdRepl& UniqueId = PC->PlayerState->GetUniqueId();
     if (!UniqueId.IsValid()) return;
 
-    if (UniqueId.IsV2())
-    {
-        const UE::Online::FAccountId& AccountId = UniqueId.GetV2Unsafe();
-        if (!AccountId.IsValid()) return;
-
-        const EOS_ProductUserId Handle = UE::Online::GetProductUserId(AccountId);
-        if (!Handle || EOS_ProductUserId_IsValid(Handle) != EOS_TRUE) return;
-
-        const FString PUID = PUIDToStr(Handle);
-        if (!PUID.IsEmpty())
-            UnregisterPlayerPUID(PUID);
-    }
+    FString PUID;
+    if (EOSId::GetProductUserId(UniqueId, PUID))
+        UnregisterPlayerPUID(PUID);
 }
 
 // ─── callbacks ───────────────────────────────────────────────────────────────
@@ -554,7 +534,15 @@ void EOS_CALL UEOSConnectSubsystem::OnQueryProductUserIdMappingsCallback(const E
                 UE_LOG(LogEOSConnect, Log, TEXT("Reverse lookup: PUID='%s' -> external='%s' (type %d)"),
                     *PUIDStr, *UInfo.AccountId, (int32)UInfo.AccountType);
 
-                Self->OnReverseLookupComplete.Broadcast(PUIDStr, UInfo.AccountId, UInfo.AccountType);
+                // Only broadcast for PUIDs that were the actual subjects of
+                // this query.  Broadcasting for non-queried PUIDs (those in
+                // AllPUIDs whose EOS SDK cache happens to be populated from a
+                // previous query) causes spurious OnReverseLookupComplete events
+                // that can trigger premature enforcement for concurrent lookups.
+                if (QueriedPUIDs.Contains(PUIDStr))
+                {
+                    Self->OnReverseLookupComplete.Broadcast(PUIDStr, UInfo.AccountId, UInfo.AccountType);
+                }
                 Infos.Add(UInfo);
 
                 if (SDK.fp_EOS_Connect_ExternalAccountInfo_Release)

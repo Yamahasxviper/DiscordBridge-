@@ -2,30 +2,63 @@
 
 #include "BanIdResolver.h"
 
-// ── EOSSystem headers first ────────────────────────────────────────────────
-// Including EOSConnectSubsystem.h (which pulls EOSSDK/eos_sdk.h → eos_platform.h)
-// BEFORE EOSDirectSDK.h (which pulls EOSDirectSDK's eos_platform.h) ensures that
-// EOSSystem's eos_platform.h wins the EOS_Platform_H include-guard race.
-// EOSSystem's version is preferred because it also does #include <eos_types.h>,
-// making EOS_Platform_Options and other platform-creation types available.
-// EOSSystem — provides UEOSConnectSubsystem for cross-platform cache lookups.
+// ── EOSSystem cross-platform cache ────────────────────────────────────────────
+// EOSConnectSubsystem.h is included first so EOSSystem's eos_platform.h wins
+// the EOS_Platform_H include-guard race before any other EOS SDK headers.
+// All TryGetCached* calls guard against nullptr so this compiles and runs
+// even when the EOSSystem mod is not installed.
 #include "EOSConnectSubsystem.h"
 #include "EOSTypes.h"
 
-// ── Player identity extraction ─────────────────────────────────────────────
-// FGOnlineHelpers — the standard CSS Satisfactory mod helper module used by
-// every Alpakit C++ mod in this project.  Provides:
-//   • EOSId::GetProductUserId  — extract EOS PUID (FGONLINEHELPERS_API, non-inline)
-//   • EOSId::GetSteam64Id      — extract Steam64 ID (FGONLINEHELPERS_API, non-inline)
-//   • EOSId::IsValidSteam64Id  — validate Steam64 format string (inline)
-//   • EOSId::IsValidEOSProductUserId — validate EOS PUID format string (inline)
-// Non-inline exports ensure EOS SDK DLL-import symbols are resolved inside
-// FGOnlineHelpers.dll rather than in this module's .obj file (avoids LNK2019).
-#include "Online/FGOnlineHelpers.h"
+// ── EOS Product User ID extraction — server context ───────────────────────────
+//
+// BanSystem is a ServerOnly module.  BanSystem.Build.cs therefore always emits
+// WITH_ONLINE_SERVICES_EOSGSS=0.  The guarded block below is permanently dead
+// code and is kept only for documentation purposes.
+//
+// WHY V2 extraction is not possible on the CSS dedicated server:
+//   • OnlineServicesEOSGS (CSS TargetDenyList=["Server"]) is absent from the
+//     Linux server distribution.  The library is not shipped with the server.
+//   • UE::Online::GetProductUserId(FAccountId) lives in that library — calling
+//     it server-side would be an unresolved external at link time.
+//   • The server's FUniqueNetIdRepl for a remote player carries type "Steam"
+//     with IsV2()==false; there is no embedded FAccountId to unpack.
+//
+// How EOS PUIDs ARE obtained on the server:
+//   EOSConnectSubsystem::LookupPUIDBySteam64() issues an async
+//   EOS_Connect_QueryExternalAccountMappings call against the EOS Connect
+//   service (raw EOS C SDK, no EOSGSS dependency).  When the result arrives,
+//   BanEnforcementSubsystem::OnPUIDLookupDone checks the EOS ban list.
+//   TryGetCachedPUIDFromSteam64 / TryGetCachedSteam64FromPUID below provide
+//   a synchronous zero-latency path when the PUID is already cached.
+#if WITH_ONLINE_SERVICES_EOSGSS   // always 0 for BanSystem (ServerOnly module)
 
-// EOSDirectSDK — direct EOS C SDK access: PUIDFromString, PUIDToString,
-// IsValidHandle and the registered EOS_HPlatform handle.
-#include "EOSDirectSDK.h"
+// EOS C SDK types: EOS_ProductUserId, EOS_ProductUserId_IsValid
+#if defined(EOS_PLATFORM_BASE_FILE_NAME)
+#include EOS_PLATFORM_BASE_FILE_NAME
+#endif
+#ifndef EOS_CALL
+#  if defined(_WIN32)
+#    define EOS_CALL __cdecl
+#  else
+#    define EOS_CALL
+#  endif
+#endif
+#ifndef EOS_MEMORY_CALL
+#  define EOS_MEMORY_CALL EOS_CALL
+#endif
+#ifndef EOS_USE_DLLEXPORT
+#  define EOS_USE_DLLEXPORT 0
+#endif
+#include "eos_common.h"
+
+// UE5 V2 — UE::Online::GetProductUserId(FAccountId) -> EOS_ProductUserId
+#include "Online/OnlineIdEOSGS.h"
+
+// EOSShared — LexToString(EOS_ProductUserId) -> FString
+#include "EOSShared.h"
+
+#endif // WITH_ONLINE_SERVICES_EOSGSS
 
 #include "Engine/GameInstance.h"
 
@@ -72,25 +105,50 @@ bool FBanIdResolver::TryGetSteam64Id(const FUniqueNetIdRepl& UniqueId,
 {
     if (!UniqueId.IsValid()) return false;
 
-    // Delegate to the centralised FGOnlineHelpers helper which checks the
-    // "Steam" type name and validates the 17-digit Steam64 format.
-    // The type check is performed before format validation inside GetSteam64Id;
-    // any non-Steam identity type returns false silently.
-    if (!EOSId::GetSteam64Id(UniqueId, OutSteam64Id))
+    // The UE5 Steam online services plugin stamps every Steam identity with the
+    // type name "Steam".  Any other type is not a Steam64 ID — return false
+    // silently so callers can try the next platform identity.
+    static const FName SteamTypeName(TEXT("Steam"));
+    if (UniqueId.GetType() != SteamTypeName)
+        return false;
+
+    // For Steam identities, FUniqueNetIdRepl::ToString() returns the raw 17-digit
+    // Steam64 decimal string (e.g. "76561198000000000").  This is standard UE5
+    // behaviour — no CSS mod helper is required.
+    const FString Candidate = UniqueId.ToString();
+
+    // Validate: Steam64 IDs are exactly 17 decimal digits starting with "7656119".
+    // This matches the inline IsValidSteam64Id logic from FGOnlineHelpers.h but is
+    // reproduced here so BanSystem has no compile-time dependency on that mod.
+    if (Candidate.Len() != 17)
     {
-        // Log a specific warning only when the type IS "Steam" but the string
-        // failed format validation — that is an unexpected malformed identity.
-        static const FName SteamTypeName(TEXT("Steam"));
-        if (UniqueId.GetType() == SteamTypeName)
+        UE_LOG(LogBanIdResolver, Warning,
+            TEXT("TryGetSteam64Id: UniqueNetId type is 'Steam' but ToString() '%s' "
+                 "failed Steam64 format validation (expected 17 digits)."),
+            *Candidate);
+        return false;
+    }
+    for (TCHAR C : Candidate)
+    {
+        if (C < TEXT('0') || C > TEXT('9'))
         {
             UE_LOG(LogBanIdResolver, Warning,
                 TEXT("TryGetSteam64Id: UniqueNetId type is 'Steam' but ToString() '%s' "
-                     "failed Steam64 format validation."),
-                *UniqueId.ToString());
+                     "failed Steam64 format validation (non-digit character)."),
+                *Candidate);
+            return false;
         }
+    }
+    if (!Candidate.StartsWith(TEXT("7656119")))
+    {
+        UE_LOG(LogBanIdResolver, Warning,
+            TEXT("TryGetSteam64Id: UniqueNetId type is 'Steam' but ToString() '%s' "
+                 "failed Steam64 format validation (unexpected prefix)."),
+            *Candidate);
         return false;
     }
 
+    OutSteam64Id = Candidate;
     UE_LOG(LogBanIdResolver, Verbose,
         TEXT("TryGetSteam64Id: resolved Steam64 ID '%s'"), *OutSteam64Id);
     return true;
@@ -104,62 +162,72 @@ bool FBanIdResolver::TryGetEOSProductUserId(const FUniqueNetIdRepl& UniqueId,
 {
     if (!UniqueId.IsValid()) return false;
 
-    // EOSId::GetProductUserId is a CSS FactoryGame helper that understands the
-    // internal representation of EOS accounts in the UE5 OnlineServices layer.
-    // It extracts the 32-char hex EOS Product User ID from the opaque FAccountId
-    // that the EOS online service embeds inside the FUniqueNetId.
+    // ── V2 path: FAccountId (OnlineServicesEOSGS) ─────────────────────────────
+    // Every Satisfactory player with an active EOS session holds a V2 FAccountId.
+    // OnlineServicesEOSGS is absent on the Linux dedicated server (CSS
+    // TargetDenyList=["Server"]), so this path is compiled only for non-server
+    // targets (WITH_ONLINE_SERVICES_EOSGSS=1, set by BanSystem.Build.cs).
     //
-    // This succeeds for:
-    //   • Players who connected directly via EOS/Epic Games Launcher
+    // UE::Online::GetProductUserId(FAccountId) maps the opaque FAccountId to the
+    // EOS_ProductUserId that the EOS SDK recognises for ban-list lookups.
+    //
+    // This path succeeds for:
+    //   • Players who connected directly via EOS / Epic Games Launcher
     //   • Steam players whose account is linked to an Epic account
-    //       (CSS Satisfactory links Steam + Epic for crossplay)
+    //       (Satisfactory links Steam + Epic for crossplay)
     //
-    // It returns false / empty for:
-    //   • Offline/LAN players (Null online service)
+    // It returns false for:
+    //   • Offline / LAN players (Null online service)
     //   • Steam-only players with no linked Epic account
-    FString Candidate;
-    if (!EOSId::GetProductUserId(UniqueId, Candidate) || Candidate.IsEmpty())
-        return false;
-
-    // Validate that the returned string matches the 32-char lowercase hex
-    // format expected by the EOS ban system.
-    if (!EOSId::IsValidEOSProductUserId(Candidate))
+#if WITH_ONLINE_SERVICES_EOSGSS
+    if (UniqueId.IsV2())
     {
-        UE_LOG(LogBanIdResolver, Warning,
-            TEXT("TryGetEOSProductUserId: EOSId::GetProductUserId returned '%s' "
-                 "but it failed PUID format validation."),
-            *Candidate);
-        return false;
-    }
+        const UE::Online::FAccountId& AccountId = UniqueId.GetV2Unsafe();
+        if (!AccountId.IsValid()) return false;
 
-#if WITH_EOS_SDK
-    // Secondary validation via EOSDirectSDK:
-    // EOSDirectSDK::PUIDFromString() calls EOS_ProductUserId_FromString() to parse
-    // the string into an EOS_ProductUserId handle, then IsValidHandle() calls
-    // EOS_ProductUserId_IsValid() to confirm the EOS SDK considers it valid.
-    // This cross-checks that the PUID produced by the UE OnlineServices layer
-    // is accepted by the underlying EOS C SDK.
-    {
-        const EOS_ProductUserId PUIDHandle = EOSDirectSDK::PUIDFromString(Candidate);
-        if (!EOSDirectSDK::IsValidHandle(PUIDHandle))
+        const EOS_ProductUserId ProductUserId = UE::Online::GetProductUserId(AccountId);
+        if (!EOS_ProductUserId_IsValid(ProductUserId)) return false;
+
+        // LexToString converts EOS_ProductUserId to the 32-char lowercase hex
+        // string used throughout the ban system (e.g. "00020aed06f0a6958c3c067fb4b73d51").
+        FString Candidate = LexToString(ProductUserId);
+        if (Candidate.IsEmpty()) return false;
+
+        // Validate 32-char lowercase hex format.
+        if (Candidate.Len() != 32)
         {
             UE_LOG(LogBanIdResolver, Warning,
-                TEXT("TryGetEOSProductUserId: PUID '%s' passed format validation but "
-                     "EOS_ProductUserId_IsValid() returned false — discarding."),
+                TEXT("TryGetEOSProductUserId: EOS returned PUID '%s' but it is not "
+                     "32 characters — discarding."),
                 *Candidate);
             return false;
         }
-    }
-#endif // WITH_EOS_SDK
+        const FString Lower = Candidate.ToLower();
+        for (TCHAR C : Lower)
+        {
+            const bool bDigit = (C >= TEXT('0') && C <= TEXT('9'));
+            const bool bHex   = (C >= TEXT('a') && C <= TEXT('f'));
+            if (!bDigit && !bHex)
+            {
+                UE_LOG(LogBanIdResolver, Warning,
+                    TEXT("TryGetEOSProductUserId: EOS returned PUID '%s' "
+                         "but it failed hex format validation — discarding."),
+                    *Candidate);
+                return false;
+            }
+        }
 
-    // Normalise to lowercase before returning.  All stored EOS PUIDs are
-    // lowercased by UEOSBanSubsystem::BanPlayer(), so callers that compare
-    // the returned value against stored records (e.g. OnEOSPlayerBanned)
-    // must have a matching case to avoid false negatives.
-    OutPUID = Candidate.ToLower();
-    UE_LOG(LogBanIdResolver, Verbose,
-        TEXT("TryGetEOSProductUserId: resolved EOS PUID '%s'"), *OutPUID);
-    return true;
+        // Normalise to lowercase before returning.  All stored EOS PUIDs are
+        // lowercased by UEOSBanSubsystem::BanPlayer(), so callers that compare
+        // the returned value against stored records must have a matching case.
+        OutPUID = Lower;
+        UE_LOG(LogBanIdResolver, Verbose,
+            TEXT("TryGetEOSProductUserId: resolved EOS PUID '%s'"), *OutPUID);
+        return true;
+    }
+#endif // WITH_ONLINE_SERVICES_EOSGSS
+
+    return false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

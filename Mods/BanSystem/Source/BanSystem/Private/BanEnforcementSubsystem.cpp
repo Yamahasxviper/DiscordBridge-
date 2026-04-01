@@ -156,6 +156,7 @@ void UBanEnforcementSubsystem::Deinitialize()
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  PreLogin enforcement (rejects connection before PlayerController is created)
+//  + early PUID pre-fetch for Steam players without an embedded EOS identity
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanEnforcementSubsystem::OnPreLogin(AGameModeBase*          GameMode,
@@ -196,7 +197,7 @@ void UBanEnforcementSubsystem::OnPreLogin(AGameModeBase*          GameMode,
         }
     }
 
-    // ── EOS ban check ──────────────────────────────────────────────────────
+    // ── EOS ban check (PUID already embedded in the identity) ─────────────────
     if (ResolvedId.HasEOSPuid())
     {
         UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>();
@@ -211,6 +212,63 @@ void UBanEnforcementSubsystem::OnPreLogin(AGameModeBase*          GameMode,
                 ErrorMessage = BuildKickMessage(true, Reason);
                 PostBanKickDiscordNotification(ResolvedId.EOSProductUserId, Reason);
                 return;
+            }
+        }
+    }
+
+    // ── Pre-fetch EOS PUID for Steam-only players ──────────────────────────────
+    // When a Steam player's FUniqueNetIdRepl does not yet carry an embedded EOS
+    // PUID (common on first connections), start the async Steam64→PUID lookup
+    // here at PreLogin rather than waiting until OnPostLogin.  The extra time
+    // between PreLogin and PostLogin (PlayerController creation, initial world
+    // travel, etc.) means the EOS result is more likely to be ready by the time
+    // OnPostLogin fires, allowing immediate ban enforcement instead of a
+    // deferred-kick window.
+    //
+    // If the EOSConnectSubsystem sync cache already has a mapping for this
+    // Steam64 ID (returning player), the EOS ban check is done right here and
+    // the connection is refused before any PlayerController is created.
+    //
+    // If no cache entry exists, a placeholder is inserted into PendingBySteam64
+    // (Controller == nullptr) and the async lookup is started.  OnPostLogin will
+    // update the placeholder with the real PlayerController without firing a
+    // second redundant lookup.
+    if (ResolvedId.HasSteamId() && !ResolvedId.HasEOSPuid())
+    {
+        UEOSConnectSubsystem* EOS = GI->GetSubsystem<UEOSConnectSubsystem>();
+        if (EOS)
+        {
+            FString CachedPUID;
+            if (FBanIdResolver::TryGetCachedPUIDFromSteam64(GI, ResolvedId.Steam64Id, CachedPUID))
+            {
+                // Cache hit — check the EOS ban list synchronously.
+                UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>();
+                if (EOSBans)
+                {
+                    FString Reason;
+                    if (EOSBans->IsPlayerBanned(CachedPUID, Reason))
+                    {
+                        UE_LOG(LogBanEnforcement, Log,
+                            TEXT("PreLogin: rejecting EOS-banned Steam player %s "
+                                 "(cached PUID %s) — Reason: %s"),
+                            *ResolvedId.Steam64Id, *CachedPUID, *Reason);
+                        ErrorMessage = BuildKickMessage(true, Reason);
+                        PostBanKickDiscordNotification(CachedPUID, Reason);
+                        return;
+                    }
+                }
+            }
+            else if (!PendingBySteam64.Contains(ResolvedId.Steam64Id))
+            {
+                // No cached PUID — plant a placeholder so OnPostLogin skips the
+                // duplicate lookup, then start fetching now.
+                FPendingEOSCheck& Pending = PendingBySteam64.Add(ResolvedId.Steam64Id);
+                Pending.Controller = nullptr;
+                Pending.Steam64Id  = ResolvedId.Steam64Id;
+                EOS->LookupPUIDBySteam64(ResolvedId.Steam64Id);
+                UE_LOG(LogBanEnforcement, Verbose,
+                    TEXT("PreLogin: started early EOS PUID lookup for Steam player %s."),
+                    *ResolvedId.Steam64Id);
             }
         }
     }
@@ -284,8 +342,11 @@ void UBanEnforcementSubsystem::OnPostLogin(AGameModeBase*    GameMode,
     // ── Async EOS PUID lookup for Steam-only players ───────────────────────
     // If this player has a Steam ID but no EOS PUID has been resolved yet,
     // try the EOSSystem sync cache first (free, no network call).  If not
-    // cached, trigger an async Steam64→PUID lookup.  When the result arrives
-    // via OnPUIDLookupDone, the EOS ban list will be checked automatically.
+    // cached, update the pending map and let the already-in-flight async lookup
+    // (started at OnPreLogin) complete.  Only trigger a new lookup when no
+    // pending entry was created by OnPreLogin (e.g. EOSSystem was not ready yet
+    // at PreLogin time).  When the result arrives via OnPUIDLookupDone, the EOS
+    // ban list will be checked automatically.
     if (ResolvedId.HasSteamId() && !ResolvedId.HasEOSPuid())
     {
         UEOSConnectSubsystem* EOS = GI->GetSubsystem<UEOSConnectSubsystem>();
@@ -313,12 +374,12 @@ void UBanEnforcementSubsystem::OnPostLogin(AGameModeBase*    GameMode,
         }
         else
         {
-            // No cache hit — add to pending map and trigger async lookup.
-            // OnPUIDLookupDone will handle the result.
+            // No cache hit — update (or create) the pending map entry.
             //
-            // If an entry already exists (rapid disconnect/reconnect before the
-            // previous lookup resolved) only update the stored controller to the
-            // latest connection — do not trigger a second redundant lookup.
+            // If OnPreLogin already planted a placeholder (Controller == nullptr),
+            // the lookup is already in-flight; just promote the controller to this
+            // newly-created PlayerController.  Only trigger a new lookup when no
+            // pending entry exists (e.g. EOSSystem was unavailable at PreLogin).
             const bool bAlreadyPending = PendingBySteam64.Contains(ResolvedId.Steam64Id);
             FPendingEOSCheck& Pending = PendingBySteam64.FindOrAdd(ResolvedId.Steam64Id);
             Pending.Controller = NewPlayer;
@@ -327,12 +388,18 @@ void UBanEnforcementSubsystem::OnPostLogin(AGameModeBase*    GameMode,
             if (!bAlreadyPending)
             {
                 EOS->LookupPUIDBySteam64(ResolvedId.Steam64Id);
+                UE_LOG(LogBanEnforcement, Verbose,
+                    TEXT("PostLogin: async EOS PUID lookup triggered for Steam player %s — "
+                         "will check EOS ban list when result arrives."),
+                    *ResolvedId.Steam64Id);
             }
-
-            UE_LOG(LogBanEnforcement, Verbose,
-                TEXT("PostLogin: async EOS PUID lookup triggered for Steam player %s — "
-                     "will check EOS ban list when result arrives."),
-                *ResolvedId.Steam64Id);
+            else
+            {
+                UE_LOG(LogBanEnforcement, Verbose,
+                    TEXT("PostLogin: promoted PlayerController for Steam player %s — "
+                         "EOS PUID lookup already in-flight from PreLogin."),
+                    *ResolvedId.Steam64Id);
+            }
         }
     }
 }
@@ -351,13 +418,25 @@ void UBanEnforcementSubsystem::OnPUIDRegistered(const FString& PUID, APlayerCont
     UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>();
 
     // ── Fast path: use the PlayerController supplied by EOSConnectSubsystem ──
-    // HandlePostLogin now extracts the PUID via UE::Online::GetProductUserId()
-    // and passes the matching PC directly, so we can skip the world scan.
+    // EOSConnectSubsystem::HandlePostLogin calls EOSId::GetProductUserId to extract
+    // the PUID and then calls RegisterPlayerPUIDInternal(PUID, PC) with the
+    // actual PlayerController.  On the CSS dedicated server, HandlePostLogin
+    // always returns early (EOSId::GetProductUserId returns false because
+    // WITH_ONLINE_SERVICES_EOSGSS=0), so this path is non-null ONLY on
+    // non-server (client/editor) builds where EOSGSS is available.
+    //
+    // The async reverse-lookup path (OnQueryExternalMappingsCallback) always calls
+    // RegisterPlayerPUID(PUID) → RegisterPlayerPUIDInternal(PUID, nullptr), so
+    // Controller is nullptr for every server-side PUID registration.
     APlayerController* PC = Controller;
 
-    // ── Fallback: world scan (manual RegisterPlayerPUID calls, PC == nullptr) ─
-    // This path is a safety net for calls that don't originate from PostLogin.
-    // It relies on FBanIdResolver::Resolve() succeeding (V2 FAccountId players).
+    // ── Fallback: world scan (V2 FAccountId / non-server targets only) ───────
+    // On non-server builds where EOSGSS is available, FBanIdResolver::Resolve()
+    // can extract the EOS PUID from the player's V2 FAccountId.  On the
+    // dedicated server WITH_ONLINE_SERVICES_EOSGSS=0, TryGetEOSProductUserId
+    // always returns false, so the scan can never match — guard it to avoid
+    // a useless world iteration on every async PUID registration.
+#if WITH_ONLINE_SERVICES_EOSGSS
     if (!PC)
     {
         UWorld* World = GI->GetWorld();
@@ -376,6 +455,7 @@ void UBanEnforcementSubsystem::OnPUIDRegistered(const FString& PUID, APlayerCont
             }
         }
     }
+#endif // WITH_ONLINE_SERVICES_EOSGSS
 
     if (!PC) return;  // Player not (yet) in world — ban will be caught by PostLogin
 
@@ -730,7 +810,12 @@ void UBanEnforcementSubsystem::PropagateToEOSAsync(const FString& Steam64Id,
     // Guard against a concurrent call for the same Steam64 — in that case the
     // lookup is already in flight, so just update the entry (second call's
     // parameters win) without triggering a redundant second lookup.
-    const bool bAlreadyPending = PendingEOSPropagation.Contains(Steam64Id);
+    // Also guard against an in-flight join-time lookup (PendingBySteam64) for
+    // the same Steam64: that lookup will fire OnPUIDLookupDone which checks both
+    // PendingBySteam64 and PendingEOSPropagation, so we don't need to start a
+    // second parallel LookupPUIDBySteam64 call for the same player.
+    const bool bAlreadyPending = PendingEOSPropagation.Contains(Steam64Id)
+                               || PendingBySteam64.Contains(Steam64Id);
     FPropagationEntry& Entry = PendingEOSPropagation.FindOrAdd(Steam64Id);
     Entry.Reason          = Reason;
     Entry.DurationMinutes = DurationMinutes;

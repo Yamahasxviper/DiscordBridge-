@@ -16,17 +16,11 @@ public class EOSSystem : ModuleRules
             "CoreUObject",
             "Engine",
             "DeveloperSettings",
-            // FUniqueNetIdRepl, IsV1/IsV2, GetV2Unsafe — needed in EOSConnectSubsystem
-            // HandlePostLogin to extract the EOS PUID from the player's replicated identity.
+            // FUniqueNetIdRepl — used in EOSConnectSubsystem HandlePostLogin/HandleLogout
+            // to get the player's replicated network identity.
             "CoreOnline",
             // IOnlineAccountIdRegistry, FAccountId
             "OnlineServicesInterface",
-            // UE::Online::GetProductUserId(FAccountId) — V2 EOS PUID extraction used in
-            // HandlePostLogin so that PUIDs are registered correctly on dedicated servers
-            // (GetLocalPlayer() returns nullptr on dedicated servers and cannot be used).
-            "OnlineServicesEOSGS",
-            // LexToString(EOS_ProductUserId) → FString
-            "EOSShared",
             // Json + JsonUtilities — used in UEOSConnectSubsystem to persist the
             // PUID↔external-account reverse-lookup cache to disk across server restarts.
             // FJsonObject/FJsonSerializer are from Json; FJsonObjectConverter is from JsonUtilities.
@@ -37,8 +31,7 @@ public class EOSSystem : ModuleRules
             // module's include path is used by the Public/EOSSDK/ delegation wrappers to
             // forward all type definitions to the canonical engine headers, preventing
             // C2371/C2011/C3431 redefinition conflicts when BanSystem includes both
-            // EOSSystem and EOSDirectSDK (which also pulls in real EOSSDK headers via
-            // EOSShared) in the same translation unit.
+            // EOSSystem and EOSDirectSDK in the same translation unit.
             "EOSSDK",
         });
 
@@ -51,6 +44,12 @@ public class EOSSystem : ModuleRules
             // UnregisterPlatformHandle so that EOSDirectSDK::GetPlatformHandle()
             // returns our EOS_HPlatform without any dependency on IEOSSDKManager.
             "EOSDirectSDK",
+            // FGOnlineHelpers — provides EOSId::GetProductUserId(FUniqueNetIdRepl),
+            // which handles both V1 and V2 (EOSGSS-guarded) extraction internally.
+            // Using this module-level helper removes the need for EOSConnectSubsystem
+            // to depend on OnlineServicesEOSGS directly (CSS marks EOSGSS as
+            // TargetDenyList=["Server"] so it is absent from Linux server builds).
+            "FGOnlineHelpers",
         });
     }
 }
