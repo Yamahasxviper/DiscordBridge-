@@ -27,20 +27,17 @@ public class BanSystem : ModuleRules
             "EOSSystem",
         });
 
-        // ── BanSystem is ServerOnly — it ONLY ever builds for TargetType.Server ────
+        // ── BanSystem builds for both Editor and Server targets ──────────────────
         //
-        // OnlineServicesEOSGS (CSS TargetDenyList=["Server"]) is absent from the
-        // dedicated-server distribution and must NEVER be listed as a dep here.
-        // BanIdResolver.cpp contains a WITH_ONLINE_SERVICES_EOSGSS-guarded V2 EOS
-        // extraction block that is permanently dead code for this module type.
+        // On dedicated-server builds, OnlineServicesEOSGS (CSS TargetDenyList=["Server"])
+        // is absent and BanSystem never calls EOSGSS symbols directly.  BanIdResolver
+        // delegates all EOS Product User ID extraction to EOSId::GetProductUserId
+        // (FACTORYGAME_API, from Source/FactoryGame/Public/Online/FGOnlineHelpers.h),
+        // which handles all platform guards internally — keeping BanSystem free of
+        // any direct EOSGSS link dependency regardless of target type.
+        //
         // EOS PUIDs are obtained server-side exclusively via the async
         // EOSConnectSubsystem::LookupPUIDBySteam64 path (raw EOS C SDK query).
-        //
-        // The EOSSDK / EOSShared transitive deps needed by BanIdResolver.cpp at
-        // compile time (for "EOSSDK/eos_sdk.h" includes in EOSConnectSubsystem.h)
-        // flow in transitively through EOSSystem's public deps — no explicit listing
-        // is needed here.
-        PublicDefinitions.Add("WITH_ONLINE_SERVICES_EOSGSS=0");
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {

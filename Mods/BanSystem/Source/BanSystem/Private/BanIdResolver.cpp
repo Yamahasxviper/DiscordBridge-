@@ -10,55 +10,19 @@
 #include "EOSConnectSubsystem.h"
 #include "EOSTypes.h"
 
-// ── EOS Product User ID extraction — server context ───────────────────────────
+// ── EOS Product User ID extraction ───────────────────────────────────────────
+// EOSId::GetProductUserId is provided by the CSS FactoryGame module (FACTORYGAME_API).
+// It wraps all OnlineServicesEOSGS / EOSShared platform guards internally, so
+// BanSystem never needs to include OnlineIdEOSGS.h, EOSShared.h, or eos_common.h
+// directly.  This avoids the LNK2019 errors that would occur if those symbols
+// were referenced in BanSystem's .obj when building for non-server targets where
+// OnlineServicesEOSGS is not linked by BanSystem.
 //
-// BanSystem is a ServerOnly module.  BanSystem.Build.cs therefore always emits
-// WITH_ONLINE_SERVICES_EOSGSS=0.  The guarded block below is permanently dead
-// code and is kept only for documentation purposes.
-//
-// WHY V2 extraction is not possible on the CSS dedicated server:
-//   • OnlineServicesEOSGS (CSS TargetDenyList=["Server"]) is absent from the
-//     Linux server distribution.  The library is not shipped with the server.
-//   • UE::Online::GetProductUserId(FAccountId) lives in that library — calling
-//     it server-side would be an unresolved external at link time.
-//   • The server's FUniqueNetIdRepl for a remote player carries type "Steam"
-//     with IsV2()==false; there is no embedded FAccountId to unpack.
-//
-// How EOS PUIDs ARE obtained on the server:
-//   EOSConnectSubsystem::LookupPUIDBySteam64() issues an async
-//   EOS_Connect_QueryExternalAccountMappings call against the EOS Connect
-//   service (raw EOS C SDK, no EOSGSS dependency).  When the result arrives,
-//   BanEnforcementSubsystem::OnPUIDLookupDone checks the EOS ban list.
-//   TryGetCachedPUIDFromSteam64 / TryGetCachedSteam64FromPUID below provide
-//   a synchronous zero-latency path when the PUID is already cached.
-#if WITH_ONLINE_SERVICES_EOSGSS   // always 0 for BanSystem (ServerOnly module)
-
-// EOS C SDK types: EOS_ProductUserId, EOS_ProductUserId_IsValid
-#if defined(EOS_PLATFORM_BASE_FILE_NAME)
-#include EOS_PLATFORM_BASE_FILE_NAME
-#endif
-#ifndef EOS_CALL
-#  if defined(_WIN32)
-#    define EOS_CALL __cdecl
-#  else
-#    define EOS_CALL
-#  endif
-#endif
-#ifndef EOS_MEMORY_CALL
-#  define EOS_MEMORY_CALL EOS_CALL
-#endif
-#ifndef EOS_USE_DLLEXPORT
-#  define EOS_USE_DLLEXPORT 0
-#endif
-#include "eos_common.h"
-
-// UE5 V2 — UE::Online::GetProductUserId(FAccountId) -> EOS_ProductUserId
-#include "Online/OnlineIdEOSGS.h"
-
-// EOSShared — LexToString(EOS_ProductUserId) -> FString
-#include "EOSShared.h"
-
-#endif // WITH_ONLINE_SERVICES_EOSGSS
+// On the CSS dedicated server, EOSId::GetProductUserId returns false (no V2
+// FAccountId embedded in the remote player's FUniqueNetIdRepl).  EOS PUIDs are
+// obtained server-side exclusively via the async
+// EOSConnectSubsystem::LookupPUIDBySteam64() path.
+#include "Online/FGOnlineHelpers.h"
 
 #include "Engine/GameInstance.h"
 
@@ -162,72 +126,34 @@ bool FBanIdResolver::TryGetEOSProductUserId(const FUniqueNetIdRepl& UniqueId,
 {
     if (!UniqueId.IsValid()) return false;
 
-    // ── V2 path: FAccountId (OnlineServicesEOSGS) ─────────────────────────────
-    // Every Satisfactory player with an active EOS session holds a V2 FAccountId.
-    // OnlineServicesEOSGS is absent on the Linux dedicated server (CSS
-    // TargetDenyList=["Server"]), so this path is compiled only for non-server
-    // targets (WITH_ONLINE_SERVICES_EOSGSS=1, set by BanSystem.Build.cs).
+    // Delegate to the CSS FactoryGame helper (FACTORYGAME_API).
+    // EOSId::GetProductUserId handles all platform guards internally (V2 FAccountId
+    // via OnlineServicesEOSGS on non-server, or V1 EOS on legacy path).  Calling
+    // through this exported function means BanSystem never references EOSGSS symbols
+    // directly, avoiding LNK2019 errors when those libraries are absent.
     //
-    // UE::Online::GetProductUserId(FAccountId) maps the opaque FAccountId to the
-    // EOS_ProductUserId that the EOS SDK recognises for ban-list lookups.
-    //
-    // This path succeeds for:
-    //   • Players who connected directly via EOS / Epic Games Launcher
-    //   • Steam players whose account is linked to an Epic account
-    //       (Satisfactory links Steam + Epic for crossplay)
-    //
-    // It returns false for:
-    //   • Offline / LAN players (Null online service)
-    //   • Steam-only players with no linked Epic account
-#if WITH_ONLINE_SERVICES_EOSGSS
-    if (UniqueId.IsV2())
+    // Returns false on the CSS dedicated server (no V2 FAccountId in remote
+    // FUniqueNetIdRepl).  EOS PUIDs are obtained server-side via the async
+    // EOSConnectSubsystem::LookupPUIDBySteam64() path instead.
+    FString Candidate;
+    if (!EOSId::GetProductUserId(UniqueId, Candidate)) return false;
+
+    if (!EOSId::IsValidEOSProductUserId(Candidate))
     {
-        const UE::Online::FAccountId& AccountId = UniqueId.GetV2Unsafe();
-        if (!AccountId.IsValid()) return false;
-
-        const EOS_ProductUserId ProductUserId = UE::Online::GetProductUserId(AccountId);
-        if (!EOS_ProductUserId_IsValid(ProductUserId)) return false;
-
-        // LexToString converts EOS_ProductUserId to the 32-char lowercase hex
-        // string used throughout the ban system (e.g. "00020aed06f0a6958c3c067fb4b73d51").
-        FString Candidate = LexToString(ProductUserId);
-        if (Candidate.IsEmpty()) return false;
-
-        // Validate 32-char lowercase hex format.
-        if (Candidate.Len() != 32)
-        {
-            UE_LOG(LogBanIdResolver, Warning,
-                TEXT("TryGetEOSProductUserId: EOS returned PUID '%s' but it is not "
-                     "32 characters — discarding."),
-                *Candidate);
-            return false;
-        }
-        const FString Lower = Candidate.ToLower();
-        for (TCHAR C : Lower)
-        {
-            const bool bDigit = (C >= TEXT('0') && C <= TEXT('9'));
-            const bool bHex   = (C >= TEXT('a') && C <= TEXT('f'));
-            if (!bDigit && !bHex)
-            {
-                UE_LOG(LogBanIdResolver, Warning,
-                    TEXT("TryGetEOSProductUserId: EOS returned PUID '%s' "
-                         "but it failed hex format validation — discarding."),
-                    *Candidate);
-                return false;
-            }
-        }
-
-        // Normalise to lowercase before returning.  All stored EOS PUIDs are
-        // lowercased by UEOSBanSubsystem::BanPlayer(), so callers that compare
-        // the returned value against stored records must have a matching case.
-        OutPUID = Lower;
-        UE_LOG(LogBanIdResolver, Verbose,
-            TEXT("TryGetEOSProductUserId: resolved EOS PUID '%s'"), *OutPUID);
-        return true;
+        UE_LOG(LogBanIdResolver, Warning,
+            TEXT("TryGetEOSProductUserId: EOS returned PUID '%s' but it failed "
+                 "hex format validation — discarding."),
+            *Candidate);
+        return false;
     }
-#endif // WITH_ONLINE_SERVICES_EOSGSS
 
-    return false;
+    // Normalise to lowercase.  All stored EOS PUIDs are lowercased by
+    // UEOSBanSubsystem::BanPlayer(), so callers that compare the returned
+    // value against stored records must have a matching case.
+    OutPUID = Candidate.ToLower();
+    UE_LOG(LogBanIdResolver, Verbose,
+        TEXT("TryGetEOSProductUserId: resolved EOS PUID '%s'"), *OutPUID);
+    return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
