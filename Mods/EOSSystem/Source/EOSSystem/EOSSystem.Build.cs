@@ -21,10 +21,6 @@ public class EOSSystem : ModuleRules
             "CoreOnline",
             // IOnlineAccountIdRegistry, FAccountId
             "OnlineServicesInterface",
-            // UE::Online::GetProductUserId(FAccountId) — V2 EOS PUID extraction used in
-            // HandlePostLogin so that PUIDs are registered correctly on dedicated servers
-            // (GetLocalPlayer() returns nullptr on dedicated servers and cannot be used).
-            "OnlineServicesEOSGS",
             // LexToString(EOS_ProductUserId) → FString
             "EOSShared",
             // Json + JsonUtilities — used in UEOSConnectSubsystem to persist the
@@ -52,5 +48,21 @@ public class EOSSystem : ModuleRules
             // returns our EOS_HPlatform without any dependency on IEOSSDKManager.
             "EOSDirectSDK",
         });
+
+        // OnlineServicesEOSGS provides UE::Online::GetProductUserId(FAccountId)
+        // for the V2 (FAccountId) EOS identity path in EOSConnectSubsystem.
+        // CSS marks this plugin with TargetDenyList=["Server"] in OnlineIntegration.uplugin,
+        // so the .so is absent from the Linux dedicated server distribution.  Guard the
+        // dependency and the V2 code path with WITH_ONLINE_SERVICES_EOSGSS so that
+        // server builds (the only target this ServerOnly module runs on) compile cleanly.
+        if (Target.Type != TargetType.Server)
+        {
+            PublicDependencyModuleNames.Add("OnlineServicesEOSGS");
+            PublicDefinitions.Add("WITH_ONLINE_SERVICES_EOSGSS=1");
+        }
+        else
+        {
+            PublicDefinitions.Add("WITH_ONLINE_SERVICES_EOSGSS=0");
+        }
     }
 }

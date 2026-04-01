@@ -11,7 +11,11 @@
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
 // V2 EOS PUID extraction: UE::Online::GetProductUserId(FAccountId) and FAccountId
+// OnlineServicesEOSGS is absent from the Linux dedicated server (CSS
+// TargetDenyList=["Server"]), so guard this include with WITH_ONLINE_SERVICES_EOSGSS.
+#if WITH_ONLINE_SERVICES_EOSGSS
 #include "Online/OnlineIdEOSGS.h"
+#endif // WITH_ONLINE_SERVICES_EOSGSS
 // JSON serialisation — Dom, Serialization (Json module) + FJsonObjectConverter (JsonUtilities)
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -355,6 +359,7 @@ void UEOSConnectSubsystem::HandlePostLogin(AGameModeBase* GM, APlayerController*
 
     if (UniqueId.IsV2())
     {
+#if WITH_ONLINE_SERVICES_EOSGSS
         const UE::Online::FAccountId& AccountId = UniqueId.GetV2Unsafe();
         if (!AccountId.IsValid()) return;
 
@@ -372,6 +377,7 @@ void UEOSConnectSubsystem::HandlePostLogin(AGameModeBase* GM, APlayerController*
             // can act directly without a world scan.
             RegisterPlayerPUIDInternal(PUID, PC);
         }
+#endif // WITH_ONLINE_SERVICES_EOSGSS
     }
 }
 
@@ -387,6 +393,7 @@ void UEOSConnectSubsystem::HandleLogout(AGameModeBase* GM, AController* C)
 
     if (UniqueId.IsV2())
     {
+#if WITH_ONLINE_SERVICES_EOSGSS
         const UE::Online::FAccountId& AccountId = UniqueId.GetV2Unsafe();
         if (!AccountId.IsValid()) return;
 
@@ -396,6 +403,7 @@ void UEOSConnectSubsystem::HandleLogout(AGameModeBase* GM, AController* C)
         const FString PUID = PUIDToStr(Handle);
         if (!PUID.IsEmpty())
             UnregisterPlayerPUID(PUID);
+#endif // WITH_ONLINE_SERVICES_EOSGSS
     }
 }
 

@@ -36,7 +36,12 @@
 #include "eos_common.h"
 
 // UE5 V2 — UE::Online::GetProductUserId(FAccountId) -> EOS_ProductUserId
+// OnlineServicesEOSGS is absent from the Linux dedicated server (CSS
+// TargetDenyList=["Server"]).  Only compile this include and the V2 path
+// when WITH_ONLINE_SERVICES_EOSGSS=1 (i.e. non-server targets).
+#if WITH_ONLINE_SERVICES_EOSGSS
 #include "Online/OnlineIdEOSGS.h"
+#endif // WITH_ONLINE_SERVICES_EOSGSS
 
 // EOSShared — LexToString(EOS_ProductUserId) -> FString
 #include "EOSShared.h"
@@ -99,6 +104,9 @@ bool GetProductUserId(const FUniqueNetIdRepl& UniqueId, FString& OutProductUserI
 
     // ── V2 path: FAccountId (OnlineServicesEOSGS) ────────────────────────────
     // Every Satisfactory player with an active EOS session holds a V2 FAccountId.
+    // OnlineServicesEOSGS is absent on the Linux dedicated server (CSS
+    // TargetDenyList=["Server"]), so this path is compiled only for non-server targets.
+#if WITH_ONLINE_SERVICES_EOSGSS
     if (UniqueId.IsV2())
     {
         const UE::Online::FAccountId& AccountId = UniqueId.GetV2Unsafe();
@@ -113,6 +121,7 @@ bool GetProductUserId(const FUniqueNetIdRepl& UniqueId, FString& OutProductUserI
         OutProductUserId = LexToString(ProductUserId);
         return !OutProductUserId.IsEmpty();
     }
+#endif // WITH_ONLINE_SERVICES_EOSGSS
 
 #if WITH_EOS_SUBSYSTEM_V1
     // ── V1 path: FUniqueNetId of EOS type (OnlineSubsystemEOS) ──────────────
