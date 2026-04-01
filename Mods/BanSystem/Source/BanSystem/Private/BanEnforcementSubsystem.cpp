@@ -351,7 +351,7 @@ void UBanEnforcementSubsystem::OnPUIDRegistered(const FString& PUID, APlayerCont
     UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>();
 
     // ── Fast path: use the PlayerController supplied by EOSConnectSubsystem ──
-    // HandlePostLogin now extracts the PUID via UE::Online::GetProductUserId()
+    // HandlePostLogin extracts the PUID via EOSId::GetProductUserId() (FGOnlineHelpers)
     // and passes the matching PC directly, so we can skip the world scan.
     APlayerController* PC = Controller;
 
