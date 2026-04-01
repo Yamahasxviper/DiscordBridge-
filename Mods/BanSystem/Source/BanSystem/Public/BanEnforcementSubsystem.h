@@ -26,11 +26,20 @@ class APlayerController;
  *    The connection is refused before any PlayerController is created, so the
  *    banned player never enters the game world.
  *
+ *    For Steam-only players (no embedded EOS PUID in the identity):
+ *      a) If the EOSConnectSubsystem sync cache already holds a PUID for this
+ *         Steam64 ID (returning player), the EOS ban list is checked here and
+ *         the connection is refused immediately if they are banned.
+ *      b) If there is no cached PUID, the async Steam64→PUID lookup is started
+ *         NOW (earliest possible moment) and a placeholder is recorded in the
+ *         pending map so OnPostLogin does not issue a redundant second lookup.
+ *         This reduces the async enforcement window.
+ *
  * 2. PostLogin  (FGameModeEvents::GameModePostLoginEvent)
  *    Fallback enforcement after the PlayerState is available.  Runs immediately
- *    if the player's EOS PUID was already resolved, or triggers an async
- *    Steam64→PUID lookup via UEOSConnectSubsystem when the PUID is not yet
- *    available (common on first-time Steam+EOS logins).
+ *    if the player's EOS PUID was already resolved, or promotes the pending-map
+ *    entry (planted at PreLogin) with the real PlayerController so that
+ *    OnPUIDLookupDone can kick the player as soon as the EOS result arrives.
  *
  * 3. PUID Registered  (UEOSConnectSubsystem::OnPlayerPUIDRegistered)
  *    Fires when EOSSystem successfully tracks a new player PUID (may arrive
@@ -38,9 +47,10 @@ class APlayerController;
  *    kicks any banned player.
  *
  * 4. Async PUID Lookup  (UEOSConnectSubsystem::OnPUIDLookupComplete)
- *    Triggered by step 2 when a Steam player has no immediate PUID.  When the
- *    EOS result arrives, the EOS ban list is checked and the player is kicked
- *    if banned.  Also handles cross-platform EOS ban propagation (see below).
+ *    Triggered at PreLogin (step 1b) or PostLogin (step 2) for Steam players
+ *    without an immediate PUID.  When the EOS result arrives, the EOS ban list
+ *    is checked and the player is kicked if banned.  Also handles cross-platform
+ *    EOS ban propagation (see below).
  *
  * 5. Async Reverse Lookup  (UEOSConnectSubsystem::OnReverseLookupComplete)
  *    Triggered when PropagateToSteamAsync() issues a PUID→Steam64 query.
