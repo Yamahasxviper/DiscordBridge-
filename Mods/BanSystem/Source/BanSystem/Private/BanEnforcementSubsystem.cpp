@@ -418,8 +418,12 @@ void UBanEnforcementSubsystem::OnPUIDRegistered(const FString& PUID, APlayerCont
     UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>();
 
     // ── Fast path: use the PlayerController supplied by EOSConnectSubsystem ──
-    // HandlePostLogin extracts the PUID via EOSId::GetProductUserId() (FGOnlineHelpers)
-    // and passes the matching PC directly, so we can skip the world scan.
+    // On the CSS dedicated server, EOSConnectSubsystem::HandlePostLogin cannot
+    // directly extract the EOS PUID from FUniqueNetIdRepl (OnlineServicesEOSGS
+    // is absent server-side).  The Controller arg is populated when this event
+    // fires from the ASYNC Steam64→PUID lookup callback (LookupPUIDBySteam64),
+    // at which point the pending-map PC is promoted here.  When Controller is
+    // non-null the world scan below is skipped.
     APlayerController* PC = Controller;
 
     // ── Fallback: world scan (manual RegisterPlayerPUID calls, PC == nullptr) ─

@@ -132,12 +132,15 @@ public:
     /**
      * Attempt to extract an EOS Product User ID (PUID).
      *
-     * Uses UE::Online::GetProductUserId(FAccountId) from OnlineServicesEOSGS
-     * directly (no FGOnlineHelpers dependency).  Handles the V2 FAccountId
-     * representation used by Satisfactory's OnlineServicesEOSGS layer.
-     * Returns true and populates OutPUID when the player has an active EOS
-     * session (including Steam players with a linked Epic account).
-     * Returns false on server builds where OnlineServicesEOSGS is absent.
+     * NOTE: BanSystem is a ServerOnly module.  On the CSS dedicated server,
+     * OnlineServicesEOSGS is absent (CSS TargetDenyList=["Server"]) and the
+     * server's FUniqueNetIdRepl for remote players does not carry a V2
+     * FAccountId.  This method therefore always returns false on the server.
+     *
+     * EOS PUIDs are obtained server-side via the async
+     * EOSConnectSubsystem::LookupPUIDBySteam64() path instead.
+     * The method signature is preserved so callers compile cleanly on all
+     * target types.
      */
     static bool TryGetEOSProductUserId(const FUniqueNetIdRepl& UniqueId,
                                        FString&                OutPUID);

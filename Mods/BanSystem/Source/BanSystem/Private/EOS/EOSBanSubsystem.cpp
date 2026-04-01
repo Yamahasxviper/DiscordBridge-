@@ -1,7 +1,8 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 
 #include "EOS/EOSBanSubsystem.h"
-#include "Online/FGOnlineHelpers.h"
+// No CSS/FGOnlineHelpers.h include — the inline validation below is
+// self-contained pure-string logic that requires no platform subsystem.
 #include "Misc/FileHelper.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
@@ -286,7 +287,20 @@ void UEOSBanSubsystem::SetNotificationProvider(IBanNotificationProvider* Provide
 // ─────────────────────────────────────────────────────────────────────────────
 bool UEOSBanSubsystem::IsValidEOSProductUserId(const FString& Id)
 {
-    return EOSId::IsValidEOSProductUserId(Id);
+    // Pure string validation — no platform or engine subsystem required.
+    // Matches the inline logic in EOSId::IsValidEOSProductUserId (FGOnlineHelpers)
+    // but inlined here to avoid pulling in the CSS FGOnlineHelpers.h include chain
+    // (which cascades through FGNetConstructionFunctionLibrary → FGBuildableSubsystem
+    // → many other CSS headers).
+    if (Id.Len() != 32) return false;
+    const FString Lower = Id.ToLower();
+    for (TCHAR C : Lower)
+    {
+        const bool bDigit = (C >= TEXT('0') && C <= TEXT('9'));
+        const bool bHex   = (C >= TEXT('a') && C <= TEXT('f'));
+        if (!bDigit && !bHex) return false;
+    }
+    return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

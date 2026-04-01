@@ -4,23 +4,34 @@
 
 // ── EOSSystem cross-platform cache ────────────────────────────────────────────
 // EOSConnectSubsystem.h is included first so EOSSystem's eos_platform.h wins
-// the EOS_Platform_H include-guard race before our own EOS SDK headers below.
-// All TryGetCached* calls are guarded with nullptr checks so this code
-// compiles and runs even when the EOSSystem mod is not installed.
+// the EOS_Platform_H include-guard race before any other EOS SDK headers.
+// All TryGetCached* calls guard against nullptr so this compiles and runs
+// even when the EOSSystem mod is not installed.
 #include "EOSConnectSubsystem.h"
 #include "EOSTypes.h"
 
-// ── EOS Product User ID extraction ────────────────────────────────────────────
-// All EOS SDK calls in this file are confined to this single translation unit
-// (BanIdResolver.cpp).  Keeping them here means the DLL-import stubs for
-// EOS_ProductUserId_IsValid and LexToString(EOS_ProductUserId) are emitted
-// in exactly one .obj file, preventing LNK2019 unresolved-external errors in
-// other BanSystem translation units.
+// ── EOS Product User ID extraction — server context ───────────────────────────
 //
-// WITH_ONLINE_SERVICES_EOSGSS is set by BanSystem.Build.cs:
-//   1 on non-server targets  (OnlineServicesEOSGS is available)
-//   0 on server targets      (OnlineServicesEOSGS is absent on the server)
-#if WITH_ONLINE_SERVICES_EOSGSS
+// BanSystem is a ServerOnly module.  BanSystem.Build.cs therefore always emits
+// WITH_ONLINE_SERVICES_EOSGSS=0.  The guarded block below is permanently dead
+// code and is kept only for documentation purposes.
+//
+// WHY V2 extraction is not possible on the CSS dedicated server:
+//   • OnlineServicesEOSGS (CSS TargetDenyList=["Server"]) is absent from the
+//     Linux server distribution.  The library is not shipped with the server.
+//   • UE::Online::GetProductUserId(FAccountId) lives in that library — calling
+//     it server-side would be an unresolved external at link time.
+//   • The server's FUniqueNetIdRepl for a remote player carries type "Steam"
+//     with IsV2()==false; there is no embedded FAccountId to unpack.
+//
+// How EOS PUIDs ARE obtained on the server:
+//   EOSConnectSubsystem::LookupPUIDBySteam64() issues an async
+//   EOS_Connect_QueryExternalAccountMappings call against the EOS Connect
+//   service (raw EOS C SDK, no EOSGSS dependency).  When the result arrives,
+//   BanEnforcementSubsystem::OnPUIDLookupDone checks the EOS ban list.
+//   TryGetCachedPUIDFromSteam64 / TryGetCachedSteam64FromPUID below provide
+//   a synchronous zero-latency path when the PUID is already cached.
+#if WITH_ONLINE_SERVICES_EOSGSS   // always 0 for BanSystem (ServerOnly module)
 
 // EOS C SDK types: EOS_ProductUserId, EOS_ProductUserId_IsValid
 #if defined(EOS_PLATFORM_BASE_FILE_NAME)
