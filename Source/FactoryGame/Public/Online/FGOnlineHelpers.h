@@ -3,6 +3,7 @@
 #pragma once
 #include "FactoryGame.h"
 #include "FGNetConstructionFunctionLibrary.h"
+#include "GameFramework/OnlineReplStructs.h"
 
 #include "FGOnlineHelpers.generated.h"
 
@@ -182,6 +183,77 @@ struct FACTORYGAME_API EOSId
 {
 	static bool GetProductUserId( const FUniqueNetId& netId, FString& out_ProductUserIdString );
 	static bool GetEpicUserId( const FUniqueNetId& netId, FString& out_EpicUserIdString );
+
+	/**
+	 * Overload that accepts a replicated network identity (FUniqueNetIdRepl).
+	 * Extracts the underlying FUniqueNetId and delegates to the base overload above.
+	 */
+	static bool GetProductUserId( const FUniqueNetIdRepl& UniqueId, FString& OutProductUserId )
+	{
+		OutProductUserId.Empty();
+		if ( !UniqueId.IsValid() )
+			return false;
+		const TSharedPtr< const FUniqueNetId > NetId = UniqueId.GetUniqueNetId();
+		if ( !NetId.IsValid() )
+			return false;
+		return GetProductUserId( *NetId, OutProductUserId );
+	}
+
+	/**
+	 * Attempt to extract a Steam 64-bit ID from a FUniqueNetIdRepl.
+	 * Returns true when the identity type is "Steam" and ToString() yields a valid
+	 * 17-digit Steam64 decimal string.
+	 */
+	static bool GetSteam64Id( const FUniqueNetIdRepl& UniqueId, FString& OutSteam64Id )
+	{
+		OutSteam64Id.Empty();
+		if ( !UniqueId.IsValid() )
+			return false;
+		static const FName SteamTypeName( TEXT( "Steam" ) );
+		if ( UniqueId.GetType() != SteamTypeName )
+			return false;
+		const FString Candidate = UniqueId.ToString();
+		if ( !IsValidSteam64Id( Candidate ) )
+			return false;
+		OutSteam64Id = Candidate;
+		return true;
+	}
+
+	/**
+	 * Returns true when Id is a valid 32-character lowercase hexadecimal EOS Product User ID.
+	 * Pure string validation — no platform or engine subsystem required.
+	 */
+	static bool IsValidEOSProductUserId( const FString& Id )
+	{
+		if ( Id.Len() != 32 )
+			return false;
+		const FString Lower = Id.ToLower();
+		for ( TCHAR C : Lower )
+		{
+			const bool bDigit = ( C >= TEXT( '0' ) && C <= TEXT( '9' ) );
+			const bool bHex   = ( C >= TEXT( 'a' ) && C <= TEXT( 'f' ) );
+			if ( !bDigit && !bHex )
+				return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Returns true when Id is a valid 17-digit decimal Steam 64-bit ID starting with "7656119".
+	 * Pure string validation — no platform or engine subsystem required.
+	 * All legitimate Steam 64-bit IDs are in the universe-1 range [76561193005069312,
+	 * 76561202255233023], which share the "7656119" prefix.
+	 */
+	static bool IsValidSteam64Id( const FString& Id )
+	{
+		if ( Id.Len() != 17 )
+			return false;
+		for ( TCHAR C : Id )
+			if ( C < TEXT( '0' ) || C > TEXT( '9' ) )
+				return false;
+		// All real Steam64 IDs are in the universe-1 range and share this prefix.
+		return Id.StartsWith( TEXT( "7656119" ) );
+	}
 };
 
 
