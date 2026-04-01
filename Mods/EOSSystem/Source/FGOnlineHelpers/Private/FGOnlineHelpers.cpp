@@ -10,6 +10,15 @@
 // UE::Online::GetProductUserId, EOS_ProductUserId_IsValid, and LexToString from
 // being pulled into consumer .obj files and causing LNK2019 errors in modules
 // such as BanSystem.
+//
+// EOSShared.h (providing LexToString) is only included when
+// WITH_ONLINE_SERVICES_EOSGSS=1 or WITH_EOS_SUBSYSTEM_V1=1 because:
+//  1. LexToString is only called in those two code paths.
+//  2. CSS explicitly excludes EOSShared from the dedicated server distribution
+//     (FactoryGame.Build.cs: "[ZolotukhinN:24/01/2024] Exclude EOSShared on
+//      dedicated server, it's not enabled as a plugin for the dedicated server").
+//  Keeping EOSShared.h out of the server compilation path prevents a potential
+//  C1083 include-not-found error on the Linux dedicated server.
 
 #include "Online/FGOnlineHelpers.h"
 #include "Modules/ModuleManager.h"
@@ -43,8 +52,16 @@
 #include "Online/OnlineIdEOSGS.h"
 #endif // WITH_ONLINE_SERVICES_EOSGSS
 
-// EOSShared — LexToString(EOS_ProductUserId) -> FString
+// EOSShared — LexToString(EOS_ProductUserId) -> FString.
+// Required by both the V2 (EOSGSS) and V1 (EOS_SUBSYSTEM_V1) code paths.
+// EOSShared is not present in the CSS dedicated-server distribution (see
+// FactoryGame.Build.cs: "[ZolotukhinN:24/01/2024] Exclude EOSShared on
+// dedicated server, it's not enabled as a plugin for the dedicated server").
+// Since both callers are non-server only paths, guard accordingly to prevent
+// a C1083 include-not-found error on the Linux dedicated server.
+#if WITH_ONLINE_SERVICES_EOSGSS || WITH_EOS_SUBSYSTEM_V1
 #include "EOSShared.h"
+#endif // WITH_ONLINE_SERVICES_EOSGSS || WITH_EOS_SUBSYSTEM_V1
 
 // V1 — IUniqueNetIdEOS interface (legacy OnlineSubsystemEOS path).
 // Only compiled when WITH_EOS_SUBSYSTEM_V1=1 (controlled in FGOnlineHelpers.Build.cs).

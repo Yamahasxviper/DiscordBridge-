@@ -97,13 +97,18 @@ struct BANSYSTEM_API FResolvedBanId
  *   CSS uses Epic's OnlineServices v2 layer.  Each player with an active EOS
  *   session has an "EOS Product User ID" (PUID) — a 32-char lowercase hex
  *   string (e.g. "00020aed06f0a6958c3c067fb4b73d51").
- *   The PUID is extracted directly via UE::Online::GetProductUserId(FAccountId)
- *   (from OnlineServicesEOSGS) and EOS_ProductUserId_IsValid + LexToString
- *   (from EOSSDK/EOSShared) — all called in BanIdResolver.cpp, with no
- *   dependency on the FGOnlineHelpers or EOSDirectSDK helper mods.
+ *
+ *   BanSystem is a ServerOnly module.  On the CSS dedicated server (Win64 and
+ *   Linux), OnlineServicesEOSGS is absent (CSS TargetDenyList=["Server"]) and
+ *   the server's FUniqueNetIdRepl for remote players does not carry a V2
+ *   FAccountId.  TryGetEOSProductUserId therefore always returns false on the
+ *   server.  EOS PUIDs are obtained server-side exclusively via the async
+ *   EOSConnectSubsystem::LookupPUIDBySteam64() cache, which is populated as
+ *   players connect (see BanEnforcementSubsystem::OnPreLogin / OnPostLogin and
+ *   the TryGetCachedPUIDFromSteam64 helper below).
  *
  *   A Steam player who has linked their account to Epic will have BOTH a
- *   Steam64 ID AND a valid EOS PUID.  This resolver returns both.
+ *   Steam64 ID AND a valid EOS PUID (once the async lookup completes).
  *
  * Usage:
  *   FResolvedBanId Ids = FBanIdResolver::Resolve(PlayerState->GetUniqueId());

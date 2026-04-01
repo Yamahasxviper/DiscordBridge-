@@ -17,8 +17,6 @@ public class FGOnlineHelpers : ModuleRules
             "Core",
             "CoreOnline",              // FUniqueNetIdRepl, FAccountId (V1/V2)
             "OnlineServicesInterface", // EOnlineServices, IOnlineAccountIdRegistry
-            // EOSShared provides LexToString(EOS_ProductUserId) -> FString.
-            "EOSShared",
             // EOSSDK provides EOS_ProductUserId, EOS_ProductUserId_IsValid, etc.
             "EOSSDK",
         });
@@ -30,9 +28,19 @@ public class FGOnlineHelpers : ModuleRules
         // dedicated server distribution.  Guard the dependency and the V2 code path with
         // WITH_ONLINE_SERVICES_EOSGSS so non-server (game/editor) builds keep the V2 path
         // while server builds compile cleanly without the missing library.
+        //
+        // EOSShared provides LexToString(EOS_ProductUserId) -> FString, which is only
+        // called inside the WITH_ONLINE_SERVICES_EOSGSS path (V2) and WITH_EOS_SUBSYSTEM_V1
+        // path (V1).  CSS explicitly documents that EOSShared is not enabled as a plugin
+        // for the dedicated server (FactoryGame.Build.cs comment:
+        // "[ZolotukhinN:24/01/2024] Exclude EOSShared on dedicated server, it's not
+        //  enabled as a plugin for the dedicated server so we cannot depend on it").
+        // Guard alongside OnlineServicesEOSGS to avoid a missing-library link error on
+        // the Linux dedicated server.
         if (Target.Type != TargetType.Server)
         {
             PublicDependencyModuleNames.Add("OnlineServicesEOSGS");
+            PublicDependencyModuleNames.Add("EOSShared");
             PublicDefinitions.Add("WITH_ONLINE_SERVICES_EOSGSS=1");
         }
         else

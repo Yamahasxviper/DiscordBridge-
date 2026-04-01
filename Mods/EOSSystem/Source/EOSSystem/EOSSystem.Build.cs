@@ -21,8 +21,6 @@ public class EOSSystem : ModuleRules
             "CoreOnline",
             // IOnlineAccountIdRegistry, FAccountId
             "OnlineServicesInterface",
-            // LexToString(EOS_ProductUserId) → FString
-            "EOSShared",
             // Json + JsonUtilities — used in UEOSConnectSubsystem to persist the
             // PUID↔external-account reverse-lookup cache to disk across server restarts.
             // FJsonObject/FJsonSerializer are from Json; FJsonObjectConverter is from JsonUtilities.
@@ -33,8 +31,7 @@ public class EOSSystem : ModuleRules
             // module's include path is used by the Public/EOSSDK/ delegation wrappers to
             // forward all type definitions to the canonical engine headers, preventing
             // C2371/C2011/C3431 redefinition conflicts when BanSystem includes both
-            // EOSSystem and EOSDirectSDK (which also pulls in real EOSSDK headers via
-            // EOSShared) in the same translation unit.
+            // EOSSystem and EOSDirectSDK in the same translation unit.
             "EOSSDK",
         });
 
