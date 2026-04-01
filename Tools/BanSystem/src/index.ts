@@ -200,8 +200,10 @@ program
       console.log("-".repeat(140));
       for (const b of bans) {
         const expires = b.isPermanent ? "PERMANENT" : (b.expireDate ?? "?");
+        const reasonDisplay =
+          b.reason.length > 28 ? b.reason.slice(0, 27) + "…" : b.reason;
         console.log(
-          `${String(b.id).padEnd(5)} ${b.uid.padEnd(50)} ${b.reason.slice(0, 28).padEnd(30)} ${b.banDate.padEnd(24)} ${expires}`
+          `${String(b.id).padEnd(5)} ${b.uid.padEnd(50)} ${reasonDisplay.padEnd(30)} ${b.banDate.padEnd(24)} ${expires}`
         );
       }
     }

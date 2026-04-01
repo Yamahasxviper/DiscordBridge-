@@ -30,7 +30,6 @@
 import express, { Request, Response, NextFunction } from "express";
 import type { BanService } from "./banService.js";
 import type { CreateBanInput, Platform } from "./models.js";
-import * as path from "node:path";
 
 export function createApiServer(
   banService: BanService,

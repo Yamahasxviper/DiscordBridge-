@@ -92,13 +92,15 @@ export class Enforcer {
     try {
       await this.dsClient.kickPlayer(player.playerId, kickMsg);
     } catch (kickErr) {
-      // Fallback: try console command
+      // Fallback: try console command.
+      // Sanitise kickMsg to prevent command-injection via special characters.
+      const safeMsgForCmd = kickMsg.replace(/["\\]/g, " ").replace(/\n|\r/g, " ");
       console.warn(
         `[enforcer] kickPlayer API call failed, trying RunCommand fallback: ${String(kickErr)}`
       );
       try {
         await this.dsClient.runCommand(
-          `KickPlayer ${player.playerId} "${kickMsg}"`
+          `KickPlayer ${player.playerId} "${safeMsgForCmd}"`
         );
       } catch (cmdErr) {
         console.error(
