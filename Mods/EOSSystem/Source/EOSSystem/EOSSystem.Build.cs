@@ -16,8 +16,8 @@ public class EOSSystem : ModuleRules
             "CoreUObject",
             "Engine",
             "DeveloperSettings",
-            // FUniqueNetIdRepl, IsV1/IsV2, GetV2Unsafe — needed in EOSConnectSubsystem
-            // HandlePostLogin to extract the EOS PUID from the player's replicated identity.
+            // FUniqueNetIdRepl — used in EOSConnectSubsystem HandlePostLogin/HandleLogout
+            // to get the player's replicated network identity.
             "CoreOnline",
             // IOnlineAccountIdRegistry, FAccountId
             "OnlineServicesInterface",
@@ -47,22 +47,12 @@ public class EOSSystem : ModuleRules
             // UnregisterPlatformHandle so that EOSDirectSDK::GetPlatformHandle()
             // returns our EOS_HPlatform without any dependency on IEOSSDKManager.
             "EOSDirectSDK",
+            // FGOnlineHelpers — provides EOSId::GetProductUserId(FUniqueNetIdRepl),
+            // which handles both V1 and V2 (EOSGSS-guarded) extraction internally.
+            // Using this module-level helper removes the need for EOSConnectSubsystem
+            // to depend on OnlineServicesEOSGS directly (CSS marks EOSGSS as
+            // TargetDenyList=["Server"] so it is absent from Linux server builds).
+            "FGOnlineHelpers",
         });
-
-        // OnlineServicesEOSGS provides UE::Online::GetProductUserId(FAccountId)
-        // for the V2 (FAccountId) EOS identity path in EOSConnectSubsystem.
-        // CSS marks this plugin with TargetDenyList=["Server"] in OnlineIntegration.uplugin,
-        // so the .so is absent from the Linux dedicated server distribution.  Guard the
-        // dependency and the V2 code path with WITH_ONLINE_SERVICES_EOSGSS so that
-        // server builds (the only target this ServerOnly module runs on) compile cleanly.
-        if (Target.Type != TargetType.Server)
-        {
-            PublicDependencyModuleNames.Add("OnlineServicesEOSGS");
-            PublicDefinitions.Add("WITH_ONLINE_SERVICES_EOSGSS=1");
-        }
-        else
-        {
-            PublicDefinitions.Add("WITH_ONLINE_SERVICES_EOSGSS=0");
-        }
     }
 }

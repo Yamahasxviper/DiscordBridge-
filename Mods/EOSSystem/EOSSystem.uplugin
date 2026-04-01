@@ -55,7 +55,10 @@
 		},
 		{
 			"Name": "OnlineServicesEOSGS",
-			"Enabled": true
+			"Enabled": true,
+			"TargetDenyList": [
+				"Server"
+			]
 		},
 		{
 			"Name": "EOSShared",
