@@ -1,75 +1,88 @@
 // Copyright Yamahasxviper. All Rights Reserved.
+// Direct port of Tools/BanSystem/src/models.ts
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "BanTypes.generated.h"
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Result of a ban-check call
-// ─────────────────────────────────────────────────────────────────────────────
-UENUM(BlueprintType)
-enum class EBanCheckResult : uint8
-{
-    NotBanned  UMETA(DisplayName = "Not Banned"),
-    Banned     UMETA(DisplayName = "Banned"),
-    BanExpired UMETA(DisplayName = "Ban Expired (auto-removed)"),
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// A single ban record — used by BOTH the Steam and EOS subsystems.
-// Neither subsystem shares instances with the other.
-// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * A single ban record — mirrors the SQLite schema in database.ts and
+ * the BanRecord interface in models.ts exactly.
+ */
 USTRUCT(BlueprintType)
 struct BANSYSTEM_API FBanEntry
 {
     GENERATED_BODY()
 
-    /** Steam64 ID (e.g. "76561198000000000") or EOS Product User ID (32-char hex). */
-    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
-    FString PlayerId;
+    /** Auto-incremented integer primary key (0 when not yet persisted). */
+    UPROPERTY(BlueprintReadOnly, Category = "Ban System")
+    int64 Id = 0;
 
-    /** Human-readable reason shown to the player on kick. */
+    /** Compound key: "STEAM:76561198012345678" or "EOS:00020aed...". */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString Uid;
+
+    /** Raw platform user ID (Steam64 or EOS Product User ID). */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString PlayerUID;
+
+    /** "STEAM" | "EOS" | "UNKNOWN" */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString Platform;
+
+    /** Human-readable display name at time of ban (informational, may be stale). */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString PlayerName;
+
+    /** Why this player was banned. */
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     FString Reason;
 
-    /** UTC timestamp when the ban was created. */
-    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
-    FDateTime BannedAt;
-
-    /**
-     * UTC timestamp when the ban expires.
-     * Set to FDateTime(0) (epoch) for permanent bans.
-     */
-    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
-    FDateTime ExpiresAt;
-
-    /** Name or identifier of the admin who issued the ban. */
+    /** Admin username or "system". */
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     FString BannedBy;
 
-    /** True when the ban never expires. ExpiresAt is ignored when this is true. */
+    /** UTC timestamp when the ban was created. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FDateTime BanDate;
+
+    /**
+     * UTC timestamp when the ban expires.
+     * FDateTime(0) (epoch) means the ban is permanent.
+     */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FDateTime ExpireDate;
+
+    /** true = permanent ban; false = temporary (ExpireDate is valid). */
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     bool bIsPermanent = true;
 
     FBanEntry()
-        : BannedAt(FDateTime::UtcNow())
-        , ExpiresAt(FDateTime(0))
-        , BannedBy(TEXT("Server"))
+        : Id(0)
+        , BanDate(FDateTime::UtcNow())
+        , ExpireDate(FDateTime(0))
         , bIsPermanent(true)
     {}
 
-    /** Returns true if the ban has a finite duration AND that duration has passed. */
+    /** Returns true if this is a temporary ban that has already passed its expiry. */
     bool IsExpired() const
     {
         if (bIsPermanent) return false;
-        return FDateTime::UtcNow() > ExpiresAt;
+        return FDateTime::UtcNow() > ExpireDate;
     }
 
-    /** Formats expiry for display. Returns "Permanent" or a UTC date-time string. */
-    FString GetExpiryString() const
+    /** Human-readable message shown to the player when they are kicked. */
+    FString GetKickMessage() const
     {
-        if (bIsPermanent) return TEXT("Permanent");
-        return ExpiresAt.ToString(TEXT("%Y-%m-%d %H:%M:%S UTC"));
+        if (bIsPermanent)
+        {
+            return FString::Printf(
+                TEXT("You have been permanently banned. Reason: %s"), *Reason);
+        }
+        return FString::Printf(
+            TEXT("You are banned until %s UTC. Reason: %s"),
+            *ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")),
+            *Reason);
     }
 };

@@ -5,7 +5,7 @@
 	"SemVersion": "1.0.0",
 	"GameVersion": ">=416835",
 	"FriendlyName": "Ban System",
-	"Description": "Standalone ban system for Satisfactory dedicated servers. Provides independent Steam ID and EOS Product User ID ban enforcement with persistent JSON storage, admin chat commands, a public C++ API for other mods, and optional Discord command integration.",
+	"Description": "Ban system for Satisfactory dedicated servers. SQLite storage, REST management API, and login-time enforcement. Direct port of Tools/BanSystem.",
 	"Category": "Modding",
 	"CreatedBy": "Yamahasxviper",
 	"CreatedByURL": "",
@@ -33,18 +33,6 @@
 			"Name": "SML",
 			"Enabled": true,
 			"SemVersion": "^3.11.3"
-		},
-		{
-			"Name": "SMLWebSocket",
-			"Enabled": true,
-			"Optional": false,
-			"SemVersion": "^1.0.0"
-		},
-		{
-			"Name": "EOSSystem",
-			"Enabled": true,
-			"Optional": true,
-			"SemVersion": "^1.0.0"
 		}
 	]
 }

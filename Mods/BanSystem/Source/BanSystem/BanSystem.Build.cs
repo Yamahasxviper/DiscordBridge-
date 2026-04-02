@@ -14,34 +14,16 @@ public class BanSystem : ModuleRules
             "Core",
             "CoreUObject",
             "Engine",
-            "NetCore",
             "Json",
-            "FactoryGame",
-            "SML",
-            // SMLWebSocket — for the standalone Discord Gateway (WebSocket) connection.
-            "SMLWebSocket",
-            // EOSSystem — standalone mod providing UEOSConnectSubsystem with
-            // forward (Steam64→PUID) and reverse (PUID→Steam64) async lookup and cache.
-            // Optional at runtime (all call sites guard for nullptr); required at
-            // compile time for the cross-platform ban-propagation code paths.
-            "EOSSystem",
+            // SQLite storage — direct port of Tools/BanSystem database.ts
+            "SQLiteCore",
         });
-
-        // ── BanSystem builds for both Editor and Server targets ──────────────────
-        //
-        // On dedicated-server builds, OnlineServicesEOSGS (CSS TargetDenyList=["Server"])
-        // is absent and BanSystem never calls EOSGSS symbols directly.  BanIdResolver
-        // delegates all EOS Product User ID extraction to EOSId::GetProductUserId
-        // (FACTORYGAME_API, from Source/FactoryGame/Public/Online/FGOnlineHelpers.h),
-        // which handles all platform guards internally — keeping BanSystem free of
-        // any direct EOSGSS link dependency regardless of target type.
-        //
-        // EOS PUIDs are obtained server-side exclusively via the async
-        // EOSConnectSubsystem::LookupPUIDBySteam64 path (raw EOS C SDK query).
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
-            // HTTP — for the standalone Discord REST API (channel messages).
+            // HTTP server — direct port of Tools/BanSystem apiServer.ts
+            "HTTPServer",
+            // HTTP client utilities (URL encoding/decoding)
             "HTTP",
         });
     }
