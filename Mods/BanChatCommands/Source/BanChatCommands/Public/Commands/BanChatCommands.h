@@ -170,16 +170,16 @@ private:
 /**
  * /whoami
  *
- * Shows the calling player's own Steam64 ID and EOS Product User ID.
- * Useful for admins who need a player's exact ID to issue a ban, and for
- * players who want to verify their own identity.
+ * Shows the calling player's own platform identity (Steam64 ID or EOS Product
+ * User ID, depending on how they connected to the server).
+ * Useful for players who need their exact ID for a ban lookup.
  *
  * Available to all players (no admin requirement).
  *
  * Example output:
  *   [BanChatCommands] Your Steam64: 76561198000000000
+ *   — or —
  *   [BanChatCommands] Your EOS PUID: 00020aed06f0a6958c3c067fb4b73d51
- *   (or "[BanChatCommands] EOS PUID: not yet resolved" when EOS lookup is pending)
  */
 UCLASS()
 class BANCHATCOMMANDS_API AWhoAmIChatCommand : public AChatCommandInstance
