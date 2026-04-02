@@ -16,8 +16,7 @@ public class BanChatCommands : ModuleRules
             "Engine",
             "FactoryGame",
             "SML",
-            // BanSystem — provides USteamBanSubsystem, UEOSBanSubsystem,
-            // UBanEnforcementSubsystem, FBanIdResolver, FBanPlayerLookup, FResolvedBanId.
+            // BanSystem — provides UBanDatabase, UBanEnforcer, FBanEntry, FBanTypes.
             "BanSystem",
         });
     }

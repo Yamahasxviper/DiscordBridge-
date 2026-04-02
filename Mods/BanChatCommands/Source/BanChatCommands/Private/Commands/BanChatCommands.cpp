@@ -3,13 +3,11 @@
 #include "Commands/BanChatCommands.h"
 #include "BanChatCommandsConfig.h"
 #include "Command/CommandSender.h"
-#include "BanIdResolver.h"
-#include "BanPlayerLookup.h"
-#include "BanEnforcementSubsystem.h"
-#include "Steam/SteamBanSubsystem.h"
-#include "EOS/EOSBanSubsystem.h"
+#include "BanDatabase.h"
+#include "BanTypes.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogBanChatCommands, Log, All);
 
@@ -18,31 +16,13 @@ DEFINE_LOG_CATEGORY_STATIC(LogBanChatCommands, Log, All);
 // ─────────────────────────────────────────────────────────────────────────────
 namespace BanChat
 {
-    static USteamBanSubsystem* GetSteamBans(UObject* Ctx)
+    static UBanDatabase* GetDB(UObject* Ctx)
     {
         if (!Ctx) return nullptr;
         UWorld* World = Ctx->GetWorld();
         if (!World) return nullptr;
         UGameInstance* GI = World->GetGameInstance();
-        return GI ? GI->GetSubsystem<USteamBanSubsystem>() : nullptr;
-    }
-
-    static UEOSBanSubsystem* GetEOSBans(UObject* Ctx)
-    {
-        if (!Ctx) return nullptr;
-        UWorld* World = Ctx->GetWorld();
-        if (!World) return nullptr;
-        UGameInstance* GI = World->GetGameInstance();
-        return GI ? GI->GetSubsystem<UEOSBanSubsystem>() : nullptr;
-    }
-
-    static UBanEnforcementSubsystem* GetEnforcement(UObject* Ctx)
-    {
-        if (!Ctx) return nullptr;
-        UWorld* World = Ctx->GetWorld();
-        if (!World) return nullptr;
-        UGameInstance* GI = World->GetGameInstance();
-        return GI ? GI->GetSubsystem<UBanEnforcementSubsystem>() : nullptr;
+        return GI ? GI->GetSubsystem<UBanDatabase>() : nullptr;
     }
 
     /** Join Arguments[StartIdx..] into a space-separated string. */
@@ -65,6 +45,32 @@ namespace BanChat
             : FString::Printf(TEXT("for %d minute(s)"), DurationMinutes);
     }
 
+    /** Format ban expiry date for display output. */
+    static FString FormatExpiry(const FBanEntry& Entry)
+    {
+        if (Entry.bIsPermanent)
+            return TEXT("never (permanent)");
+        return Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")) + TEXT(" UTC");
+    }
+
+    /** Returns true if Id is a 17-digit decimal Steam64 ID. */
+    static bool IsValidSteam64(const FString& Id)
+    {
+        if (Id.Len() != 17) return false;
+        for (TCHAR c : Id)
+            if (c < '0' || c > '9') return false;
+        return true;
+    }
+
+    /** Returns true if Id is a 32-character lowercase hex EOS Product User ID. */
+    static bool IsValidEOSPUID(const FString& Id)
+    {
+        if (Id.Len() != 32) return false;
+        for (TCHAR c : Id)
+            if (!FChar::IsHexDigit(c)) return false;
+        return true;
+    }
+
     /**
      * Check whether the command sender is allowed to run admin commands.
      *
@@ -73,7 +79,7 @@ namespace BanChat
      * When the list is empty, player access is denied (console-only mode).
      *
      * @param Sender  The command sender to check.
-     * @param OutSteam64Id  Populated with the sender's Steam64 ID when IsPlayer is true.
+     * @param OutSteam64Id  Populated with the sender's Steam64 ID when they connect via Steam.
      * @return true when the sender is authorised to run admin commands.
      */
     static bool IsAdminSender(UCommandSender* Sender, FString& OutSteam64Id)
@@ -85,19 +91,17 @@ namespace BanChat
             return true;
         }
 
-        // Resolve sender name → their platform identity via connected player list.
-        const FString SenderName = Sender->GetSenderName();
-        UWorld* World = nullptr;
-        if (APlayerController* PC = Cast<APlayerController>(Sender->GetPlayer()))
-            World = PC->GetWorld();
-
-        if (World)
+        // Resolve the sender's platform identity directly from their PlayerState.
+        APlayerController* PC = Cast<APlayerController>(Sender->GetPlayer());
+        if (PC && PC->PlayerState)
         {
-            FResolvedBanId Ids;
-            FString        FoundName;
-            TArray<FString> Ambiguous;
-            if (FBanPlayerLookup::FindPlayerByName(World, SenderName, Ids, FoundName, Ambiguous, true))
-                OutSteam64Id = Ids.Steam64Id;
+            const FUniqueNetIdRepl& UniqueId = PC->PlayerState->GetUniqueId();
+            if (UniqueId.IsValid())
+            {
+                const FString Type = UniqueId->GetType().ToString().ToUpper();
+                if (Type == TEXT("STEAM"))
+                    OutSteam64Id = UniqueId->ToString();
+            }
         }
 
         const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
@@ -112,37 +116,38 @@ namespace BanChat
     }
 
     /**
-     * Resolve a player argument to a FResolvedBanId.
+     * Resolve a player argument to a compound ban UID.
      *
      * Resolution order:
-     *   1. 17-digit decimal → Steam64 ID.
-     *   2. 32-char hex       → EOS PUID.
-     *   3. Otherwise         → display-name lookup against connected players.
+     *   1. 17-digit decimal → Steam64 ID  → UID "STEAM:xxx"
+     *   2. 32-char hex       → EOS PUID   → UID "EOS:xxx"
+     *   3. Otherwise         → display-name substring lookup against connected players.
      *
-     * Returns true on success and populates OutIds + OutDisplayName.
+     * Returns true on success and populates OutUid + OutDisplayName.
      */
-    static bool ResolvePlayerArg(UObject* Ctx, UCommandSender* Sender,
-                                 const FString& Arg,
-                                 FResolvedBanId& OutIds,
-                                 FString& OutDisplayName)
+    static bool ResolveTarget(UObject* Ctx, UCommandSender* Sender,
+                              const FString& Arg,
+                              FString& OutUid,
+                              FString& OutDisplayName)
     {
         // 1. Raw Steam64 ID
-        if (USteamBanSubsystem::IsValidSteam64Id(Arg))
+        if (IsValidSteam64(Arg))
         {
-            OutIds.Steam64Id    = Arg;
+            OutUid         = UBanDatabase::MakeUid(TEXT("STEAM"), Arg);
             OutDisplayName = Arg;
             return true;
         }
 
         // 2. Raw EOS PUID
-        if (UEOSBanSubsystem::IsValidEOSProductUserId(Arg))
+        if (IsValidEOSPUID(Arg))
         {
-            OutIds.EOSProductUserId = Arg.ToLower();
-            OutDisplayName      = Arg;
+            const FString Lower = Arg.ToLower();
+            OutUid         = UBanDatabase::MakeUid(TEXT("EOS"), Lower);
+            OutDisplayName = Lower;
             return true;
         }
 
-        // 3. Display-name lookup
+        // 3. Display-name lookup against connected PlayerControllers.
         UWorld* World = Ctx ? Ctx->GetWorld() : nullptr;
         if (!World)
         {
@@ -152,111 +157,113 @@ namespace BanChat
             return false;
         }
 
-        TArray<FString> Ambiguous;
-        if (!FBanPlayerLookup::FindPlayerByName(World, Arg, OutIds, OutDisplayName, Ambiguous))
+        APlayerController* FoundPC = nullptr;
+        TArray<FString>    Matches;
+        for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
         {
-            if (Ambiguous.Num() > 1)
+            APlayerController* PC = It->Get();
+            if (!PC || !PC->PlayerState) continue;
+            const FString Name = PC->PlayerState->GetPlayerName();
+            if (Name.Contains(Arg, ESearchCase::IgnoreCase))
             {
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] Ambiguous name '%s'. Matching players: %s"),
-                        *Arg, *FString::Join(Ambiguous, TEXT(", "))),
-                    FLinearColor::Yellow);
+                Matches.Add(Name);
+                if (!FoundPC) FoundPC = PC;
             }
-            else
-            {
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] No connected player found matching '%s'. "
-                        "Use a Steam64 ID or EOS PUID to target offline players."), *Arg),
-                    FLinearColor::Red);
-            }
-            return false;
         }
 
-        if (!OutIds.IsValid())
+        if (Matches.IsEmpty())
         {
             Sender->SendChatMessage(
-                FString::Printf(TEXT("[BanChatCommands] Found player '%s' but could not resolve "
-                    "their platform identity."), *OutDisplayName),
+                FString::Printf(TEXT("[BanChatCommands] No connected player found matching '%s'. "
+                    "Use a Steam64 ID or EOS PUID to target offline players."), *Arg),
                 FLinearColor::Red);
             return false;
         }
 
+        if (Matches.Num() > 1)
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] Ambiguous name '%s'. Matching players: %s"),
+                    *Arg, *FString::Join(Matches, TEXT(", "))),
+                FLinearColor::Yellow);
+            return false;
+        }
+
+        // Unique match — resolve their platform identity.
+        const FUniqueNetIdRepl& UniqueId = FoundPC->PlayerState->GetUniqueId();
+        if (!UniqueId.IsValid())
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] Found player '%s' but could not resolve "
+                    "their platform identity."), *Matches[0]),
+                FLinearColor::Red);
+            return false;
+        }
+
+        const FString Platform = UniqueId->GetType().ToString().ToUpper();
+        const FString RawId    = UniqueId->ToString();
+        OutUid         = UBanDatabase::MakeUid(Platform, RawId);
+        OutDisplayName = Matches[0];
+
         Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] Resolved '%s' → %s"),
-                *Arg, OutIds.HasSteamId()
-                    ? *FString::Printf(TEXT("Steam64: %s"), *OutIds.Steam64Id)
-                    : *FString::Printf(TEXT("EOS PUID: %s"), *OutIds.EOSProductUserId)),
+            FString::Printf(TEXT("[BanChatCommands] Resolved '%s' → %s: %s"),
+                *Arg, *Platform, *RawId),
             FLinearColor::White);
         return true;
     }
 
     /**
-     * Shared ban-and-propagate logic used by both /ban and /tempban.
+     * Shared ban logic used by both /ban and /tempban.
      */
     static EExecutionStatus DoBan(UObject* Ctx, UCommandSender* Sender,
-                                  const FResolvedBanId& Ids, const FString& DisplayName,
+                                  const FString& Uid, const FString& DisplayName,
                                   int32 DurationMinutes, const FString& Reason,
                                   const FString& BannedBy)
     {
+        UBanDatabase* DB = GetDB(Ctx);
+        if (!DB)
+        {
+            Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+            return EExecutionStatus::UNCOMPLETED;
+        }
+
+        FString Platform, RawId;
+        UBanDatabase::ParseUid(Uid, Platform, RawId);
+
+        FBanEntry Entry;
+        Entry.Uid        = Uid;
+        Entry.PlayerUID  = RawId;
+        Entry.Platform   = Platform;
+        Entry.PlayerName = DisplayName;
+        Entry.Reason     = Reason;
+        Entry.BannedBy   = BannedBy;
+        Entry.BanDate    = FDateTime::UtcNow();
+
+        if (DurationMinutes <= 0)
+        {
+            Entry.bIsPermanent = true;
+            Entry.ExpireDate   = FDateTime(0);
+        }
+        else
+        {
+            Entry.bIsPermanent = false;
+            Entry.ExpireDate   = FDateTime::UtcNow() + FTimespan::FromMinutes(DurationMinutes);
+        }
+
         const FString DurStr = FormatDuration(DurationMinutes);
-        bool bBanned = false;
-
-        if (Ids.HasSteamId())
+        if (DB->AddBan(Entry))
         {
-            USteamBanSubsystem* Steam = GetSteamBans(Ctx);
-            if (!Steam)
-            {
-                Sender->SendChatMessage(TEXT("[BanChatCommands] USteamBanSubsystem unavailable."), FLinearColor::Red);
-                return EExecutionStatus::UNCOMPLETED;
-            }
-            if (Steam->BanPlayer(Ids.Steam64Id, Reason, DurationMinutes, BannedBy))
-            {
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] Banned '%s' (Steam64: %s) %s — reason: %s"),
-                        *DisplayName, *Ids.Steam64Id, *DurStr, *Reason),
-                    FLinearColor::Green);
-                bBanned = true;
-
-                // Cross-platform propagation
-                if (UBanEnforcementSubsystem* Enf = GetEnforcement(Ctx))
-                    Enf->PropagateToEOSAsync(Ids.Steam64Id, Reason, DurationMinutes, BannedBy);
-            }
-            else
-            {
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] Failed to ban Steam64 '%s'."), *Ids.Steam64Id),
-                    FLinearColor::Red);
-            }
-        }
-        else if (Ids.HasEOSPuid())
-        {
-            UEOSBanSubsystem* EOS = GetEOSBans(Ctx);
-            if (!EOS)
-            {
-                Sender->SendChatMessage(TEXT("[BanChatCommands] UEOSBanSubsystem unavailable."), FLinearColor::Red);
-                return EExecutionStatus::UNCOMPLETED;
-            }
-            if (EOS->BanPlayer(Ids.EOSProductUserId, Reason, DurationMinutes, BannedBy))
-            {
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] Banned '%s' (EOS PUID: %s) %s — reason: %s"),
-                        *DisplayName, *Ids.EOSProductUserId, *DurStr, *Reason),
-                    FLinearColor::Green);
-                bBanned = true;
-
-                // Cross-platform propagation
-                if (UBanEnforcementSubsystem* Enf = GetEnforcement(Ctx))
-                    Enf->PropagateToSteamAsync(Ids.EOSProductUserId, Reason, DurationMinutes, BannedBy);
-            }
-            else
-            {
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] Failed to ban EOS PUID '%s'."), *Ids.EOSProductUserId),
-                    FLinearColor::Red);
-            }
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] Banned '%s' (%s: %s) %s — reason: %s"),
+                    *DisplayName, *Platform, *RawId, *DurStr, *Reason),
+                FLinearColor::Green);
+            return EExecutionStatus::COMPLETED;
         }
 
-        return bBanned ? EExecutionStatus::COMPLETED : EExecutionStatus::UNCOMPLETED;
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Failed to ban %s '%s'."), *Platform, *RawId),
+            FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
     }
 
 } // namespace BanChat
@@ -281,9 +288,8 @@ EExecutionStatus ABanChatCommand::ExecuteCommand_Implementation(
     if (!BanChat::IsAdminSender(Sender, AdminId))
         return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
 
-    FResolvedBanId Ids;
-    FString        DisplayName;
-    if (!BanChat::ResolvePlayerArg(this, Sender, Arguments[0], Ids, DisplayName))
+    FString Uid, DisplayName;
+    if (!BanChat::ResolveTarget(this, Sender, Arguments[0], Uid, DisplayName))
         return EExecutionStatus::BAD_ARGUMENTS;
 
     const FString Reason = Arguments.Num() > 1
@@ -291,7 +297,7 @@ EExecutionStatus ABanChatCommand::ExecuteCommand_Implementation(
         : TEXT("Banned by server administrator");
 
     const FString BannedBy = Sender->GetSenderName();
-    return BanChat::DoBan(this, Sender, Ids, DisplayName, 0, Reason, BannedBy);
+    return BanChat::DoBan(this, Sender, Uid, DisplayName, 0, Reason, BannedBy);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -314,9 +320,8 @@ EExecutionStatus ATempBanChatCommand::ExecuteCommand_Implementation(
     if (!BanChat::IsAdminSender(Sender, AdminId))
         return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
 
-    FResolvedBanId Ids;
-    FString        DisplayName;
-    if (!BanChat::ResolvePlayerArg(this, Sender, Arguments[0], Ids, DisplayName))
+    FString Uid, DisplayName;
+    if (!BanChat::ResolveTarget(this, Sender, Arguments[0], Uid, DisplayName))
         return EExecutionStatus::BAD_ARGUMENTS;
 
     if (!Arguments[1].IsNumeric())
@@ -333,7 +338,7 @@ EExecutionStatus ATempBanChatCommand::ExecuteCommand_Implementation(
         : TEXT("Temporarily banned by server administrator");
     const FString BannedBy = Sender->GetSenderName();
 
-    return BanChat::DoBan(this, Sender, Ids, DisplayName, DurationMinutes, Reason, BannedBy);
+    return BanChat::DoBan(this, Sender, Uid, DisplayName, DurationMinutes, Reason, BannedBy);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -357,58 +362,45 @@ EExecutionStatus AUnbanChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
 
     const FString& Arg = Arguments[0];
-    bool bRemovedAny = false;
 
-    // Try Steam unban
-    if (USteamBanSubsystem::IsValidSteam64Id(Arg))
+    // Build the compound UID — accept Steam64 or EOS PUID only (exact IDs required for unban).
+    FString Uid;
+    if (BanChat::IsValidSteam64(Arg))
     {
-        if (USteamBanSubsystem* Steam = BanChat::GetSteamBans(this))
-        {
-            if (Steam->UnbanPlayer(Arg))
-            {
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] Removed Steam ban for %s."), *Arg),
-                    FLinearColor::Green);
-                bRemovedAny = true;
-            }
-            else
-            {
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] No active Steam ban found for %s."), *Arg),
-                    FLinearColor::Yellow);
-            }
-        }
-        return bRemovedAny ? EExecutionStatus::COMPLETED : EExecutionStatus::UNCOMPLETED;
+        Uid = UBanDatabase::MakeUid(TEXT("STEAM"), Arg);
+    }
+    else if (BanChat::IsValidEOSPUID(Arg))
+    {
+        Uid = UBanDatabase::MakeUid(TEXT("EOS"), Arg.ToLower());
+    }
+    else
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid Steam64 ID (17 digits) or "
+                "EOS PUID (32 hex chars). /unban requires an exact ID."), *Arg),
+            FLinearColor::Red);
+        return EExecutionStatus::BAD_ARGUMENTS;
     }
 
-    // Try EOS unban
-    if (UEOSBanSubsystem::IsValidEOSProductUserId(Arg))
+    UBanDatabase* DB = BanChat::GetDB(this);
+    if (!DB)
     {
-        const FString PuidLower = Arg.ToLower();
-        if (UEOSBanSubsystem* EOS = BanChat::GetEOSBans(this))
-        {
-            if (EOS->UnbanPlayer(PuidLower))
-            {
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] Removed EOS ban for %s."), *PuidLower),
-                    FLinearColor::Green);
-                bRemovedAny = true;
-            }
-            else
-            {
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] No active EOS ban found for %s."), *PuidLower),
-                    FLinearColor::Yellow);
-            }
-        }
-        return bRemovedAny ? EExecutionStatus::COMPLETED : EExecutionStatus::UNCOMPLETED;
+        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
+
+    if (DB->RemoveBanByUid(Uid))
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Removed ban for %s."), *Uid),
+            FLinearColor::Green);
+        return EExecutionStatus::COMPLETED;
     }
 
     Sender->SendChatMessage(
-        FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid Steam64 ID (17 digits) or "
-            "EOS PUID (32 hex chars). /unban requires an exact ID."), *Arg),
-        FLinearColor::Red);
-    return EExecutionStatus::BAD_ARGUMENTS;
+        FString::Printf(TEXT("[BanChatCommands] No active ban found for %s."), *Uid),
+        FLinearColor::Yellow);
+    return EExecutionStatus::UNCOMPLETED;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -431,77 +423,41 @@ EExecutionStatus ABanCheckChatCommand::ExecuteCommand_Implementation(
     if (!BanChat::IsAdminSender(Sender, AdminId))
         return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
 
-    FResolvedBanId Ids;
-    FString        DisplayName;
-    if (!BanChat::ResolvePlayerArg(this, Sender, Arguments[0], Ids, DisplayName))
+    FString Uid, DisplayName;
+    if (!BanChat::ResolveTarget(this, Sender, Arguments[0], Uid, DisplayName))
         return EExecutionStatus::BAD_ARGUMENTS;
 
-    bool bFoundAny = false;
-
-    if (Ids.HasSteamId())
+    UBanDatabase* DB = BanChat::GetDB(this);
+    if (!DB)
     {
-        if (USteamBanSubsystem* Steam = BanChat::GetSteamBans(this))
-        {
-            FBanEntry Entry;
-            const EBanCheckResult Result = Steam->CheckPlayerBan(Ids.Steam64Id, Entry);
-            switch (Result)
-            {
-            case EBanCheckResult::Banned:
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] STEAM BANNED — %s (Steam64: %s)  "
-                        "Reason: %s  Expires: %s  Banned by: %s"),
-                        *DisplayName, *Ids.Steam64Id,
-                        *Entry.Reason, *Entry.GetExpiryString(), *Entry.BannedBy),
-                    FLinearColor::Red);
-                bFoundAny = true;
-                break;
-            case EBanCheckResult::BanExpired:
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] Steam ban for %s was expired and removed."),
-                        *Ids.Steam64Id),
-                    FLinearColor::Yellow);
-                bFoundAny = true;
-                break;
-            case EBanCheckResult::NotBanned:
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] Not Steam-banned: %s"), *Ids.Steam64Id),
-                    FLinearColor::White);
-                break;
-            }
-        }
+        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
     }
 
-    if (Ids.HasEOSPuid())
+    FBanEntry Entry;
+    if (DB->IsCurrentlyBanned(Uid, Entry))
     {
-        if (UEOSBanSubsystem* EOS = BanChat::GetEOSBans(this))
-        {
-            FBanEntry Entry;
-            const EBanCheckResult Result = EOS->CheckPlayerBan(Ids.EOSProductUserId, Entry);
-            switch (Result)
-            {
-            case EBanCheckResult::Banned:
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] EOS BANNED — %s (PUID: %s)  "
-                        "Reason: %s  Expires: %s  Banned by: %s"),
-                        *DisplayName, *Ids.EOSProductUserId,
-                        *Entry.Reason, *Entry.GetExpiryString(), *Entry.BannedBy),
-                    FLinearColor::Red);
-                bFoundAny = true;
-                break;
-            case EBanCheckResult::BanExpired:
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] EOS ban for %s was expired and removed."),
-                        *Ids.EOSProductUserId),
-                    FLinearColor::Yellow);
-                bFoundAny = true;
-                break;
-            case EBanCheckResult::NotBanned:
-                Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] Not EOS-banned: %s"), *Ids.EOSProductUserId),
-                    FLinearColor::White);
-                break;
-            }
-        }
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] BANNED — %s (%s)  "
+                "Reason: %s  Expires: %s  Banned by: %s"),
+                *DisplayName, *Uid,
+                *Entry.Reason, *BanChat::FormatExpiry(Entry), *Entry.BannedBy),
+            FLinearColor::Red);
+        return EExecutionStatus::COMPLETED;
+    }
+
+    // Check whether there is an expired ban record.
+    if (DB->GetBanByUid(Uid, Entry) && Entry.IsExpired())
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Ban for %s was expired and has been removed."), *Uid),
+            FLinearColor::Yellow);
+    }
+    else
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Not banned: %s"), *Uid),
+            FLinearColor::White);
     }
 
     return EExecutionStatus::COMPLETED;
@@ -526,20 +482,14 @@ EExecutionStatus ABanListChatCommand::ExecuteCommand_Implementation(
     if (!BanChat::IsAdminSender(Sender, AdminId))
         return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
 
-    // Collect combined ban list: Steam entries tagged "S", EOS tagged "E".
-    struct FBanRow { FString Tag; FBanEntry Entry; };
-    TArray<FBanRow> AllBans;
+    UBanDatabase* DB = BanChat::GetDB(this);
+    if (!DB)
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
 
-    if (USteamBanSubsystem* Steam = BanChat::GetSteamBans(this))
-    {
-        for (const FBanEntry& E : Steam->GetAllBans())
-            AllBans.Add({ TEXT("S"), E });
-    }
-    if (UEOSBanSubsystem* EOS = BanChat::GetEOSBans(this))
-    {
-        for (const FBanEntry& E : EOS->GetAllBans())
-            AllBans.Add({ TEXT("E"), E });
-    }
+    const TArray<FBanEntry> AllBans = DB->GetActiveBans();
 
     if (AllBans.IsEmpty())
     {
@@ -547,9 +497,9 @@ EExecutionStatus ABanListChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::COMPLETED;
     }
 
-    const int32 Page      = (Arguments.Num() > 0 && Arguments[0].IsNumeric())
+    const int32 Page        = (Arguments.Num() > 0 && Arguments[0].IsNumeric())
         ? FMath::Max(1, FCString::Atoi(*Arguments[0])) : 1;
-    const int32 TotalPages = FMath::DivideAndRoundUp(AllBans.Num(), PageSize);
+    const int32 TotalPages  = FMath::DivideAndRoundUp(AllBans.Num(), PageSize);
     const int32 PageClamped = FMath::Clamp(Page, 1, TotalPages);
     const int32 Start       = (PageClamped - 1) * PageSize;
     const int32 End         = FMath::Min(Start + PageSize, AllBans.Num());
@@ -561,19 +511,19 @@ EExecutionStatus ABanListChatCommand::ExecuteCommand_Implementation(
 
     for (int32 i = Start; i < End; ++i)
     {
-        const FBanRow& Row = AllBans[i];
+        const FBanEntry& E = AllBans[i];
         Sender->SendChatMessage(
             FString::Printf(TEXT("  [%s] %s | %s | By: %s | Expires: %s"),
-                *Row.Tag, *Row.Entry.PlayerId, *Row.Entry.Reason,
-                *Row.Entry.BannedBy, *Row.Entry.GetExpiryString()),
+                *E.Platform, *E.PlayerUID,
+                E.PlayerName.IsEmpty() ? TEXT("(unknown)") : *E.PlayerName,
+                *E.BannedBy, *BanChat::FormatExpiry(E)),
             FLinearColor::White);
     }
 
     if (TotalPages > 1)
     {
         Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] Use /banlist <page> to view more. "
-                "(S=Steam, E=EOS)")),
+            FString::Printf(TEXT("[BanChatCommands] Use /banlist <page> to view more.")),
             FLinearColor::White);
     }
 
@@ -595,70 +545,44 @@ AWhoAmIChatCommand::AWhoAmIChatCommand()
 EExecutionStatus AWhoAmIChatCommand::ExecuteCommand_Implementation(
     UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
 {
-    UWorld* World = nullptr;
-    if (APlayerController* PC = Cast<APlayerController>(Sender->GetPlayer()))
-        World = PC->GetWorld();
-
-    if (!World)
+    APlayerController* PC = Cast<APlayerController>(Sender->GetPlayer());
+    if (!PC || !PC->PlayerState)
     {
-        Sender->SendChatMessage(TEXT("[BanChatCommands] No world context available."),
+        Sender->SendChatMessage(TEXT("[BanChatCommands] No player state available."),
             FLinearColor::Red);
         return EExecutionStatus::UNCOMPLETED;
     }
 
-    // Look up the caller's own IDs by their display name (exact match).
-    const FString SenderName = Sender->GetSenderName();
-    FResolvedBanId Ids;
-    FString        FoundName;
-    TArray<FString> Ambiguous;
-
-    if (!FBanPlayerLookup::FindPlayerByName(World, SenderName, Ids, FoundName, Ambiguous, true))
+    const FUniqueNetIdRepl& UniqueId = PC->PlayerState->GetUniqueId();
+    if (!UniqueId.IsValid())
     {
         Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] Could not resolve your identity (name: '%s'). "
-                "Try again in a moment."), *SenderName),
+            TEXT("[BanChatCommands] Could not resolve your platform identity. "
+                 "Try again in a moment."),
             FLinearColor::Yellow);
         return EExecutionStatus::UNCOMPLETED;
     }
 
-    if (Ids.HasSteamId())
-    {
-        Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] Your Steam64: %s"), *Ids.Steam64Id),
-            FLinearColor::Green);
-    }
-    else
-    {
-        Sender->SendChatMessage(
-            TEXT("[BanChatCommands] Steam64: not available (non-Steam connection)"),
-            FLinearColor::Yellow);
-    }
+    const FString Platform = UniqueId->GetType().ToString().ToUpper();
+    const FString RawId    = UniqueId->ToString();
 
-    if (Ids.HasEOSPuid())
+    if (Platform == TEXT("STEAM"))
     {
         Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] Your EOS PUID: %s"), *Ids.EOSProductUserId),
+            FString::Printf(TEXT("[BanChatCommands] Your Steam64: %s"), *RawId),
+            FLinearColor::Green);
+    }
+    else if (Platform == TEXT("EOS"))
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Your EOS PUID: %s"), *RawId),
             FLinearColor::Green);
     }
     else
     {
-        // Check the EOSSystem sync cache for a Steam64→PUID mapping.
-        UGameInstance* GI = World->GetGameInstance();
-        FString CachedPUID;
-        if (Ids.HasSteamId() &&
-            FBanIdResolver::TryGetCachedPUIDFromSteam64(GI, Ids.Steam64Id, CachedPUID))
-        {
-            Sender->SendChatMessage(
-                FString::Printf(TEXT("[BanChatCommands] Your EOS PUID: %s (cached)"), *CachedPUID),
-                FLinearColor::Green);
-        }
-        else
-        {
-            Sender->SendChatMessage(
-                TEXT("[BanChatCommands] EOS PUID: not yet resolved. "
-                     "Try again in a few seconds or ask the server admin."),
-                FLinearColor::Yellow);
-        }
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Your platform ID (%s): %s"), *Platform, *RawId),
+            FLinearColor::Green);
     }
 
     return EExecutionStatus::COMPLETED;
