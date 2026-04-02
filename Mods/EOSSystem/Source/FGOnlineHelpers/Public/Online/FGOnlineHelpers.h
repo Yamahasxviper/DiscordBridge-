@@ -31,7 +31,15 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/OnlineReplStructs.h"  // FUniqueNetIdRepl
+
+// Forward-declare FUniqueNetIdRepl so consumers of this header can compile
+// without requiring GameFramework/OnlineReplStructs.h on their include path.
+// The CSS Alpakit server distribution does not ship OnlineReplStructs.h as
+// part of the standalone Engine module headers; it is available through
+// FactoryGame's include paths.  Callers that create or inspect
+// FUniqueNetIdRepl values must include GameFramework/OnlineReplStructs.h
+// themselves (all current consumers already get it via FactoryGame or Engine).
+struct FUniqueNetIdRepl;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EOSId  —  CSS FactoryGame helper namespace for EOS identity extraction

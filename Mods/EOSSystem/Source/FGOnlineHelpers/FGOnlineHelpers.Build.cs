@@ -15,13 +15,23 @@ public class FGOnlineHelpers : ModuleRules
         PublicDependencyModuleNames.AddRange(new string[]
         {
             "Core",
-            "Engine",                  // GameFramework/OnlineReplStructs.h (FUniqueNetIdRepl)
+            "Engine",                  // GameFramework/OnlineReplStructs.h (FUniqueNetIdRepl) via transitives
             "CoreOnline",              // FUniqueNetIdRepl, FAccountId (V1/V2)
             "OnlineSubsystem",         // Provides GameFramework/OnlineReplStructs.h include path (matches FactoryGame.Build.cs)
             "OnlineServicesInterface", // EOnlineServices, IOnlineAccountIdRegistry
             // EOSSDK provides EOS_ProductUserId, EOS_ProductUserId_IsValid, etc.
             "EOSSDK",
         });
+
+        // FactoryGame is required as a private dependency so that FGOnlineHelpers.cpp
+        // can include "GameFramework/OnlineReplStructs.h" for the full FUniqueNetIdRepl
+        // definition needed in GetProductUserId() and GetSteam64Id() function bodies.
+        //
+        // The CSS Alpakit server distribution does not ship OnlineReplStructs.h as part
+        // of the standalone Engine module headers; it is available through FactoryGame's
+        // transitive Engine dep.  Private (not Public) so consumers don't get an
+        // extra FactoryGame transitive dep through FGOnlineHelpers.
+        PrivateDependencyModuleNames.Add("FactoryGame");
 
         // OnlineServicesEOSGS provides UE::Online::GetProductUserId(FAccountId)
         // for the V2 (FAccountId) EOS identity path.
