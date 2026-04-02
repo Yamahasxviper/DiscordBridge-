@@ -50,6 +50,15 @@ public class EOSSystem : ModuleRules
             // to depend on OnlineServicesEOSGS directly (CSS marks EOSGSS as
             // TargetDenyList=["Server"] so it is absent from Linux server builds).
             "FGOnlineHelpers",
+            // FactoryGame is required as a private dependency so that EOSConnectSubsystem.cpp
+            // can include "GameFramework/OnlineReplStructs.h" for the full FUniqueNetIdRepl
+            // definition used in HandlePostLogin and HandleLogout.
+            //
+            // The CSS Alpakit server distribution does not ship OnlineReplStructs.h as part
+            // of the standalone Engine module headers; it is available through FactoryGame's
+            // transitive Engine dep.  Private (not Public) so consumers of EOSSystem do not
+            // get an unintended FactoryGame transitive dep through this module.
+            "FactoryGame",
         });
     }
 }
