@@ -17,6 +17,7 @@ public class FGOnlineHelpers : ModuleRules
             "Core",
             "Engine",                  // GameFramework/OnlineReplStructs.h (FUniqueNetIdRepl)
             "CoreOnline",              // FUniqueNetIdRepl, FAccountId (V1/V2)
+            "OnlineSubsystem",         // Provides GameFramework/OnlineReplStructs.h include path (matches FactoryGame.Build.cs)
             "OnlineServicesInterface", // EOnlineServices, IOnlineAccountIdRegistry
             // EOSSDK provides EOS_ProductUserId, EOS_ProductUserId_IsValid, etc.
             "EOSSDK",
