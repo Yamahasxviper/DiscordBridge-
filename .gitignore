@@ -32,6 +32,7 @@ Mods/**/Metadata/Crypto.json
 !Mods/ExampleMod/
 !Mods/BanSystem/
 !Mods/EOSSystem/
+!Mods/BanChatCommands/
 !Mods/DummyHeaders/
 
 # Mods binaries

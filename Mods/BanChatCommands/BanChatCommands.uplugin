@@ -1,0 +1,44 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0.0",
+	"SemVersion": "1.0.0",
+	"GameVersion": ">=416835",
+	"FriendlyName": "Ban Chat Commands",
+	"Description": "Adds unified in-game chat commands (/ban, /tempban, /unban, /bancheck, /banlist, /whoami) to Satisfactory dedicated servers. Requires the BanSystem mod.",
+	"Category": "Modding",
+	"CreatedBy": "Yamahasxviper",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"RequiredOnRemote": false,
+	"SupportedTargetPlatforms": [
+		"Win64",
+		"Linux"
+	],
+	"Modules": [
+		{
+			"Name": "BanChatCommands",
+			"Type": "ServerOnly",
+			"LoadingPhase": "PostDefault"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "SML",
+			"Enabled": true,
+			"SemVersion": "^3.11.3"
+		},
+		{
+			"Name": "BanSystem",
+			"Enabled": true,
+			"Optional": false,
+			"SemVersion": "^1.0.0"
+		}
+	]
+}
