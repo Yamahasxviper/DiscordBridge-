@@ -15,6 +15,7 @@ public class FGOnlineHelpers : ModuleRules
         PublicDependencyModuleNames.AddRange(new string[]
         {
             "Core",
+            "Engine",                  // GameFramework/OnlineReplStructs.h (FUniqueNetIdRepl)
             "CoreOnline",              // FUniqueNetIdRepl, FAccountId (V1/V2)
             "OnlineServicesInterface", // EOnlineServices, IOnlineAccountIdRegistry
             // EOSSDK provides EOS_ProductUserId, EOS_ProductUserId_IsValid, etc.
