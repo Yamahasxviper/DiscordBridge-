@@ -31,6 +31,8 @@ Mods/**/Metadata/Crypto.json
 !Mods/SMLEditor/
 !Mods/ExampleMod/
 !Mods/BanChatCommands/
+!Mods/BanSystem/
+!Mods/EOSSystem/
 
 # Mods binaries
 Mods/**/Binaries/*
