@@ -96,19 +96,39 @@ void UBanEnforcer::OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPl
     if (!GameMode || !NewPlayer) return;
 
     // PlayerState may not be set yet on the very first frame; guard defensively.
-    if (!NewPlayer->PlayerState) return;
+    if (!NewPlayer->PlayerState)
+    {
+        UE_LOG(LogBanEnforcer, Warning,
+            TEXT("BanEnforcer: OnPostLogin — PlayerState is null, skipping ban check"));
+        return;
+    }
 
     UBanDatabase* DB = nullptr;
     if (UGameInstance* GI = GetGameInstance())
         DB = GI->GetSubsystem<UBanDatabase>();
-    if (!DB) return;
+    if (!DB)
+    {
+        UE_LOG(LogBanEnforcer, Error,
+            TEXT("BanEnforcer: OnPostLogin — UBanDatabase subsystem unavailable, skipping ban check"));
+        return;
+    }
 
     const FUniqueNetIdRepl& NetId = NewPlayer->PlayerState->GetUniqueId();
-    if (!NetId.IsValid()) return;
+    if (!NetId.IsValid())
+    {
+        UE_LOG(LogBanEnforcer, Warning,
+            TEXT("BanEnforcer: OnPostLogin — UniqueId not yet valid for '%s', skipping ban check"),
+            *NewPlayer->PlayerState->GetPlayerName());
+        return;
+    }
 
     const FString Platform = NetId->GetType().ToString().ToUpper();
     const FString RawId    = NetId->ToString();
     const FString Uid      = UBanDatabase::MakeUid(Platform, RawId);
+
+    UE_LOG(LogBanEnforcer, Log,
+        TEXT("BanEnforcer: checking ban status for player '%s' (%s: %s)"),
+        *NewPlayer->PlayerState->GetPlayerName(), *Platform, *RawId);
 
     FBanEntry Entry;
     if (!DB->IsCurrentlyBanned(Uid, Entry)) return;

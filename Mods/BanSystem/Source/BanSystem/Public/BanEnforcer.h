@@ -50,9 +50,10 @@ public:
      * PlayerControllers, resolves each player's platform UID (same format
      * as stored in UBanDatabase: "STEAM:xxx" / "EOS:xxx"), and kicks the
      * first matching player.  First tries AGameSession::KickPlayer, then
-     * falls back to closing the UNetConnection and destroying the PC directly
-     * to handle CSS dedicated-server configurations where the session kick
-     * does not fully disconnect the client.
+     * falls back to closing the UNetConnection directly to handle CSS
+     * dedicated-server configurations where the session kick does not fully
+     * disconnect the client.  Does NOT call PC->Destroy() — the connection
+     * close triggers the standard UE cleanup path.
      */
     static void KickConnectedPlayer(UWorld* World, const FString& Uid, const FString& Reason);
 
