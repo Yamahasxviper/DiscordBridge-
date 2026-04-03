@@ -11,7 +11,7 @@
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/OnlineReplStructs.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogBanChatCommands, Log, All);
+DEFINE_LOG_CATEGORY(LogBanChatCommands);
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Internal helpers
