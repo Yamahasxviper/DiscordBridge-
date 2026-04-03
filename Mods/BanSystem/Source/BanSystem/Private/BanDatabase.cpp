@@ -162,11 +162,12 @@ bool UBanDatabase::RemoveBanByUid(const FString& Uid)
         return false;
 
     FSQLitePreparedStatement Stmt;
-    Stmt.Create(Db, TEXT("DELETE FROM bans WHERE uid = ?1;"));
+    if (!Stmt.Create(Db, TEXT("DELETE FROM bans WHERE uid = ?1;")))
+        return false;
     Stmt.SetBindingValueByIndex(1, Uid);
-    Stmt.Step();
+    const ESQLitePreparedStatementStepResult Result = Stmt.Step();
     Stmt.Destroy();
-    return true;
+    return Result == ESQLitePreparedStatementStepResult::Done;
 }
 
 bool UBanDatabase::RemoveBanById(int64 Id)
@@ -186,11 +187,12 @@ bool UBanDatabase::RemoveBanById(int64 Id)
     if (Count == 0) return false;
 
     FSQLitePreparedStatement DeleteStmt;
-    DeleteStmt.Create(Db, TEXT("DELETE FROM bans WHERE id = ?1;"));
+    if (!DeleteStmt.Create(Db, TEXT("DELETE FROM bans WHERE id = ?1;")))
+        return false;
     DeleteStmt.SetBindingValueByIndex(1, Id);
-    DeleteStmt.Step();
+    const ESQLitePreparedStatementStepResult Result = DeleteStmt.Step();
     DeleteStmt.Destroy();
-    return true;
+    return Result == ESQLitePreparedStatementStepResult::Done;
 }
 
 int32 UBanDatabase::PruneExpiredBans()
