@@ -2,13 +2,13 @@
 // Direct port of Tools/BanSystem/src/database.ts
 
 #include "BanDatabase.h"
+#include "BanSystemConfig.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
 #include "Misc/Paths.h"
-#include "Misc/ConfigCacheIni.h"
 #include "Misc/FileHelper.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
@@ -391,11 +391,9 @@ void UBanDatabase::ParseUid(const FString& Uid, FString& OutPlatform, FString& O
 
 FString UBanDatabase::GetDatabasePath() const
 {
-    // Read override from DefaultBanSystem.ini, fall back to default path.
-    FString Configured;
-    GConfig->GetString(TEXT("BanSystem"), TEXT("DatabasePath"), Configured, GGameIni);
-    if (!Configured.IsEmpty())
-        return Configured;
+    const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+    if (Cfg && !Cfg->DatabasePath.IsEmpty())
+        return Cfg->DatabasePath;
 
     return FPaths::ProjectSavedDir() / TEXT("BanSystem") / TEXT("bans.json");
 }

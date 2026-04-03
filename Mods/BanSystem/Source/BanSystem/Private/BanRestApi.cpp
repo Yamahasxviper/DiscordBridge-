@@ -4,6 +4,7 @@
 #include "BanRestApi.h"
 #include "BanDatabase.h"
 #include "BanEnforcer.h"
+#include "BanSystemConfig.h"
 
 #include "HttpServerModule.h"
 #include "IHttpRouter.h"
@@ -12,7 +13,6 @@
 #include "HttpServerRequest.h"
 #include "GenericPlatform/GenericPlatformHttp.h"
 
-#include "Misc/ConfigCacheIni.h"
 #include "Misc/Paths.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -108,10 +108,9 @@ void UBanRestApi::Initialize(FSubsystemCollectionBase& Collection)
     Collection.InitializeDependency<UBanDatabase>();
     Super::Initialize(Collection);
 
-    // Read port from DefaultBanSystem.ini.
-    int32 Port = 3000;
-    GConfig->GetInt(TEXT("BanSystem"), TEXT("RestApiPort"), Port, GGameIni);
-    ApiPort = Port;
+    // Read port from DefaultBanSystem.ini via UBanSystemConfig.
+    const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+    ApiPort = Cfg ? Cfg->RestApiPort : 3000;
 
     if (ApiPort <= 0)
     {
@@ -421,8 +420,8 @@ void UBanRestApi::RegisterRoutes()
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
             if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::InternalServerError)); return true; }
 
-            int32 MaxBackups = 5;
-            GConfig->GetInt(TEXT("BanSystem"), TEXT("MaxBackups"), MaxBackups, GGameIni);
+            const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+            const int32 MaxBackups = Cfg ? Cfg->MaxBackups : 5;
 
             const FString BackupDir =
                 FPaths::GetPath(DB->GetDatabasePath()) / TEXT("backups");
