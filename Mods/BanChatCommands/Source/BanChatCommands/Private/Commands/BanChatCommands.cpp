@@ -9,6 +9,7 @@
 #include "Engine/GameInstance.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
+#include "GameFramework/OnlineReplStructs.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogBanChatCommands, Log, All);
 

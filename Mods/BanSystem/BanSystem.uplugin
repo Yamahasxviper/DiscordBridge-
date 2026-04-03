@@ -5,7 +5,7 @@
 	"SemVersion": "1.0.0",
 	"GameVersion": ">=416835",
 	"FriendlyName": "Ban System",
-	"Description": "Ban system for Satisfactory dedicated servers. SQLite storage, REST management API, and login-time enforcement. Direct port of Tools/BanSystem.",
+	"Description": "Ban system for Satisfactory dedicated servers. JSON file storage, REST management API, and login-time enforcement. Direct port of Tools/BanSystem.",
 	"Category": "Modding",
 	"CreatedBy": "Yamahasxviper",
 	"CreatedByURL": "",

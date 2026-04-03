@@ -142,16 +142,18 @@ void UBanEnforcer::OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPl
             GM->GameSession->KickPlayer(PC, FText::FromString(KickMsgCopy));
         }
 
-        // Hard fallback: close the net connection and destroy the PC.
+        // Hard fallback: close the net connection directly.
         // CSS's AFGGameSession::KickPlayer may not fully disconnect the client in all
         // server configurations.  Closing UNetConnection guarantees disconnection.
+        // NOTE: Do NOT call PC->Destroy() here — the connection close triggers the
+        // standard UE cleanup path that removes the PC from the game.  Explicitly
+        // destroying the PC before that cleanup runs causes crashes and ghost players.
         if (IsValid(PC))
         {
             if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
             {
                 Conn->Close();
             }
-            PC->Destroy();
         }
 
         UE_LOG(LogBanEnforcer, Log, TEXT("BanEnforcer: deferred kick executed for banned player"));
@@ -185,15 +187,17 @@ void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
         {
             GM->GameSession->KickPlayer(PC, FText::FromString(Reason));
 
-            // Hard fallback: close the net connection and destroy the PC in case
+            // Hard fallback: close the net connection directly in case
             // CSS's AFGGameSession::KickPlayer does not fully disconnect the client.
+            // NOTE: Do NOT call PC->Destroy() — the connection close triggers the
+            // standard UE cleanup path.  Explicitly destroying the PC before that
+            // cleanup runs can cause crashes or leave ghost players.
             if (IsValid(PC))
             {
                 if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
                 {
                     Conn->Close();
                 }
-                PC->Destroy();
             }
 
             UE_LOG(LogBanEnforcer, Log,
