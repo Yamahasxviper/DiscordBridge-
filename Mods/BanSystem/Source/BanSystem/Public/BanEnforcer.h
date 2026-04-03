@@ -6,8 +6,13 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "GameFramework/OnlineReplStructs.h"
 #include "BanEnforcer.generated.h"
+
+// Forward declaration to avoid pulling GameFramework/OnlineReplStructs.h into every
+// translation unit that includes this header.  The CSS Alpakit server distribution
+// does not ship OnlineReplStructs.h through the standalone Engine dep; it is only
+// reachable via FactoryGame's transitive Engine include paths.
+struct FUniqueNetIdRepl;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogBanEnforcer, Log, All);
 
