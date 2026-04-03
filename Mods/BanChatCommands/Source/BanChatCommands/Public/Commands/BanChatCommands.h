@@ -6,6 +6,8 @@
 #include "Command/ChatCommandInstance.h"
 #include "BanChatCommands.generated.h"
 
+DECLARE_LOG_CATEGORY_EXTERN(LogBanChatCommands, Log, All);
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  /ban  — permanent ban
 // ─────────────────────────────────────────────────────────────────────────────
@@ -14,15 +16,10 @@
  * /ban <player|Steam64|PUID> [reason...]
  *
  * Permanently bans a player.  The first argument is resolved as follows:
- *   • 17-digit decimal string  → Steam64 ID (bans via USteamBanSubsystem)
- *   • 32-char hex string       → EOS Product User ID (bans via UEOSBanSubsystem)
+ *   • 17-digit decimal string  → Steam64 ID (stored as "STEAM:xxx" UID)
+ *   • 32-char hex string       → EOS Product User ID (stored as "EOS:xxx" UID)
  *   • Anything else            → player display-name lookup (case-insensitive,
- *     substring match); bans by Steam64 when available, otherwise by EOS PUID.
- *
- * After the platform-specific ban is issued, cross-platform propagation is
- * triggered via UBanEnforcementSubsystem::PropagateToEOSAsync /
- * PropagateToSteamAsync so the player is also blocked on the other platform
- * if their accounts are linked.
+ *     substring match); bans using the player's FUniqueNetIdRepl identity.
  *
  * Requires the caller's Steam64 to be in AdminSteam64Ids (DefaultGame.ini),
  * or the command to be run from the server console.
@@ -52,8 +49,7 @@ public:
  * /tempban <player|Steam64|PUID> <minutes> [reason...]
  *
  * Temporarily bans a player for the specified number of minutes.
- * Player resolution and cross-platform propagation follow the same rules as
- * /ban.  Use /ban for a permanent ban.
+ * Player resolution follows the same rules as /ban.  Use /ban for a permanent ban.
  *
  * Requires admin.
  *
@@ -81,8 +77,7 @@ public:
  * /unban <Steam64|PUID>
  *
  * Removes an existing ban.  Accepts either a Steam64 ID or an EOS PUID.
- * Both the Steam and EOS ban lists are tried so a single command removes
- * the ban regardless of which platform it was originally issued on.
+ * The ban is looked up by compound UID ("STEAM:xxx" or "EOS:xxx").
  *
  * Requires admin.
  *
@@ -109,7 +104,7 @@ public:
 /**
  * /bancheck <player|Steam64|PUID>
  *
- * Reports ban status for a player.  Checks both Steam and EOS ban lists.
+ * Reports ban status for a player.  Checks the ban database by compound UID.
  * Accepts a player display name (for online players), a Steam64 ID, or an
  * EOS PUID.
  *
@@ -138,7 +133,7 @@ public:
 /**
  * /banlist [page]
  *
- * Lists all active bans from both the Steam and EOS ban lists.
+ * Lists all active bans from the ban database.
  * Results are paginated (10 entries per page).  Pass an optional page number
  * to view further pages.
  *
