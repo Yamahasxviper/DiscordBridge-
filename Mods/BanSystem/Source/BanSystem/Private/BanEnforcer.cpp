@@ -110,9 +110,10 @@ void UBanEnforcer::OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPl
         return;
     }
 
-    UBanDatabase* DB = nullptr;
-    if (UGameInstance* GI = GetGameInstance())
-        DB = GI->GetSubsystem<UBanDatabase>();
+    UGameInstance* GI = GetGameInstance();
+    if (!GI) return;
+
+    UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
     if (!DB)
     {
         UE_LOG(LogBanEnforcer, Error,
@@ -120,15 +121,22 @@ void UBanEnforcer::OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPl
         return;
     }
 
-    UWorld* World = GameMode->GetWorld();
+    UWorld* World = GI->GetWorld();
     if (!World) return;
 
-    // CSS dedicated servers populate FUniqueNetIdRepl asynchronously after
-    // PostLogin via a Server_RegisterControllerComponent RPC.  The identity is
-    // therefore often not yet valid at this point.  Instead of checking once
-    // and bailing out, queue the player for polling every 0.5 s so we catch the
-    // identity as soon as it arrives (up to FPendingBanCheck::MaxAttempts ticks,
-    // i.e. ~10 s).
+    // Attempt an immediate ban check if the player's platform identity is already
+    // available.  On CSS dedicated servers, APlayerState::UniqueId is set during
+    // AGameModeBase::Login() before PostLogin fires, so this path fires for most
+    // Steam players without any polling delay.
+    const FUniqueNetIdRepl& NetIdAtLogin = NewPlayer->PlayerState->GetUniqueId();
+    if (NetIdAtLogin.IsValid())
+    {
+        PerformBanCheckForPlayer(World, NewPlayer, DB);
+        return;
+    }
+
+    // Identity not yet available (CSS async Server_RegisterControllerComponent RPC).
+    // Queue the player and poll every 0.5 s until the identity arrives.
     PendingBanChecks.Add({NewPlayer, 0});
 
     if (!World->GetTimerManager().IsTimerActive(PollTimerHandle))
@@ -268,38 +276,67 @@ void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
     AGameModeBase* GM = World->GetAuthGameMode();
     if (!GM || !GM->GameSession) return;
 
+    // Parse the platform and raw player ID from the compound UID so we can fall back
+    // to a second matching strategy when GetUniqueId() is not yet populated.
+    FString UidPlatform, UidRawId;
+    UBanDatabase::ParseUid(Uid, UidPlatform, UidRawId);
+
     for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
     {
         APlayerController* PC = It->Get();
         if (!PC || !PC->PlayerState) continue;
 
+        // ── Primary match: compound UID via FUniqueNetIdRepl ─────────────────
         const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
-        if (!NetId.IsValid()) continue;
-
-        const FString Platform   = NetId->GetType().ToString().ToUpper();
-        const FString RawId      = NetId->ToString();
-        const FString PlayerUid  = UBanDatabase::MakeUid(Platform, RawId);
-
-        if (PlayerUid == Uid)
+        if (NetId.IsValid())
         {
-            GM->GameSession->KickPlayer(PC, FText::FromString(Reason));
+            const FString Platform   = NetId->GetType().ToString().ToUpper();
+            const FString RawId      = NetId->ToString();
+            const FString PlayerUid  = UBanDatabase::MakeUid(Platform, RawId);
 
-            // Hard fallback: close the net connection directly in case
-            // CSS's AFGGameSession::KickPlayer does not fully disconnect the client.
-            // NOTE: Do NOT call PC->Destroy() — the connection close triggers the
-            // standard UE cleanup path.  Explicitly destroying the PC before that
-            // cleanup runs can cause crashes or leave ghost players.
-            if (IsValid(PC))
+            if (PlayerUid != Uid) continue;
+        }
+        else
+        {
+            // ── Fallback: CSS DS may not have set UniqueId yet.  Match by the
+            //    raw player ID embedded in the UID against the PlayerState name
+            //    (Steam players' display names often equal their Steam64 ID on
+            //    fresh connection, but this is best-effort only).
+            // If neither strategy finds the player we log a warning.
+            const FString PlayerName = PC->PlayerState->GetPlayerName();
+            if (!PlayerName.Equals(UidRawId, ESearchCase::IgnoreCase))
             {
-                if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
-                {
-                    Conn->Close();
-                }
+                UE_LOG(LogBanEnforcer, Verbose,
+                    TEXT("BanEnforcer: KickConnectedPlayer — player '%s' has no valid UniqueId yet, skipping (UID mismatch)"),
+                    *PlayerName);
+                continue;
             }
 
-            UE_LOG(LogBanEnforcer, Log,
-                TEXT("BanEnforcer: kicked connected player %s — %s"), *Uid, *Reason);
-            return;
+            UE_LOG(LogBanEnforcer, Warning,
+                TEXT("BanEnforcer: KickConnectedPlayer — matched '%s' by name fallback (UniqueId not yet set)"),
+                *PlayerName);
         }
+
+        GM->GameSession->KickPlayer(PC, FText::FromString(Reason));
+
+        // Hard fallback: close the net connection directly in case
+        // CSS's AFGGameSession::KickPlayer does not fully disconnect the client.
+        // NOTE: Do NOT call PC->Destroy() — the connection close triggers the
+        // standard UE cleanup path.  Explicitly destroying the PC before that
+        // cleanup runs can cause crashes or leave ghost players.
+        if (IsValid(PC))
+        {
+            if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
+            {
+                Conn->Close();
+            }
+        }
+
+        UE_LOG(LogBanEnforcer, Log,
+            TEXT("BanEnforcer: kicked connected player %s — %s"), *Uid, *Reason);
+        return;
     }
+
+    UE_LOG(LogBanEnforcer, Log,
+        TEXT("BanEnforcer: KickConnectedPlayer — no connected player found for UID %s"), *Uid);
 }
