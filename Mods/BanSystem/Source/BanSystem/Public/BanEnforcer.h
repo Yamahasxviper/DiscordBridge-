@@ -28,7 +28,7 @@ struct FPendingBanCheck
 {
     TWeakObjectPtr<APlayerController> Player;
     int32 Attempts = 0;
-    static constexpr int32 MaxAttempts = 20; // 20 * 0.5s = 10 s
+    static constexpr int32 MaxAttempts = 40; // 40 * 0.5s = 20 s
 };
 
 /**
@@ -67,6 +67,10 @@ public:
      * dedicated-server configurations where the session kick does not fully
      * disconnect the client.  Does NOT call PC->Destroy() — the connection
      * close triggers the standard UE cleanup path.
+     *
+     * If a player's FUniqueNetIdRepl is not yet populated (CSS DS async
+     * identity), the raw player ID embedded in the UID is compared against the
+     * PlayerState display name as a best-effort fallback.
      */
     static void KickConnectedPlayer(UWorld* World, const FString& Uid, const FString& Reason);
 
@@ -92,10 +96,11 @@ private:
      * fire.  GameModePostLoginEvent is broadcast by AGameModeBase::PostLogin
      * which CSS does call (SML relies on it).
      *
-     * On CSS dedicated servers, FUniqueNetIdRepl is populated asynchronously
-     * after PostLogin via an RPC.  This method therefore queues the player for
-     * identity-based ban checking (see ProcessPendingBanChecks / PendingBanChecks)
-     * rather than performing the check synchronously.
+     * If the player's FUniqueNetIdRepl is already valid at PostLogin time
+     * (the common case for Steam players on CSS DS), the ban check runs
+     * immediately and synchronously.  Otherwise the player is queued for
+     * identity polling every 0.5 s up to MaxAttempts ticks (~20 s) while
+     * the async Server_RegisterControllerComponent RPC populates the identity.
      */
     void OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPlayer);
 
@@ -104,7 +109,7 @@ private:
      * For each queued player it checks whether their FUniqueNetIdRepl is now
      * valid.  If so, the ban lookup is performed and the player is kicked if
      * banned.  Players whose identity does not arrive within MaxAttempts ticks
-     * (~10 s) are dropped from the queue with a warning.
+     * (~20 s) are dropped from the queue with a warning.
      */
     void ProcessPendingBanChecks();
 
