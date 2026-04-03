@@ -3,6 +3,7 @@
 
 #include "BanRestApi.h"
 #include "BanDatabase.h"
+#include "BanEnforcer.h"
 
 #include "HttpServerModule.h"
 #include "IHttpRouter.h"
@@ -318,6 +319,12 @@ void UBanRestApi::RegisterRoutes()
             {
                 Done(BanJson::Error(TEXT("Failed to add ban"), EHttpServerResponseCodes::InternalServerError));
                 return true;
+            }
+
+            // Kick the player immediately if they are currently connected.
+            if (UWorld* World = GI->GetWorld())
+            {
+                UBanEnforcer::KickConnectedPlayer(World, Entry.Uid, Entry.GetKickMessage());
             }
 
             // Fetch the row back so we can return the assigned id.
