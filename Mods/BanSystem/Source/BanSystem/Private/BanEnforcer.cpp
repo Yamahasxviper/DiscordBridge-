@@ -10,6 +10,8 @@
 #include "GameFramework/PlayerState.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "Engine/NetConnection.h"
+#include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY(LogBanEnforcer);
 
@@ -87,16 +89,14 @@ void UBanEnforcer::OnPreLogin(AGameModeBase* /*GameMode*/,
 //  PostLogin enforcement (primary path on CSS dedicated servers)
 // ─────────────────────────────────────────────────────────────────────────────
 
-void UBanEnforcer::OnPostLogin(AGameModeBase* /*GameMode*/, APlayerController* NewPlayer)
+void UBanEnforcer::OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPlayer)
 {
-    if (!NewPlayer) return;
+    if (!GameMode || !NewPlayer) return;
 
     // PlayerState may not be set yet on the very first frame; guard defensively.
     if (!NewPlayer->PlayerState) return;
 
-    UGameInstance* GI = GetGameInstance();
-    if (!GI) return;
-    UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
+    UBanDatabase* DB = GetGameInstance()->GetSubsystem<UBanDatabase>();
     if (!DB) return;
 
     const FUniqueNetIdRepl& NetId = NewPlayer->PlayerState->GetUniqueId();
@@ -107,16 +107,51 @@ void UBanEnforcer::OnPostLogin(AGameModeBase* /*GameMode*/, APlayerController* N
     const FString Uid      = UBanDatabase::MakeUid(Platform, RawId);
 
     FBanEntry Entry;
-    if (DB->IsCurrentlyBanned(Uid, Entry))
-    {
-        const FString KickMsg = Entry.GetKickMessage();
-        UE_LOG(LogBanEnforcer, Log,
-            TEXT("BanEnforcer: kicking banned player %s (%s) at PostLogin — %s"),
-            *RawId, *Platform, *KickMsg);
+    if (!DB->IsCurrentlyBanned(Uid, Entry)) return;
 
-        // KickConnectedPlayer searches all connected PCs and kicks the matching one.
-        UBanEnforcer::KickConnectedPlayer(GI->GetWorld(), Uid, KickMsg);
-    }
+    const FString KickMsg = Entry.GetKickMessage();
+    UE_LOG(LogBanEnforcer, Log,
+        TEXT("BanEnforcer: scheduling deferred kick for banned player %s (%s) — %s"),
+        *RawId, *Platform, *KickMsg);
+
+    // Defer the kick to the next tick so that CSS's AFGGameMode::PostLogin and
+    // UFGGameModeDSComponent::PostLogin have fully completed before we disconnect
+    // the player.  Kicking synchronously inside the GameModePostLoginEvent callback
+    // can corrupt the dedicated-server login state.
+    UWorld* World = GameMode->GetWorld();
+    if (!World) return;
+
+    TWeakObjectPtr<UWorld>            WeakWorld(World);
+    TWeakObjectPtr<APlayerController> WeakPlayer(NewPlayer);
+    FString KickMsgCopy = KickMsg;
+
+    World->GetTimerManager().SetTimerForNextTick([WeakWorld, WeakPlayer, KickMsgCopy]()
+    {
+        UWorld* W  = WeakWorld.Get();
+        APlayerController* PC = WeakPlayer.Get();
+        if (!W || !IsValid(PC)) return;  // world gone or player already disconnected
+
+        // Try the standard session kick first (sends a "kicked" message to the client).
+        AGameModeBase* GM = W->GetAuthGameMode();
+        if (GM && GM->GameSession)
+        {
+            GM->GameSession->KickPlayer(PC, FText::FromString(KickMsgCopy));
+        }
+
+        // Hard fallback: close the net connection and destroy the PC.
+        // CSS's AFGGameSession::KickPlayer may not fully disconnect the client in all
+        // server configurations.  Closing UNetConnection guarantees disconnection.
+        if (IsValid(PC))
+        {
+            if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
+            {
+                Conn->Close();
+            }
+            PC->Destroy();
+        }
+
+        UE_LOG(LogBanEnforcer, Log, TEXT("BanEnforcer: deferred kick executed for banned player"));
+    });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -145,6 +180,18 @@ void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
         if (PlayerUid == Uid)
         {
             GM->GameSession->KickPlayer(PC, FText::FromString(Reason));
+
+            // Hard fallback: close the net connection and destroy the PC in case
+            // CSS's AFGGameSession::KickPlayer does not fully disconnect the client.
+            if (IsValid(PC))
+            {
+                if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
+                {
+                    Conn->Close();
+                }
+                PC->Destroy();
+            }
+
             UE_LOG(LogBanEnforcer, Log,
                 TEXT("BanEnforcer: kicked connected player %s — %s"), *Uid, *Reason);
             return;

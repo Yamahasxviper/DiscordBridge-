@@ -44,7 +44,10 @@ public:
      * Must be called from the game thread.  Iterates connected
      * PlayerControllers, resolves each player's platform UID (same format
      * as stored in UBanDatabase: "STEAM:xxx" / "EOS:xxx"), and kicks the
-     * first matching player via AGameSession::KickPlayer.
+     * first matching player.  First tries AGameSession::KickPlayer, then
+     * falls back to closing the UNetConnection and destroying the PC directly
+     * to handle CSS dedicated-server configurations where the session kick
+     * does not fully disconnect the client.
      */
     static void KickConnectedPlayer(UWorld* World, const FString& Uid, const FString& Reason);
 
@@ -70,7 +73,10 @@ private:
      * fire.  GameModePostLoginEvent is broadcast by AGameModeBase::PostLogin
      * which CSS does call (SML relies on it).
      *
-     * A banned player that slips past PreLogin is kicked immediately here.
+     * The kick is deferred to the next tick so that AFGGameMode::PostLogin
+     * and UFGGameModeDSComponent::PostLogin have fully completed before the
+     * player is disconnected.  Kicking inside the PostLogin callback
+     * synchronously can disrupt CSS's dedicated-server login state.
      */
     void OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPlayer);
 
