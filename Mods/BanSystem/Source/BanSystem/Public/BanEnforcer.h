@@ -49,10 +49,31 @@ public:
     static void KickConnectedPlayer(UWorld* World, const FString& Uid, const FString& Reason);
 
 private:
+    /**
+     * FGameModeEvents::GameModePreLoginEvent best-effort hook.
+     * Fires from AGameModeBase::PreLogin in standard UE.
+     * CSS may or may not broadcast this depending on the AFGGameMode::Login
+     * override; the PostLogin hook below is the primary enforcement path.
+     */
     void OnPreLogin(AGameModeBase* GameMode,
                     const FUniqueNetIdRepl& UniqueId,
                     const FString& Options,
                     FString& ErrorMessage);
 
+    /**
+     * FGameModeEvents::GameModePostLoginEvent hook — primary ban enforcement
+     * path on CSS dedicated servers.
+     *
+     * CSS's AFGGameMode::Login() routes authentication through
+     * UFGDedicatedServerGameModeComponentInterface::PreLogin rather than the
+     * standard AGameModeBase::PreLogin, so GameModePreLoginEvent may never
+     * fire.  GameModePostLoginEvent is broadcast by AGameModeBase::PostLogin
+     * which CSS does call (SML relies on it).
+     *
+     * A banned player that slips past PreLogin is kicked immediately here.
+     */
+    void OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPlayer);
+
     FDelegateHandle PreLoginHandle;
+    FDelegateHandle PostLoginHandle;
 };
