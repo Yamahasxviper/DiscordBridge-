@@ -51,11 +51,12 @@ void UBanEnforcer::Deinitialize()
 
     // Cancel any in-flight identity poll and clear the queue.
     PendingBanChecks.Empty();
-    if (UGameInstance* GI = GetGameInstance())
-    {
-        if (UWorld* World = GI->GetWorld())
-            World->GetTimerManager().ClearTimer(PollTimerHandle);
-    }
+
+    // Use the stored world reference because GetGameInstance()->GetWorld() may
+    // already return null by the time Deinitialize() is called on shutdown.
+    if (UWorld* World = PollTimerWorld.Get())
+        World->GetTimerManager().ClearTimer(PollTimerHandle);
+    PollTimerWorld.Reset();
 
     Super::Deinitialize();
 }
@@ -103,13 +104,6 @@ void UBanEnforcer::OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPl
 {
     if (!GameMode || !NewPlayer) return;
 
-    if (!NewPlayer->PlayerState)
-    {
-        UE_LOG(LogBanEnforcer, Warning,
-            TEXT("BanEnforcer: OnPostLogin — PlayerState is null, skipping ban check"));
-        return;
-    }
-
     UGameInstance* GI = GetGameInstance();
     if (!GI) return;
 
@@ -124,23 +118,47 @@ void UBanEnforcer::OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPl
     UWorld* World = GI->GetWorld();
     if (!World) return;
 
-    // Attempt an immediate ban check if the player's platform identity is already
-    // available.  On CSS dedicated servers, APlayerState::UniqueId is set during
-    // AGameModeBase::Login() before PostLogin fires, so this path fires for most
-    // Steam players without any polling delay.
-    const FUniqueNetIdRepl& NetIdAtLogin = NewPlayer->PlayerState->GetUniqueId();
-    if (NetIdAtLogin.IsValid())
+    // Attempt an immediate ban check when PlayerState and identity are ready.
+    // On CSS dedicated servers APlayerState::UniqueId is typically set during
+    // AGameModeBase::Login() so this fast path fires for most Steam players.
+    if (NewPlayer->PlayerState)
     {
-        PerformBanCheckForPlayer(World, NewPlayer, DB);
-        return;
+        const FUniqueNetIdRepl& NetIdAtLogin = NewPlayer->PlayerState->GetUniqueId();
+        if (NetIdAtLogin.IsValid())
+        {
+            // Defer the kick one tick so CSS's own PostLogin code can finish
+            // before the connection is closed.  Closing synchronously inside the
+            // PostLogin event can crash if AFGGameMode::PostLogin() runs more
+            // setup code after Super::PostLogin() returns.
+            TWeakObjectPtr<UBanEnforcer> WeakThis(this);
+            TWeakObjectPtr<APlayerController> WeakPC(NewPlayer);
+            World->GetTimerManager().SetTimerForNextTick(
+                FTimerDelegate::CreateLambda([WeakThis, WeakPC]()
+                {
+                    UBanEnforcer* Enforcer = WeakThis.Get();
+                    APlayerController* PC  = WeakPC.Get();
+                    if (!Enforcer || !IsValid(PC)) return;
+
+                    UGameInstance* GI2 = Enforcer->GetGameInstance();
+                    if (!GI2) return;
+                    UWorld* W2 = GI2->GetWorld();
+                    UBanDatabase* DB2 = GI2->GetSubsystem<UBanDatabase>();
+                    if (W2 && DB2)
+                        Enforcer->PerformBanCheckForPlayer(W2, PC, DB2);
+                }));
+            return;
+        }
     }
 
-    // Identity not yet available (CSS async Server_RegisterControllerComponent RPC).
-    // Queue the player and poll every 0.5 s until the identity arrives.
+    // PlayerState is null OR identity not yet available.
+    // CSS may initialise PlayerState asynchronously after PostLogin fires.
+    // Queue the player and poll every 0.5 s until both PlayerState and identity
+    // are available.
     PendingBanChecks.Add({NewPlayer, 0});
 
     if (!World->GetTimerManager().IsTimerActive(PollTimerHandle))
     {
+        PollTimerWorld = World;
         World->GetTimerManager().SetTimer(
             PollTimerHandle,
             FTimerDelegate::CreateUObject(this, &UBanEnforcer::ProcessPendingBanChecks),
@@ -174,9 +192,26 @@ void UBanEnforcer::ProcessPendingBanChecks()
         APlayerController* PC = Check.Player.Get();
 
         // Player already disconnected.
-        if (!IsValid(PC) || !PC->PlayerState)
+        if (!IsValid(PC))
         {
             PendingBanChecks.RemoveAt(i);
+            continue;
+        }
+
+        // PlayerState not yet available — CSS may initialise it asynchronously
+        // after PostLogin.  Treat this the same as an unresolved identity: burn
+        // one attempt and keep the player in the queue.
+        if (!PC->PlayerState)
+        {
+            if (++Check.Attempts >= FPendingBanCheck::MaxAttempts)
+            {
+                UE_LOG(LogBanEnforcer, Warning,
+                    TEXT("BanEnforcer: gave up waiting for PlayerState for player after %d attempts (~%.0f s)"),
+                    FPendingBanCheck::MaxAttempts,
+                    FPendingBanCheck::MaxAttempts * 0.5f);
+                PendingBanChecks.RemoveAt(i);
+            }
+            // else: PlayerState not ready yet — keep queued, retry next tick.
             continue;
         }
 
@@ -205,6 +240,7 @@ void UBanEnforcer::ProcessPendingBanChecks()
     if (PendingBanChecks.IsEmpty())
     {
         World->GetTimerManager().ClearTimer(PollTimerHandle);
+        PollTimerWorld.Reset();
         UE_LOG(LogBanEnforcer, Log,
             TEXT("BanEnforcer: identity-poll timer stopped (queue empty)"));
     }

@@ -21,8 +21,8 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBanEnforcer, Log, All);
 class UWorld;
 
 /**
- * Tracks a player whose platform identity was not yet available at PostLogin
- * time.  Retried every 0.5 s up to MaxAttempts times (~10 s total).
+ * Tracks a player whose PlayerState or platform identity was not yet available
+ * at PostLogin time.  Retried every 0.5 s up to MaxAttempts times (~20 s total).
  */
 struct FPendingBanCheck
 {
@@ -123,10 +123,15 @@ private:
     FDelegateHandle PreLoginHandle;
     FDelegateHandle PostLoginHandle;
 
-    /** Players queued for identity-based ban checking (CSS async identity). */
+    /** Players queued for PlayerState / identity polling (CSS async init). */
     TArray<FPendingBanCheck> PendingBanChecks;
 
     /** Looping 0.5 s timer that drives ProcessPendingBanChecks(). Active only
      *  while PendingBanChecks is non-empty. */
     FTimerHandle PollTimerHandle;
+
+    /** Weak reference to the world the poll timer was registered on.
+     *  Kept so Deinitialize() can clear the timer even if GetWorld() is
+     *  already null at that point. */
+    TWeakObjectPtr<UWorld> PollTimerWorld;
 };
