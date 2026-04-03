@@ -4,6 +4,8 @@
 #include "BanEnforcer.h"
 #include "BanDatabase.h"
 
+// Pull in the full FUniqueNetIdRepl definition that was forward-declared in the header.
+#include "GameFramework/OnlineReplStructs.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/GameSession.h"
 #include "GameFramework/PlayerController.h"
@@ -96,7 +98,9 @@ void UBanEnforcer::OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPl
     // PlayerState may not be set yet on the very first frame; guard defensively.
     if (!NewPlayer->PlayerState) return;
 
-    UBanDatabase* DB = GetGameInstance()->GetSubsystem<UBanDatabase>();
+    UBanDatabase* DB = nullptr;
+    if (UGameInstance* GI = GetGameInstance())
+        DB = GI->GetSubsystem<UBanDatabase>();
     if (!DB) return;
 
     const FUniqueNetIdRepl& NetId = NewPlayer->PlayerState->GetUniqueId();

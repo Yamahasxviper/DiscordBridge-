@@ -5,8 +5,6 @@
 #include "Commands/BanChatCommands.h"
 #include "Engine/World.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogBanChatCommands, Log, All);
-
 #define LOCTEXT_NAMESPACE "FBanChatCommandsModule"
 
 void FBanChatCommandsModule::StartupModule()
