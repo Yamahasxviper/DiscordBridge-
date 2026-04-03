@@ -5,8 +5,11 @@
 #include "BanDatabase.h"
 
 #include "GameFramework/GameModeBase.h"
-#include "GameFramework/GameModeEvents.h"
+#include "GameFramework/GameSession.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
 #include "Engine/GameInstance.h"
+#include "Engine/World.h"
 
 DEFINE_LOG_CATEGORY(LogBanEnforcer);
 
@@ -66,5 +69,38 @@ void UBanEnforcer::OnPreLogin(AGameModeBase* /*GameMode*/,
         UE_LOG(LogBanEnforcer, Log,
             TEXT("BanEnforcer: rejected %s (%s) — %s"),
             *RawId, *Platform, *ErrorMessage);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Kick helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const FString& Reason)
+{
+    if (!World) return;
+
+    AGameModeBase* GM = World->GetAuthGameMode();
+    if (!GM || !GM->GameSession) return;
+
+    for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+    {
+        APlayerController* PC = It->Get();
+        if (!PC || !PC->PlayerState) continue;
+
+        const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+        if (!NetId.IsValid()) continue;
+
+        const FString Platform   = NetId->GetType().ToString().ToUpper();
+        const FString RawId      = NetId->ToString();
+        const FString PlayerUid  = UBanDatabase::MakeUid(Platform, RawId);
+
+        if (PlayerUid == Uid)
+        {
+            GM->GameSession->KickPlayer(PC, FText::FromString(Reason));
+            UE_LOG(LogBanEnforcer, Log,
+                TEXT("BanEnforcer: kicked connected player %s — %s"), *Uid, *Reason);
+            return;
+        }
     }
 }

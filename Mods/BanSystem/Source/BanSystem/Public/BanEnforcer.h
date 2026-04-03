@@ -11,6 +11,8 @@
 
 DECLARE_LOG_CATEGORY_EXTERN(LogBanEnforcer, Log, All);
 
+class UWorld;
+
 /**
  * UBanEnforcer
  *
@@ -35,6 +37,16 @@ class BANSYSTEM_API UBanEnforcer : public UGameInstanceSubsystem
 public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
+
+    /**
+     * Kick any currently-connected player whose compound UID matches.
+     *
+     * Must be called from the game thread.  Iterates connected
+     * PlayerControllers, resolves each player's platform UID (same format
+     * as stored in UBanDatabase: "STEAM:xxx" / "EOS:xxx"), and kicks the
+     * first matching player via AGameSession::KickPlayer.
+     */
+    static void KickConnectedPlayer(UWorld* World, const FString& Uid, const FString& Reason);
 
 private:
     void OnPreLogin(AGameModeBase* GameMode,

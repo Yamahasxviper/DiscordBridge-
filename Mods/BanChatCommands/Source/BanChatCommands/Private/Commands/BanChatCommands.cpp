@@ -4,6 +4,7 @@
 #include "BanChatCommandsConfig.h"
 #include "Command/CommandSender.h"
 #include "BanDatabase.h"
+#include "BanEnforcer.h"
 #include "BanTypes.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/PlayerController.h"
@@ -257,6 +258,11 @@ namespace BanChat
                 FString::Printf(TEXT("[BanChatCommands] Banned '%s' (%s: %s) %s — reason: %s"),
                     *DisplayName, *Platform, *RawId, *DurStr, *Reason),
                 FLinearColor::Green);
+
+            // Kick immediately if the player is currently connected.
+            UWorld* World = Ctx ? Ctx->GetWorld() : nullptr;
+            UBanEnforcer::KickConnectedPlayer(World, Uid, Entry.GetKickMessage());
+
             return EExecutionStatus::COMPLETED;
         }
 
