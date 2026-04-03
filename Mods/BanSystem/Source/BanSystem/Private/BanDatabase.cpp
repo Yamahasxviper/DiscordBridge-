@@ -2,29 +2,88 @@
 // Direct port of Tools/BanSystem/src/database.ts
 
 #include "BanDatabase.h"
-#include "SQLitePreparedStatement.h"
+
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonWriter.h"
+#include "Serialization/JsonSerializer.h"
 #include "Misc/Paths.h"
 #include "Misc/ConfigCacheIni.h"
+#include "Misc/FileHelper.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
 
 DEFINE_LOG_CATEGORY(LogBanDatabase);
 
-// ── Column indices for  SELECT * FROM bans ───────────────────────────────────
-// Must match the CREATE TABLE column order exactly.
-namespace BanCol
+// ─────────────────────────────────────────────────────────────────────────────
+//  Internal JSON helpers
+// ─────────────────────────────────────────────────────────────────────────────
+namespace BanDbJson
 {
-    static constexpr int32 Id          = 0;
-    static constexpr int32 Uid         = 1;
-    static constexpr int32 PlayerUID   = 2;
-    static constexpr int32 Platform    = 3;
-    static constexpr int32 PlayerName  = 4;
-    static constexpr int32 Reason      = 5;
-    static constexpr int32 BannedBy    = 6;
-    static constexpr int32 BanDate     = 7;
-    static constexpr int32 ExpireDate  = 8;
-    static constexpr int32 IsPermanent = 9;
-}
+    static TSharedPtr<FJsonObject> EntryToJson(const FBanEntry& E)
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        Obj->SetNumberField(TEXT("id"),          static_cast<double>(E.Id));
+        Obj->SetStringField(TEXT("uid"),         E.Uid);
+        Obj->SetStringField(TEXT("playerUID"),   E.PlayerUID);
+        Obj->SetStringField(TEXT("platform"),    E.Platform);
+        Obj->SetStringField(TEXT("playerName"),  E.PlayerName);
+        Obj->SetStringField(TEXT("reason"),      E.Reason);
+        Obj->SetStringField(TEXT("bannedBy"),    E.BannedBy);
+        Obj->SetStringField(TEXT("banDate"),     E.BanDate.ToIso8601());
+        if (E.bIsPermanent)
+            Obj->SetField(TEXT("expireDate"), MakeShared<FJsonValueNull>());
+        else
+            Obj->SetStringField(TEXT("expireDate"), E.ExpireDate.ToIso8601());
+        Obj->SetBoolField(TEXT("isPermanent"), E.bIsPermanent);
+        return Obj;
+    }
+
+    static bool JsonToEntry(const TSharedPtr<FJsonObject>& Obj, FBanEntry& OutEntry)
+    {
+        if (!Obj.IsValid()) return false;
+
+        double IdDbl = 0.0;
+        Obj->TryGetNumberField(TEXT("id"), IdDbl);
+        OutEntry.Id = static_cast<int64>(IdDbl);
+
+        Obj->TryGetStringField(TEXT("uid"),        OutEntry.Uid);
+        Obj->TryGetStringField(TEXT("playerUID"),  OutEntry.PlayerUID);
+        Obj->TryGetStringField(TEXT("platform"),   OutEntry.Platform);
+        Obj->TryGetStringField(TEXT("playerName"), OutEntry.PlayerName);
+        Obj->TryGetStringField(TEXT("reason"),     OutEntry.Reason);
+        Obj->TryGetStringField(TEXT("bannedBy"),   OutEntry.BannedBy);
+
+        FString BanDateStr;
+        if (Obj->TryGetStringField(TEXT("banDate"), BanDateStr))
+            FDateTime::ParseIso8601(*BanDateStr, OutEntry.BanDate);
+
+        bool bPerm = true;
+        Obj->TryGetBoolField(TEXT("isPermanent"), bPerm);
+        OutEntry.bIsPermanent = bPerm;
+
+        if (!bPerm)
+        {
+            FString ExpireDateStr;
+            if (Obj->TryGetStringField(TEXT("expireDate"), ExpireDateStr) && !ExpireDateStr.IsEmpty())
+            {
+                FDateTime::ParseIso8601(*ExpireDateStr, OutEntry.ExpireDate);
+            }
+            else
+            {
+                // Malformed record — treat as permanent.
+                OutEntry.bIsPermanent = true;
+                OutEntry.ExpireDate   = FDateTime(0);
+            }
+        }
+        else
+        {
+            OutEntry.ExpireDate = FDateTime(0);
+        }
+
+        return !OutEntry.Uid.IsEmpty();
+    }
+} // namespace BanDbJson
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  USubsystem lifecycle
@@ -42,61 +101,92 @@ void UBanDatabase::Initialize(FSubsystemCollectionBase& Collection)
     if (!PF.DirectoryExists(*Dir))
         PF.CreateDirectoryTree(*Dir);
 
-    // Open or create the database.
-    if (!Db.Open(*DbPath, ESQLiteDatabaseOpenMode::ReadWriteCreate))
-    {
-        UE_LOG(LogBanDatabase, Error,
-            TEXT("BanDatabase: failed to open %s"), *DbPath);
-        return;
-    }
-
-    ApplySchema();
+    LoadFromFile();
 
     const int32 Pruned = PruneExpiredBans();
     UE_LOG(LogBanDatabase, Log,
-        TEXT("BanDatabase: opened %s — pruned %d expired ban(s)"), *DbPath, Pruned);
+        TEXT("BanDatabase: loaded %s (%d ban(s), pruned %d expired)"),
+        *DbPath, Bans.Num(), Pruned);
 }
 
 void UBanDatabase::Deinitialize()
 {
-    FScopeLock Lock(&DbMutex);
-    if (Db.IsValid())
-        Db.Close();
     Super::Deinitialize();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Schema
+//  File I/O
 // ─────────────────────────────────────────────────────────────────────────────
 
-void UBanDatabase::ApplySchema()
+void UBanDatabase::LoadFromFile()
 {
+    // Caller must hold DbMutex — but Initialize() calls this before subsystems
+    // are shared, so we take the lock here for safety.
     FScopeLock Lock(&DbMutex);
-    if (!Db.IsValid()) return;
 
-    // WAL mode: allow concurrent reads while a write is in progress.
-    Db.Execute(TEXT("PRAGMA journal_mode = WAL;"));
-    Db.Execute(TEXT("PRAGMA foreign_keys = ON;"));
+    Bans.Empty();
+    NextId = 1;
 
-    // Main table — schema mirrors Tools/BanSystem/src/database.ts exactly.
-    Db.Execute(
-        TEXT("CREATE TABLE IF NOT EXISTS bans (")
-        TEXT("  id          INTEGER PRIMARY KEY AUTOINCREMENT,")
-        TEXT("  uid         TEXT    NOT NULL UNIQUE,")
-        TEXT("  playerUID   TEXT    NOT NULL,")
-        TEXT("  platform    TEXT    NOT NULL,")
-        TEXT("  playerName  TEXT    NOT NULL DEFAULT '',")
-        TEXT("  reason      TEXT    NOT NULL DEFAULT 'No reason given',")
-        TEXT("  bannedBy    TEXT    NOT NULL DEFAULT 'system',")
-        TEXT("  banDate     TEXT    NOT NULL,")
-        TEXT("  expireDate  TEXT,")
-        TEXT("  isPermanent INTEGER NOT NULL DEFAULT 1")
-        TEXT(");")
-    );
+    FString RawJson;
+    if (!FFileHelper::LoadFileToString(RawJson, *DbPath))
+        return; // File doesn't exist yet — that's fine on first run.
 
-    Db.Execute(TEXT("CREATE INDEX IF NOT EXISTS idx_bans_uid      ON bans(uid);"));
-    Db.Execute(TEXT("CREATE INDEX IF NOT EXISTS idx_bans_platform ON bans(platform);"));
-    Db.Execute(TEXT("CREATE INDEX IF NOT EXISTS idx_bans_expire   ON bans(expireDate);"));
+    TSharedPtr<FJsonObject> Root;
+    TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(RawJson);
+    if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+    {
+        UE_LOG(LogBanDatabase, Warning,
+            TEXT("BanDatabase: failed to parse %s — starting with empty ban list"), *DbPath);
+        return;
+    }
+
+    double NextIdDbl = 1.0;
+    Root->TryGetNumberField(TEXT("nextId"), NextIdDbl);
+    NextId = FMath::Max((int64)1, static_cast<int64>(NextIdDbl));
+
+    const TArray<TSharedPtr<FJsonValue>>* BanArray = nullptr;
+    if (Root->TryGetArrayField(TEXT("bans"), BanArray) && BanArray)
+    {
+        for (const TSharedPtr<FJsonValue>& Val : *BanArray)
+        {
+            if (!Val.IsValid()) continue;
+            const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+            if (!Val->TryGetObject(ObjPtr) || !ObjPtr) continue;
+
+            FBanEntry E;
+            if (BanDbJson::JsonToEntry(*ObjPtr, E))
+                Bans.Add(E);
+        }
+    }
+}
+
+bool UBanDatabase::SaveToFile() const
+{
+    // Caller must hold DbMutex.
+    TArray<TSharedPtr<FJsonValue>> BanArray;
+    BanArray.Reserve(Bans.Num());
+    for (const FBanEntry& E : Bans)
+        BanArray.Add(MakeShared<FJsonValueObject>(BanDbJson::EntryToJson(E)));
+
+    TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetNumberField(TEXT("nextId"), static_cast<double>(NextId));
+    Root->SetArrayField(TEXT("bans"), BanArray);
+
+    FString JsonStr;
+    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonStr);
+    if (!FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
+    {
+        UE_LOG(LogBanDatabase, Error, TEXT("BanDatabase: failed to serialize ban list"));
+        return false;
+    }
+
+    if (!FFileHelper::SaveStringToFile(JsonStr, *DbPath))
+    {
+        UE_LOG(LogBanDatabase, Error,
+            TEXT("BanDatabase: failed to write %s"), *DbPath);
+        return false;
+    }
+    return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -106,129 +196,59 @@ void UBanDatabase::ApplySchema()
 bool UBanDatabase::AddBan(const FBanEntry& Entry)
 {
     FScopeLock Lock(&DbMutex);
-    if (!Db.IsValid()) return false;
 
-    static const TCHAR* Sql =
-        TEXT("INSERT INTO bans")
-        TEXT("  (uid, playerUID, platform, playerName, reason, bannedBy, banDate, expireDate, isPermanent)")
-        TEXT(" VALUES")
-        TEXT("  (?1,  ?2,       ?3,       ?4,         ?5,     ?6,      ?7,     ?8,         ?9)")
-        TEXT(" ON CONFLICT(uid) DO UPDATE SET")
-        TEXT("  playerUID   = excluded.playerUID,")
-        TEXT("  playerName  = excluded.playerName,")
-        TEXT("  reason      = excluded.reason,")
-        TEXT("  bannedBy    = excluded.bannedBy,")
-        TEXT("  banDate     = excluded.banDate,")
-        TEXT("  expireDate  = excluded.expireDate,")
-        TEXT("  isPermanent = excluded.isPermanent;");
+    // Upsert: remove any existing record with the same UID first.
+    Bans.RemoveAll([&Entry](const FBanEntry& E){ return E.Uid == Entry.Uid; });
 
-    FSQLitePreparedStatement Stmt;
-    if (!Stmt.Create(Db, Sql))
-    {
-        UE_LOG(LogBanDatabase, Error, TEXT("AddBan: failed to prepare statement"));
-        return false;
-    }
+    FBanEntry NewEntry = Entry;
+    if (NewEntry.Id <= 0)
+        NewEntry.Id = NextId++;
+    else
+        NextId = FMath::Max(NextId, NewEntry.Id + 1);
 
-    Stmt.SetBindingValueByIndex(1, Entry.Uid);
-    Stmt.SetBindingValueByIndex(2, Entry.PlayerUID);
-    Stmt.SetBindingValueByIndex(3, Entry.Platform);
-    Stmt.SetBindingValueByIndex(4, Entry.PlayerName);
-    Stmt.SetBindingValueByIndex(5, Entry.Reason);
-    Stmt.SetBindingValueByIndex(6, Entry.BannedBy);
-    Stmt.SetBindingValueByIndex(7, Entry.BanDate.ToIso8601());
-
-    // NULL expireDate for permanent bans — matches the Node.js schema.
-    // Do not bind param 8 at all for permanent bans: SQLite defaults
-    // unbound parameters to NULL, which is exactly what we want.
-    if (!Entry.bIsPermanent)
-        Stmt.SetBindingValueByIndex(8, Entry.ExpireDate.ToIso8601());
-
-    Stmt.SetBindingValueByIndex(9, Entry.bIsPermanent ? (int64)1 : (int64)0);
-
-    const ESQLitePreparedStatementStepResult Result = Stmt.Step();
-    Stmt.Destroy();
-
-    return Result == ESQLitePreparedStatementStepResult::Done;
+    Bans.Add(NewEntry);
+    return SaveToFile();
 }
 
 bool UBanDatabase::RemoveBanByUid(const FString& Uid)
 {
     FScopeLock Lock(&DbMutex);
-    if (!Db.IsValid()) return false;
 
-    // Check existence first so we can return a meaningful bool.
-    FBanEntry Dummy;
-    if (!GetBanByUid_Locked(Uid, Dummy))
+    const int32 Removed = Bans.RemoveAll([&Uid](const FBanEntry& E){ return E.Uid == Uid; });
+    if (Removed == 0)
         return false;
 
-    FSQLitePreparedStatement Stmt;
-    if (!Stmt.Create(Db, TEXT("DELETE FROM bans WHERE uid = ?1;")))
-        return false;
-    Stmt.SetBindingValueByIndex(1, Uid);
-    const ESQLitePreparedStatementStepResult Result = Stmt.Step();
-    Stmt.Destroy();
-    return Result == ESQLitePreparedStatementStepResult::Done;
+    return SaveToFile();
 }
 
 bool UBanDatabase::RemoveBanById(int64 Id)
 {
     FScopeLock Lock(&DbMutex);
-    if (!Db.IsValid()) return false;
 
-    // Check existence first.
-    FSQLitePreparedStatement CheckStmt;
-    CheckStmt.Create(Db, TEXT("SELECT COUNT(*) FROM bans WHERE id = ?1;"));
-    CheckStmt.SetBindingValueByIndex(1, Id);
-    int64 Count = 0;
-    if (CheckStmt.Step() == ESQLitePreparedStatementStepResult::Row)
-        CheckStmt.GetColumnValueByIndex(0, Count);
-    CheckStmt.Destroy();
-
-    if (Count == 0) return false;
-
-    FSQLitePreparedStatement DeleteStmt;
-    if (!DeleteStmt.Create(Db, TEXT("DELETE FROM bans WHERE id = ?1;")))
+    const int32 Removed = Bans.RemoveAll([Id](const FBanEntry& E){ return E.Id == Id; });
+    if (Removed == 0)
         return false;
-    DeleteStmt.SetBindingValueByIndex(1, Id);
-    const ESQLitePreparedStatementStepResult Result = DeleteStmt.Step();
-    DeleteStmt.Destroy();
-    return Result == ESQLitePreparedStatementStepResult::Done;
+
+    return SaveToFile();
 }
 
 int32 UBanDatabase::PruneExpiredBans()
 {
     FScopeLock Lock(&DbMutex);
-    if (!Db.IsValid()) return 0;
 
-    const FString Now = FDateTime::UtcNow().ToIso8601();
+    const FDateTime Now = FDateTime::UtcNow();
+    const int32 Before  = Bans.Num();
 
-    // Count how many will be removed so we can return an accurate number.
-    FSQLitePreparedStatement CountStmt;
-    CountStmt.Create(Db,
-        TEXT("SELECT COUNT(*) FROM bans")
-        TEXT(" WHERE isPermanent = 0")
-        TEXT("   AND expireDate IS NOT NULL")
-        TEXT("   AND expireDate <= ?1;"));
-    CountStmt.SetBindingValueByIndex(1, Now);
+    Bans.RemoveAll([&Now](const FBanEntry& E)
+    {
+        return !E.bIsPermanent && E.ExpireDate <= Now;
+    });
 
-    int64 Count = 0;
-    if (CountStmt.Step() == ESQLitePreparedStatementStepResult::Row)
-        CountStmt.GetColumnValueByIndex(0, Count);
-    CountStmt.Destroy();
+    const int32 Pruned = Before - Bans.Num();
+    if (Pruned > 0)
+        SaveToFile();
 
-    if (Count <= 0) return 0;
-
-    FSQLitePreparedStatement DelStmt;
-    DelStmt.Create(Db,
-        TEXT("DELETE FROM bans")
-        TEXT(" WHERE isPermanent = 0")
-        TEXT("   AND expireDate IS NOT NULL")
-        TEXT("   AND expireDate <= ?1;"));
-    DelStmt.SetBindingValueByIndex(1, Now);
-    DelStmt.Step();
-    DelStmt.Destroy();
-
-    return static_cast<int32>(Count);
+    return Pruned;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -238,25 +258,27 @@ int32 UBanDatabase::PruneExpiredBans()
 bool UBanDatabase::IsCurrentlyBanned(const FString& Uid, FBanEntry& OutEntry) const
 {
     FScopeLock Lock(&DbMutex);
-    if (!Db.IsValid()) return false;
 
-    const FString Now = FDateTime::UtcNow().ToIso8601();
-
-    FSQLitePreparedStatement Stmt;
-    Stmt.Create(Db,
-        TEXT("SELECT * FROM bans")
-        TEXT(" WHERE uid = ?1")
-        TEXT("   AND (isPermanent = 1 OR (expireDate IS NOT NULL AND expireDate > ?2));"));
-    Stmt.SetBindingValueByIndex(1, Uid);
-    Stmt.SetBindingValueByIndex(2, Now);
-
-    bool bFound = false;
-    if (Stmt.Step() == ESQLitePreparedStatementStepResult::Row)
+    for (const FBanEntry& E : Bans)
     {
-        bFound = RowToEntry(Stmt, OutEntry);
+        if (E.Uid != Uid) continue;
+
+        // Permanent bans are always active.
+        if (E.bIsPermanent)
+        {
+            OutEntry = E;
+            return true;
+        }
+        // Temporary bans are active until expiry.
+        if (FDateTime::UtcNow() < E.ExpireDate)
+        {
+            OutEntry = E;
+            return true;
+        }
+        // Expired — not currently banned.
+        return false;
     }
-    Stmt.Destroy();
-    return bFound;
+    return false;
 }
 
 bool UBanDatabase::GetBanByUid(const FString& Uid, FBanEntry& OutEntry) const
@@ -267,65 +289,35 @@ bool UBanDatabase::GetBanByUid(const FString& Uid, FBanEntry& OutEntry) const
 
 bool UBanDatabase::GetBanByUid_Locked(const FString& Uid, FBanEntry& OutEntry) const
 {
-    // Caller must already hold DbMutex.
-    if (!Db.IsValid()) return false;
-
-    FSQLitePreparedStatement Stmt;
-    Stmt.Create(Db, TEXT("SELECT * FROM bans WHERE uid = ?1;"));
-    Stmt.SetBindingValueByIndex(1, Uid);
-
-    bool bFound = false;
-    if (Stmt.Step() == ESQLitePreparedStatementStepResult::Row)
+    for (const FBanEntry& E : Bans)
     {
-        bFound = RowToEntry(Stmt, OutEntry);
+        if (E.Uid == Uid)
+        {
+            OutEntry = E;
+            return true;
+        }
     }
-    Stmt.Destroy();
-    return bFound;
+    return false;
 }
 
 TArray<FBanEntry> UBanDatabase::GetActiveBans() const
 {
     FScopeLock Lock(&DbMutex);
-    if (!Db.IsValid()) return {};
 
-    const FString Now = FDateTime::UtcNow().ToIso8601();
-
-    FSQLitePreparedStatement Stmt;
-    Stmt.Create(Db,
-        TEXT("SELECT * FROM bans")
-        TEXT(" WHERE isPermanent = 1")
-        TEXT("    OR (expireDate IS NOT NULL AND expireDate > ?1)")
-        TEXT(" ORDER BY banDate DESC;"));
-    Stmt.SetBindingValueByIndex(1, Now);
-
-    TArray<FBanEntry> Rows;
-    while (Stmt.Step() == ESQLitePreparedStatementStepResult::Row)
+    const FDateTime Now = FDateTime::UtcNow();
+    TArray<FBanEntry> Active;
+    for (const FBanEntry& E : Bans)
     {
-        FBanEntry E;
-        if (RowToEntry(Stmt, E))
-            Rows.Add(E);
+        if (E.bIsPermanent || Now < E.ExpireDate)
+            Active.Add(E);
     }
-    Stmt.Destroy();
-    return Rows;
+    return Active;
 }
 
 TArray<FBanEntry> UBanDatabase::GetAllBans() const
 {
     FScopeLock Lock(&DbMutex);
-    if (!Db.IsValid()) return {};
-
-    FSQLitePreparedStatement Stmt;
-    Stmt.Create(Db, TEXT("SELECT * FROM bans ORDER BY banDate DESC;"));
-
-    TArray<FBanEntry> Rows;
-    while (Stmt.Step() == ESQLitePreparedStatementStepResult::Row)
-    {
-        FBanEntry E;
-        if (RowToEntry(Stmt, E))
-            Rows.Add(E);
-    }
-    Stmt.Destroy();
-    return Rows;
+    return Bans;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -344,16 +336,12 @@ FString UBanDatabase::Backup(const FString& BackupDir, int32 MaxKeep) const
     if (!PF.DirectoryExists(*BackupDir))
         PF.CreateDirectoryTree(*BackupDir);
 
-    // Flush WAL to the main database file before copying.
-    if (Db.IsValid())
-        Db.Execute(TEXT("PRAGMA wal_checkpoint(FULL);"));
-
-    const FDateTime Now = FDateTime::UtcNow();
+    const FDateTime Now   = FDateTime::UtcNow();
     const FString   Stamp = FString::Printf(
         TEXT("%04d-%02d-%02d_%02d-%02d-%02d"),
         Now.GetYear(), Now.GetMonth(),  Now.GetDay(),
         Now.GetHour(), Now.GetMinute(), Now.GetSecond());
-    const FString Dest = BackupDir / FString::Printf(TEXT("bans_%s.db"), *Stamp);
+    const FString Dest = BackupDir / FString::Printf(TEXT("bans_%s.json"), *Stamp);
 
     if (!PF.CopyFile(*Dest, *DbPath))
     {
@@ -366,7 +354,7 @@ FString UBanDatabase::Backup(const FString& BackupDir, int32 MaxKeep) const
 
     // Prune old backups beyond MaxKeep.
     TArray<FString> Files;
-    IFileManager::Get().FindFiles(Files, *(BackupDir / TEXT("bans_*.db")), true, false);
+    IFileManager::Get().FindFiles(Files, *(BackupDir / TEXT("bans_*.json")), true, false);
     Files.Sort();
     while (Files.Num() > MaxKeep)
     {
@@ -409,66 +397,5 @@ FString UBanDatabase::GetDatabasePath() const
     if (!Configured.IsEmpty())
         return Configured;
 
-    return FPaths::ProjectSavedDir() / TEXT("BanSystem") / TEXT("bans.db");
-}
-
-bool UBanDatabase::RowToEntry(FSQLitePreparedStatement& Stmt, FBanEntry& OutEntry) const
-{
-    // Caller must hold DbMutex.
-    int64 Id = 0;
-    Stmt.GetColumnValueByIndex(BanCol::Id, Id);
-    OutEntry.Id = Id;
-
-    Stmt.GetColumnValueByIndex(BanCol::Uid,        OutEntry.Uid);
-    Stmt.GetColumnValueByIndex(BanCol::PlayerUID,   OutEntry.PlayerUID);
-    Stmt.GetColumnValueByIndex(BanCol::Platform,    OutEntry.Platform);
-    Stmt.GetColumnValueByIndex(BanCol::PlayerName,  OutEntry.PlayerName);
-    Stmt.GetColumnValueByIndex(BanCol::Reason,      OutEntry.Reason);
-    Stmt.GetColumnValueByIndex(BanCol::BannedBy,    OutEntry.BannedBy);
-
-    FString BanDateStr;
-    Stmt.GetColumnValueByIndex(BanCol::BanDate, BanDateStr);
-    FDateTime::ParseIso8601(*BanDateStr, OutEntry.BanDate);
-
-    // expireDate may be NULL for permanent bans.
-    FString ExpireDateStr;
-    const bool bHasExpire = Stmt.GetColumnValueByIndex(BanCol::ExpireDate, ExpireDateStr);
-    if (bHasExpire && !ExpireDateStr.IsEmpty())
-    {
-        FDateTime::ParseIso8601(*ExpireDateStr, OutEntry.ExpireDate);
-        OutEntry.bIsPermanent = false;
-    }
-    else
-    {
-        OutEntry.ExpireDate   = FDateTime(0);
-        OutEntry.bIsPermanent = true;
-    }
-
-    // Also read the stored isPermanent flag as an override.
-    int64 IsPerm = 1;
-    Stmt.GetColumnValueByIndex(BanCol::IsPermanent, IsPerm);
-    OutEntry.bIsPermanent = (IsPerm != 0);
-
-    return true;
-}
-
-TArray<FBanEntry> UBanDatabase::QueryRows_Locked(const TCHAR* Sql,
-    const FString& Param1, const FString& Param2) const
-{
-    TArray<FBanEntry> Rows;
-    if (!Db.IsValid()) return Rows;
-
-    FSQLitePreparedStatement Stmt;
-    Stmt.Create(Db, Sql);
-    if (!Param1.IsEmpty()) Stmt.SetBindingValueByIndex(1, Param1);
-    if (!Param2.IsEmpty()) Stmt.SetBindingValueByIndex(2, Param2);
-
-    while (Stmt.Step() == ESQLitePreparedStatementStepResult::Row)
-    {
-        FBanEntry E;
-        if (RowToEntry(Stmt, E))
-            Rows.Add(E);
-    }
-    Stmt.Destroy();
-    return Rows;
+    return FPaths::ProjectSavedDir() / TEXT("BanSystem") / TEXT("bans.json");
 }
