@@ -6,6 +6,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "GameFramework/OnlineReplStructs.h"
 #include "BanEnforcer.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogBanEnforcer, Log, All);
@@ -38,6 +39,7 @@ public:
 private:
     void OnPreLogin(AGameModeBase* GameMode,
                     const FUniqueNetIdRepl& UniqueId,
+                    const FString& Options,
                     FString& ErrorMessage);
 
     FDelegateHandle PreLoginHandle;

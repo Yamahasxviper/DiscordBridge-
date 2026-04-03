@@ -40,6 +40,7 @@ void UBanEnforcer::Deinitialize()
 
 void UBanEnforcer::OnPreLogin(AGameModeBase* /*GameMode*/,
                                const FUniqueNetIdRepl& UniqueId,
+                               const FString& /*Options*/,
                                FString& ErrorMessage)
 {
     // If another system already rejected this login, don't overwrite.

@@ -123,7 +123,7 @@ bool UBanDatabase::AddBan(const FBanEntry& Entry)
         TEXT("  isPermanent = excluded.isPermanent;");
 
     FSQLitePreparedStatement Stmt;
-    if (!Stmt.Create(Db, Sql, ESQLitePreparedStatementFlags::Persistent))
+    if (!Stmt.Create(Db, Sql))
     {
         UE_LOG(LogBanDatabase, Error, TEXT("AddBan: failed to prepare statement"));
         return false;
@@ -138,9 +138,9 @@ bool UBanDatabase::AddBan(const FBanEntry& Entry)
     Stmt.SetBindingValueByIndex(7, Entry.BanDate.ToIso8601());
 
     // NULL expireDate for permanent bans — matches the Node.js schema.
-    if (Entry.bIsPermanent)
-        Stmt.SetBindingValueByIndex(8, nullptr);
-    else
+    // Do not bind param 8 at all for permanent bans: SQLite defaults
+    // unbound parameters to NULL, which is exactly what we want.
+    if (!Entry.bIsPermanent)
         Stmt.SetBindingValueByIndex(8, Entry.ExpireDate.ToIso8601());
 
     Stmt.SetBindingValueByIndex(9, Entry.bIsPermanent ? (int64)1 : (int64)0);
