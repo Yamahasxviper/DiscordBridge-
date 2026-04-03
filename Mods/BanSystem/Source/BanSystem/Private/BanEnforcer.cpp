@@ -5,10 +5,8 @@
 #include "BanDatabase.h"
 
 #include "GameFramework/GameModeBase.h"
-#include "GameFramework/GameSession.h"
+#include "GameFramework/GameModeEvents.h"
 #include "Engine/GameInstance.h"
-#include "GameFramework/GameModeBase.h"
-#include "GameFramework/PlayerController.h"
 
 DEFINE_LOG_CATEGORY(LogBanEnforcer);
 
@@ -49,7 +47,9 @@ void UBanEnforcer::OnPreLogin(AGameModeBase* /*GameMode*/,
 
     if (!UniqueId.IsValid()) return;
 
-    UBanDatabase* DB = GetGameInstance()->GetSubsystem<UBanDatabase>();
+    UGameInstance* GI = GetGameInstance();
+    if (!GI) return;
+    UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
     if (!DB) return;
 
     // Build the compound UID.  The FUniqueNetId type name is "STEAM" or "EOS"
