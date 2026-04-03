@@ -15,8 +15,6 @@ public class BanSystem : ModuleRules
             "CoreUObject",
             "Engine",
             "Json",
-            // SQLite storage — direct port of Tools/BanSystem database.ts
-            "SQLiteCore",
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]

@@ -6,7 +6,6 @@
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "BanTypes.h"
-#include "SQLiteDatabase.h"
 #include "BanDatabase.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogBanDatabase, Log, All);
@@ -14,24 +13,15 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBanDatabase, Log, All);
 /**
  * UBanDatabase
  *
- * Unified SQLite-backed ban storage for the dedicated server.
+ * JSON-file-backed in-memory ban storage for the dedicated server.
  * Direct port of the BanDatabase class in Tools/BanSystem/src/database.ts.
  *
- * Schema (identical to the Node.js version):
- *   id          INTEGER PRIMARY KEY AUTOINCREMENT
- *   uid         TEXT UNIQUE  -- "STEAM:xxx" or "EOS:xxx"
- *   playerUID   TEXT         -- raw platform ID
- *   platform    TEXT         -- "STEAM" | "EOS" | "UNKNOWN"
- *   playerName  TEXT
- *   reason      TEXT
- *   bannedBy    TEXT
- *   banDate     TEXT         -- ISO-8601 UTC
- *   expireDate  TEXT         -- ISO-8601 UTC, NULL for permanent bans
- *   isPermanent INTEGER      -- 1 = permanent, 0 = temporary
+ * All bans are held in a TArray<FBanEntry> and written to a JSON file on
+ * every change.  The JSON file schema mirrors the Node.js version exactly.
  *
  * This subsystem is thread-safe: all reads and writes are protected by an
  * internal mutex so that the REST API thread and the game thread can both
- * access the database safely.
+ * access the storage safely.
  */
 UCLASS()
 class BANSYSTEM_API UBanDatabase : public UGameInstanceSubsystem
@@ -98,7 +88,7 @@ public:
     // ── Backup ────────────────────────────────────────────────────────────
 
     /**
-     * Copies the live database to BackupDir/bans_YYYY-MM-DD_HH-MM-SS.db.
+     * Copies the live JSON file to BackupDir/bans_YYYY-MM-DD_HH-MM-SS.json.
      * Prunes backups beyond MaxKeep.
      * Returns the backup path on success, or an empty string on failure.
      */
@@ -112,21 +102,21 @@ public:
     /** Split a compound UID back into platform + raw player ID. */
     static void ParseUid(const FString& Uid, FString& OutPlatform, FString& OutPlayerUID);
 
-    /** Returns the resolved path of the database file. */
+    /** Returns the resolved path of the JSON ban file. */
     FString GetDatabasePath() const;
 
 private:
-    void ApplySchema();
-    bool RowToEntry(FSQLitePreparedStatement& Stmt, FBanEntry& OutEntry) const;
+    void LoadFromFile();
+    bool SaveToFile() const;
 
-    // Internal read helpers that assume DbMutex is already held.
+    // Caller must already hold DbMutex.
     bool GetBanByUid_Locked(const FString& Uid, FBanEntry& OutEntry) const;
-    TArray<FBanEntry> QueryRows_Locked(const TCHAR* Sql, const FString& Param1 = TEXT(""), const FString& Param2 = TEXT("")) const;
 
-    FSQLiteDatabase Db;
-    FString         DbPath;
+    TArray<FBanEntry>    Bans;
+    int64                NextId = 1;
+    FString              DbPath;
 
-    /** Protects all SQLite operations so the HTTP thread and game thread
-     *  can both access the database safely. */
+    /** Protects all in-memory and file operations so the HTTP thread and
+     *  game thread can both access the ban list safely. */
     mutable FCriticalSection DbMutex;
 };
