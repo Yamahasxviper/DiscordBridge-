@@ -14,9 +14,22 @@
 // reachable via FactoryGame's transitive Engine include paths.
 struct FUniqueNetIdRepl;
 
+class UBanDatabase;
+
 DECLARE_LOG_CATEGORY_EXTERN(LogBanEnforcer, Log, All);
 
 class UWorld;
+
+/**
+ * Tracks a player whose platform identity was not yet available at PostLogin
+ * time.  Retried every 0.5 s up to MaxAttempts times (~10 s total).
+ */
+struct FPendingBanCheck
+{
+    TWeakObjectPtr<APlayerController> Player;
+    int32 Attempts = 0;
+    static constexpr int32 MaxAttempts = 20; // 20 * 0.5s = 10 s
+};
 
 /**
  * UBanEnforcer
@@ -79,13 +92,36 @@ private:
      * fire.  GameModePostLoginEvent is broadcast by AGameModeBase::PostLogin
      * which CSS does call (SML relies on it).
      *
-     * The kick is deferred to the next tick so that AFGGameMode::PostLogin
-     * and UFGGameModeDSComponent::PostLogin have fully completed before the
-     * player is disconnected.  Kicking inside the PostLogin callback
-     * synchronously can disrupt CSS's dedicated-server login state.
+     * On CSS dedicated servers, FUniqueNetIdRepl is populated asynchronously
+     * after PostLogin via an RPC.  This method therefore queues the player for
+     * identity-based ban checking (see ProcessPendingBanChecks / PendingBanChecks)
+     * rather than performing the check synchronously.
      */
     void OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPlayer);
 
+    /**
+     * Timer callback fired every 0.5 s while there are pending ban checks.
+     * For each queued player it checks whether their FUniqueNetIdRepl is now
+     * valid.  If so, the ban lookup is performed and the player is kicked if
+     * banned.  Players whose identity does not arrive within MaxAttempts ticks
+     * (~10 s) are dropped from the queue with a warning.
+     */
+    void ProcessPendingBanChecks();
+
+    /**
+     * Performs the actual ban database lookup and kick for a player whose
+     * platform identity has been confirmed valid.  Safe to call from the game
+     * thread only.
+     */
+    void PerformBanCheckForPlayer(UWorld* World, APlayerController* PC, UBanDatabase* DB);
+
     FDelegateHandle PreLoginHandle;
     FDelegateHandle PostLoginHandle;
+
+    /** Players queued for identity-based ban checking (CSS async identity). */
+    TArray<FPendingBanCheck> PendingBanChecks;
+
+    /** Looping 0.5 s timer that drives ProcessPendingBanChecks(). Active only
+     *  while PendingBanChecks is non-empty. */
+    FTimerHandle PollTimerHandle;
 };

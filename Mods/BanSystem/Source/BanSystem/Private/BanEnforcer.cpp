@@ -49,6 +49,14 @@ void UBanEnforcer::Deinitialize()
     FGameModeEvents::GameModePostLoginEvent.Remove(PostLoginHandle);
     PostLoginHandle.Reset();
 
+    // Cancel any in-flight identity poll and clear the queue.
+    PendingBanChecks.Empty();
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UWorld* World = GI->GetWorld())
+            World->GetTimerManager().ClearTimer(PollTimerHandle);
+    }
+
     Super::Deinitialize();
 }
 
@@ -95,7 +103,6 @@ void UBanEnforcer::OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPl
 {
     if (!GameMode || !NewPlayer) return;
 
-    // PlayerState may not be set yet on the very first frame; guard defensively.
     if (!NewPlayer->PlayerState)
     {
         UE_LOG(LogBanEnforcer, Warning,
@@ -113,14 +120,98 @@ void UBanEnforcer::OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPl
         return;
     }
 
-    const FUniqueNetIdRepl& NetId = NewPlayer->PlayerState->GetUniqueId();
-    if (!NetId.IsValid())
+    UWorld* World = GameMode->GetWorld();
+    if (!World) return;
+
+    // CSS dedicated servers populate FUniqueNetIdRepl asynchronously after
+    // PostLogin via a Server_RegisterControllerComponent RPC.  The identity is
+    // therefore often not yet valid at this point.  Instead of checking once
+    // and bailing out, queue the player for polling every 0.5 s so we catch the
+    // identity as soon as it arrives (up to FPendingBanCheck::MaxAttempts ticks,
+    // i.e. ~10 s).
+    PendingBanChecks.Add({NewPlayer, 0});
+
+    if (!World->GetTimerManager().IsTimerActive(PollTimerHandle))
     {
-        UE_LOG(LogBanEnforcer, Warning,
-            TEXT("BanEnforcer: OnPostLogin — UniqueId not yet valid for '%s', skipping ban check"),
-            *NewPlayer->PlayerState->GetPlayerName());
-        return;
+        World->GetTimerManager().SetTimer(
+            PollTimerHandle,
+            FTimerDelegate::CreateUObject(this, &UBanEnforcer::ProcessPendingBanChecks),
+            0.5f,
+            /*bLoop=*/true);
+
+        UE_LOG(LogBanEnforcer, Log,
+            TEXT("BanEnforcer: started identity-poll timer for pending ban checks"));
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Identity poll timer  (fires every 0.5 s while there are pending checks)
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanEnforcer::ProcessPendingBanChecks()
+{
+    UGameInstance* GI = GetGameInstance();
+    if (!GI) return;
+
+    UWorld* World = GI->GetWorld();
+    if (!World) return;
+
+    UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
+    if (!DB) return;
+
+    // Iterate backwards so we can safely RemoveAt while iterating.
+    for (int32 i = PendingBanChecks.Num() - 1; i >= 0; --i)
+    {
+        FPendingBanCheck& Check = PendingBanChecks[i];
+        APlayerController* PC = Check.Player.Get();
+
+        // Player already disconnected.
+        if (!IsValid(PC) || !PC->PlayerState)
+        {
+            PendingBanChecks.RemoveAt(i);
+            continue;
+        }
+
+        const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+        if (!NetId.IsValid())
+        {
+            if (++Check.Attempts >= FPendingBanCheck::MaxAttempts)
+            {
+                UE_LOG(LogBanEnforcer, Warning,
+                    TEXT("BanEnforcer: gave up waiting for UniqueId for player '%s' after %d attempts (~%.0f s)"),
+                    *PC->PlayerState->GetPlayerName(),
+                    FPendingBanCheck::MaxAttempts,
+                    FPendingBanCheck::MaxAttempts * 0.5f);
+                PendingBanChecks.RemoveAt(i);
+            }
+            // else: identity not ready yet — keep queued, retry next tick.
+            continue;
+        }
+
+        // Identity is now valid — run the ban check and remove from queue.
+        PendingBanChecks.RemoveAt(i);
+        PerformBanCheckForPlayer(World, PC, DB);
+    }
+
+    // Stop the poll timer when the queue is drained to avoid unnecessary work.
+    if (PendingBanChecks.IsEmpty())
+    {
+        World->GetTimerManager().ClearTimer(PollTimerHandle);
+        UE_LOG(LogBanEnforcer, Log,
+            TEXT("BanEnforcer: identity-poll timer stopped (queue empty)"));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Ban lookup + kick for a player whose identity has been confirmed valid
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC, UBanDatabase* DB)
+{
+    if (!World || !IsValid(PC) || !DB || !PC->PlayerState) return;
+
+    const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+    if (!NetId.IsValid()) return;
 
     const FString Platform = NetId->GetType().ToString().ToUpper();
     const FString RawId    = NetId->ToString();
@@ -128,56 +219,42 @@ void UBanEnforcer::OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPl
 
     UE_LOG(LogBanEnforcer, Log,
         TEXT("BanEnforcer: checking ban status for player '%s' (%s: %s)"),
-        *NewPlayer->PlayerState->GetPlayerName(), *Platform, *RawId);
+        *PC->PlayerState->GetPlayerName(), *Platform, *RawId);
 
     FBanEntry Entry;
-    if (!DB->IsCurrentlyBanned(Uid, Entry)) return;
+    if (!DB->IsCurrentlyBanned(Uid, Entry))
+    {
+        UE_LOG(LogBanEnforcer, Log,
+            TEXT("BanEnforcer: player '%s' (%s) is not banned — allowing join"),
+            *PC->PlayerState->GetPlayerName(), *Uid);
+        return;
+    }
 
     const FString KickMsg = Entry.GetKickMessage();
     UE_LOG(LogBanEnforcer, Log,
-        TEXT("BanEnforcer: scheduling deferred kick for banned player %s (%s) — %s"),
+        TEXT("BanEnforcer: kicking banned player %s (%s) — %s"),
         *RawId, *Platform, *KickMsg);
 
-    // Defer the kick to the next tick so that CSS's AFGGameMode::PostLogin and
-    // UFGGameModeDSComponent::PostLogin have fully completed before we disconnect
-    // the player.  Kicking synchronously inside the GameModePostLoginEvent callback
-    // can corrupt the dedicated-server login state.
-    UWorld* World = GameMode->GetWorld();
-    if (!World) return;
-
-    TWeakObjectPtr<UWorld>            WeakWorld(World);
-    TWeakObjectPtr<APlayerController> WeakPlayer(NewPlayer);
-    FString KickMsgCopy = KickMsg;
-
-    World->GetTimerManager().SetTimerForNextTick([WeakWorld, WeakPlayer, KickMsgCopy]()
+    // Try the standard session kick first (sends a kick message to the client).
+    AGameModeBase* GM = World->GetAuthGameMode();
+    if (GM && GM->GameSession)
     {
-        UWorld* W  = WeakWorld.Get();
-        APlayerController* PC = WeakPlayer.Get();
-        if (!W || !IsValid(PC)) return;  // world gone or player already disconnected
+        GM->GameSession->KickPlayer(PC, FText::FromString(KickMsg));
+    }
 
-        // Try the standard session kick first (sends a "kicked" message to the client).
-        AGameModeBase* GM = W->GetAuthGameMode();
-        if (GM && GM->GameSession)
+    // Hard fallback: close the net connection directly.
+    // CSS's AFGGameSession::KickPlayer may not fully disconnect the client in all
+    // server configurations.  Closing UNetConnection guarantees disconnection.
+    // NOTE: Do NOT call PC->Destroy() — the connection close triggers the standard
+    // UE cleanup path.  Explicitly destroying the PC before that runs can cause
+    // crashes and ghost players.
+    if (IsValid(PC))
+    {
+        if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
         {
-            GM->GameSession->KickPlayer(PC, FText::FromString(KickMsgCopy));
+            Conn->Close();
         }
-
-        // Hard fallback: close the net connection directly.
-        // CSS's AFGGameSession::KickPlayer may not fully disconnect the client in all
-        // server configurations.  Closing UNetConnection guarantees disconnection.
-        // NOTE: Do NOT call PC->Destroy() here — the connection close triggers the
-        // standard UE cleanup path that removes the PC from the game.  Explicitly
-        // destroying the PC before that cleanup runs causes crashes and ghost players.
-        if (IsValid(PC))
-        {
-            if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
-            {
-                Conn->Close();
-            }
-        }
-
-        UE_LOG(LogBanEnforcer, Log, TEXT("BanEnforcer: deferred kick executed for banned player"));
-    });
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
