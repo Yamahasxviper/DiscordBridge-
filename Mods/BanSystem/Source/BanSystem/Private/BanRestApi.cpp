@@ -229,9 +229,9 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
         {
             UGameInstance* GI = WeakGI.Get();
-            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavailable)); return true; }
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
-            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::InternalServerError)); return true; }
+            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
             Done(BanJson::Json(BanJson::ArrayToString(DB->GetActiveBans())));
             return true;
         }
@@ -244,9 +244,9 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
         {
             UGameInstance* GI = WeakGI.Get();
-            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavailable)); return true; }
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
-            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::InternalServerError)); return true; }
+            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
             Done(BanJson::Json(BanJson::ArrayToString(DB->GetAllBans())));
             return true;
         }
@@ -263,9 +263,9 @@ void UBanRestApi::RegisterRoutes()
             const FString Uid      = FGenericPlatformHttp::UrlDecode(RawUid);
 
             UGameInstance* GI = WeakGI.Get();
-            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavailable)); return true; }
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
-            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::InternalServerError)); return true; }
+            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
 
             FBanEntry Entry;
             const bool bBanned = DB->IsCurrentlyBanned(Uid, Entry);
@@ -293,7 +293,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             UGameInstance* GI = WeakGI.Get();
-            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavailable)); return true; }
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
 
             // Reject oversized bodies before touching body content (HTTP 413).
             static constexpr int32 MaxPostBodyBytes = 1 * 1024 * 1024;
@@ -301,7 +301,7 @@ void UBanRestApi::RegisterRoutes()
             {
                 Done(BanJson::Error(
                     FString::Printf(TEXT("Request body too large (%d bytes, limit %d)"), Req.Body.Num(), MaxPostBodyBytes),
-                    EHttpServerResponseCodes::RequestEntityTooLarge));
+                    EHttpServerResponseCodes::RequestTooLarge));
                 return true;
             }
 
@@ -364,11 +364,11 @@ void UBanRestApi::RegisterRoutes()
                 : FDateTime::UtcNow() + FTimespan::FromMinutes(DurationMinutes);
 
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
-            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::InternalServerError)); return true; }
+            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
 
             if (!DB->AddBan(Entry))
             {
-                Done(BanJson::Error(TEXT("Failed to add ban"), EHttpServerResponseCodes::InternalServerError));
+                Done(BanJson::Error(TEXT("Failed to add ban"), EHttpServerResponseCodes::ServerError));
                 return true;
             }
 
@@ -412,9 +412,9 @@ void UBanRestApi::RegisterRoutes()
             }
 
             UGameInstance* GI = WeakGI.Get();
-            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavailable)); return true; }
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
-            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::InternalServerError)); return true; }
+            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
 
             const int64 Id = FCString::Atoi64(*IdStr);
             if (!DB->RemoveBanById(Id))
@@ -440,9 +440,9 @@ void UBanRestApi::RegisterRoutes()
             const FString Uid    = FGenericPlatformHttp::UrlDecode(RawUid);
 
             UGameInstance* GI = WeakGI.Get();
-            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavailable)); return true; }
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
-            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::InternalServerError)); return true; }
+            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
 
             if (!DB->RemoveBanByUid(Uid))
             {
@@ -464,9 +464,9 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
         {
             UGameInstance* GI = WeakGI.Get();
-            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavailable)); return true; }
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
-            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::InternalServerError)); return true; }
+            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
 
             const int32 Pruned = DB->PruneExpiredBans();
 
@@ -484,9 +484,9 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
         {
             UGameInstance* GI = WeakGI.Get();
-            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavailable)); return true; }
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
-            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::InternalServerError)); return true; }
+            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
 
             const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
             const int32 MaxBackups = Cfg ? Cfg->MaxBackups : 5;
@@ -497,7 +497,7 @@ void UBanRestApi::RegisterRoutes()
 
             if (Dest.IsEmpty())
             {
-                Done(BanJson::Error(TEXT("Backup failed"), EHttpServerResponseCodes::InternalServerError));
+                Done(BanJson::Error(TEXT("Backup failed"), EHttpServerResponseCodes::ServerError));
                 return true;
             }
 
