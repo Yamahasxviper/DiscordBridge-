@@ -227,6 +227,23 @@ namespace BanChat
         // CSS DS with EOS V2 PUIDs (see IsAdminSender for the full explanation).
         if (!UniqueId.IsValid() || UniqueId.GetType() == FName(TEXT("NONE")))
         {
+            // CSS DS 1.1.0 workaround: GetType()==NONE because the EOS online
+            // subsystem is offline (IsOnline=false).  The EOS PUID is still
+            // transmitted in the ClientIdentity URL option.  Try that before
+            // giving up — this is the same fallback used by IsAdminSender,
+            // OnPostLogin, ProcessPendingBanChecks, and KickConnectedPlayer.
+            const FString EosPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(FoundPC);
+            if (!EosPuid.IsEmpty())
+            {
+                OutUid         = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
+                OutDisplayName = Matches[0];
+                Sender->SendChatMessage(
+                    FString::Printf(TEXT("[BanChatCommands] Resolved '%s' → EOS: %s (via connection URL)"),
+                        *Arg, *EosPuid),
+                    FLinearColor::White);
+                return true;
+            }
+
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] Found player '%s' but could not resolve "
                     "their platform identity."), *Matches[0]),
