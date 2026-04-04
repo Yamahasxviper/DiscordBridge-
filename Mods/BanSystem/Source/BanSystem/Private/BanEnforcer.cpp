@@ -224,12 +224,19 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
     const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
     if (!NetId.IsValid()) return;
 
-    const FString Platform = NetId->GetType().ToString().ToUpper();
+    // Use the direct FUniqueNetIdRepl accessors (GetType/ToString on the repl
+    // struct itself) instead of dereferencing through operator->. On CSS dedicated
+    // servers, EOS V2 (PUID) identities do not use the TSharedPtr<FUniqueNetId>
+    // storage path — the inner pointer slot holds a raw EOS handle value, not a
+    // valid C++ object, so calling NetId->GetType() causes a SIGSEGV.
+    // FUniqueNetIdRepl::GetType() and FUniqueNetIdRepl::ToString() are safe for
+    // both V1 (Steam) and V2 (EOS PUID) identities.
+    const FString Platform = NetId.GetType().ToString().ToUpper();
     // Normalize EOS PUIDs to lowercase so they match bans stored by chat commands
     // (which also lowercase EOS PUIDs via the /ban and /tempban resolution paths).
     const FString RawId    = (Platform == TEXT("EOS"))
-        ? NetId->ToString().ToLower()
-        : NetId->ToString();
+        ? NetId.ToString().ToLower()
+        : NetId.ToString();
     const FString Uid      = UBanDatabase::MakeUid(Platform, RawId);
 
     UE_LOG(LogBanEnforcer, Log,
@@ -308,11 +315,13 @@ void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
         const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
         if (NetId.IsValid())
         {
-            const FString Platform   = NetId->GetType().ToString().ToUpper();
+            // Use direct FUniqueNetIdRepl accessors — safe for V2 EOS PUIDs.
+            // (See PerformBanCheckForPlayer for the full explanation.)
+            const FString Platform   = NetId.GetType().ToString().ToUpper();
             // Normalize EOS PUIDs to lowercase to match stored ban UIDs.
             const FString RawId      = (Platform == TEXT("EOS"))
-                ? NetId->ToString().ToLower()
-                : NetId->ToString();
+                ? NetId.ToString().ToLower()
+                : NetId.ToString();
             const FString PlayerUid  = UBanDatabase::MakeUid(Platform, RawId);
 
             if (PlayerUid != Uid) continue;
