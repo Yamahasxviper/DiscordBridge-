@@ -22,6 +22,15 @@
 DEFINE_LOG_CATEGORY(LogBanRestApi);
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  PIMPL struct — hides TArray<FHttpRouteHandle> from the public header so that
+//  UHT / MSVC never needs to instantiate it from the Public include path.
+// ─────────────────────────────────────────────────────────────────────────────
+struct FBanRestApiRoutes
+{
+    TArray<FHttpRouteHandle> Handles;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Internal JSON helpers
 // ─────────────────────────────────────────────────────────────────────────────
 namespace BanJson
@@ -160,6 +169,7 @@ void UBanRestApi::StartServer()
         return;
     }
 
+    Routes = MakeShared<FBanRestApiRoutes>();
     RegisterRoutes();
     HttpModule->StartAllListeners();
 
@@ -171,9 +181,13 @@ void UBanRestApi::StopServer()
 {
     if (!Router.IsValid()) return;
 
-    for (FHttpRouteHandle& H : RouteHandles)
-        Router->UnbindRoute(H);
-    RouteHandles.Empty();
+    if (Routes.IsValid())
+    {
+        for (FHttpRouteHandle& H : Routes->Handles)
+            Router->UnbindRoute(H);
+        Routes->Handles.Empty();
+    }
+    Routes.Reset();
 
     // NOTE: Do NOT call HttpModule->StopAllListeners() here — it would stop
     // every HTTP listener across every mod, not just ours.  Unbinding our routes
@@ -195,7 +209,7 @@ void UBanRestApi::RegisterRoutes()
     TWeakObjectPtr<UGameInstance> WeakGI(GetGameInstance());
 
     // ── GET /health ──────────────────────────────────────────────────────────
-    RouteHandles.Add(Router->BindRoute(
+    Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/health")),
         EHttpServerRequestVerbs::VERB_GET,
         [](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
@@ -209,7 +223,7 @@ void UBanRestApi::RegisterRoutes()
     ));
 
     // ── GET /bans ────────────────────────────────────────────────────────────
-    RouteHandles.Add(Router->BindRoute(
+    Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/bans")),
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
@@ -224,7 +238,7 @@ void UBanRestApi::RegisterRoutes()
     ));
 
     // ── GET /bans/all ────────────────────────────────────────────────────────
-    RouteHandles.Add(Router->BindRoute(
+    Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/bans/all")),
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
@@ -240,7 +254,7 @@ void UBanRestApi::RegisterRoutes()
 
     // ── GET /bans/check/:uid ─────────────────────────────────────────────────
     // Must be registered BEFORE /bans/:uid to avoid route collision.
-    RouteHandles.Add(Router->BindRoute(
+    Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/bans/check/:uid")),
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
@@ -273,7 +287,7 @@ void UBanRestApi::RegisterRoutes()
     ));
 
     // ── POST /bans ───────────────────────────────────────────────────────────
-    RouteHandles.Add(Router->BindRoute(
+    Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/bans")),
         EHttpServerRequestVerbs::VERB_POST,
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
@@ -385,7 +399,7 @@ void UBanRestApi::RegisterRoutes()
 
     // ── DELETE /bans/id/:id ──────────────────────────────────────────────────
     // Register BEFORE /bans/:uid so the "id" literal segment wins.
-    RouteHandles.Add(Router->BindRoute(
+    Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/bans/id/:id")),
         EHttpServerRequestVerbs::VERB_DELETE,
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
@@ -417,7 +431,7 @@ void UBanRestApi::RegisterRoutes()
     ));
 
     // ── DELETE /bans/:uid ────────────────────────────────────────────────────
-    RouteHandles.Add(Router->BindRoute(
+    Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/bans/:uid")),
         EHttpServerRequestVerbs::VERB_DELETE,
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
@@ -444,7 +458,7 @@ void UBanRestApi::RegisterRoutes()
     ));
 
     // ── POST /bans/prune ─────────────────────────────────────────────────────
-    RouteHandles.Add(Router->BindRoute(
+    Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/bans/prune")),
         EHttpServerRequestVerbs::VERB_POST,
         [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
@@ -464,7 +478,7 @@ void UBanRestApi::RegisterRoutes()
     ));
 
     // ── POST /bans/backup ────────────────────────────────────────────────────
-    RouteHandles.Add(Router->BindRoute(
+    Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/bans/backup")),
         EHttpServerRequestVerbs::VERB_POST,
         [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool

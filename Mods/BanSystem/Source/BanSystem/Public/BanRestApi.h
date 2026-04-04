@@ -9,12 +9,12 @@
 
 class IHttpRouter;
 
-// FHttpRouteHandle is defined in the CSS engine as a typedef inside IHttpRouter.h,
-// but that header is not pulled in by BanRestApi.h.  Mirror the forward-declaration
-// pattern used in Source/FactoryDedicatedServer/Public/Networking/FGServerAPIManager.h
-// so the TArray member compiles without dragging in HttpServerModule headers.
-struct FHttpRouteHandleInternal;
-typedef TSharedPtr<const FHttpRouteHandleInternal> FHttpRouteHandle;
+// Opaque implementation struct — defined in BanRestApi.cpp.
+// Keeps TArray<FHttpRouteHandle> (an HTTPServer-module type) out of this
+// public UHT-processed header so that MSVC / UHT never needs to instantiate
+// TArray<FHttpRouteHandle> from the Public include path where the HTTPServer
+// module headers are not available (PrivateDependencyModuleNames only).
+struct FBanRestApiRoutes;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogBanRestApi, Log, All);
 
@@ -66,6 +66,6 @@ private:
     void RegisterRoutes();
 
     TSharedPtr<IHttpRouter> Router;
-    TArray<FHttpRouteHandle> RouteHandles;
+    TSharedPtr<FBanRestApiRoutes> Routes;   // holds TArray<FHttpRouteHandle>
     int32 ApiPort = 3000;
 };
