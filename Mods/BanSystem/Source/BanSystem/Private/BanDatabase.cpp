@@ -71,7 +71,12 @@ namespace BanDbJson
             }
             else
             {
-                // Malformed record — treat as permanent.
+                // Malformed record — isPermanent=false but expireDate is missing or empty.
+                // Treat as permanent to avoid an unbounded active-ban window.
+                UE_LOG(LogBanDatabase, Warning,
+                    TEXT("BanDatabase: record uid='%s' has isPermanent=false but "
+                         "expireDate is missing or empty — treating as permanent"),
+                    *OutEntry.Uid);
                 OutEntry.bIsPermanent = true;
                 OutEntry.ExpireDate   = FDateTime(0);
             }
