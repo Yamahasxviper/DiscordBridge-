@@ -15,6 +15,11 @@
 #include "Engine/World.h"
 #include "Engine/NetConnection.h"
 #include "TimerManager.h"
+// CSS dedicated-server component hooked to capture client login Options before
+// UNetConnection::URL is overwritten with the server bind address.
+#include "FGGameModeDSComponent.h"
+// SML native hook macros used for the PreLogin / NotifyPlayerLogout hooks.
+#include "Patching/NativeHookManager.h"
 
 DEFINE_LOG_CATEGORY(LogBanEnforcer);
 
@@ -43,6 +48,101 @@ void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
                 Enforcer->OnPostLogin(GameMode, NewPlayer);
         });
 
+    // ──────────────────────────────────────────────────────────────────────────
+    // PreLogin hook — capture the EOS PUID from the client Options string.
+    //
+    // Root cause of the "gave up waiting for EOS PUID" / "/whoami UNCOMPLETED"
+    // bug:  On CSS DS 1.1.0, UNetConnection::URL is initialised from the
+    // server's bind address, NOT from the client's join URL.  So
+    // Conn->URL.GetOption("ClientIdentity=") always returns null, and
+    // ExtractEosPuidFromConnectionUrl silently returns empty every time.
+    //
+    // UFGGameModeDSComponent::PreLogin IS called with the full Options string
+    // (same string logged as "Login request: ?ClientIdentity=...").  We hook it
+    // here with SUBSCRIBE_UOBJECT_METHOD_AFTER to extract and cache the decoded
+    // EOS PUID, keyed by UNetConnection, before PostLogin fires.
+    // ──────────────────────────────────────────────────────────────────────────
+    PreLoginHookHandle = SUBSCRIBE_UOBJECT_METHOD_AFTER(UFGGameModeDSComponent, PreLogin,
+        ([WeakThis](const bool& bLoginAllowed,
+                    UFGGameModeDSComponent* /*Self*/,
+                    UPlayer* NewPlayer,
+                    const FString& Options,
+                    const FUniqueNetIdRepl& /*UniqueId*/,
+                    FString& /*ErrorMessage*/,
+                    TSharedPtr<FDedicatedServerGameModeComponentPreLoginDataInterface>& /*OutPreLoginData*/)
+        {
+            // Only cache for accepted logins.
+            if (!bLoginAllowed) return;
+
+            UBanEnforcer* Enforcer = WeakThis.Get();
+            if (!Enforcer) return;
+
+            UNetConnection* Conn = Cast<UNetConnection>(NewPlayer);
+            if (!Conn) return;
+
+            // Options format: "?ClientIdentity=<hex>?EntryTicket=...?Name=..."
+            // Extract the hex blob from between "ClientIdentity=" and the next "?".
+            const FString ClientIdentityKey = TEXT("ClientIdentity=");
+            int32 KeyIdx = Options.Find(ClientIdentityKey, ESearchCase::IgnoreCase);
+            if (KeyIdx == INDEX_NONE) return;
+
+            FString HexStr = Options.Mid(KeyIdx + ClientIdentityKey.Len());
+            int32 EndIdx;
+            if (HexStr.FindChar(TEXT('?'), EndIdx))
+                HexStr = HexStr.Left(EndIdx);
+            HexStr.TrimStartAndEndInline();
+
+            // Decode EOS PUID from the binary blob encoded as a lowercase hex string.
+            // Layout: offsets 0-7 = 4-byte LE header; offsets 8-71 = 32 ASCII PUID bytes.
+            if (HexStr.Len() < 72) return;
+
+            FString Puid;
+            Puid.Reserve(32);
+            for (int32 i = 8; i < 72; i += 2)
+            {
+                const TCHAR Hi = FChar::ToLower(HexStr[i]);
+                const TCHAR Lo = FChar::ToLower(HexStr[i + 1]);
+                if (!FChar::IsHexDigit(Hi) || !FChar::IsHexDigit(Lo)) return;
+
+                const uint8 HiN = (Hi >= TEXT('a')) ? (uint8)(Hi - TEXT('a') + 10) : (uint8)(Hi - TEXT('0'));
+                const uint8 LoN = (Lo >= TEXT('a')) ? (uint8)(Lo - TEXT('a') + 10) : (uint8)(Lo - TEXT('0'));
+                const TCHAR Ch = static_cast<TCHAR>((HiN << 4) | LoN);
+                if (!FChar::IsHexDigit(Ch)) return;
+                Puid.AppendChar(Ch);
+            }
+            if (Puid.Len() != 32) return;
+            Puid = Puid.ToLower();
+
+            Enforcer->CachedConnectionPuids.Add(TWeakObjectPtr<UNetConnection>(Conn), Puid);
+            UE_LOG(LogBanEnforcer, Log,
+                TEXT("BanEnforcer: cached EOS PUID %s for incoming connection (via PreLogin Options)"),
+                *Puid);
+        }));
+
+    // Evict cache entries when the player's connection is torn down.
+    PlayerLogoutHookHandle = SUBSCRIBE_UOBJECT_METHOD_AFTER(UFGGameModeDSComponent, NotifyPlayerLogout,
+        ([WeakThis](UFGGameModeDSComponent* /*Self*/, AController* ExitingController)
+        {
+            UBanEnforcer* Enforcer = WeakThis.Get();
+            if (!Enforcer) return;
+
+            if (UNetConnection* Conn = Cast<UNetConnection>(
+                    ExitingController ? ExitingController->GetNetConnection() : nullptr))
+            {
+                const int32 Removed = Enforcer->CachedConnectionPuids.Remove(TWeakObjectPtr<UNetConnection>(Conn));
+                if (Removed > 0)
+                    UE_LOG(LogBanEnforcer, Log,
+                        TEXT("BanEnforcer: evicted cached EOS PUID on player logout"));
+            }
+
+            // Also prune any fully garbage-collected (stale) entries.
+            for (auto It = Enforcer->CachedConnectionPuids.CreateIterator(); It; ++It)
+            {
+                if (!It.Key().IsValid())
+                    It.RemoveCurrent();
+            }
+        }));
+
     UE_LOG(LogBanEnforcer, Log, TEXT("BanEnforcer: login enforcement active (PostLogin)"));
 }
 
@@ -50,6 +150,15 @@ void UBanEnforcer::Deinitialize()
 {
     FGameModeEvents::GameModePostLoginEvent.Remove(PostLoginHandle);
     PostLoginHandle.Reset();
+
+    // Remove the PreLogin / NotifyPlayerLogout SML hooks.
+    UNSUBSCRIBE_UOBJECT_METHOD(UFGGameModeDSComponent, PreLogin, PreLoginHookHandle);
+    PreLoginHookHandle.Reset();
+    UNSUBSCRIBE_UOBJECT_METHOD(UFGGameModeDSComponent, NotifyPlayerLogout, PlayerLogoutHookHandle);
+    PlayerLogoutHookHandle.Reset();
+
+    // Clear the EOS PUID cache.
+    CachedConnectionPuids.Empty();
 
     // Cancel any in-flight identity poll and clear the queue.
     PendingBanChecks.Empty();
@@ -510,8 +619,33 @@ FString UBanEnforcer::ExtractEosPuidFromConnectionUrl(APlayerController* PC)
 {
     if (!IsValid(PC)) return FString();
 
-    // On dedicated servers, PC->Player is the UNetConnection for this client.
+    // ── Primary path: PreLogin hook cache ────────────────────────────────────
+    // On CSS DS 1.1.0 the server-side UNetConnection::URL is the server's bind
+    // address, so Conn->URL.GetOption("ClientIdentity=") always returns null.
+    // The PreLogin hook (installed in Initialize) caches the decoded EOS PUID
+    // from the client's Options string before PostLogin fires.  Check it first.
     UNetConnection* Conn = Cast<UNetConnection>(PC->Player);
+    if (Conn)
+    {
+        if (UGameInstance* GI = PC->GetWorld() ? PC->GetWorld()->GetGameInstance() : nullptr)
+        {
+            if (UBanEnforcer* Enforcer = GI->GetSubsystem<UBanEnforcer>())
+            {
+                if (const FString* Cached = Enforcer->CachedConnectionPuids.Find(TWeakObjectPtr<UNetConnection>(Conn)))
+                {
+                    UE_LOG(LogBanEnforcer, Verbose,
+                        TEXT("BanEnforcer: ExtractEosPuidFromConnectionUrl — resolved '%s' from PreLogin cache"),
+                        **Cached);
+                    return *Cached;
+                }
+            }
+        }
+    }
+
+    // ── Fallback path: Conn->URL option (works if CSS ever sets it) ───────────
+    // Kept as a belt-and-suspenders fallback; historically always returned null
+    // on CSS DS 1.1.0 because Conn->URL holds the server bind address, not the
+    // client join URL.  May become relevant for future CSS versions.
     if (!Conn) return FString();
 
     // The ClientIdentity query option contains the EOS PUID as ASCII bytes

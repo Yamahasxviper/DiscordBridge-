@@ -19,6 +19,7 @@ class UBanDatabase;
 DECLARE_LOG_CATEGORY_EXTERN(LogBanEnforcer, Log, All);
 
 class UWorld;
+class UNetConnection;
 
 /**
  * Tracks a player whose PlayerState or platform identity was not yet available
@@ -146,6 +147,33 @@ private:
     void PerformBanCheckForUid(UWorld* World, APlayerController* PC, UBanDatabase* DB, const FString& Uid);
 
     FDelegateHandle PostLoginHandle;
+
+    /**
+     * Handle for the UFGGameModeDSComponent::PreLogin after-hook installed in
+     * Initialize().  Removed in Deinitialize() to prevent stale handlers if the
+     * subsystem is ever torn down and re-created.
+     */
+    FDelegateHandle PreLoginHookHandle;
+
+    /**
+     * Handle for the UFGGameModeDSComponent::NotifyPlayerLogout after-hook used
+     * to evict stale entries from CachedConnectionPuids when a player disconnects.
+     */
+    FDelegateHandle PlayerLogoutHookHandle;
+
+    /**
+     * EOS PUID cache populated by the PreLogin hook.
+     *
+     * On CSS DS 1.1.0 (IsOnline=false), UNetConnection::URL on the server side
+     * holds the server's bind address, not the client's join URL.  Consequently
+     * Conn->URL.GetOption("ClientIdentity=") always returns null.  The ONLY place
+     * where the client's Options string (containing ClientIdentity=...) is
+     * available is inside UFGGameModeDSComponent::PreLogin.  We extract and cache
+     * the decoded EOS PUID here, keyed by the UNetConnection pointer.
+     *
+     * ExtractEosPuidFromConnectionUrl() checks this map first.
+     */
+    TMap<TWeakObjectPtr<UNetConnection>, FString> CachedConnectionPuids;
 
     /** Players queued for PlayerState / identity polling (CSS async init). */
     TArray<FPendingBanCheck> PendingBanChecks;
