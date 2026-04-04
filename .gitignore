@@ -35,7 +35,6 @@ Mods/**/Metadata/Crypto.json
 !Mods/TicketSystem/
 !Mods/BanSystem/
 !Mods/DummyHeaders/
-!Mods/EOSSystem/
 
 # Mods binaries
 Mods/**/Binaries/*

@@ -16,9 +16,6 @@ public class DiscordBridge : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
-			// Header stubs for APIs not present in Satisfactory's custom UE build.
-			// Required by all Alpakit C++ mods so UBT can resolve engine headers at mod compile time.
-			"FGOnlineHelpers",
 			// FactoryGame – provides AFGChatManager, AFGPlayerController, etc.
 			// Declared explicitly even though it is transitively available through SML.
 			"FactoryGame",

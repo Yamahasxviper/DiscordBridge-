@@ -40,11 +40,5 @@
 			"Optional": false,
 			"SemVersion": "^1.0.0"
 		},
-		{
-			"Name": "EOSSystem",
-			"Enabled": true,
-			"Optional": false,
-			"SemVersion": "^1.0.0"
-		}
 	]
 }

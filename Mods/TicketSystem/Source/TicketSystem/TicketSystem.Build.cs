@@ -16,9 +16,6 @@ public class TicketSystem : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
-			// Header stubs for APIs not present in Satisfactory's custom UE build.
-			// Required by all Alpakit C++ mods so UBT can resolve engine headers.
-			"FGOnlineHelpers",
 			// SML runtime – ensures correct module load ordering.
 			"SML",
 			// Custom WebSocket client with SSL support for the standalone Discord
