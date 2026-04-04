@@ -216,6 +216,46 @@ public:
         const FString& Label) override;
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  /playerhistory  — look up all known identities for a player name or UID
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /playerhistory <name_substring|UID>
+ *
+ * Queries the player session registry for all compound UIDs that have connected
+ * under a given display name (substring match), or the display name recorded for
+ * a given compound UID.
+ *
+ * Useful when an EOS player reconnects under a new PUID: admins can search the
+ * registry by the player's old display name, find their previous UID, cross-check
+ * it against the ban database, and use /linkbans or /ban to re-apply the ban.
+ *
+ * Requires admin.
+ *
+ * Examples:
+ *   /playerhistory BadPlayer
+ *   /playerhistory EOS:00020aed06f0a6958c3c067fb4b73d51
+ */
+UCLASS()
+class BANCHATCOMMANDS_API APlayerHistoryChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    APlayerHistoryChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+
+private:
+    static constexpr int32 MaxResults = 20;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /whoami  — display the caller's own platform IDs
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * /whoami
  *

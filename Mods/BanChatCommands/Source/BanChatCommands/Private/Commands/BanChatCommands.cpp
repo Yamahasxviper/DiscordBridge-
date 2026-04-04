@@ -6,6 +6,7 @@
 #include "BanDatabase.h"
 #include "BanEnforcer.h"
 #include "BanTypes.h"
+#include "PlayerSessionRegistry.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
@@ -327,10 +328,13 @@ namespace BanChat
             return true;
         }
 
-        Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid compound UID "
-                "(STEAM:<17digits> or EOS:<32hex>)."), *Arg),
-            FLinearColor::Red);
+        if (Sender)
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid compound UID "
+                    "(STEAM:<17digits> or EOS:<32hex>)."), *Arg),
+                FLinearColor::Red);
+        }
         return false;
     }
 
@@ -756,6 +760,101 @@ EExecutionStatus AWhoAmIChatCommand::ExecuteCommand_Implementation(
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Your platform ID (%s): %s"), *Platform, *RawId),
             FLinearColor::Green);
+    }
+
+    return EExecutionStatus::COMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  APlayerHistoryChatCommand  — /playerhistory
+// ─────────────────────────────────────────────────────────────────────────────
+
+APlayerHistoryChatCommand::APlayerHistoryChatCommand()
+{
+    CommandName          = TEXT("playerhistory");
+    MinNumberOfArguments = 1;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "PlayerHistoryUsage",
+        "/playerhistory <name_substring|UID>");
+}
+
+EExecutionStatus APlayerHistoryChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString AdminUid;
+    if (!BanChat::IsAdminSender(Sender, AdminUid))
+        return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    UWorld* World = GetWorld();
+    if (!World) return EExecutionStatus::UNCOMPLETED;
+    UGameInstance* GI = World->GetGameInstance();
+    if (!GI) return EExecutionStatus::UNCOMPLETED;
+
+    UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>();
+    if (!Registry)
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] PlayerSessionRegistry unavailable."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
+
+    const FString& Arg = Arguments[0];
+
+    // Determine whether the argument looks like a compound UID (contains ':')
+    // or a display-name substring.
+    FString SearchUid;
+    const bool bIsUid = BanChat::ParseAndNormaliseUidArg(nullptr, Arg, SearchUid);
+
+    TArray<FPlayerSessionRecord> Results;
+    if (bIsUid)
+    {
+        // Look up by UID — show the recorded display name.
+        FPlayerSessionRecord Rec;
+        if (Registry->FindByUid(SearchUid, Rec))
+        {
+            Results.Add(Rec);
+        }
+        else
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] No session history found for UID %s."), *SearchUid),
+                FLinearColor::Yellow);
+            return EExecutionStatus::COMPLETED;
+        }
+    }
+    else
+    {
+        // Look up by display-name substring.
+        Results = Registry->FindByName(Arg);
+        if (Results.IsEmpty())
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] No session history found for name '%s'."), *Arg),
+                FLinearColor::Yellow);
+            return EExecutionStatus::COMPLETED;
+        }
+    }
+
+    if (Results.Num() > MaxResults)
+        Results.SetNum(MaxResults);
+
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("[BanChatCommands] Session history for '%s' (%d result(s)):"), *Arg, Results.Num()),
+        FLinearColor::White);
+
+    UBanDatabase* DB = BanChat::GetDB(this);
+
+    for (const FPlayerSessionRecord& Rec : Results)
+    {
+        FBanEntry BanEntry;
+        const bool bBanned = DB && DB->IsCurrentlyBannedByAnyId(Rec.Uid, BanEntry);
+        const FString BanStatus = bBanned
+            ? FString::Printf(TEXT(" [BANNED: %s]"), *BanEntry.Reason)
+            : TEXT("");
+
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("  %s | \"%s\" | last seen: %s%s"),
+                *Rec.Uid, *Rec.DisplayName, *Rec.LastSeen, *BanStatus),
+            bBanned ? FLinearColor::Red : FLinearColor::White);
     }
 
     return EExecutionStatus::COMPLETED;

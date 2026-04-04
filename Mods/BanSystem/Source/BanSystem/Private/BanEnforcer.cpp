@@ -3,6 +3,7 @@
 
 #include "BanEnforcer.h"
 #include "BanDatabase.h"
+#include "PlayerSessionRegistry.h"
 
 // Pull in the full FUniqueNetIdRepl definition that was forward-declared in the header.
 #include "GameFramework/OnlineReplStructs.h"
@@ -24,6 +25,7 @@ DEFINE_LOG_CATEGORY(LogBanEnforcer);
 void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
 {
     Collection.InitializeDependency<UBanDatabase>();
+    Collection.InitializeDependency<UPlayerSessionRegistry>();
     Super::Initialize(Collection);
 
     // Primary enforcement hook — AGameModeBase::PostLogin broadcasts this event
@@ -240,6 +242,17 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
         UE_LOG(LogBanEnforcer, Log,
             TEXT("BanEnforcer: player '%s' (%s) is not banned — allowing join"),
             *PC->PlayerState->GetPlayerName(), *Uid);
+
+        // Record the session for identity-persistence tracking (Gap 4).
+        // This lets admins use /playerhistory to audit which UIDs a player
+        // has connected with across server sessions.
+        UGameInstance* GI = GetGameInstance();
+        if (GI)
+        {
+            if (UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>())
+                Registry->RecordSession(Uid, PC->PlayerState->GetPlayerName());
+        }
+
         return;
     }
 
