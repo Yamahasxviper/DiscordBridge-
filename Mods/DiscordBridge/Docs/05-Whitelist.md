@@ -5,15 +5,8 @@
 The built-in whitelist lets you restrict which players can join the server and manage
 the list directly from the bridged Discord channel.
 
-> **The whitelist and the ban system are completely independent.**
-> You can use either one, both, or neither — enabling or disabling one never affects the other.
->
-> | Goal | Config |
-> |------|--------|
-> | Whitelist only | `WhitelistEnabled=True`, `BanSystemEnabled=False` |
-> | Ban system only | `WhitelistEnabled=False`, `BanSystemEnabled=True` *(default)* |
-> | Both | `WhitelistEnabled=True`, `BanSystemEnabled=True` |
-> | Neither | `WhitelistEnabled=False`, `BanSystemEnabled=False` |
+> **The whitelist is an independent access-control feature.**
+> Enable or disable it freely without affecting any other functionality.
 
 ---
 

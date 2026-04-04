@@ -2,10 +2,6 @@
 
 #include "DiscordBridgeSubsystem.h"
 #include "TicketSubsystem.h"
-#include "Steam/SteamBanSubsystem.h"
-#include "EOS/EOSBanSubsystem.h"
-#include "BanDiscordSubsystem.h"
-#include "BanIdResolver.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -125,47 +121,6 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		}
 	}
 
-	// Register as the notification provider for USteamBanSubsystem and
-	// UEOSBanSubsystem (if BanSystem is installed).  BanSystem is an optional
-	// standalone mod that manages its own Discord connection; DiscordBridge
-	// does not share its bot connection with BanSystem.  Instead, DiscordBridge
-	// registers here so that ban/unban events from any source (Discord commands,
-	// in-game chat commands, etc.) can be forwarded to Discord when the
-	// BanNotificationsEnabled config is set to True.
-	// DiscordBridge also injects itself as IBanDiscordCommandProvider so that
-	// UBanDiscordSubsystem routes Discord ban commands (!steamban, !eosban, etc.)
-	// through this subsystem's existing Gateway connection instead of opening a
-	// second bot connection.
-	if (FModuleManager::Get().IsModuleLoaded(TEXT("BanSystem")))
-	{
-		if (UGameInstance* GI = GetGameInstance())
-		{
-			if (USteamBanSubsystem* SteamBans = GI->GetSubsystem<USteamBanSubsystem>())
-			{
-				CachedSteamBanSubsystem = SteamBans;
-				SteamBans->SetNotificationProvider(this);
-				UE_LOG(LogTemp, Log,
-				       TEXT("DiscordBridge: Registered as Steam ban notification provider."));
-			}
-
-			if (UEOSBanSubsystem* EOSBans = GI->GetSubsystem<UEOSBanSubsystem>())
-			{
-				CachedEOSBanSubsystem = EOSBans;
-				EOSBans->SetNotificationProvider(this);
-				UE_LOG(LogTemp, Log,
-				       TEXT("DiscordBridge: Registered as EOS ban notification provider."));
-			}
-
-			if (UBanDiscordSubsystem* BanDiscord = GI->GetSubsystem<UBanDiscordSubsystem>())
-			{
-				CachedBanDiscordSubsystem = BanDiscord;
-				BanDiscord->SetCommandProvider(this);
-				UE_LOG(LogTemp, Log,
-				       TEXT("DiscordBridge: Registered as BanDiscord command provider."));
-			}
-		}
-	}
-
 }
 
 void UDiscordBridgeSubsystem::Deinitialize()
@@ -176,28 +131,6 @@ void UDiscordBridgeSubsystem::Deinitialize()
 		Tickets->SetProvider(nullptr);
 	}
 	CachedTicketSubsystem.Reset();
-
-	// Deregister as the Steam/EOS ban notification provider so the subsystems do
-	// not hold a dangling pointer to this (now-destroyed) subsystem.
-	if (USteamBanSubsystem* SteamBans = CachedSteamBanSubsystem.Get())
-	{
-		SteamBans->SetNotificationProvider(nullptr);
-	}
-	CachedSteamBanSubsystem.Reset();
-
-	if (UEOSBanSubsystem* EOSBans = CachedEOSBanSubsystem.Get())
-	{
-		EOSBans->SetNotificationProvider(nullptr);
-	}
-	CachedEOSBanSubsystem.Reset();
-
-	// Deregister as the BanDiscord command provider so it does not hold a
-	// dangling pointer to this (now-destroyed) subsystem.
-	if (UBanDiscordSubsystem* BanDiscord = CachedBanDiscordSubsystem.Get())
-	{
-		BanDiscord->SetCommandProvider(nullptr);
-	}
-	CachedBanDiscordSubsystem.Reset();
 
 	// Stop the chat-manager bind ticker if it is still running.
 	FTSTicker::GetCoreTicker().RemoveTicker(ChatManagerBindTickHandle);
@@ -2047,17 +1980,8 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 	}
 
 	// ── Resolve Steam64 ID and EOS PUID ─────────────────────────────────────
-	// BanIdResolver is available when BanSystem is installed (it is a compile-time
-	// dependency of DiscordBridge).  The call is cheap and synchronous; it reads
-	// platform IDs that are already populated by PostLogin.
 	FString ResolvedSteam64Id;
 	FString ResolvedEOSProductUserId;
-	if (PS)
-	{
-		const FResolvedBanId ResolvedIds = FBanIdResolver::Resolve(PS->GetUniqueId());
-		ResolvedSteam64Id        = ResolvedIds.Steam64Id;
-		ResolvedEOSProductUserId = ResolvedIds.EOSProductUserId;
-	}
 
 	// Always log the available platform IDs so server operators can see them in
 	// the server log regardless of whether player-event notifications are enabled.
@@ -2748,126 +2672,4 @@ return OnDiscordRawMessageReceived.AddLambda(MoveTemp(Callback));
 void UDiscordBridgeSubsystem::UnsubscribeRawMessage(FDelegateHandle Handle)
 {
 OnDiscordRawMessageReceived.Remove(Handle);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// IBanDiscordCommandProvider – shared Discord connection for BanSystem
-// BanSystem calls SubscribeDiscordMessages to receive raw MESSAGE_CREATE events
-// through this subsystem's existing Gateway connection so that Discord ban
-// commands (!steamban, !eosban, etc.) work without a second bot token.
-// SendDiscordChannelMessage and GetGuildOwnerId are already satisfied by the
-// IDiscordBridgeProvider overrides.
-// ─────────────────────────────────────────────────────────────────────────────
-
-FDelegateHandle UDiscordBridgeSubsystem::SubscribeDiscordMessages(
-TFunction<void(const TSharedPtr<FJsonObject>&)> Callback)
-{
-return OnDiscordRawMessageReceived.AddLambda(MoveTemp(Callback));
-}
-
-void UDiscordBridgeSubsystem::UnsubscribeDiscordMessages(FDelegateHandle Handle)
-{
-OnDiscordRawMessageReceived.Remove(Handle);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// IBanNotificationProvider – ban / unban event notifications
-// Called by USteamBanSubsystem / UEOSBanSubsystem after a ban record is written
-// or removed.  Posts a notification to Discord when the feature is enabled.
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UDiscordBridgeSubsystem::OnSteamPlayerBanned(const FString& Steam64Id,
-                                                   const FBanEntry& Entry)
-{
-	if (!Config.bBanNotificationsEnabled || Config.SteamBanNotificationMessage.IsEmpty())
-	{
-		return;
-	}
-
-	const FString& TargetChannel = Config.BanNotificationChannelId.IsEmpty()
-		? Config.ChannelId
-		: Config.BanNotificationChannelId;
-
-	if (TargetChannel.IsEmpty())
-	{
-		return;
-	}
-
-	FString Msg = Config.SteamBanNotificationMessage;
-	Msg.ReplaceInline(TEXT("%PlayerId%"), *Steam64Id,          ESearchCase::CaseSensitive);
-	Msg.ReplaceInline(TEXT("%Reason%"),   *Entry.Reason,       ESearchCase::CaseSensitive);
-	Msg.ReplaceInline(TEXT("%BannedBy%"), *Entry.BannedBy,     ESearchCase::CaseSensitive);
-	Msg.ReplaceInline(TEXT("%Expiry%"),   *Entry.GetExpiryString(), ESearchCase::CaseSensitive);
-
-	SendMessageToChannel(TargetChannel, Msg);
-}
-
-void UDiscordBridgeSubsystem::OnSteamPlayerUnbanned(const FString& Steam64Id)
-{
-	if (!Config.bBanNotificationsEnabled || Config.SteamUnbanNotificationMessage.IsEmpty())
-	{
-		return;
-	}
-
-	const FString& TargetChannel = Config.BanNotificationChannelId.IsEmpty()
-		? Config.ChannelId
-		: Config.BanNotificationChannelId;
-
-	if (TargetChannel.IsEmpty())
-	{
-		return;
-	}
-
-	FString Msg = Config.SteamUnbanNotificationMessage;
-	Msg.ReplaceInline(TEXT("%PlayerId%"), *Steam64Id, ESearchCase::CaseSensitive);
-
-	SendMessageToChannel(TargetChannel, Msg);
-}
-
-void UDiscordBridgeSubsystem::OnEOSPlayerBanned(const FString& EOSProductUserId,
-                                                  const FBanEntry& Entry)
-{
-	if (!Config.bBanNotificationsEnabled || Config.EOSBanNotificationMessage.IsEmpty())
-	{
-		return;
-	}
-
-	const FString& TargetChannel = Config.BanNotificationChannelId.IsEmpty()
-		? Config.ChannelId
-		: Config.BanNotificationChannelId;
-
-	if (TargetChannel.IsEmpty())
-	{
-		return;
-	}
-
-	FString Msg = Config.EOSBanNotificationMessage;
-	Msg.ReplaceInline(TEXT("%PlayerId%"), *EOSProductUserId,   ESearchCase::CaseSensitive);
-	Msg.ReplaceInline(TEXT("%Reason%"),   *Entry.Reason,       ESearchCase::CaseSensitive);
-	Msg.ReplaceInline(TEXT("%BannedBy%"), *Entry.BannedBy,     ESearchCase::CaseSensitive);
-	Msg.ReplaceInline(TEXT("%Expiry%"),   *Entry.GetExpiryString(), ESearchCase::CaseSensitive);
-
-	SendMessageToChannel(TargetChannel, Msg);
-}
-
-void UDiscordBridgeSubsystem::OnEOSPlayerUnbanned(const FString& EOSProductUserId)
-{
-	if (!Config.bBanNotificationsEnabled || Config.EOSUnbanNotificationMessage.IsEmpty())
-	{
-		return;
-	}
-
-	const FString& TargetChannel = Config.BanNotificationChannelId.IsEmpty()
-		? Config.ChannelId
-		: Config.BanNotificationChannelId;
-
-	if (TargetChannel.IsEmpty())
-	{
-		return;
-	}
-
-	FString Msg = Config.EOSUnbanNotificationMessage;
-	Msg.ReplaceInline(TEXT("%PlayerId%"), *EOSProductUserId, ESearchCase::CaseSensitive);
-
-	SendMessageToChannel(TargetChannel, Msg);
 }

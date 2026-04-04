@@ -54,26 +54,7 @@ is configured through a single INI file with no external service or dashboard re
 
 ## Ban system
 
-Ban functionality is provided by the optional **BanSystem** mod, which handles join enforcement, Discord commands, in-game commands, and kick notifications independently of DiscordBridge.
-
-- Bans use **platform IDs** (Steam 64-bit IDs and EOS Product User IDs) rather than player names, so bans cannot be evaded by renaming.
-- Banned players are kicked automatically when they attempt to join.
-- BanSystem can run standalone with its own Discord bot, or share DiscordBridge's connection automatically when both mods are installed.
-
-**BanSystem Discord commands** (require the `DiscordCommandRoleId` role)
-
-| Command | Effect |
-|---------|--------|
-| `!steamban <Steam64Id\|Name> [min] [reason]` | Ban by Steam 64-bit ID or player name |
-| `!steamunban <Steam64Id>` | Remove a Steam ban |
-| `!steambanlist` | List all active Steam bans |
-| `!eosban <EOSProductUserId\|Name> [min] [reason]` | Ban by EOS Product User ID or player name |
-| `!eosunban <EOSProductUserId>` | Remove an EOS ban |
-| `!eosbanlist` | List all active EOS bans |
-| `!banbyname <Name> [min] [reason]` | Ban a connected player on all platforms at once |
-| `!playerids [Name]` | Show platform IDs of all (or one) connected player(s) |
-
-→ See [Ban System](04-BanSystem.md)
+Ban functionality has been removed from this project. For ban enforcement, consider using a separate dedicated ban mod or server-level tooling.
 
 ---
 
@@ -114,8 +95,6 @@ Ban functionality is provided by the optional **BanSystem** mod, which handles j
   if the primary file is ever missing the bridge automatically restores all settings
   from the backup.
 - Whitelist data persists in `Saved/ServerWhitelist.json` across server restarts.
-- Ban data is managed by the **BanSystem** mod and stored in
-  `Saved/BanSystem/SteamBans.json` and `Saved/BanSystem/EOSBans.json`.
 
 → See [Getting Started](01-GettingStarted.md) and [Connection Settings](02-ConnectionSettings.md)
 

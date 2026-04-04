@@ -78,14 +78,7 @@ LogDiscordBridge: Error: Failed to create WebSocket – SMLWebSocket module not 
 
 ## Ban commands are not recognised / banned players can still join
 
-Ban management has been moved to the **BanSystem** mod. If you are looking for ban commands:
-
-1. Install the **BanSystem** mod.
-2. Configure it via `<ServerRoot>/FactoryGame/Mods/BanSystem/Config/DefaultBanSystem.ini`.
-3. Use `!steamban`, `!eosban`, `!banbyname` in the Discord channel configured in `DefaultBanSystem.ini`.
-4. Banned players (by Steam64 ID or EOS PUID) are automatically kicked on join by BanSystem.
-
-See the [Ban System](04-BanSystem.md) page for full details.
+Ban functionality has been removed from DiscordBridge. There is no built-in ban system in this mod. For player ban enforcement, use a dedicated external tool or server-level tooling.
 
 ---
 
@@ -94,8 +87,7 @@ See the [Ban System](04-BanSystem.md) page for full details.
 1. Make sure `InGameWhitelistCommandPrefix` is set (defaults to `!whitelist`) and not empty in the config file.
 2. In-game commands can only be typed in the **Satisfactory in-game chat** by players who are already connected to the server.
 3. In-game whitelist commands do not include `!whitelist role add/remove` — that is Discord-only.
-4. For in-game ban commands, install the **BanSystem** mod which provides `/steamban`, `/eosban`, `/banbyname`, and related commands.
-5. If the command appears to do nothing, check the server log (`FactoryGame.log`) for `LogDiscordBridge` or `LogWhitelistManager` lines that may explain why it was rejected.
+4. If the command appears to do nothing, check the server log (`FactoryGame.log`) for `LogDiscordBridge` or `LogWhitelistManager` lines that may explain why it was rejected.
 
 ---
 

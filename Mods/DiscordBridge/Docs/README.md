@@ -8,7 +8,6 @@ Welcome to the DiscordBridge documentation. Use the links below to jump straight
 | [Getting Started](01-GettingStarted.md) | How to install the mod, where the config file lives, and how to create your Discord bot |
 | [Connection Settings](02-ConnectionSettings.md) | `BotToken`, `ChannelId`, `ServerName` |
 | [Chat Bridge](03-ChatBridge.md) | Customise how messages look on both sides of the bridge |
-| [Ban System](04-BanSystem.md) | Ban functionality is now handled by the BanSystem mod |
 | [Whitelist](05-Whitelist.md) | Restrict who can join, managed from Discord |
 | [Server Status & Behaviour](06-ServerStatus.md) | Online/offline announcements and bot-message filtering |
 | [Player Count Presence](07-PlayerCountPresence.md) | Bot status showing live player count |

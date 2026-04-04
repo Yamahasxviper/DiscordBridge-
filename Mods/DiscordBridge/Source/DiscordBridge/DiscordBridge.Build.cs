@@ -31,16 +31,6 @@ public class DiscordBridge : ModuleRules
 			// DiscordBridge implements IDiscordBridgeProvider and injects itself into
 			// UTicketSubsystem::SetProvider() when TicketSystem is loaded.
 			"TicketSystem",
-			// BanSystem – standalone mod that manages its own Discord connection.
-			// DiscordBridge implements IBanNotificationProvider and registers itself
-			// with USteamBanSubsystem / UEOSBanSubsystem so ban/unban events from any
-			// source can optionally be forwarded to a Discord channel.
-			// DiscordBridge also implements IBanDiscordCommandProvider and injects
-			// itself into UBanDiscordSubsystem::SetCommandProvider() so that
-			// BanSystem Discord commands (!steamban, !eosban, etc.) are routed
-			// through DiscordBridge's existing Gateway connection — no separate
-			// BotToken is required in DefaultBanSystem.ini when DiscordBridge is installed.
-			"BanSystem",
 			// Unreal HTTP module – confirmed present in Satisfactory's custom UE build.
 			// Verified: FactoryGame.Build.cs lists "HTTP" in PublicDependencyModuleNames,
 			// which makes it transitively available to every SML-dependent mod.
