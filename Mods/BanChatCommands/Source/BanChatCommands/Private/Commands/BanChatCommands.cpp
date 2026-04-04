@@ -10,6 +10,9 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/OnlineReplStructs.h"
+// Full definition required for Cast<> between AFGPlayerController and APlayerController
+// (UE Cast<> rejects incomplete types via static_assert in Casts.h).
+#include "FGPlayerController.h"
 
 DEFINE_LOG_CATEGORY(LogBanChatCommands);
 
