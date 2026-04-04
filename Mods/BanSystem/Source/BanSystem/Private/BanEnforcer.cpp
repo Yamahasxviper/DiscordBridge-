@@ -26,26 +26,19 @@ void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
     Collection.InitializeDependency<UBanDatabase>();
     Super::Initialize(Collection);
 
-    // Best-effort PreLogin hook — may not fire on CSS dedicated servers because
-    // AFGGameMode::Login() routes through UFGDedicatedServerGameModeComponentInterface::PreLogin
-    // rather than the standard AGameModeBase::PreLogin path.  Kept for completeness.
-    PreLoginHandle = FGameModeEvents::GameModePreLoginEvent.AddUObject(
-        this, &UBanEnforcer::OnPreLogin);
-
     // Primary enforcement hook — AGameModeBase::PostLogin broadcasts this event
-    // and CSS (confirmed by SML) calls it on every player join.  Any banned player
-    // that was not caught at PreLogin is kicked here immediately.
+    // and CSS (confirmed by SML) calls it on every player join.
+    // Note: CSS routes PreLogin through UFGDedicatedServerGameModeComponentInterface
+    // rather than AGameModeBase::PreLogin, so FGameModeEvents::GameModePreLoginEvent
+    // does not fire on CSS dedicated servers and is not hooked here.
     PostLoginHandle = FGameModeEvents::GameModePostLoginEvent.AddUObject(
         this, &UBanEnforcer::OnPostLogin);
 
-    UE_LOG(LogBanEnforcer, Log, TEXT("BanEnforcer: login enforcement active (PreLogin + PostLogin)"));
+    UE_LOG(LogBanEnforcer, Log, TEXT("BanEnforcer: login enforcement active (PostLogin)"));
 }
 
 void UBanEnforcer::Deinitialize()
 {
-    FGameModeEvents::GameModePreLoginEvent.Remove(PreLoginHandle);
-    PreLoginHandle.Reset();
-
     FGameModeEvents::GameModePostLoginEvent.Remove(PostLoginHandle);
     PostLoginHandle.Reset();
 
@@ -59,41 +52,6 @@ void UBanEnforcer::Deinitialize()
     PollTimerWorld.Reset();
 
     Super::Deinitialize();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Enforcement
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UBanEnforcer::OnPreLogin(AGameModeBase* /*GameMode*/,
-                               const FUniqueNetIdRepl& UniqueId,
-                               const FString& /*Options*/,
-                               FString& ErrorMessage)
-{
-    // If another system already rejected this login, don't overwrite.
-    if (!ErrorMessage.IsEmpty()) return;
-
-    if (!UniqueId.IsValid()) return;
-
-    UGameInstance* GI = GetGameInstance();
-    if (!GI) return;
-    UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
-    if (!DB) return;
-
-    // Build the compound UID.  The FUniqueNetId type name is "STEAM" or "EOS"
-    // on the CSS dedicated server; we upper-case it to match the stored format.
-    const FString Platform = UniqueId->GetType().ToString().ToUpper();
-    const FString RawId    = UniqueId->ToString();
-    const FString Uid      = UBanDatabase::MakeUid(Platform, RawId);
-
-    FBanEntry Entry;
-    if (DB->IsCurrentlyBanned(Uid, Entry))
-    {
-        ErrorMessage = Entry.GetKickMessage();
-        UE_LOG(LogBanEnforcer, Log,
-            TEXT("BanEnforcer: rejected %s (%s) at PreLogin — %s"),
-            *RawId, *Platform, *ErrorMessage);
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

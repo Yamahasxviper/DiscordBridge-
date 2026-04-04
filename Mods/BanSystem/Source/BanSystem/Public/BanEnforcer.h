@@ -76,17 +76,6 @@ public:
 
 private:
     /**
-     * FGameModeEvents::GameModePreLoginEvent best-effort hook.
-     * Fires from AGameModeBase::PreLogin in standard UE.
-     * CSS may or may not broadcast this depending on the AFGGameMode::Login
-     * override; the PostLogin hook below is the primary enforcement path.
-     */
-    void OnPreLogin(AGameModeBase* GameMode,
-                    const FUniqueNetIdRepl& UniqueId,
-                    const FString& Options,
-                    FString& ErrorMessage);
-
-    /**
      * FGameModeEvents::GameModePostLoginEvent hook — primary ban enforcement
      * path on CSS dedicated servers.
      *
@@ -120,7 +109,6 @@ private:
      */
     void PerformBanCheckForPlayer(UWorld* World, APlayerController* PC, UBanDatabase* DB);
 
-    FDelegateHandle PreLoginHandle;
     FDelegateHandle PostLoginHandle;
 
     /** Players queued for PlayerState / identity polling (CSS async init). */

@@ -9,6 +9,13 @@
 
 class IHttpRouter;
 
+// FHttpRouteHandle is defined in the CSS engine as a typedef inside IHttpRouter.h,
+// but that header is not pulled in by BanRestApi.h.  Mirror the forward-declaration
+// pattern used in Source/FactoryDedicatedServer/Public/Networking/FGServerAPIManager.h
+// so the TArray member compiles without dragging in HttpServerModule headers.
+struct FHttpRouteHandleInternal;
+typedef TSharedPtr<const FHttpRouteHandleInternal> FHttpRouteHandle;
+
 DECLARE_LOG_CATEGORY_EXTERN(LogBanRestApi, Log, All);
 
 /**
