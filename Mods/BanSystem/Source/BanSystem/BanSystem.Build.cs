@@ -28,6 +28,9 @@ public class BanSystem : ModuleRules
             "HTTPServer",
             // HTTP client utilities (URL encoding/decoding)
             "HTTP",
+            // Required for ENetCloseResult symbols referenced by UNetConnection::Close(),
+            // which is called in BanEnforcer to hard-disconnect banned players.
+            "NetCore",
         });
     }
 }
