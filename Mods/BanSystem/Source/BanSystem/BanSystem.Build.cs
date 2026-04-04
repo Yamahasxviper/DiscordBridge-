@@ -24,6 +24,13 @@ public class BanSystem : ModuleRules
             // through the standalone Engine dep — it is only reachable via FactoryGame's
             // transitive Engine include paths.
             "FactoryGame",
+            // CSS dedicated-server game-mode component: UFGGameModeDSComponent::PreLogin
+            // is hooked to cache EOS PUIDs from the client Options string before PostLogin.
+            // FactoryDedicatedServer is only built for Server+Editor targets, matching
+            // this mod's ServerOnly module type.
+            "FactoryDedicatedServer",
+            // SML patching API — SUBSCRIBE_UOBJECT_METHOD_AFTER for the PreLogin hook.
+            "SML",
             // HTTP server — direct port of Tools/BanSystem apiServer.ts
             "HTTPServer",
             // HTTP client utilities (URL encoding/decoding)
