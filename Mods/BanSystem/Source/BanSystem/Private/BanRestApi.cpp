@@ -93,6 +93,19 @@ namespace BanJson
     static FString BodyToString(const FHttpServerRequest& Req)
     {
         if (Req.Body.Num() == 0) return TEXT("{}");
+
+        // Guard against excessively large request bodies (e.g. accidental or
+        // malicious oversized POST payloads).  1 MB is far more than any valid
+        // JSON ban payload would ever require.
+        static constexpr int32 MaxBodyBytes = 1 * 1024 * 1024;
+        if (Req.Body.Num() > MaxBodyBytes)
+        {
+            UE_LOG(LogBanRestApi, Warning,
+                TEXT("BanRestApi: request body too large (%d bytes, limit %d) — rejecting"),
+                Req.Body.Num(), MaxBodyBytes);
+            return TEXT("{}");
+        }
+
         TArray<uint8> Buf = Req.Body;
         Buf.Add(0);
         return UTF8_TO_TCHAR(reinterpret_cast<const char*>(Buf.GetData()));

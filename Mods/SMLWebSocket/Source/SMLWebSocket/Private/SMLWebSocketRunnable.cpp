@@ -118,7 +118,17 @@ FSMLWebSocketRunnable::FSMLWebSocketRunnable(USMLWebSocketClient* InOwner,
 	int32 ColonIdx;
 	if (ParsedHost.FindChar(TEXT(':'), ColonIdx))
 	{
-		ParsedPort = FCString::Atoi(*ParsedHost.RightChop(ColonIdx + 1));
+		const int32 RawPort = FCString::Atoi(*ParsedHost.RightChop(ColonIdx + 1));
+		if (RawPort >= 1 && RawPort <= 65535)
+		{
+			ParsedPort = RawPort;
+		}
+		else
+		{
+			UE_LOG(LogSMLWebSocket, Warning,
+			       TEXT("SMLWebSocket: Invalid port number in URL '%s' — using default port %d"),
+			       *InUrl, ParsedPort);
+		}
 		ParsedHost = ParsedHost.Left(ColonIdx);
 	}
 }
@@ -193,6 +203,7 @@ uint32 FSMLWebSocketRunnable::Run()
 		// Reset per-attempt flags.
 		bReceivedServerClose = false;
 		FragmentBuffer.Empty();
+		bFragmentIsBinary = false;
 
 		// ── 1. Resolve host and connect TCP socket ────────────────────────────
 		State.store(ESMLWebSocketRunnableState::Connecting);
@@ -1165,24 +1176,25 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 				NotifyBinaryMessage(Payload, true);
 			}
 		}
+		else if (!FragmentBuffer.IsEmpty())
+		{
+			// RFC 6455 §5.4: A new data frame must not start while a fragmented
+			// message is still being assembled. The server is misbehaving — discard
+			// the in-progress fragment, log a warning, and close the connection.
+			UE_LOG(LogSMLWebSocket, Warning,
+			       TEXT("SMLWebSocket: Received a new Text/Binary frame while a fragmented "
+			            "message was still in progress (RFC 6455 §5.4 violation). "
+			            "Discarding %d buffered fragment byte(s) and closing connection."),
+			       FragmentBuffer.Num());
+			FragmentBuffer.Empty();
+			bFragmentIsBinary = false;
+			return false;
+		}
 		else
 		{
-			// Start of a fragmented message
+			// Start of a fragmented message (bFin == false, FragmentBuffer is empty)
 			bFragmentIsBinary = (Opcode == WsOpcode::Binary);
 			FragmentBuffer = MoveTemp(Payload);
-
-			if (bFin)
-			{
-				if (bFragmentIsBinary)
-				{
-					NotifyBinaryMessage(FragmentBuffer, true);
-				}
-				else
-				{
-					NotifyMessage(ToFString(FragmentBuffer));
-				}
-				FragmentBuffer.Empty();
-			}
 		}
 		break;
 	}
