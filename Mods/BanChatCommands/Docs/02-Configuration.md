@@ -6,11 +6,20 @@
 
 ## Config file location
 
+Settings are stored in the mod's own config file, **not** the project `DefaultGame.ini`.  
+The recommended way to configure without being overwritten by mod updates is to use the server override file:
+
 ```
-<ServerRoot>/FactoryGame/Config/DefaultGame.ini
+<ServerRoot>/FactoryGame/Saved/Config/<Platform>/BanChatCommands.ini
 ```
 
-BanChatCommands reads its settings from the `[/Script/BanChatCommands.BanChatCommandsConfig]` section of `DefaultGame.ini`.
+Alternatively you can edit the mod's default template directly (note: this file is overwritten on mod updates):
+
+```
+<ServerRoot>/FactoryGame/Mods/BanChatCommands/Config/DefaultBanChatCommands.ini
+```
+
+BanChatCommands reads its settings from the `[/Script/BanChatCommands.BanChatCommandsConfig]` section.
 
 ---
 
@@ -62,4 +71,4 @@ If both lists are empty, **no player** can run admin commands from chat — only
 
 ## Applying changes
 
-Restart the dedicated server after editing `DefaultGame.ini`. Changes are not hot-reloaded at runtime.
+Restart the dedicated server after editing the config file. Changes are not hot-reloaded at runtime.

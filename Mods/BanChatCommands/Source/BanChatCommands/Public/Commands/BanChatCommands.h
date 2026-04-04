@@ -21,7 +21,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBanChatCommands, Log, All);
  *   • Anything else            → player display-name lookup (case-insensitive,
  *     substring match); bans using the player's FUniqueNetIdRepl identity.
  *
- * Requires the caller's Steam64 to be in AdminSteam64Ids (DefaultGame.ini),
+ * Requires the caller's Steam64 to be in AdminSteam64Ids (BanChatCommands.ini),
  * or the command to be run from the server console.
  *
  * Examples:

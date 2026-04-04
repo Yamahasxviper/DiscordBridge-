@@ -24,10 +24,11 @@ Requires the **BanSystem** mod.
 
 ## Admin setup
 
-Admin access is controlled by player platform IDs in `DefaultGame.ini`:
+Admin access is controlled by player platform IDs in the mod's own config file.  
+To ensure your settings survive mod updates, add them to the server override file:
 
 ```
-<ServerRoot>/FactoryGame/Config/DefaultGame.ini
+<ServerRoot>/FactoryGame/Saved/Config/<Platform>/BanChatCommands.ini
 ```
 
 ```ini

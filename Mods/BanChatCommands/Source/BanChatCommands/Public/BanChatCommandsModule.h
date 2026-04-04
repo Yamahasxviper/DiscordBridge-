@@ -20,7 +20,7 @@
  *
  * All commands delegate storage and enforcement to BanSystem subsystems.
  * Admin access to ban/tempban/unban/bancheck/banlist is controlled by the
- * AdminSteam64Ids list in UBanChatCommandsConfig (DefaultGame.ini).
+ * AdminSteam64Ids list in UBanChatCommandsConfig (DefaultBanChatCommands.ini).
  */
 class BANCHATCOMMANDS_API FBanChatCommandsModule : public IModuleInterface
 {
