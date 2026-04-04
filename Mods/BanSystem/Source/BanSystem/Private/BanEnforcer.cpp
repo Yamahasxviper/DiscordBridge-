@@ -31,8 +31,15 @@ void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
     // Note: CSS routes PreLogin through UFGDedicatedServerGameModeComponentInterface
     // rather than AGameModeBase::PreLogin, so FGameModeEvents::GameModePreLoginEvent
     // does not fire on CSS dedicated servers and is not hooked here.
-    PostLoginHandle = FGameModeEvents::GameModePostLoginEvent.AddUObject(
-        this, &UBanEnforcer::OnPostLogin);
+    // Use AddLambda + TWeakObjectPtr instead of AddUObject to avoid C2665 in
+    // CSS 5.3's strict template matching while still handling object lifetime safely.
+    TWeakObjectPtr<UBanEnforcer> WeakThis(this);
+    PostLoginHandle = FGameModeEvents::GameModePostLoginEvent.AddLambda(
+        [WeakThis](AGameModeBase* GameMode, APlayerController* NewPlayer)
+        {
+            if (UBanEnforcer* Enforcer = WeakThis.Get())
+                Enforcer->OnPostLogin(GameMode, NewPlayer);
+        });
 
     UE_LOG(LogBanEnforcer, Log, TEXT("BanEnforcer: login enforcement active (PostLogin)"));
 }
