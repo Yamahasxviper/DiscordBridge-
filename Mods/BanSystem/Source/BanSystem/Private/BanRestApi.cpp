@@ -301,7 +301,7 @@ void UBanRestApi::RegisterRoutes()
             {
                 Done(BanJson::Error(
                     FString::Printf(TEXT("Request body too large (%d bytes, limit %d)"), Req.Body.Num(), MaxPostBodyBytes),
-                    static_cast<EHttpServerResponseCodes>(413)));
+                    EHttpServerResponseCodes::RequestTooLarge));
                 return true;
             }
 
