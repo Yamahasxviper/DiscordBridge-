@@ -281,6 +281,16 @@ void UBanRestApi::RegisterRoutes()
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavailable)); return true; }
 
+            // Reject oversized bodies before touching body content (HTTP 413).
+            static constexpr int32 MaxPostBodyBytes = 1 * 1024 * 1024;
+            if (Req.Body.Num() > MaxPostBodyBytes)
+            {
+                Done(BanJson::Error(
+                    FString::Printf(TEXT("Request body too large (%d bytes, limit %d)"), Req.Body.Num(), MaxPostBodyBytes),
+                    EHttpServerResponseCodes::RequestEntityTooLarge));
+                return true;
+            }
+
             // Parse JSON body.
             const FString BodyStr = BanJson::BodyToString(Req);
             TSharedPtr<FJsonObject> Body;
@@ -316,7 +326,12 @@ void UBanRestApi::RegisterRoutes()
 
             double DurationMinutesDbl = 0.0;
             Body->TryGetNumberField(TEXT("durationMinutes"), DurationMinutesDbl);
-            const int32 DurationMinutes = static_cast<int32>(DurationMinutesDbl);
+            // Guard against out-of-range doubles: values outside [0, INT_MAX] would
+            // produce undefined behaviour when cast to int32.  Negative/zero means
+            // permanent; anything larger than INT_MAX is clamped to INT_MAX.
+            const int32 DurationMinutes = (DurationMinutesDbl <= 0.0 || DurationMinutesDbl > static_cast<double>(INT_MAX))
+                ? 0
+                : static_cast<int32>(DurationMinutesDbl);
 
             if (Reason.IsEmpty())   Reason   = TEXT("No reason given");
             if (BannedBy.IsEmpty()) BannedBy = TEXT("system");
@@ -349,9 +364,17 @@ void UBanRestApi::RegisterRoutes()
                 UBanEnforcer::KickConnectedPlayer(World, Entry.Uid, Entry.GetKickMessage());
             }
 
-            // Fetch the row back so we can return the assigned id.
+            // Fetch the row back so we can return the assigned id (auto-incremented by AddBan).
+            // Fall back to returning the in-memory entry if the lookup fails (should never
+            // happen after a successful AddBan, but guards against a corrupt DB state).
             FBanEntry Saved;
-            DB->GetBanByUid(Entry.Uid, Saved);
+            if (!DB->GetBanByUid(Entry.Uid, Saved))
+            {
+                UE_LOG(LogBanRestApi, Warning,
+                    TEXT("BanRestApi: POST /bans — GetBanByUid failed for '%s' immediately after AddBan; returning in-memory entry"),
+                    *Entry.Uid);
+                Saved = Entry;
+            }
 
             auto Resp = BanJson::Json(BanJson::ObjectToString(BanJson::EntryToJson(Saved)));
             Resp->Code = EHttpServerResponseCodes::Created;

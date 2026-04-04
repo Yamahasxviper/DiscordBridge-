@@ -146,6 +146,16 @@ FSMLWebSocketRunnable::~FSMLWebSocketRunnable()
 		{
 			SocketSS->DestroySocket(Socket);
 		}
+		else
+		{
+			// SocketSubsystem is unavailable (e.g. very late engine shutdown).
+			// delete the FSocket directly so the OS file descriptor is closed and
+			// not leaked.  This is safe because FSocket subclass destructors call
+			// Close() which releases the underlying socket handle.
+			UE_LOG(LogSMLWebSocket, Warning,
+			       TEXT("SMLWebSocket: ISocketSubsystem unavailable in destructor — deleting socket directly"));
+			delete Socket;
+		}
 		Socket = nullptr;
 	}
 }
@@ -395,6 +405,15 @@ void FSMLWebSocketRunnable::CleanupConnection()
 		if (SocketSS)
 		{
 			SocketSS->DestroySocket(Socket);
+		}
+		else
+		{
+			// SocketSubsystem is unavailable (e.g. late shutdown).  Delete directly
+			// so the OS handle is released; FSocket subclasses call Close() in their
+			// destructor which closes the underlying file descriptor.
+			UE_LOG(LogSMLWebSocket, Warning,
+			       TEXT("SMLWebSocket: ISocketSubsystem unavailable in CleanupConnection — deleting socket directly"));
+			delete Socket;
 		}
 		Socket = nullptr;
 	}
