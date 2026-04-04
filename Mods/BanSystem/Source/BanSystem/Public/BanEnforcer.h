@@ -74,6 +74,30 @@ public:
      */
     static void KickConnectedPlayer(UWorld* World, const FString& Uid, const FString& Reason);
 
+    /**
+     * CSS DS 1.1.0 workaround: extract the EOS Product User ID from the
+     * ClientIdentity URL option embedded in the player's UNetConnection.
+     *
+     * On CSS dedicated servers running Satisfactory 1.1.0+, EOS V2 PUIDs are
+     * used for player authentication, but the server-side EOS online subsystem
+     * is offline (IsOnline=false).  As a result FUniqueNetIdRepl::GetType()
+     * returns "NONE" and ToString() returns "" for the entire session, making
+     * it impossible to retrieve the player identity via PlayerState::GetUniqueId().
+     *
+     * The EOS PUID is, however, transmitted in the ClientIdentity query
+     * parameter of the player's connection URL.  Its binary layout is:
+     *   Bytes 0-3  (hex offset  0- 7): LE uint32 header / length
+     *   Bytes 4-35 (hex offset  8-71): 32-byte ASCII EOS PUID
+     *                                  (each byte is a printable hex char,
+     *                                   e.g. '4','8','c','b',... → "48cb...")
+     *   Bytes 36+  (hex offset 72+  ): additional data (Steam handle, flags)
+     *
+     * @param PC  The player controller whose connection URL to inspect.
+     * @return    The 32-char lowercase EOS PUID string, or an empty FString if
+     *            the option is absent, malformed, or the PUID cannot be decoded.
+     */
+    static FString ExtractEosPuidFromConnectionUrl(APlayerController* PC);
+
 private:
     /**
      * FGameModeEvents::GameModePostLoginEvent hook — primary ban enforcement
@@ -108,6 +132,18 @@ private:
      * thread only.
      */
     void PerformBanCheckForPlayer(UWorld* World, APlayerController* PC, UBanDatabase* DB);
+
+    /**
+     * Variant of PerformBanCheckForPlayer that takes a pre-computed compound
+     * UID instead of deriving it from PlayerState::GetUniqueId().
+     *
+     * Used when the identity was extracted from the connection URL
+     * (ExtractEosPuidFromConnectionUrl) rather than from the EOS subsystem,
+     * e.g. on CSS DS 1.1.0 where GetType() stays "NONE" for the whole session.
+     *
+     * PC->PlayerState may still be null when this is called.
+     */
+    void PerformBanCheckForUid(UWorld* World, APlayerController* PC, UBanDatabase* DB, const FString& Uid);
 
     FDelegateHandle PostLoginHandle;
 

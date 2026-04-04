@@ -117,7 +117,43 @@ void UBanEnforcer::OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPl
         }
     }
 
-    // PlayerState is null OR identity not yet available.
+    // CSS DS 1.1.0 workaround: GetType()==NONE because EOS online subsystem is
+    // offline (IsOnline=false).  The EOS PUID is still transmitted in the
+    // ClientIdentity URL option — try to extract it directly from the connection.
+    {
+        const FString EosPuid = ExtractEosPuidFromConnectionUrl(NewPlayer);
+        if (!EosPuid.IsEmpty())
+        {
+            const FString Uid = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
+            const FString PlayerName = (NewPlayer->PlayerState)
+                ? NewPlayer->PlayerState->GetPlayerName()
+                : TEXT("(unknown)");
+
+            UE_LOG(LogBanEnforcer, Log,
+                TEXT("BanEnforcer: extracted EOS PUID from connection URL for '%s' (%s) — deferred ban check"),
+                *PlayerName, *Uid);
+
+            TWeakObjectPtr<UBanEnforcer> WeakThis(this);
+            TWeakObjectPtr<APlayerController> WeakPC(NewPlayer);
+            World->GetTimerManager().SetTimerForNextTick(
+                FTimerDelegate::CreateLambda([WeakThis, WeakPC, Uid]()
+                {
+                    UBanEnforcer* Enforcer = WeakThis.Get();
+                    APlayerController* PC  = WeakPC.Get();
+                    if (!Enforcer || !IsValid(PC)) return;
+
+                    UGameInstance* GI2 = Enforcer->GetGameInstance();
+                    if (!GI2) return;
+                    UWorld* W2 = GI2->GetWorld();
+                    UBanDatabase* DB2 = GI2->GetSubsystem<UBanDatabase>();
+                    if (W2 && DB2)
+                        Enforcer->PerformBanCheckForUid(W2, PC, DB2, Uid);
+                }));
+            return;
+        }
+    }
+
+    // PlayerState is null OR identity not yet available AND no URL PUID found.
     // CSS may initialise PlayerState asynchronously after PostLogin fires.
     // Queue the player and poll every 0.5 s until both PlayerState and identity
     // are available.
@@ -185,6 +221,19 @@ void UBanEnforcer::ProcessPendingBanChecks()
         const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
         if (!NetId.IsValid() || NetId.GetType() == FName(TEXT("NONE")))
         {
+            // CSS DS 1.1.0 workaround: identity stays NONE when EOS subsystem is
+            // offline.  Try extracting the EOS PUID from the connection URL before
+            // burning another attempt (the PUID is baked into ClientIdentity and
+            // doesn't change, so a single successful decode is enough).
+            const FString EosPuid = ExtractEosPuidFromConnectionUrl(PC);
+            if (!EosPuid.IsEmpty())
+            {
+                const FString Uid = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
+                PendingBanChecks.RemoveAt(i);
+                PerformBanCheckForUid(World, PC, DB, Uid);
+                continue;
+            }
+
             if (++Check.Attempts >= FPendingBanCheck::MaxAttempts)
             {
                 UE_LOG(LogBanEnforcer, Warning,
@@ -323,7 +372,8 @@ void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
 
         // ── Primary match: compound UID via FUniqueNetIdRepl ─────────────────
         const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
-        if (NetId.IsValid())
+        bool bMatched = false;
+        if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
         {
             // Use direct FUniqueNetIdRepl accessors — safe for V2 EOS PUIDs.
             // (See PerformBanCheckForPlayer for the full explanation.)
@@ -334,28 +384,40 @@ void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
                 : NetId.ToString();
             const FString PlayerUid  = UBanDatabase::MakeUid(Platform, RawId);
 
-            if (PlayerUid != Uid) continue;
+            if (PlayerUid == Uid)
+                bMatched = true;
         }
-        else
-        {
-            // ── Fallback: CSS DS may not have set UniqueId yet.  Match by the
-            //    raw player ID embedded in the UID against the PlayerState name
-            //    (Steam players' display names often equal their Steam64 ID on
-            //    fresh connection, but this is best-effort only).
-            // If neither strategy finds the player we log a warning.
-            const FString PlayerName = PC->PlayerState->GetPlayerName();
-            if (!PlayerName.Equals(UidRawId, ESearchCase::IgnoreCase))
-            {
-                UE_LOG(LogBanEnforcer, Verbose,
-                    TEXT("BanEnforcer: KickConnectedPlayer — player '%s' has no valid UniqueId yet, skipping (UID mismatch)"),
-                    *PlayerName);
-                continue;
-            }
 
-            UE_LOG(LogBanEnforcer, Warning,
-                TEXT("BanEnforcer: KickConnectedPlayer — matched '%s' by name fallback (UniqueId not yet set)"),
-                *PlayerName);
+        if (!bMatched)
+        {
+            // ── Fallback A: CSS DS 1.1.0 — GetType()==NONE but EOS PUID may be
+            //    available from the connection URL's ClientIdentity option.
+            const FString UrlPuid = ExtractEosPuidFromConnectionUrl(PC);
+            if (!UrlPuid.IsEmpty())
+            {
+                const FString UrlUid = UBanDatabase::MakeUid(TEXT("EOS"), UrlPuid);
+                if (UrlUid == Uid)
+                    bMatched = true;
+            }
         }
+
+        if (!bMatched)
+        {
+            // ── Fallback B: match by the raw player ID embedded in the UID
+            //    against the PlayerState name (Steam players' display names often
+            //    equal their Steam64 ID on fresh connection, but this is
+            //    best-effort only).
+            const FString PlayerName = PC->PlayerState->GetPlayerName();
+            if (PlayerName.Equals(UidRawId, ESearchCase::IgnoreCase))
+            {
+                UE_LOG(LogBanEnforcer, Warning,
+                    TEXT("BanEnforcer: KickConnectedPlayer — matched '%s' by name fallback (UniqueId not yet set)"),
+                    *PlayerName);
+                bMatched = true;
+            }
+        }
+
+        if (!bMatched) continue;
 
         GM->GameSession->KickPlayer(PC, FText::FromString(Reason));
 
@@ -379,4 +441,115 @@ void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
 
     UE_LOG(LogBanEnforcer, Log,
         TEXT("BanEnforcer: KickConnectedPlayer — no connected player found for UID %s"), *Uid);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Ban check using a pre-computed UID (URL-extracted identity path)
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, UBanDatabase* DB, const FString& Uid)
+{
+    if (!World || !IsValid(PC) || !DB) return;
+
+    FString Platform, RawId;
+    UBanDatabase::ParseUid(Uid, Platform, RawId);
+
+    const FString PlayerName = (PC->PlayerState)
+        ? PC->PlayerState->GetPlayerName()
+        : TEXT("(unknown)");
+
+    UE_LOG(LogBanEnforcer, Log,
+        TEXT("BanEnforcer: checking ban status for player '%s' (%s: %s) [URL-extracted identity]"),
+        *PlayerName, *Platform, *RawId);
+
+    FBanEntry Entry;
+    if (!DB->IsCurrentlyBannedByAnyId(Uid, Entry))
+    {
+        UE_LOG(LogBanEnforcer, Log,
+            TEXT("BanEnforcer: player '%s' (%s) is not banned — allowing join"),
+            *PlayerName, *Uid);
+
+        // Record the session for identity-persistence tracking.
+        UGameInstance* GI = GetGameInstance();
+        if (GI)
+        {
+            if (UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>())
+                Registry->RecordSession(Uid, PlayerName);
+        }
+        return;
+    }
+
+    const FString KickMsg = Entry.GetKickMessage();
+    UE_LOG(LogBanEnforcer, Log,
+        TEXT("BanEnforcer: kicking banned player %s (%s) — %s"),
+        *RawId, *Platform, *KickMsg);
+
+    AGameModeBase* GM = World->GetAuthGameMode();
+    if (GM && GM->GameSession)
+    {
+        GM->GameSession->KickPlayer(PC, FText::FromString(KickMsg));
+    }
+
+    // Hard fallback: close the net connection directly.
+    // NOTE: Do NOT call PC->Destroy() — the connection close triggers the
+    // standard UE cleanup path.
+    if (IsValid(PC))
+    {
+        if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
+        {
+            Conn->Close();
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  CSS DS 1.1.0 EOS PUID extraction from connection URL
+// ─────────────────────────────────────────────────────────────────────────────
+
+FString UBanEnforcer::ExtractEosPuidFromConnectionUrl(APlayerController* PC)
+{
+    if (!IsValid(PC)) return FString();
+
+    // On dedicated servers, PC->Player is the UNetConnection for this client.
+    UNetConnection* Conn = Cast<UNetConnection>(PC->Player);
+    if (!Conn) return FString();
+
+    // The ClientIdentity query option contains the EOS PUID as ASCII bytes
+    // embedded in a binary blob encoded as a lowercase hex string.
+    //
+    // Layout (hex string offsets):
+    //   0 - 7  : 4-byte LE header (length or version field)
+    //   8 - 71 : 32 ASCII bytes that form the 32-char EOS PUID
+    //            e.g. hex pair "34" = 0x34 = 52 = '4', so "3438" → "48"
+    //   72+    : additional platform data (Steam handle, flags)
+    const TCHAR* Opt = Conn->URL.GetOption(TEXT("ClientIdentity="), nullptr);
+    if (!Opt || !*Opt) return FString();
+
+    const FString Hex(Opt);
+    // Minimum: 8 header chars + 64 PUID-as-bytes chars = 72 hex chars
+    if (Hex.Len() < 72) return FString();
+
+    FString Puid;
+    Puid.Reserve(32);
+
+    for (int32 i = 8; i < 72; i += 2)
+    {
+        // Decode one hex byte pair into the ASCII character it represents.
+        const TCHAR Hi = FChar::ToLower(Hex[i]);
+        const TCHAR Lo = FChar::ToLower(Hex[i + 1]);
+
+        if (!FChar::IsHexDigit(Hi) || !FChar::IsHexDigit(Lo)) return FString();
+
+        const uint8 HiNibble = (Hi >= 'a') ? (uint8)(Hi - 'a' + 10) : (uint8)(Hi - '0');
+        const uint8 LoNibble = (Lo >= 'a') ? (uint8)(Lo - 'a' + 10) : (uint8)(Lo - '0');
+        const TCHAR Ch       = (TCHAR)((HiNibble << 4) | LoNibble);
+
+        // Each decoded byte must itself be a hex character: EOS PUIDs are
+        // 32-char lowercase hex strings.
+        if (!FChar::IsHexDigit(Ch)) return FString();
+        Puid.AppendChar(Ch);
+    }
+
+    if (Puid.Len() != 32) return FString();
+    return Puid.ToLower();
 }
