@@ -104,14 +104,23 @@ namespace BanChat
         if (PC && PC->PlayerState)
         {
             const FUniqueNetIdRepl& UniqueId = PC->PlayerState->GetUniqueId();
-            if (UniqueId.IsValid())
+            // Use direct FUniqueNetIdRepl member accessors — do NOT dereference
+            // via operator-> (UniqueId->GetType() / UniqueId->ToString()).
+            // On CSS DS with EOS V2 PUIDs the inner TSharedPtr slot holds a raw
+            // EOS handle, not a valid C++ FUniqueNetId object; operator-> returns
+            // a garbage pointer that crashes.  FUniqueNetIdRepl::GetType() and
+            // FUniqueNetIdRepl::ToString() are safe for both Steam (V1) and EOS
+            // PUID (V2) identities.  Guard against a NONE-type identity that
+            // IsValid() can return true for before the EOS PUID provider assigns
+            // it (GetType() == "NONE", ToString() == "").
+            if (UniqueId.IsValid() && UniqueId.GetType() != FName(TEXT("NONE")))
             {
-                const FString Type  = UniqueId->GetType().ToString().ToUpper();
+                const FString Type  = UniqueId.GetType().ToString().ToUpper();
                 // Normalize to lowercase for EOS so the UID matches DB entries
                 // created by the /ban and /tempban commands (which also lowercase).
                 const FString RawId = (Type == TEXT("EOS"))
-                    ? UniqueId->ToString().ToLower()
-                    : UniqueId->ToString();
+                    ? UniqueId.ToString().ToLower()
+                    : UniqueId.ToString();
                 OutUid = UBanDatabase::MakeUid(Type, RawId);
             }
         }
@@ -203,7 +212,11 @@ namespace BanChat
 
         // Unique match — resolve their platform identity.
         const FUniqueNetIdRepl& UniqueId = FoundPC->PlayerState->GetUniqueId();
-        if (!UniqueId.IsValid())
+        // Guard against NONE-type: IsValid() can return true before the EOS PUID
+        // provider assigns the identity (GetType()=="NONE", ToString()=="").
+        // Also use direct member accessors — NOT operator-> — to avoid a crash on
+        // CSS DS with EOS V2 PUIDs (see IsAdminSender for the full explanation).
+        if (!UniqueId.IsValid() || UniqueId.GetType() == FName(TEXT("NONE")))
         {
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] Found player '%s' but could not resolve "
@@ -212,11 +225,11 @@ namespace BanChat
             return false;
         }
 
-        const FString Platform = UniqueId->GetType().ToString().ToUpper();
+        const FString Platform = UniqueId.GetType().ToString().ToUpper();
         // Normalize EOS PUIDs to lowercase to match bans stored via /ban or /tempban.
         const FString RawId    = (Platform == TEXT("EOS"))
-            ? UniqueId->ToString().ToLower()
-            : UniqueId->ToString();
+            ? UniqueId.ToString().ToLower()
+            : UniqueId.ToString();
         OutUid         = UBanDatabase::MakeUid(Platform, RawId);
         OutDisplayName = Matches[0];
 
@@ -731,7 +744,10 @@ EExecutionStatus AWhoAmIChatCommand::ExecuteCommand_Implementation(
     }
 
     const FUniqueNetIdRepl& UniqueId = PC->PlayerState->GetUniqueId();
-    if (!UniqueId.IsValid())
+    // Guard against NONE-type and use direct member accessors — NOT operator->
+    // (see IsAdminSender for the full explanation on why operator-> crashes on
+    // CSS DS with EOS V2 PUIDs).
+    if (!UniqueId.IsValid() || UniqueId.GetType() == FName(TEXT("NONE")))
     {
         Sender->SendChatMessage(
             TEXT("[BanChatCommands] Could not resolve your platform identity. "
@@ -740,8 +756,10 @@ EExecutionStatus AWhoAmIChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::UNCOMPLETED;
     }
 
-    const FString Platform = UniqueId->GetType().ToString().ToUpper();
-    const FString RawId    = UniqueId->ToString();
+    const FString Platform = UniqueId.GetType().ToString().ToUpper();
+    const FString RawId    = (Platform == TEXT("EOS"))
+        ? UniqueId.ToString().ToLower()
+        : UniqueId.ToString();
 
     if (Platform == TEXT("STEAM"))
     {
