@@ -91,7 +91,7 @@ void UBanEnforcer::OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPl
     if (NewPlayer->PlayerState)
     {
         const FUniqueNetIdRepl& NetIdAtLogin = NewPlayer->PlayerState->GetUniqueId();
-        if (NetIdAtLogin.IsValid())
+        if (NetIdAtLogin.IsValid() && NetIdAtLogin.GetType() != FName(TEXT("NONE")))
         {
             // Defer the kick one tick so CSS's own PostLogin code can finish
             // before the connection is closed.  Closing synchronously inside the
@@ -183,18 +183,18 @@ void UBanEnforcer::ProcessPendingBanChecks()
         }
 
         const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
-        if (!NetId.IsValid())
+        if (!NetId.IsValid() || NetId.GetType() == FName(TEXT("NONE")))
         {
             if (++Check.Attempts >= FPendingBanCheck::MaxAttempts)
             {
                 UE_LOG(LogBanEnforcer, Warning,
-                    TEXT("BanEnforcer: gave up waiting for UniqueId for player '%s' after %d attempts (~%.0f s)"),
+                    TEXT("BanEnforcer: gave up waiting for UniqueId (or NONE-type EOS PUID) for player '%s' after %d attempts (~%.0f s)"),
                     *PC->PlayerState->GetPlayerName(),
                     FPendingBanCheck::MaxAttempts,
                     FPendingBanCheck::MaxAttempts * 0.5f);
                 PendingBanChecks.RemoveAt(i);
             }
-            // else: identity not ready yet — keep queued, retry next tick.
+            // else: identity not ready yet or still NONE type — keep queued, retry next tick.
             continue;
         }
 
@@ -232,6 +232,16 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
     // FUniqueNetIdRepl::GetType() and FUniqueNetIdRepl::ToString() are safe for
     // both V1 (Steam) and V2 (EOS PUID) identities.
     const FString Platform = NetId.GetType().ToString().ToUpper();
+    // Guard against an unresolved EOS identity: on CSS DS, FUniqueNetIdRepl::IsValid()
+    // can return true before the EOS PUID provider has been assigned, leaving GetType()
+    // as "NONE" and ToString() as "".  Recording or enforcing a "NONE:" UID is wrong.
+    if (Platform == TEXT("NONE"))
+    {
+        UE_LOG(LogBanEnforcer, Warning,
+            TEXT("BanEnforcer: PerformBanCheckForPlayer — identity type is NONE for player '%s', skipping (EOS PUID not yet resolved)"),
+            *PC->PlayerState->GetPlayerName());
+        return;
+    }
     // Normalize EOS PUIDs to lowercase so they match bans stored by chat commands
     // (which also lowercase EOS PUIDs via the /ban and /tempban resolution paths).
     const FString RawId    = (Platform == TEXT("EOS"))
