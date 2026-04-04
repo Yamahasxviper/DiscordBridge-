@@ -123,6 +123,15 @@ namespace BanChat
                     : UniqueId.ToString();
                 OutUid = UBanDatabase::MakeUid(Type, RawId);
             }
+            else
+            {
+                // CSS DS 1.1.0 workaround: GetType()==NONE because EOS online
+                // subsystem is offline.  Extract the EOS PUID from the connection
+                // URL's ClientIdentity option instead.
+                const FString EosPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+                if (!EosPuid.IsEmpty())
+                    OutUid = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
+            }
         }
 
         const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
@@ -747,19 +756,31 @@ EExecutionStatus AWhoAmIChatCommand::ExecuteCommand_Implementation(
     // Guard against NONE-type and use direct member accessors — NOT operator->
     // (see IsAdminSender for the full explanation on why operator-> crashes on
     // CSS DS with EOS V2 PUIDs).
-    if (!UniqueId.IsValid() || UniqueId.GetType() == FName(TEXT("NONE")))
+    FString Platform, RawId;
+    if (UniqueId.IsValid() && UniqueId.GetType() != FName(TEXT("NONE")))
     {
-        Sender->SendChatMessage(
-            TEXT("[BanChatCommands] Could not resolve your platform identity. "
-                 "Try again in a moment."),
-            FLinearColor::Yellow);
-        return EExecutionStatus::UNCOMPLETED;
+        Platform = UniqueId.GetType().ToString().ToUpper();
+        RawId    = (Platform == TEXT("EOS"))
+            ? UniqueId.ToString().ToLower()
+            : UniqueId.ToString();
     }
-
-    const FString Platform = UniqueId.GetType().ToString().ToUpper();
-    const FString RawId    = (Platform == TEXT("EOS"))
-        ? UniqueId.ToString().ToLower()
-        : UniqueId.ToString();
+    else
+    {
+        // CSS DS 1.1.0 workaround: GetType()==NONE because EOS online subsystem
+        // is offline (IsOnline=false).  The EOS PUID is still embedded in the
+        // ClientIdentity URL option of the player's connection — use it.
+        const FString EosPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+        if (EosPuid.IsEmpty())
+        {
+            Sender->SendChatMessage(
+                TEXT("[BanChatCommands] Could not resolve your platform identity. "
+                     "Try again in a moment."),
+                FLinearColor::Yellow);
+            return EExecutionStatus::UNCOMPLETED;
+        }
+        Platform = TEXT("EOS");
+        RawId    = EosPuid;
+    }
 
     if (Platform == TEXT("STEAM"))
     {
