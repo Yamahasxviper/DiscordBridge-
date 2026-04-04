@@ -80,19 +80,21 @@ namespace BanChat
      * Check whether the command sender is allowed to run admin commands.
      *
      * Console senders (non-player) are always permitted.  Player senders must
-     * have their Steam64 ID listed in UBanChatCommandsConfig::AdminSteam64Ids.
-     * When the list is empty, player access is denied (console-only mode).
+     * have their compound UID (STEAM:xxx or EOS:xxx) listed in
+     * UBanChatCommandsConfig::AdminSteam64Ids (for Steam) or
+     * UBanChatCommandsConfig::AdminEosPUIDs (for EOS).
+     * When both lists are empty, player access is denied (console-only mode).
      *
      * @param Sender  The command sender to check.
-     * @param OutSteam64Id  Populated with the sender's Steam64 ID when they connect via Steam.
+     * @param OutUid  Populated with the sender's compound UID when they connect via a known platform.
      * @return true when the sender is authorised to run admin commands.
      */
-    static bool IsAdminSender(UCommandSender* Sender, FString& OutSteam64Id)
+    static bool IsAdminSender(UCommandSender* Sender, FString& OutUid)
     {
         if (!Sender->IsPlayerSender())
         {
             // Console / server operator — always allowed.
-            OutSteam64Id.Reset();
+            OutUid.Reset();
             return true;
         }
 
@@ -103,14 +105,18 @@ namespace BanChat
             const FUniqueNetIdRepl& UniqueId = PC->PlayerState->GetUniqueId();
             if (UniqueId.IsValid())
             {
-                const FString Type = UniqueId->GetType().ToString().ToUpper();
-                if (Type == TEXT("STEAM"))
-                    OutSteam64Id = UniqueId->ToString();
+                const FString Type  = UniqueId->GetType().ToString().ToUpper();
+                // Normalize to lowercase for EOS so the UID matches DB entries
+                // created by the /ban and /tempban commands (which also lowercase).
+                const FString RawId = (Type == TEXT("EOS"))
+                    ? UniqueId->ToString().ToLower()
+                    : UniqueId->ToString();
+                OutUid = UBanDatabase::MakeUid(Type, RawId);
             }
         }
 
         const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
-        if (!Cfg || !Cfg->IsAdmin(OutSteam64Id))
+        if (!Cfg || !Cfg->IsAdminUid(OutUid))
         {
             Sender->SendChatMessage(
                 TEXT("[BanChatCommands] You do not have permission to use this command."),
@@ -206,7 +212,10 @@ namespace BanChat
         }
 
         const FString Platform = UniqueId->GetType().ToString().ToUpper();
-        const FString RawId    = UniqueId->ToString();
+        // Normalize EOS PUIDs to lowercase to match bans stored via /ban or /tempban.
+        const FString RawId    = (Platform == TEXT("EOS"))
+            ? UniqueId->ToString().ToLower()
+            : UniqueId->ToString();
         OutUid         = UBanDatabase::MakeUid(Platform, RawId);
         OutDisplayName = Matches[0];
 

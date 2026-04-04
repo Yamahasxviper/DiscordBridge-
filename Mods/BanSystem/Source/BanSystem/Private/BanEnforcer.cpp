@@ -223,7 +223,11 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
     if (!NetId.IsValid()) return;
 
     const FString Platform = NetId->GetType().ToString().ToUpper();
-    const FString RawId    = NetId->ToString();
+    // Normalize EOS PUIDs to lowercase so they match bans stored by chat commands
+    // (which also lowercase EOS PUIDs via the /ban and /tempban resolution paths).
+    const FString RawId    = (Platform == TEXT("EOS"))
+        ? NetId->ToString().ToLower()
+        : NetId->ToString();
     const FString Uid      = UBanDatabase::MakeUid(Platform, RawId);
 
     UE_LOG(LogBanEnforcer, Log,
@@ -292,7 +296,10 @@ void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
         if (NetId.IsValid())
         {
             const FString Platform   = NetId->GetType().ToString().ToUpper();
-            const FString RawId      = NetId->ToString();
+            // Normalize EOS PUIDs to lowercase to match stored ban UIDs.
+            const FString RawId      = (Platform == TEXT("EOS"))
+                ? NetId->ToString().ToLower()
+                : NetId->ToString();
             const FString PlayerUid  = UBanDatabase::MakeUid(Platform, RawId);
 
             if (PlayerUid != Uid) continue;
