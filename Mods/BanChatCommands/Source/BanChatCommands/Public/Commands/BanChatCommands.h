@@ -159,8 +159,62 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  /whoami  — display the caller's own platform IDs
+//  /linkbans  — associate two UIDs with the same ban
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /linkbans <UID1> <UID2>
+ *
+ * Links two compound UIDs together so that a ban on one also blocks the player
+ * when they connect under the other identity.  Useful when the same person has
+ * both a Steam account and an EOS account.
+ *
+ * Both UIDs must have existing ban records.  The link is bidirectional: each
+ * ban's LinkedUids list is updated to include the other UID.
+ *
+ * Requires admin.
+ *
+ * Examples:
+ *   /linkbans STEAM:76561198000000000 EOS:00020aed06f0a6958c3c067fb4b73d51
+ */
+UCLASS()
+class BANCHATCOMMANDS_API ALinkBansChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    ALinkBansChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /unlinkbans  — remove the association between two UIDs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /unlinkbans <UID1> <UID2>
+ *
+ * Removes the bidirectional link between two compound UIDs that was previously
+ * created by /linkbans.
+ *
+ * Requires admin.
+ *
+ * Examples:
+ *   /unlinkbans STEAM:76561198000000000 EOS:00020aed06f0a6958c3c067fb4b73d51
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AUnlinkBansChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AUnlinkBansChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
 
 /**
  * /whoami

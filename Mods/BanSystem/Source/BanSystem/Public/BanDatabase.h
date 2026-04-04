@@ -64,8 +64,17 @@ public:
     /**
      * Returns true and fills OutEntry if the UID is currently banned
      * (permanent or not yet expired).  Thread-safe.
+     * Only the primary Uid field is checked.
      */
     bool IsCurrentlyBanned(const FString& Uid, FBanEntry& OutEntry) const;
+
+    /**
+     * Like IsCurrentlyBanned(), but also scans the LinkedUids array of every
+     * ban record.  Use this in enforcement paths so that a ban issued for one
+     * platform also blocks the same player under a linked identity.
+     * Thread-safe.
+     */
+    bool IsCurrentlyBannedByAnyId(const FString& Uid, FBanEntry& OutEntry) const;
 
     /**
      * Returns the ban record for the UID regardless of expiry.
@@ -85,7 +94,26 @@ public:
      */
     TArray<FBanEntry> GetAllBans() const;
 
-    // ── Backup ────────────────────────────────────────────────────────────
+    // ── Cross-platform linking ─────────────────────────────────────────────
+
+    /**
+     * Links two UIDs together so that a ban on one also blocks the other.
+     *
+     * Finds the ban record for UidA (or UidB) and adds the other UID to its
+     * LinkedUids list.  If both UIDs have their own ban records the link is
+     * added to both.  Returns true if at least one record was updated.
+     *
+     * Use /linkbans <UID1> <UID2> from the server console or an admin chat
+     * command to associate a Steam64 ban with an EOS PUID, or any two bans
+     * that belong to the same real-world player.
+     */
+    bool LinkBans(const FString& UidA, const FString& UidB);
+
+    /**
+     * Removes the directional link from PrimaryUid's LinkedUids list.
+     * Returns true if the link was found and removed from at least one record.
+     */
+    bool UnlinkBans(const FString& UidA, const FString& UidB);
 
     /**
      * Copies the live JSON file to BackupDir/bans_YYYY-MM-DD_HH-MM-SS.json.

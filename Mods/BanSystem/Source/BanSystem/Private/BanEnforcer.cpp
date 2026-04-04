@@ -235,7 +235,7 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
         *PC->PlayerState->GetPlayerName(), *Platform, *RawId);
 
     FBanEntry Entry;
-    if (!DB->IsCurrentlyBanned(Uid, Entry))
+    if (!DB->IsCurrentlyBannedByAnyId(Uid, Entry))
     {
         UE_LOG(LogBanEnforcer, Log,
             TEXT("BanEnforcer: player '%s' (%s) is not banned — allowing join"),
