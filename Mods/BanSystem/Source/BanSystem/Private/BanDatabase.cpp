@@ -36,6 +36,16 @@ namespace BanDbJson
         else
             Obj->SetStringField(TEXT("expireDate"), E.ExpireDate.ToIso8601());
         Obj->SetBoolField(TEXT("isPermanent"), E.bIsPermanent);
+
+        // Persist linked UIDs (cross-platform identity).
+        if (E.LinkedUids.Num() > 0)
+        {
+            TArray<TSharedPtr<FJsonValue>> LinkedArr;
+            for (const FString& L : E.LinkedUids)
+                LinkedArr.Add(MakeShared<FJsonValueString>(L));
+            Obj->SetArrayField(TEXT("linkedUids"), LinkedArr);
+        }
+
         return Obj;
     }
 
@@ -84,6 +94,18 @@ namespace BanDbJson
         else
         {
             OutEntry.ExpireDate = FDateTime(0);
+        }
+
+        // Restore linked UIDs (may be absent in older records).
+        const TArray<TSharedPtr<FJsonValue>>* LinkedArr = nullptr;
+        if (Obj->TryGetArrayField(TEXT("linkedUids"), LinkedArr) && LinkedArr)
+        {
+            for (const TSharedPtr<FJsonValue>& Val : *LinkedArr)
+            {
+                FString L;
+                if (Val.IsValid() && Val->TryGetString(L) && !L.IsEmpty())
+                    OutEntry.LinkedUids.Add(L);
+            }
         }
 
         return !OutEntry.Uid.IsEmpty();
@@ -286,6 +308,25 @@ bool UBanDatabase::IsCurrentlyBanned(const FString& Uid, FBanEntry& OutEntry) co
     return false;
 }
 
+bool UBanDatabase::IsCurrentlyBannedByAnyId(const FString& Uid, FBanEntry& OutEntry) const
+{
+    FScopeLock Lock(&DbMutex);
+
+    const FDateTime Now = FDateTime::UtcNow();
+    for (const FBanEntry& E : Bans)
+    {
+        if (!E.MatchesUid(Uid)) continue;
+
+        if (E.bIsPermanent || Now < E.ExpireDate)
+        {
+            OutEntry = E;
+            return true;
+        }
+        // Expired — keep scanning in case a different linked record is still active.
+    }
+    return false;
+}
+
 bool UBanDatabase::GetBanByUid(const FString& Uid, FBanEntry& OutEntry) const
 {
     FScopeLock Lock(&DbMutex);
@@ -323,6 +364,67 @@ TArray<FBanEntry> UBanDatabase::GetAllBans() const
 {
     FScopeLock Lock(&DbMutex);
     return Bans;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Cross-platform linking
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool UBanDatabase::LinkBans(const FString& UidA, const FString& UidB)
+{
+    if (UidA.IsEmpty() || UidB.IsEmpty() || UidA.Equals(UidB, ESearchCase::IgnoreCase))
+        return false;
+
+    FScopeLock Lock(&DbMutex);
+
+    bool bDirty = false;
+
+    auto AddLinkIfMissing = [&](FBanEntry& Entry, const FString& LinkUid) -> bool
+    {
+        for (const FString& L : Entry.LinkedUids)
+            if (L.Equals(LinkUid, ESearchCase::IgnoreCase)) return false;
+        Entry.LinkedUids.Add(LinkUid);
+        return true;
+    };
+
+    for (FBanEntry& E : Bans)
+    {
+        if (E.Uid.Equals(UidA, ESearchCase::IgnoreCase))
+            bDirty |= AddLinkIfMissing(E, UidB);
+        if (E.Uid.Equals(UidB, ESearchCase::IgnoreCase))
+            bDirty |= AddLinkIfMissing(E, UidA);
+    }
+
+    if (bDirty)
+        return SaveToFile();
+
+    UE_LOG(LogBanDatabase, Warning,
+        TEXT("BanDatabase: LinkBans — no ban found for either '%s' or '%s'"), *UidA, *UidB);
+    return false;
+}
+
+bool UBanDatabase::UnlinkBans(const FString& UidA, const FString& UidB)
+{
+    if (UidA.IsEmpty() || UidB.IsEmpty()) return false;
+
+    FScopeLock Lock(&DbMutex);
+
+    bool bDirty = false;
+
+    for (FBanEntry& E : Bans)
+    {
+        if (E.Uid.Equals(UidA, ESearchCase::IgnoreCase) || E.Uid.Equals(UidB, ESearchCase::IgnoreCase))
+        {
+            const FString& ToRemove = E.Uid.Equals(UidA, ESearchCase::IgnoreCase) ? UidB : UidA;
+            const int32 Removed = E.LinkedUids.RemoveAll([&ToRemove](const FString& L)
+            {
+                return L.Equals(ToRemove, ESearchCase::IgnoreCase);
+            });
+            if (Removed > 0) bDirty = true;
+        }
+    }
+
+    return bDirty ? SaveToFile() : false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

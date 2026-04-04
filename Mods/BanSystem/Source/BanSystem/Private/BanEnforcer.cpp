@@ -3,6 +3,7 @@
 
 #include "BanEnforcer.h"
 #include "BanDatabase.h"
+#include "PlayerSessionRegistry.h"
 
 // Pull in the full FUniqueNetIdRepl definition that was forward-declared in the header.
 #include "GameFramework/OnlineReplStructs.h"
@@ -24,6 +25,7 @@ DEFINE_LOG_CATEGORY(LogBanEnforcer);
 void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
 {
     Collection.InitializeDependency<UBanDatabase>();
+    Collection.InitializeDependency<UPlayerSessionRegistry>();
     Super::Initialize(Collection);
 
     // Primary enforcement hook — AGameModeBase::PostLogin broadcasts this event
@@ -223,7 +225,11 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
     if (!NetId.IsValid()) return;
 
     const FString Platform = NetId->GetType().ToString().ToUpper();
-    const FString RawId    = NetId->ToString();
+    // Normalize EOS PUIDs to lowercase so they match bans stored by chat commands
+    // (which also lowercase EOS PUIDs via the /ban and /tempban resolution paths).
+    const FString RawId    = (Platform == TEXT("EOS"))
+        ? NetId->ToString().ToLower()
+        : NetId->ToString();
     const FString Uid      = UBanDatabase::MakeUid(Platform, RawId);
 
     UE_LOG(LogBanEnforcer, Log,
@@ -231,11 +237,22 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
         *PC->PlayerState->GetPlayerName(), *Platform, *RawId);
 
     FBanEntry Entry;
-    if (!DB->IsCurrentlyBanned(Uid, Entry))
+    if (!DB->IsCurrentlyBannedByAnyId(Uid, Entry))
     {
         UE_LOG(LogBanEnforcer, Log,
             TEXT("BanEnforcer: player '%s' (%s) is not banned — allowing join"),
             *PC->PlayerState->GetPlayerName(), *Uid);
+
+        // Record the session for identity-persistence tracking (Gap 4).
+        // This lets admins use /playerhistory to audit which UIDs a player
+        // has connected with across server sessions.
+        UGameInstance* GI = GetGameInstance();
+        if (GI)
+        {
+            if (UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>())
+                Registry->RecordSession(Uid, PC->PlayerState->GetPlayerName());
+        }
+
         return;
     }
 
@@ -292,7 +309,10 @@ void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
         if (NetId.IsValid())
         {
             const FString Platform   = NetId->GetType().ToString().ToUpper();
-            const FString RawId      = NetId->ToString();
+            // Normalize EOS PUIDs to lowercase to match stored ban UIDs.
+            const FString RawId      = (Platform == TEXT("EOS"))
+                ? NetId->ToString().ToLower()
+                : NetId->ToString();
             const FString PlayerUid  = UBanDatabase::MakeUid(Platform, RawId);
 
             if (PlayerUid != Uid) continue;

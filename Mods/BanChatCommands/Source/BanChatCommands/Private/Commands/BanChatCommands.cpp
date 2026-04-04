@@ -6,6 +6,7 @@
 #include "BanDatabase.h"
 #include "BanEnforcer.h"
 #include "BanTypes.h"
+#include "PlayerSessionRegistry.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
@@ -80,19 +81,21 @@ namespace BanChat
      * Check whether the command sender is allowed to run admin commands.
      *
      * Console senders (non-player) are always permitted.  Player senders must
-     * have their Steam64 ID listed in UBanChatCommandsConfig::AdminSteam64Ids.
-     * When the list is empty, player access is denied (console-only mode).
+     * have their compound UID (STEAM:xxx or EOS:xxx) listed in
+     * UBanChatCommandsConfig::AdminSteam64Ids (for Steam) or
+     * UBanChatCommandsConfig::AdminEosPUIDs (for EOS).
+     * When both lists are empty, player access is denied (console-only mode).
      *
      * @param Sender  The command sender to check.
-     * @param OutSteam64Id  Populated with the sender's Steam64 ID when they connect via Steam.
+     * @param OutUid  Populated with the sender's compound UID when they connect via a known platform.
      * @return true when the sender is authorised to run admin commands.
      */
-    static bool IsAdminSender(UCommandSender* Sender, FString& OutSteam64Id)
+    static bool IsAdminSender(UCommandSender* Sender, FString& OutUid)
     {
         if (!Sender->IsPlayerSender())
         {
             // Console / server operator — always allowed.
-            OutSteam64Id.Reset();
+            OutUid.Reset();
             return true;
         }
 
@@ -103,14 +106,18 @@ namespace BanChat
             const FUniqueNetIdRepl& UniqueId = PC->PlayerState->GetUniqueId();
             if (UniqueId.IsValid())
             {
-                const FString Type = UniqueId->GetType().ToString().ToUpper();
-                if (Type == TEXT("STEAM"))
-                    OutSteam64Id = UniqueId->ToString();
+                const FString Type  = UniqueId->GetType().ToString().ToUpper();
+                // Normalize to lowercase for EOS so the UID matches DB entries
+                // created by the /ban and /tempban commands (which also lowercase).
+                const FString RawId = (Type == TEXT("EOS"))
+                    ? UniqueId->ToString().ToLower()
+                    : UniqueId->ToString();
+                OutUid = UBanDatabase::MakeUid(Type, RawId);
             }
         }
 
         const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
-        if (!Cfg || !Cfg->IsAdmin(OutSteam64Id))
+        if (!Cfg || !Cfg->IsAdminUid(OutUid))
         {
             Sender->SendChatMessage(
                 TEXT("[BanChatCommands] You do not have permission to use this command."),
@@ -206,7 +213,10 @@ namespace BanChat
         }
 
         const FString Platform = UniqueId->GetType().ToString().ToUpper();
-        const FString RawId    = UniqueId->ToString();
+        // Normalize EOS PUIDs to lowercase to match bans stored via /ban or /tempban.
+        const FString RawId    = (Platform == TEXT("EOS"))
+            ? UniqueId->ToString().ToLower()
+            : UniqueId->ToString();
         OutUid         = UBanDatabase::MakeUid(Platform, RawId);
         OutDisplayName = Matches[0];
 
@@ -276,7 +286,164 @@ namespace BanChat
         return EExecutionStatus::UNCOMPLETED;
     }
 
+    /**
+     * Validates and normalises a compound UID argument entered by the user.
+     *
+     * Accepts:
+     *   "STEAM:<17-digit decimal>"  → returned as-is
+     *   "EOS:<32-hex>"             → returned with lowercase hex part
+     *   "STEAM:<id>"               → platform prefix already present
+     *
+     * On failure, sends an error to the sender and returns false.
+     */
+    static bool ParseAndNormaliseUidArg(UCommandSender* Sender,
+                                        const FString& Arg,
+                                        FString& OutUid)
+    {
+        // Try to parse an explicit compound UID supplied by the user (e.g. "STEAM:xxx" or "EOS:xxx").
+        FString Platform, RawId;
+        UBanDatabase::ParseUid(Arg, Platform, RawId);
+
+        if (Platform == TEXT("STEAM") && IsValidSteam64(RawId))
+        {
+            OutUid = UBanDatabase::MakeUid(TEXT("STEAM"), RawId);
+            return true;
+        }
+
+        if (Platform == TEXT("EOS") && IsValidEOSPUID(RawId))
+        {
+            OutUid = UBanDatabase::MakeUid(TEXT("EOS"), RawId.ToLower());
+            return true;
+        }
+
+        // Accept raw IDs without prefix.
+        if (IsValidSteam64(Arg))
+        {
+            OutUid = UBanDatabase::MakeUid(TEXT("STEAM"), Arg);
+            return true;
+        }
+        if (IsValidEOSPUID(Arg))
+        {
+            OutUid = UBanDatabase::MakeUid(TEXT("EOS"), Arg.ToLower());
+            return true;
+        }
+
+        if (Sender)
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid compound UID "
+                    "(STEAM:<17digits> or EOS:<32hex>)."), *Arg),
+                FLinearColor::Red);
+        }
+        return false;
+    }
+
 } // namespace BanChat
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ALinkBansChatCommand  — /linkbans
+// ─────────────────────────────────────────────────────────────────────────────
+
+ALinkBansChatCommand::ALinkBansChatCommand()
+{
+    CommandName          = TEXT("linkbans");
+    MinNumberOfArguments = 2;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "LinkBansUsage",
+        "/linkbans <UID1> <UID2>");
+}
+
+EExecutionStatus ALinkBansChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString AdminUid;
+    if (!BanChat::IsAdminSender(Sender, AdminUid))
+        return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    FString UidA, UidB;
+    if (!BanChat::ParseAndNormaliseUidArg(Sender, Arguments[0], UidA))
+        return EExecutionStatus::BAD_ARGUMENTS;
+    if (!BanChat::ParseAndNormaliseUidArg(Sender, Arguments[1], UidB))
+        return EExecutionStatus::BAD_ARGUMENTS;
+
+    if (UidA.Equals(UidB, ESearchCase::IgnoreCase))
+    {
+        Sender->SendChatMessage(
+            TEXT("[BanChatCommands] Cannot link a UID to itself."),
+            FLinearColor::Red);
+        return EExecutionStatus::BAD_ARGUMENTS;
+    }
+
+    UBanDatabase* DB = BanChat::GetDB(this);
+    if (!DB)
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
+
+    if (DB->LinkBans(UidA, UidB))
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Linked %s ↔ %s. "
+                "A ban on either identity will now block both."), *UidA, *UidB),
+            FLinearColor::Green);
+        return EExecutionStatus::COMPLETED;
+    }
+
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("[BanChatCommands] Could not link — no ban record found for '%s' or '%s'. "
+            "Both UIDs must have existing ban records before they can be linked."),
+            *UidA, *UidB),
+        FLinearColor::Red);
+    return EExecutionStatus::UNCOMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AUnlinkBansChatCommand  — /unlinkbans
+// ─────────────────────────────────────────────────────────────────────────────
+
+AUnlinkBansChatCommand::AUnlinkBansChatCommand()
+{
+    CommandName          = TEXT("unlinkbans");
+    MinNumberOfArguments = 2;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "UnlinkBansUsage",
+        "/unlinkbans <UID1> <UID2>");
+}
+
+EExecutionStatus AUnlinkBansChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString AdminUid;
+    if (!BanChat::IsAdminSender(Sender, AdminUid))
+        return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    FString UidA, UidB;
+    if (!BanChat::ParseAndNormaliseUidArg(Sender, Arguments[0], UidA))
+        return EExecutionStatus::BAD_ARGUMENTS;
+    if (!BanChat::ParseAndNormaliseUidArg(Sender, Arguments[1], UidB))
+        return EExecutionStatus::BAD_ARGUMENTS;
+
+    UBanDatabase* DB = BanChat::GetDB(this);
+    if (!DB)
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
+
+    if (DB->UnlinkBans(UidA, UidB))
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Removed link between %s and %s."), *UidA, *UidB),
+            FLinearColor::Green);
+        return EExecutionStatus::COMPLETED;
+    }
+
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("[BanChatCommands] No link found between %s and %s."), *UidA, *UidB),
+        FLinearColor::Yellow);
+    return EExecutionStatus::UNCOMPLETED;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ABanChatCommand  — /ban
@@ -593,6 +760,101 @@ EExecutionStatus AWhoAmIChatCommand::ExecuteCommand_Implementation(
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Your platform ID (%s): %s"), *Platform, *RawId),
             FLinearColor::Green);
+    }
+
+    return EExecutionStatus::COMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  APlayerHistoryChatCommand  — /playerhistory
+// ─────────────────────────────────────────────────────────────────────────────
+
+APlayerHistoryChatCommand::APlayerHistoryChatCommand()
+{
+    CommandName          = TEXT("playerhistory");
+    MinNumberOfArguments = 1;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "PlayerHistoryUsage",
+        "/playerhistory <name_substring|UID>");
+}
+
+EExecutionStatus APlayerHistoryChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString AdminUid;
+    if (!BanChat::IsAdminSender(Sender, AdminUid))
+        return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    UWorld* World = GetWorld();
+    if (!World) return EExecutionStatus::UNCOMPLETED;
+    UGameInstance* GI = World->GetGameInstance();
+    if (!GI) return EExecutionStatus::UNCOMPLETED;
+
+    UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>();
+    if (!Registry)
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] PlayerSessionRegistry unavailable."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
+
+    const FString& Arg = Arguments[0];
+
+    // Determine whether the argument looks like a compound UID (contains ':')
+    // or a display-name substring.
+    FString SearchUid;
+    const bool bIsUid = BanChat::ParseAndNormaliseUidArg(nullptr, Arg, SearchUid);
+
+    TArray<FPlayerSessionRecord> Results;
+    if (bIsUid)
+    {
+        // Look up by UID — show the recorded display name.
+        FPlayerSessionRecord Rec;
+        if (Registry->FindByUid(SearchUid, Rec))
+        {
+            Results.Add(Rec);
+        }
+        else
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] No session history found for UID %s."), *SearchUid),
+                FLinearColor::Yellow);
+            return EExecutionStatus::COMPLETED;
+        }
+    }
+    else
+    {
+        // Look up by display-name substring.
+        Results = Registry->FindByName(Arg);
+        if (Results.IsEmpty())
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] No session history found for name '%s'."), *Arg),
+                FLinearColor::Yellow);
+            return EExecutionStatus::COMPLETED;
+        }
+    }
+
+    if (Results.Num() > MaxResults)
+        Results.SetNum(MaxResults);
+
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("[BanChatCommands] Session history for '%s' (%d result(s)):"), *Arg, Results.Num()),
+        FLinearColor::White);
+
+    UBanDatabase* DB = BanChat::GetDB(this);
+
+    for (const FPlayerSessionRecord& Rec : Results)
+    {
+        FBanEntry BanEntry;
+        const bool bBanned = DB && DB->IsCurrentlyBannedByAnyId(Rec.Uid, BanEntry);
+        const FString BanStatus = bBanned
+            ? FString::Printf(TEXT(" [BANNED: %s]"), *BanEntry.Reason)
+            : TEXT("");
+
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("  %s | \"%s\" | last seen: %s%s"),
+                *Rec.Uid, *Rec.DisplayName, *Rec.LastSeen, *BanStatus),
+            bBanned ? FLinearColor::Red : FLinearColor::White);
     }
 
     return EExecutionStatus::COMPLETED;

@@ -58,6 +58,17 @@ struct BANSYSTEM_API FBanEntry
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     bool bIsPermanent = true;
 
+    /**
+     * Optional list of additional compound UIDs that are linked to this ban
+     * (cross-platform identity, e.g. "STEAM:xxx" and "EOS:yyy" for the same person).
+     *
+     * When UBanDatabase::IsCurrentlyBannedByAnyId() is called, it searches both
+     * the primary Uid and every entry in this list.  Use /linkbans to associate
+     * two UIDs and /unlinkbans to remove the association.
+     */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    TArray<FString> LinkedUids;
+
     FBanEntry()
         : Id(0)
         , BanDate(FDateTime::UtcNow())
@@ -70,6 +81,18 @@ struct BANSYSTEM_API FBanEntry
     {
         if (bIsPermanent) return false;
         return FDateTime::UtcNow() > ExpireDate;
+    }
+
+    /**
+     * Returns true if the given compound UID matches this ban's primary Uid or
+     * any entry in LinkedUids (case-insensitive).
+     */
+    bool MatchesUid(const FString& InUid) const
+    {
+        if (Uid.Equals(InUid, ESearchCase::IgnoreCase)) return true;
+        for (const FString& L : LinkedUids)
+            if (L.Equals(InUid, ESearchCase::IgnoreCase)) return true;
+        return false;
     }
 
     /** Human-readable message shown to the player when they are kicked. */
