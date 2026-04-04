@@ -11,18 +11,22 @@
  *
  * Per-server configuration for BanChatCommands.
  *
- * Edit <ServerRoot>/FactoryGame/Config/DefaultGame.ini and add a section:
+ * Settings are read from the mod's Config/DefaultBanChatCommands.ini.
+ * To add admins, create (or edit) the override file on your server:
+ *   Saved/Config/<Platform>/BanChatCommands.ini
+ * and add a section:
  *
  *   [/Script/BanChatCommands.BanChatCommandsConfig]
  *   +AdminSteam64Ids=76561198000000000
  *   +AdminSteam64Ids=76561198111111111
  *   +AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d51
  *
- * When both lists are empty, admin commands (/ban, /tempban, /unban,
- * /bancheck, /banlist) can only be run from the server console.
+ * Using Saved/Config ensures your admin list is never overwritten by a
+ * mod update.  When both lists are empty, admin commands (/ban, /tempban,
+ * /unban, /bancheck, /banlist) can only be run from the server console.
  * /whoami is always available to all players regardless of this setting.
  */
-UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "Ban Chat Commands"))
+UCLASS(Config = BanChatCommands, DefaultConfig, meta = (DisplayName = "Ban Chat Commands"))
 class BANCHATCOMMANDS_API UBanChatCommandsConfig : public UObject
 {
     GENERATED_BODY()
@@ -30,7 +34,7 @@ class BANCHATCOMMANDS_API UBanChatCommandsConfig : public UObject
 public:
     /**
      * Steam64 IDs of server administrators who may run ban commands in chat.
-     * Add one entry per line in DefaultGame.ini using the +AdminSteam64Ids= syntax.
+     * Add one entry per line in BanChatCommands.ini using the +AdminSteam64Ids= syntax.
      * If this list and AdminEosPUIDs are both empty, only the server console can
      * run admin commands.
      */
@@ -40,7 +44,7 @@ public:
     /**
      * EOS Product User IDs (32-character hex strings) of server administrators
      * who may run ban commands in chat.  Use /whoami in-game to find your EOS PUID.
-     * Add one entry per line in DefaultGame.ini using the +AdminEosPUIDs= syntax.
+     * Add one entry per line in BanChatCommands.ini using the +AdminEosPUIDs= syntax.
      *
      * Example:
      *   +AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d51
