@@ -43,6 +43,11 @@ public:
      *  of the mod directory. */
     static void BackupConfigIfNeeded();
 
+    /** Restores Mods/BanChatCommands/Config/DefaultBanChatCommands.ini with the full
+     *  annotated template if the file is missing or has been stripped of comment lines
+     *  by Alpakit's staging step. */
+    static void RestoreDefaultConfigIfNeeded();
+
 private:
     FDelegateHandle WorldInitHandle;
 

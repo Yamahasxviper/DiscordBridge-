@@ -19,6 +19,10 @@ void FBanSystemModule::StartupModule()
     // subclasses and initialise automatically when the game instance starts.
     // No manual setup is required here.
 
+    // Restore the annotated Default*.ini so operators can always read the
+    // setting descriptions even after a mod update or fresh install.
+    RestoreDefaultConfigIfNeeded();
+
     // On every server start, write a backup to Saved/BanSystem/BanSystem.ini.
     // That folder is never touched by mod updates so settings survive any wipe
     // of the mod directory.
@@ -92,6 +96,88 @@ void FBanSystemModule::BackupConfigIfNeeded()
     {
         UE_LOG(LogBanSystem, Warning,
             TEXT("BanSystem: Could not write backup config to '%s'."), *BackupPath);
+    }
+}
+
+void FBanSystemModule::RestoreDefaultConfigIfNeeded()
+{
+    const FString DefaultIniPath = FPaths::Combine(
+        FPaths::ProjectDir(),
+        TEXT("Mods"), TEXT("BanSystem"),
+        TEXT("Config"), TEXT("DefaultBanSystem.ini"));
+
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+
+    // Only rewrite when the file is missing or has been stripped of comment
+    // lines.  Alpakit's staging step runs Default*.ini through UE's config
+    // cache, which drops all semicolon comment lines.  Excluding the file via
+    // PluginSettings.ini prevents that, but a fresh install may still land
+    // without the file.  This keeps comments visible after every update.
+    if (PlatformFile.FileExists(*DefaultIniPath))
+    {
+        FString Existing;
+        FFileHelper::LoadFileToString(Existing, *DefaultIniPath);
+        if (Existing.Contains(TEXT("; ")))
+            return; // comment lines present — leave as-is
+    }
+
+    const FString Content =
+        FString(TEXT("; BanSystem configuration.\n"))
+        + TEXT(";\n")
+        + TEXT("; Settings in this file are read automatically by UBanSystemConfig\n")
+        + TEXT("; (UCLASS Config=BanSystem).\n")
+        + TEXT(";\n")
+        + TEXT("; RECOMMENDED: place your server-specific settings in\n")
+        + TEXT(";   Saved/BanSystem/BanSystem.ini\n")
+        + TEXT("; using the same section header below.  That file is never overwritten by mod\n")
+        + TEXT("; updates.  BanSystem writes your current settings there on every server start\n")
+        + TEXT("; so they survive any wipe of the mod directory.\n")
+        + TEXT(";\n")
+        + TEXT("; Example:\n")
+        + TEXT(";\n")
+        + TEXT("; [/Script/BanSystem.BanSystemConfig]\n")
+        + TEXT("; DatabasePath=/home/user/bans.json\n")
+        + TEXT("; RestApiPort=3001\n")
+        + TEXT("; MaxBackups=10\n")
+        + TEXT("\n")
+        + TEXT("[/Script/BanSystem.BanSystemConfig]\n")
+        + TEXT("\n")
+        + TEXT("; ── Database ──────────────────────────────────────────────────────────────────\n")
+        + TEXT(";\n")
+        + TEXT("; Absolute path to the JSON ban file.\n")
+        + TEXT("; Leave empty to use the default: <ProjectSaved>/BanSystem/bans.json\n")
+        + TEXT("; On Linux this is typically: /home/<user>/.config/Epic/FactoryGame/Saved/BanSystem/bans.json\n")
+        + TEXT("DatabasePath=\n")
+        + TEXT("\n")
+        + TEXT("; ── REST Management API ───────────────────────────────────────────────────────\n")
+        + TEXT(";\n")
+        + TEXT("; Port for the local HTTP management API (default: 3000).\n")
+        + TEXT("; Mirrors the Tools/BanSystem API_PORT setting.\n")
+        + TEXT(";\n")
+        + TEXT("; The API binds to all interfaces (0.0.0.0).\n")
+        + TEXT("; Restrict external access with your server firewall if needed.\n")
+        + TEXT(";\n")
+        + TEXT("; Set to 0 to disable the REST API entirely.\n")
+        + TEXT("RestApiPort=3000\n")
+        + TEXT("\n")
+        + TEXT("; ── Backup ────────────────────────────────────────────────────────────────────\n")
+        + TEXT(";\n")
+        + TEXT("; Number of automatic database backups to keep (default: 5).\n")
+        + TEXT("; A backup is created on demand via POST /bans/backup.\n")
+        + TEXT("; Older backups beyond this limit are deleted automatically.\n")
+        + TEXT("MaxBackups=5\n");
+
+    PlatformFile.CreateDirectoryTree(*FPaths::GetPath(DefaultIniPath));
+
+    if (FFileHelper::SaveStringToFile(Content, *DefaultIniPath))
+    {
+        UE_LOG(LogBanSystem, Log,
+            TEXT("BanSystem: Restored annotated default config at '%s'."), *DefaultIniPath);
+    }
+    else
+    {
+        UE_LOG(LogBanSystem, Warning,
+            TEXT("BanSystem: Could not write default config to '%s'."), *DefaultIniPath);
     }
 }
 
