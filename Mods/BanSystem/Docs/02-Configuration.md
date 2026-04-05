@@ -103,10 +103,10 @@ MaxBackups=5
 
 ## BanChatCommands admin config
 
-If you are using the **BanChatCommands** mod, add admin player IDs to `DefaultGame.ini` (not `DefaultBanSystem.ini`):
+If you are using the **BanChatCommands** mod, add admin EOS PUIDs to the BanChatCommands override config file (not `DefaultBanSystem.ini` and not `DefaultGame.ini`):
 
 ```
-<ServerRoot>/FactoryGame/Config/DefaultGame.ini
+<ServerRoot>/FactoryGame/Saved/Config/<Platform>/BanChatCommands.ini
 ```
 
 ```ini
@@ -115,9 +115,11 @@ If you are using the **BanChatCommands** mod, add admin player IDs to `DefaultGa
 +AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d52
 ```
 
-Use `/whoami` in-game to find your own compound UID, then add the raw ID portion here.
+This file is in the server's `Saved/Config/` directory and is **never overwritten** by mod updates. Use one `+AdminEosPUIDs=` line per admin; the value is the player's raw 32-character hex EOS PUID (without the `EOS:` prefix).
 
-→ See [In-Game Commands](03-ChatCommands.md) for the full command reference.
+Use `/whoami` in-game to find your own EOS PUID.
+
+→ See the [BanChatCommands Configuration guide](../../BanChatCommands/Docs/02-Configuration.md) for the full admin setup reference.
 
 ---
 
