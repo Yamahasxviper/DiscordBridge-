@@ -17,4 +17,9 @@ private:
      *  That folder is never touched by mod updates so settings survive any wipe
      *  of the mod directory. */
     static void BackupConfigIfNeeded();
+
+    /** Restores Mods/BanSystem/Config/DefaultBanSystem.ini with the full annotated
+     *  template if the file is missing or has been stripped of comment lines by
+     *  Alpakit's staging step. */
+    static void RestoreDefaultConfigIfNeeded();
 };
