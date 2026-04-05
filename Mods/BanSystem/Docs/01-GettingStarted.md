@@ -31,7 +31,6 @@ BanChatCommands adds in-game chat commands (`/ban`, `/tempban`, `/whoami`, etc.)
 
 ```ini
 [/Script/BanChatCommands.BanChatCommandsConfig]
-+AdminSteam64Ids=76561198000000000
 +AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d51
 ```
 
@@ -95,7 +94,7 @@ curl http://localhost:3000/health
 From the in-game chat (requires BanChatCommands and admin rights):
 
 ```
-/ban 76561198000000000 Cheating
+/ban 00020aed06f0a6958c3c067fb4b73d51 Cheating
 /ban SomePlayer Griefing
 /tempban SomePlayer 60 Spamming (1-hour ban)
 ```
@@ -105,7 +104,7 @@ From the REST API:
 ```sh
 curl -X POST http://localhost:3000/bans \
   -H "Content-Type: application/json" \
-  -d '{"playerUID":"76561198000000000","platform":"STEAM","reason":"Cheating","bannedBy":"admin"}'
+  -d '{"playerUID":"00020aed06f0a6958c3c067fb4b73d51","platform":"EOS","reason":"Cheating","bannedBy":"admin"}'
 ```
 
 ---

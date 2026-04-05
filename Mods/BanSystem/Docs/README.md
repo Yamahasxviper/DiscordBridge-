@@ -9,7 +9,7 @@ Welcome to the BanSystem documentation. Use the links below to jump to the guide
 | [Configuration](02-Configuration.md) | All `DefaultBanSystem.ini` settings |
 | [In-Game Commands](03-ChatCommands.md) | `/ban`, `/tempban`, `/unban`, and all other chat commands |
 | [REST API](04-RestApi.md) | HTTP management endpoints and request/response formats |
-| [Cross-Platform Linking](05-CrossPlatform.md) | Linking Steam and EOS bans for the same player |
+| [UID Linking](05-CrossPlatform.md) | Linking multiple EOS UIDs for the same player |
 | [Troubleshooting](06-Troubleshooting.md) | Fixes for common problems |
 
 ---

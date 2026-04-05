@@ -8,12 +8,12 @@ A server-only Alpakit C++ mod that provides a persistent, platform-aware ban sys
 
 | Feature | Details |
 |---------|---------|
-| Permanent bans | ✅ Steam & EOS |
-| Timed (temporary) bans | ✅ Steam & EOS |
+| Permanent bans | ✅ EOS |
+| Timed (temporary) bans | ✅ EOS |
 | Auto-expiry pruning | ✅ On startup and via REST API |
 | Persistent JSON storage | ✅ Survives restarts and updates |
 | Login-time enforcement | ✅ PostLogin hook + 20 s identity polling |
-| Cross-platform UID linking | ✅ Link Steam + EOS bans for the same player |
+| UID linking | ✅ Link multiple EOS UIDs for the same player |
 | REST management API | ✅ HTTP on configurable port (default 3000) |
 | Player session registry | ✅ Audit log of all known UIDs and names |
 | Blueprint-accessible API | ✅ Full UE Blueprint support |
@@ -32,7 +32,7 @@ Install the optional **BanChatCommands** mod to get the full set of in-game chat
 | `/unban <UID>` | Remove a ban |
 | `/bancheck <player\|UID>` | Query ban status |
 | `/banlist [page]` | List active bans (10 per page) |
-| `/linkbans <UID1> <UID2>` | Link two UIDs (e.g. Steam + EOS for the same person) |
+| `/linkbans <UID1> <UID2>` | Link two EOS UIDs for the same player |
 | `/unlinkbans <UID1> <UID2>` | Remove a UID link |
 | `/playerhistory <name\|UID>` | Look up session history |
 | `/whoami` | Show your own compound UID *(no admin required)* |
@@ -101,7 +101,6 @@ All bans use **compound UIDs** that encode both platform and raw ID in one strin
 
 | Platform | Format | Example |
 |----------|--------|---------|
-| Steam | `STEAM:<17-digit decimal>` | `STEAM:76561198000000000` |
 | EOS | `EOS:<32-char hex>` | `EOS:00020aed06f0a6958c3c067fb4b73d51` |
 
 Use `/whoami` in-game to see your own UID.

@@ -26,16 +26,15 @@ BanChatCommands is a server-only Satisfactory mod that adds a full set of ban ma
 
 Commands that accept `<player|UID>` resolve the target in order:
 
-1. **Compound UID** (`STEAM:xxx` / `EOS:xxx`) — used directly.
-2. **17-digit decimal string** — treated as a raw Steam 64-bit ID.
-3. **32-character hex string** — treated as a raw EOS Product User ID.
-4. **Anything else** — matched case-insensitively against the display names of currently connected players (substring match).
+1. **Compound UID** (`EOS:xxx`) — used directly.
+2. **32-character hex string** — treated as a raw EOS Product User ID.
+3. **Anything else** — matched case-insensitively against the display names of currently connected players (substring match).
 
 ---
 
-## Cross-platform ban linking
+## Ban linking across identities
 
-Using `/linkbans`, a ban issued under a player's Steam identity also blocks them if they reconnect under an EOS identity (or vice versa). See the [Commands Reference](03-Commands.md) for usage.
+Using `/linkbans`, a ban issued under one EOS PUID also blocks the player if they reconnect under a different PUID. See the [Commands Reference](03-Commands.md) for usage.
 
 ---
 

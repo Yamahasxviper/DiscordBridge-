@@ -111,9 +111,8 @@ If you are using the **BanChatCommands** mod, add admin player IDs to `DefaultGa
 
 ```ini
 [/Script/BanChatCommands.BanChatCommandsConfig]
-+AdminSteam64Ids=76561198000000000
-+AdminSteam64Ids=76561198111111111
 +AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d51
++AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d52
 ```
 
 Use `/whoami` in-game to find your own compound UID, then add the raw ID portion here.

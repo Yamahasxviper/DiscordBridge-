@@ -44,7 +44,7 @@ public:
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * /tempban <player|Steam64|PUID> <minutes> [reason...]
+ * /tempban <player|PUID> <minutes> [reason...]
  *
  * Temporarily bans a player for the specified number of minutes.
  * Player resolution follows the same rules as /ban.  Use /ban for a permanent ban.
@@ -52,7 +52,6 @@ public:
  * Requires admin.
  *
  * Examples:
- *   /tempban 76561198000000000 60
  *   /tempban BadPlayer 1440 Spamming
  */
 UCLASS()
@@ -74,8 +73,8 @@ public:
 /**
  * /unban <PUID>
  *
- * Removes an existing ban.  Accepts an EOS PUID (or a legacy STEAM:xxx compound UID
- * for old ban records).  The ban is looked up by compound UID ("EOS:xxx").
+ * Removes an existing ban.  Accepts an EOS PUID.
+ * The ban is looked up by compound UID ("EOS:xxx").
  *
  * Requires admin.
  *
@@ -164,7 +163,7 @@ private:
  *
  * Links two compound UIDs together so that a ban on one also blocks the player
  * when they connect under the other identity.  Useful when the same person has
- * both a Steam account and an EOS account.
+ * connected under two different EOS PUIDs.
  *
  * Both UIDs must have existing ban records.  The link is bidirectional: each
  * ban's LinkedUids list is updated to include the other UID.
@@ -172,7 +171,7 @@ private:
  * Requires admin.
  *
  * Examples:
- *   /linkbans STEAM:76561198000000000 EOS:00020aed06f0a6958c3c067fb4b73d51
+ *   /linkbans EOS:00020aed06f0a6958c3c067fb4b73d51 EOS:aabbccdd11223344aabbccdd11223344
  */
 UCLASS()
 class BANCHATCOMMANDS_API ALinkBansChatCommand : public AChatCommandInstance
@@ -199,7 +198,7 @@ public:
  * Requires admin.
  *
  * Examples:
- *   /unlinkbans STEAM:76561198000000000 EOS:00020aed06f0a6958c3c067fb4b73d51
+ *   /unlinkbans EOS:00020aed06f0a6958c3c067fb4b73d51 EOS:aabbccdd11223344aabbccdd11223344
  */
 UCLASS()
 class BANCHATCOMMANDS_API AUnlinkBansChatCommand : public AChatCommandInstance

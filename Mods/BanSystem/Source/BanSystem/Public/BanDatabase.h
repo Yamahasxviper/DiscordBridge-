@@ -42,7 +42,7 @@ public:
     bool AddBan(const FBanEntry& Entry);
 
     /**
-     * Remove a ban by compound UID ("STEAM:xxx" or "EOS:xxx").
+     * Remove a ban by compound UID ("EOS:xxx").
      * Returns true if a row was found and deleted.
      */
     bool RemoveBanByUid(const FString& Uid);
@@ -104,8 +104,7 @@ public:
      * added to both.  Returns true if at least one record was updated.
      *
      * Use /linkbans <UID1> <UID2> from the server console or an admin chat
-     * command to associate a Steam64 ban with an EOS PUID, or any two bans
-     * that belong to the same real-world player.
+     * command to associate two EOS PUID bans that belong to the same player.
      */
     bool LinkBans(const FString& UidA, const FString& UidB);
 
@@ -124,7 +123,7 @@ public:
 
     // ── Helpers ───────────────────────────────────────────────────────────
 
-    /** Build compound UID: "STEAM:76561198..." or "EOS:00020aed..." */
+    /** Build compound UID: "EOS:00020aed..." */
     static FString MakeUid(const FString& Platform, const FString& PlayerUID);
 
     /** Split a compound UID back into platform + raw player ID. */

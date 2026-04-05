@@ -7,8 +7,8 @@
 ## Banned player was not kicked when they joined
 
 1. Check the server log (`FactoryGame.log`) for `LogBanEnforcer` lines. They will show whether the player's UID was resolved and whether the ban check ran.
-2. Verify the UID format in `bans.json` — UIDs must be in the compound format `STEAM:xxx` or `EOS:xxx` (with the platform prefix). A raw Steam64 ID without the `STEAM:` prefix will not match.
-3. If the player uses both Steam and EOS, ban both platform IDs and link them with `/linkbans`.
+2. Verify the UID format in `bans.json` — UIDs must be in the compound format `EOS:xxx` (with the platform prefix). A raw EOS PUID without the `EOS:` prefix will not match.
+3. If the player may have changed their EOS PUID (ban evasion), ban the new UID and link them with `/linkbans`.
 4. CSS Satisfactory uses asynchronous EOS identity resolution. BanSystem polls for up to 20 s after PostLogin — check the log for `[BanEnforcer] Pending identity check` messages to confirm the poll is running.
 5. Make sure BanSystem is actually loaded: look for `LogBanDatabase: Database loaded` near the start of the log.
 
@@ -35,17 +35,17 @@
 
 1. Make sure the **BanChatCommands** mod is installed alongside BanSystem.
 2. Check the server log for `LogBanChatCommands` lines.
-3. Verify your Steam64 ID or EOS PUID is in `DefaultGame.ini` under `[/Script/BanChatCommands.BanChatCommandsConfig]`.
+3. Verify your EOS PUID is in `BanChatCommands.ini` under `[/Script/BanChatCommands.BanChatCommandsConfig]`.
 4. Use `/whoami` to confirm your UID. Then check it matches what is in the config file exactly (correct platform prefix, correct casing for EOS PUIDs).
 
 ---
 
 ## `/ban SomeName` says "player not found"
 
-Display name resolution only works for **currently connected** players. If the player has disconnected, use their UID directly:
+Display name resolution only works for **currently connected** players. If the player has disconnected, use their EOS PUID directly:
 
 ```
-/ban STEAM:76561198000000000 Reason
+/ban EOS:00020aed06f0a6958c3c067fb4b73d51 Reason
 ```
 
 Use `/playerhistory SomeName` to find a past UID from the session registry.

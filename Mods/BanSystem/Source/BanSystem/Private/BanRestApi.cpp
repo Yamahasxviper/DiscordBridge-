@@ -323,13 +323,13 @@ void UBanRestApi::RegisterRoutes()
             }
             if (!Body->TryGetStringField(TEXT("platform"), Platform) || Platform.IsEmpty())
             {
-                Done(BanJson::Error(TEXT("platform is required (STEAM | EOS | UNKNOWN)")));
+                Done(BanJson::Error(TEXT("platform is required (EOS | UNKNOWN)")));
                 return true;
             }
             Platform = Platform.ToUpper();
-            if (Platform != TEXT("STEAM") && Platform != TEXT("EOS") && Platform != TEXT("UNKNOWN"))
+            if (Platform != TEXT("EOS") && Platform != TEXT("UNKNOWN"))
             {
-                Done(BanJson::Error(TEXT("platform must be STEAM, EOS, or UNKNOWN")));
+                Done(BanJson::Error(TEXT("platform must be EOS or UNKNOWN")));
                 return true;
             }
 

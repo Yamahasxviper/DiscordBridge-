@@ -17,7 +17,7 @@ struct BANSYSTEM_API FPlayerSessionRecord
 {
     GENERATED_BODY()
 
-    /** Compound UID: "STEAM:xxx" or "EOS:xxx" */
+    /** Compound UID: "EOS:xxx" */
     UPROPERTY(BlueprintReadOnly, Category = "BanSystem")
     FString Uid;
 
