@@ -30,4 +30,9 @@ public:
 
 private:
     FDelegateHandle WorldInitHandle;
+
+    /** On first startup, writes a non-empty AdminEosPUIDs list to
+     *  Saved/Config/<Platform>/BanChatCommands.ini so the admin list survives
+     *  an Alpakit dev deploy that deletes and recreates the mod directory. */
+    static void BackupConfigIfNeeded();
 };
