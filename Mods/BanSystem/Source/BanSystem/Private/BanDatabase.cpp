@@ -130,6 +130,9 @@ void UBanDatabase::Initialize(FSubsystemCollectionBase& Collection)
 
     LoadFromFile();
 
+    // Capture the mtime so we can detect external edits in ReloadIfChanged().
+    LastKnownFileModTime = IFileManager::Get().GetTimeStamp(*DbPath);
+
     const int32 Pruned = PruneExpiredBans();
     UE_LOG(LogBanDatabase, Log,
         TEXT("BanDatabase: loaded %s (%d ban(s), pruned %d expired)"),
@@ -139,6 +142,38 @@ void UBanDatabase::Initialize(FSubsystemCollectionBase& Collection)
 void UBanDatabase::Deinitialize()
 {
     Super::Deinitialize();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Hot-reload on external file change
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDatabase::ReloadIfChanged()
+{
+    const FDateTime NewModTime = IFileManager::Get().GetTimeStamp(*DbPath);
+
+    // GetTimeStamp returns FDateTime(0) when the file does not exist.
+    // In that case there is nothing to reload, so bail out early.
+    if (NewModTime == FDateTime(0) || NewModTime == LastKnownFileModTime)
+        return;
+
+    UE_LOG(LogBanDatabase, Log,
+        TEXT("BanDatabase: bans.json changed on disk, reloading (%s)"), *DbPath);
+
+    LoadFromFile();
+
+    // Prune any bans that expired while the file was externally edited and
+    // immediately write the cleaned list back so the file stays consistent.
+    const int32 Pruned = PruneExpiredBans();
+
+    // Record the definitive mtime after all writes are done.
+    {
+        FScopeLock Lock(&DbMutex);
+        LastKnownFileModTime = IFileManager::Get().GetTimeStamp(*DbPath);
+        UE_LOG(LogBanDatabase, Log,
+            TEXT("BanDatabase: reload complete (%d ban(s), pruned %d expired)"),
+            Bans.Num(), Pruned);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -213,6 +248,11 @@ bool UBanDatabase::SaveToFile() const
             TEXT("BanDatabase: failed to write %s"), *DbPath);
         return false;
     }
+
+    // Update the cached mtime so ReloadIfChanged() does not treat our own
+    // writes as external edits and reload the file unnecessarily.
+    LastKnownFileModTime = IFileManager::Get().GetTimeStamp(*DbPath);
+
     return true;
 }
 
