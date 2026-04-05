@@ -5,7 +5,6 @@
 #include "BanDatabase.h"
 #include "BanSystemConfig.h"
 #include "HAL/PlatformFileManager.h"
-#include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -105,16 +104,35 @@ void FBanSystemModule::RestoreDefaultConfigDocs()
 {
     // UE's staging pipeline reads Default*.ini through FConfigFile and writes
     // them back to the staged directory, stripping all comments in the process.
-    // To ensure server admins always see the documented config file in the mod's
-    // Config/ folder, we re-write it with full comments on every server start.
-
-    const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("BanSystem"));
-    if (!Plugin.IsValid()) return;
-
+    // We detect this by checking whether the deployed file contains any ';'
+    // comment lines (mirroring the DiscordBridge branch approach that checks for
+    // '#').  If the file already has comments it was either hand-edited or
+    // previously restored — leave it alone.  Only rewrite when comments are
+    // absent so that user-customised values (e.g. a non-default RestApiPort) set
+    // directly in this file are preserved.
     const FString DefaultConfigPath = FPaths::Combine(
-        Plugin->GetBaseDir(), TEXT("Config"), TEXT("DefaultBanSystem.ini"));
+        FPaths::ProjectDir(),
+        TEXT("Mods"), TEXT("BanSystem"),
+        TEXT("Config"), TEXT("DefaultBanSystem.ini"));
 
-    static const FString Content =
+    // Load raw content; if file doesn't exist yet or already has comments, skip.
+    FString RawContent;
+    if (FFileHelper::LoadFileToString(RawContent, *DefaultConfigPath) &&
+        RawContent.Contains(TEXT(";")))
+    {
+        return; // Already documented — nothing to do.
+    }
+
+    // File is either missing or Alpakit-stripped (no comments).  Embed the
+    // current live values so existing operator customisations are not lost.
+    const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+    const FString DatabasePath = Cfg ? Cfg->DatabasePath : TEXT("");
+    const FString RestApiPort  = Cfg ? FString::FromInt(Cfg->RestApiPort) : TEXT("3000");
+    const FString MaxBackups   = Cfg ? FString::FromInt(Cfg->MaxBackups)  : TEXT("5");
+
+    // NOTE: String concatenation (not Printf) to avoid misinterpreting any
+    // '%' character that might appear in a custom DatabasePath.
+    const FString Content =
         FString(TEXT("; BanSystem configuration.\n"))
         + TEXT(";\n")
         + TEXT("; Settings in this file are read automatically by UBanSystemConfig\n")
@@ -140,7 +158,7 @@ void FBanSystemModule::RestoreDefaultConfigDocs()
         + TEXT("; Absolute path to the JSON ban file.\n")
         + TEXT("; Leave empty to use the default: <ProjectSaved>/BanSystem/bans.json\n")
         + TEXT("; On Linux this is typically: /home/<user>/.config/Epic/FactoryGame/Saved/BanSystem/bans.json\n")
-        + TEXT("DatabasePath=\n")
+        + TEXT("DatabasePath=") + DatabasePath + TEXT("\n")
         + TEXT("\n")
         + TEXT("; -- REST Management API -------------------------------------------------------\n")
         + TEXT(";\n")
@@ -151,14 +169,17 @@ void FBanSystemModule::RestoreDefaultConfigDocs()
         + TEXT("; Restrict external access with your server firewall if needed.\n")
         + TEXT(";\n")
         + TEXT("; Set to 0 to disable the REST API entirely.\n")
-        + TEXT("RestApiPort=3000\n")
+        + TEXT("RestApiPort=") + RestApiPort + TEXT("\n")
         + TEXT("\n")
         + TEXT("; -- Backup --------------------------------------------------------------------\n")
         + TEXT(";\n")
         + TEXT("; Number of automatic database backups to keep (default: 5).\n")
         + TEXT("; A backup is created on demand via POST /bans/backup.\n")
         + TEXT("; Older backups beyond this limit are deleted automatically.\n")
-        + TEXT("MaxBackups=5\n");
+        + TEXT("MaxBackups=") + MaxBackups + TEXT("\n");
+
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+    PlatformFile.CreateDirectoryTree(*FPaths::GetPath(DefaultConfigPath));
 
     if (FFileHelper::SaveStringToFile(Content, *DefaultConfigPath))
     {

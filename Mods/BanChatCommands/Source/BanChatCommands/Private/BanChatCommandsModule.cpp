@@ -6,7 +6,6 @@
 #include "Commands/BanChatCommands.h"
 #include "Engine/World.h"
 #include "HAL/PlatformFileManager.h"
-#include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -128,15 +127,26 @@ void FBanChatCommandsModule::RestoreDefaultConfigDocs()
 {
     // UE's staging pipeline reads Default*.ini through FConfigFile and writes
     // them back to the staged directory, stripping all comments in the process.
-    // To ensure server admins always see the documented config file in the mod's
-    // Config/ folder, we re-write it with full comments on every server start.
-
-    const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("BanChatCommands"));
-    if (!Plugin.IsValid()) return;
-
+    // We detect this by checking whether the deployed file contains any ';'
+    // comment lines (mirroring the DiscordBridge branch approach that checks for
+    // '#').  If the file already has comments it was either hand-edited or
+    // previously restored — leave it alone.
     const FString DefaultConfigPath = FPaths::Combine(
-        Plugin->GetBaseDir(), TEXT("Config"), TEXT("DefaultBanChatCommands.ini"));
+        FPaths::ProjectDir(),
+        TEXT("Mods"), TEXT("BanChatCommands"),
+        TEXT("Config"), TEXT("DefaultBanChatCommands.ini"));
 
+    // Load raw content; if file doesn't exist yet or already has comments, skip.
+    FString RawContent;
+    if (FFileHelper::LoadFileToString(RawContent, *DefaultConfigPath) &&
+        RawContent.Contains(TEXT(";")))
+    {
+        return; // Already documented — nothing to do.
+    }
+
+    // File is either missing or Alpakit-stripped.  Admins configure the real
+    // list in Saved/BanChatCommands/BanChatCommands.ini, so only the template
+    // placeholder needs to be written here.
     static const FString Content =
         FString(TEXT("; BanChatCommands admin configuration.\n"))
         + TEXT(";\n")
@@ -165,6 +175,9 @@ void FBanChatCommandsModule::RestoreDefaultConfigDocs()
         + TEXT("\n")
         + TEXT("[/Script/BanChatCommands.BanChatCommandsConfig]\n")
         + TEXT("; +AdminEosPUIDs=YOUR_EOS_PUID_HERE\n");
+
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+    PlatformFile.CreateDirectoryTree(*FPaths::GetPath(DefaultConfigPath));
 
     if (FFileHelper::SaveStringToFile(Content, *DefaultConfigPath))
     {
