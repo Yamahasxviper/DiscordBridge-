@@ -155,8 +155,9 @@ namespace BanChat
             return true;
         }
 
-        // 2. Compound UID supplied directly, e.g. "EOS:<32hex>" — resolve without
-        //    requiring the player to be currently connected (offline ban / pre-ban).
+        // 2. Compound UID supplied directly:
+        //      "EOS:<32hex>"  → resolve without requiring player to be connected
+        //      "IP:<address>" → IP ban UID (e.g. from /banname or manual entry)
         {
             FString Platform, RawId;
             UBanDatabase::ParseUid(Arg, Platform, RawId);
@@ -164,6 +165,12 @@ namespace BanChat
             {
                 OutUid         = UBanDatabase::MakeUid(TEXT("EOS"), RawId.ToLower());
                 OutDisplayName = RawId.ToLower();
+                return true;
+            }
+            if (Platform == TEXT("IP") && !RawId.IsEmpty())
+            {
+                OutUid         = UBanDatabase::MakeUid(TEXT("IP"), RawId);
+                OutDisplayName = RawId;
                 return true;
             }
         }
@@ -320,6 +327,7 @@ namespace BanChat
      * Accepts:
      *   "EOS:<32-hex>"  → returned with lowercase hex part
      *   "<32-hex>"      → "EOS:" prefix added automatically
+     *   "IP:<address>"  → IP ban UID (IPv4 or IPv6)
      *
      * On failure, sends an error to the sender and returns false.
      */
@@ -337,6 +345,12 @@ namespace BanChat
             return true;
         }
 
+        if (Platform == TEXT("IP") && !RawId.IsEmpty())
+        {
+            OutUid = UBanDatabase::MakeUid(TEXT("IP"), RawId);
+            return true;
+        }
+
         // Accept raw EOS PUID without prefix.
         if (IsValidEOSPUID(Arg))
         {
@@ -348,7 +362,7 @@ namespace BanChat
         {
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid compound UID "
-                    "(EOS:<32hex>)."), *Arg),
+                    "(EOS:<32hex> or IP:<address>)."), *Arg),
                 FLinearColor::Red);
         }
         return false;
@@ -471,7 +485,7 @@ ABanChatCommand::ABanChatCommand()
     MinNumberOfArguments = 1;
     bOnlyUsableByPlayer  = false; // allow console too
     Usage = NSLOCTEXT("BanChatCommands", "BanUsage",
-        "/ban <player|PUID> [reason...]");
+        "/ban <player|PUID|IP:address> [reason...]");
 }
 
 EExecutionStatus ABanChatCommand::ExecuteCommand_Implementation(
@@ -503,7 +517,7 @@ ATempBanChatCommand::ATempBanChatCommand()
     MinNumberOfArguments = 2;
     bOnlyUsableByPlayer  = false;
     Usage = NSLOCTEXT("BanChatCommands", "TempBanUsage",
-        "/tempban <player|PUID> <minutes> [reason...]");
+        "/tempban <player|PUID|IP:address> <minutes> [reason...]");
 }
 
 EExecutionStatus ATempBanChatCommand::ExecuteCommand_Implementation(
@@ -544,7 +558,7 @@ AUnbanChatCommand::AUnbanChatCommand()
     MinNumberOfArguments = 1;
     bOnlyUsableByPlayer  = false;
     Usage = NSLOCTEXT("BanChatCommands", "UnbanUsage",
-        "/unban <PUID>");
+        "/unban <PUID|IP:address>");
 }
 
 EExecutionStatus AUnbanChatCommand::ExecuteCommand_Implementation(
@@ -556,7 +570,7 @@ EExecutionStatus AUnbanChatCommand::ExecuteCommand_Implementation(
 
     const FString& Arg = Arguments[0];
 
-    // Build the compound UID — accept EOS PUID only (exact ID required for unban).
+    // Build the compound UID — accept EOS PUID or IP:<address> (exact ID required for unban).
     FString Uid;
     if (BanChat::IsValidEOSPUID(Arg))
     {
@@ -564,11 +578,24 @@ EExecutionStatus AUnbanChatCommand::ExecuteCommand_Implementation(
     }
     else
     {
-        Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid "
-                "EOS PUID (32 hex chars). /unban requires an exact ID."), *Arg),
-            FLinearColor::Red);
-        return EExecutionStatus::BAD_ARGUMENTS;
+        FString Platform, RawId;
+        UBanDatabase::ParseUid(Arg, Platform, RawId);
+        if (Platform == TEXT("IP") && !RawId.IsEmpty())
+        {
+            Uid = UBanDatabase::MakeUid(TEXT("IP"), RawId);
+        }
+        else if (Platform == TEXT("EOS") && BanChat::IsValidEOSPUID(RawId))
+        {
+            Uid = UBanDatabase::MakeUid(TEXT("EOS"), RawId.ToLower());
+        }
+        else
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid "
+                    "UID. Use an EOS PUID (32 hex chars) or IP:<address>."), *Arg),
+                FLinearColor::Red);
+            return EExecutionStatus::BAD_ARGUMENTS;
+        }
     }
 
     UBanDatabase* DB = BanChat::GetDB(this);
@@ -602,7 +629,7 @@ ABanCheckChatCommand::ABanCheckChatCommand()
     MinNumberOfArguments = 1;
     bOnlyUsableByPlayer  = false;
     Usage = NSLOCTEXT("BanChatCommands", "BanCheckUsage",
-        "/bancheck <player|PUID>");
+        "/bancheck <player|PUID|IP:address>");
 }
 
 EExecutionStatus ABanCheckChatCommand::ExecuteCommand_Implementation(
