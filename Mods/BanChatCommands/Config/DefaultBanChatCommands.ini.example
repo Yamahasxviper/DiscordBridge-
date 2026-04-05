@@ -1,0 +1,31 @@
+; BanChatCommands admin configuration.
+;
+; RECOMMENDED: place your admin list in
+;   Saved/Config/BanChatCommands.ini
+; using the section header below.  That file is never overwritten by mod
+; updates.  BanChatCommands writes your current admin list there on every
+; server start so it survives any wipe of the mod directory.
+;
+; EOS Product User IDs — Each +AdminEosPUIDs= entry grants that player permission to run
+; /ban, /tempban, /unban, /bancheck, /banlist, /linkbans, /unlinkbans, and /playerhistory
+; from in-game chat.
+;
+; EOS PUIDs are 32-character hex strings.  Players can find their own PUID by running
+; /whoami in-game.
+;
+; Note: On CSS Dedicated Server, all players are identified by their EOS Product User ID
+; regardless of their launch platform (Steam, Epic, etc.).
+;
+; If the list is empty, those commands are only usable from the server console.
+; /whoami is always available to all players regardless of this setting.
+;
+; To configure without being overwritten by mod updates, place your settings in:
+;   Saved/Config/<Platform>/BanChatCommands.ini
+; using the same section header shown below.
+;
+; Example:
+;   [/Script/BanChatCommands.BanChatCommandsConfig]
+;   +AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d51
+
+[/Script/BanChatCommands.BanChatCommandsConfig]
+; +AdminEosPUIDs=YOUR_EOS_PUID_HERE

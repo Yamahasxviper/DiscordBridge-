@@ -1,0 +1,44 @@
+; BanSystem configuration.
+;
+; Settings in this file are read automatically by UBanSystemConfig
+; (UCLASS Config=BanSystem, DefaultConfig).
+;
+; RECOMMENDED: place your server-specific settings in
+;   Saved/Config/BanSystem.ini
+; using the same section header below.  That file is never overwritten by mod
+; updates.  BanSystem writes your current settings there on every server start
+; so they survive any wipe of the mod directory.
+;
+; Example:
+;
+; [/Script/BanSystem.BanSystemConfig]
+; DatabasePath=/home/user/bans.json
+; RestApiPort=3001
+; MaxBackups=10
+
+[/Script/BanSystem.BanSystemConfig]
+
+; ── Database ──────────────────────────────────────────────────────────────────
+;
+; Absolute path to the JSON ban file.
+; Leave empty to use the default: <ProjectSaved>/BanSystem/bans.json
+; On Linux this is typically: /home/<user>/.config/Epic/FactoryGame/Saved/BanSystem/bans.json
+DatabasePath=
+
+; ── REST Management API ───────────────────────────────────────────────────────
+;
+; Port for the local HTTP management API (default: 3000).
+; Mirrors the Tools/BanSystem API_PORT setting.
+;
+; The API binds to all interfaces (0.0.0.0).
+; Restrict external access with your server firewall if needed.
+;
+; Set to 0 to disable the REST API entirely.
+RestApiPort=3000
+
+; ── Backup ────────────────────────────────────────────────────────────────────
+;
+; Number of automatic database backups to keep (default: 5).
+; A backup is created on demand via POST /bans/backup.
+; Older backups beyond this limit are deleted automatically.
+MaxBackups=5
