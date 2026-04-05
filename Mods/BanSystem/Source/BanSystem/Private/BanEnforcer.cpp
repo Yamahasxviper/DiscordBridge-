@@ -117,6 +117,17 @@ void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
             UE_LOG(LogBanEnforcer, Log,
                 TEXT("BanEnforcer: cached EOS PUID %s for incoming connection (via PreLogin Options)"),
                 *Puid);
+
+            // Also cache the remote IP address while the connection object is
+            // available in the PreLogin callback.
+            const FString RemoteIp = Conn->LowLevelGetRemoteAddress(/*bAppendPort=*/false);
+            if (!RemoteIp.IsEmpty())
+            {
+                Enforcer->CachedConnectionIPs.Add(TWeakObjectPtr<UNetConnection>(Conn), RemoteIp);
+                UE_LOG(LogBanEnforcer, Log,
+                    TEXT("BanEnforcer: cached remote IP %s for incoming connection"),
+                    *RemoteIp);
+            }
         }));
 
     // Evict cache entries when the player's connection is torn down.
@@ -133,10 +144,16 @@ void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
                 if (Removed > 0)
                     UE_LOG(LogBanEnforcer, Log,
                         TEXT("BanEnforcer: evicted cached EOS PUID on player logout"));
+                Enforcer->CachedConnectionIPs.Remove(TWeakObjectPtr<UNetConnection>(Conn));
             }
 
             // Also prune any fully garbage-collected (stale) entries.
             for (auto It = Enforcer->CachedConnectionPuids.CreateIterator(); It; ++It)
+            {
+                if (!It.Key().IsValid())
+                    It.RemoveCurrent();
+            }
+            for (auto It = Enforcer->CachedConnectionIPs.CreateIterator(); It; ++It)
             {
                 if (!It.Key().IsValid())
                     It.RemoveCurrent();
@@ -159,6 +176,7 @@ void UBanEnforcer::Deinitialize()
 
     // Clear the EOS PUID cache.
     CachedConnectionPuids.Empty();
+    CachedConnectionIPs.Empty();
 
     // Cancel any in-flight identity poll and clear the queue.
     PendingBanChecks.Empty();
@@ -423,7 +441,7 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
         if (GI)
         {
             if (UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>())
-                Registry->RecordSession(Uid, PC->PlayerState->GetPlayerName());
+                Registry->RecordSession(Uid, PC->PlayerState->GetPlayerName(), GetCachedIpForPlayer(PC));
         }
 
         return;
@@ -578,7 +596,7 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
         if (GI)
         {
             if (UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>())
-                Registry->RecordSession(Uid, PlayerName);
+                Registry->RecordSession(Uid, PlayerName, GetCachedIpForPlayer(PC));
         }
         return;
     }
@@ -681,4 +699,21 @@ FString UBanEnforcer::ExtractEosPuidFromConnectionUrl(APlayerController* PC)
 
     if (Puid.Len() != 32) return FString();
     return Puid.ToLower();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  IP address lookup from the PreLogin cache
+// ─────────────────────────────────────────────────────────────────────────────
+
+FString UBanEnforcer::GetCachedIpForPlayer(APlayerController* PC) const
+{
+    if (!IsValid(PC)) return FString();
+
+    UNetConnection* Conn = Cast<UNetConnection>(PC->Player);
+    if (!Conn) return FString();
+
+    if (const FString* Cached = CachedConnectionIPs.Find(TWeakObjectPtr<UNetConnection>(Conn)))
+        return *Cached;
+
+    return FString();
 }
