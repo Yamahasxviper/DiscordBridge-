@@ -11,12 +11,20 @@
  *
  * Per-server configuration for BanSystem.
  *
- * Settings are read from Config/DefaultBanSystem.ini (deployed with the mod).
- * Server operators can override them by editing that file or by adding
- * a [/Script/BanSystem.BanSystemConfig] section to their server's
- * Saved/Config/<Platform>/BanSystem.ini.
+ * RECOMMENDED: manage settings in the persistent override file:
+ *   Saved/Config/BanSystem.ini
+ * That file is never touched by mod updates or Alpakit dev deploys.
+ * BanSystem writes the current settings there on every server start so your
+ * configuration survives any wipe of the mod directory.
  *
- * Example DefaultBanSystem.ini override section:
+ * Settings are also read from the mod's own Config/DefaultBanSystem.ini, but
+ * that file may be overwritten when the mod is updated.  Use it only to check
+ * the current defaults, not as the long-term home for your configuration.
+ *
+ * Both files use the same section header:
+ *   [/Script/BanSystem.BanSystemConfig]
+ *
+ * Example Saved/Config/BanSystem.ini override:
  *
  *   [/Script/BanSystem.BanSystemConfig]
  *   DatabasePath=/home/user/bans.json

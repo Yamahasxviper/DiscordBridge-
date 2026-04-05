@@ -11,17 +11,19 @@
  *
  * Per-server configuration for BanChatCommands.
  *
- * Settings are read from the mod's Config/DefaultBanChatCommands.ini.
- * To add admins, create (or edit) the override file on your server:
- *   Saved/Config/<Platform>/BanChatCommands.ini
- * and add a section:
+ * RECOMMENDED: manage the admin list in the persistent override file:
+ *   Saved/Config/BanChatCommands.ini
+ * That file is never touched by mod updates or Alpakit dev deploys.
+ * BanChatCommands writes the current admin list there on every server start
+ * so your configuration survives any wipe of the mod directory.
+ *
+ * Example Saved/Config/BanChatCommands.ini:
  *
  *   [/Script/BanChatCommands.BanChatCommandsConfig]
  *   +AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d51
  *
  * When the list is empty, admin commands (/ban, /tempban, /unban,
  * /bancheck, /banlist) can only be run from the server console.
- * Using Saved/Config ensures your admin list is never overwritten by a mod update.
  * /whoami is always available to all players regardless of this setting.
  *
  * Note: On CSS Dedicated Server, all players are identified by their EOS
