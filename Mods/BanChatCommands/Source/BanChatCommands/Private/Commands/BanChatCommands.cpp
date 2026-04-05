@@ -101,19 +101,14 @@ namespace BanChat
             // On CSS DS with EOS V2 PUIDs the inner TSharedPtr slot holds a raw
             // EOS handle, not a valid C++ FUniqueNetId object; operator-> returns
             // a garbage pointer that crashes.  FUniqueNetIdRepl::GetType() and
-            // FUniqueNetIdRepl::ToString() are safe for both Steam (V1) and EOS
-            // PUID (V2) identities.  Guard against a NONE-type identity that
-            // IsValid() can return true for before the EOS PUID provider assigns
-            // it (GetType() == "NONE", ToString() == "").
+            // FUniqueNetIdRepl::ToString() are safe for EOS PUID (V2) identities.
+            // Guard against a NONE-type identity that IsValid() can return true for
+            // before the EOS PUID provider assigns it (GetType()=="NONE", ToString()=="").
             if (UniqueId.IsValid() && UniqueId.GetType() != FName(TEXT("NONE")))
             {
-                const FString Type  = UniqueId.GetType().ToString().ToUpper();
-                // Normalize to lowercase for EOS so the UID matches DB entries
-                // created by the /ban and /tempban commands (which also lowercase).
-                const FString RawId = (Type == TEXT("EOS"))
-                    ? UniqueId.ToString().ToLower()
-                    : UniqueId.ToString();
-                OutUid = UBanDatabase::MakeUid(Type, RawId);
+                // CSS DS exclusively assigns EOS PUIDs — always build an EOS compound UID,
+                // normalized to lowercase to match bans stored via /ban and /tempban.
+                OutUid = UBanDatabase::MakeUid(TEXT("EOS"), UniqueId.ToString().ToLower());
             }
             else
             {
@@ -234,17 +229,15 @@ namespace BanChat
             return false;
         }
 
-        const FString Platform = UniqueId.GetType().ToString().ToUpper();
-        // Normalize EOS PUIDs to lowercase to match bans stored via /ban or /tempban.
-        const FString RawId    = (Platform == TEXT("EOS"))
-            ? UniqueId.ToString().ToLower()
-            : UniqueId.ToString();
-        OutUid         = UBanDatabase::MakeUid(Platform, RawId);
+        // CSS DS exclusively assigns EOS PUIDs — always build an EOS compound UID,
+        // normalized to lowercase to match bans stored via /ban or /tempban.
+        const FString RawId = UniqueId.ToString().ToLower();
+        OutUid         = UBanDatabase::MakeUid(TEXT("EOS"), RawId);
         OutDisplayName = Matches[0];
 
         Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] Resolved '%s' → %s: %s"),
-                *Arg, *Platform, *RawId),
+            FString::Printf(TEXT("[BanChatCommands] Resolved '%s' → EOS: %s"),
+                *Arg, *RawId),
             FLinearColor::White);
         return true;
     }
@@ -740,13 +733,11 @@ EExecutionStatus AWhoAmIChatCommand::ExecuteCommand_Implementation(
     // Guard against NONE-type and use direct member accessors — NOT operator->
     // (see IsAdminSender for the full explanation on why operator-> crashes on
     // CSS DS with EOS V2 PUIDs).
-    FString Platform, RawId;
+    FString RawId;
     if (UniqueId.IsValid() && UniqueId.GetType() != FName(TEXT("NONE")))
     {
-        Platform = UniqueId.GetType().ToString().ToUpper();
-        RawId    = (Platform == TEXT("EOS"))
-            ? UniqueId.ToString().ToLower()
-            : UniqueId.ToString();
+        // CSS DS exclusively assigns EOS PUIDs — always normalize to lowercase.
+        RawId = UniqueId.ToString().ToLower();
     }
     else
     {
@@ -762,22 +753,12 @@ EExecutionStatus AWhoAmIChatCommand::ExecuteCommand_Implementation(
                 FLinearColor::Yellow);
             return EExecutionStatus::UNCOMPLETED;
         }
-        Platform = TEXT("EOS");
-        RawId    = EosPuid;
+        RawId = EosPuid;
     }
 
-    if (Platform == TEXT("EOS"))
-    {
-        Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] Your EOS PUID: %s"), *RawId),
-            FLinearColor::Green);
-    }
-    else
-    {
-        Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] Your platform ID (%s): %s"), *Platform, *RawId),
-            FLinearColor::Green);
-    }
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("[BanChatCommands] Your EOS PUID: %s"), *RawId),
+        FLinearColor::Green);
 
     return EExecutionStatus::COMPLETED;
 }

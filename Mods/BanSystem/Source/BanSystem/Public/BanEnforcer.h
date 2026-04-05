@@ -45,8 +45,8 @@ struct FPendingBanCheck
  *                              joins) to reject the connection outright
  *                              with the ban reason.  No polling needed.
  *
- * Supports both Steam and EOS player IDs.  The compound UID format
- * ("STEAM:xxx" / "EOS:xxx") matches the database schema exactly.
+ * Supports EOS player IDs (the only identity CSS DS assigns).  The compound UID format
+ * ("EOS:xxx") matches the database schema exactly.
  */
 UCLASS()
 class BANSYSTEM_API UBanEnforcer : public UGameInstanceSubsystem
@@ -62,7 +62,7 @@ public:
      *
      * Must be called from the game thread.  Iterates connected
      * PlayerControllers, resolves each player's platform UID (same format
-     * as stored in UBanDatabase: "STEAM:xxx" / "EOS:xxx"), and kicks the
+     * as stored in UBanDatabase: "EOS:xxx"), and kicks the
      * first matching player.  First tries AGameSession::KickPlayer, then
      * falls back to closing the UNetConnection directly to handle CSS
      * dedicated-server configurations where the session kick does not fully
@@ -91,7 +91,7 @@ public:
      *   Bytes 4-35 (hex offset  8-71): 32-byte ASCII EOS PUID
      *                                  (each byte is a printable hex char,
      *                                   e.g. '4','8','c','b',... → "48cb...")
-     *   Bytes 36+  (hex offset 72+  ): additional data (Steam handle, flags)
+     *   Bytes 36+  (hex offset 72+  ): additional platform data (flags, etc.)
      *
      * @param PC  The player controller whose connection URL to inspect.
      * @return    The 32-char lowercase EOS PUID string, or an empty FString if
@@ -111,7 +111,7 @@ private:
      * which CSS does call (SML relies on it).
      *
      * If the player's FUniqueNetIdRepl is already valid at PostLogin time
-     * (the common case for Steam players on CSS DS), the ban check runs
+     * (the common case for EOS players on CSS DS), the ban check runs
      * immediately and synchronously.  Otherwise the player is queued for
      * identity polling every 0.5 s up to MaxAttempts ticks (~20 s) while
      * the async Server_RegisterControllerComponent RPC populates the identity.

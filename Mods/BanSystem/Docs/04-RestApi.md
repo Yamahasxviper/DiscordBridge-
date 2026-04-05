@@ -32,9 +32,9 @@ Returns all currently active bans (permanent + unexpired temporary).
 [
   {
     "Id": 1,
-    "Uid": "STEAM:76561198000000000",
-    "PlayerUID": "76561198000000000",
-    "Platform": "STEAM",
+    "Uid": "EOS:00020aed06f0a6958c3c067fb4b73d51",
+    "PlayerUID": "00020aed06f0a6958c3c067fb4b73d51",
+    "Platform": "EOS",
     "PlayerName": "SomePlayer",
     "Reason": "Cheating",
     "BannedBy": "admin",
@@ -58,7 +58,7 @@ Returns all ban records, including expired temporary bans.
 
 Check whether a compound UID is currently banned.
 
-**URL parameter:** `:uid` — compound UID in the format `STEAM:xxx` or `EOS:xxx` (URL-encode the colon as `%3A`).
+**URL parameter:** `:uid` — compound UID in the format `EOS:xxx` (URL-encode the colon as `%3A`).
 
 **Response — banned:**
 ```json
@@ -72,7 +72,7 @@ Check whether a compound UID is currently banned.
 
 **Example:**
 ```sh
-curl "http://localhost:3000/bans/check/STEAM%3A76561198000000000"
+curl "http://localhost:3000/bans/check/EOS%3A00020aed06f0a6958c3c067fb4b73d51"
 ```
 
 ---
@@ -84,8 +84,8 @@ Create a new ban.
 **Request body:**
 ```json
 {
-  "playerUID":       "76561198000000000",
-  "platform":        "STEAM",
+  "playerUID":       "00020aed06f0a6958c3c067fb4b73d51",
+  "platform":        "EOS",
   "playerName":      "SomePlayer",
   "reason":          "Griefing",
   "bannedBy":        "admin",
@@ -95,8 +95,8 @@ Create a new ban.
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `playerUID` | ✅ | Raw platform ID (Steam 64-bit decimal or EOS 32-char hex) |
-| `platform` | ✅ | `"STEAM"`, `"EOS"`, or `"UNKNOWN"` |
+| `playerUID` | ✅ | Raw EOS Product User ID (32-char hex) |
+| `platform` | ✅ | `"EOS"` or `"UNKNOWN"` |
 | `playerName` | ❌ | Display name at time of ban (informational) |
 | `reason` | ❌ | Ban reason text |
 | `bannedBy` | ❌ | Admin username or identifier |
@@ -127,7 +127,7 @@ Remove a ban by compound UID.
 
 **Example:**
 ```sh
-curl -X DELETE "http://localhost:3000/bans/STEAM%3A76561198000000000"
+curl -X DELETE "http://localhost:3000/bans/EOS%3A00020aed06f0a6958c3c067fb4b73d51"
 ```
 
 ---
@@ -174,10 +174,10 @@ curl http://localhost:3000/health
 # List active bans
 curl http://localhost:3000/bans
 
-# Ban a Steam player permanently
+# Ban an EOS player permanently
 curl -X POST http://localhost:3000/bans \
   -H "Content-Type: application/json" \
-  -d '{"playerUID":"76561198000000000","platform":"STEAM","reason":"Cheating","bannedBy":"admin"}'
+  -d '{"playerUID":"00020aed06f0a6958c3c067fb4b73d51","platform":"EOS","reason":"Cheating","bannedBy":"admin"}'
 
 # Ban an EOS player for 24 hours
 curl -X POST http://localhost:3000/bans \
@@ -185,7 +185,7 @@ curl -X POST http://localhost:3000/bans \
   -d '{"playerUID":"00020aed06f0a6958c3c067fb4b73d51","platform":"EOS","reason":"Toxic","bannedBy":"admin","durationMinutes":1440}'
 
 # Remove a ban
-curl -X DELETE "http://localhost:3000/bans/STEAM%3A76561198000000000"
+curl -X DELETE "http://localhost:3000/bans/EOS%3A00020aed06f0a6958c3c067fb4b73d51"
 
 # Create a backup
 curl -X POST http://localhost:3000/bans/backup

@@ -2,7 +2,7 @@
 
 ← [Back to index](README.md)
 
-BanSystem is a server-only Satisfactory mod that enforces player bans on dedicated servers. It uses platform IDs (Steam 64-bit IDs and EOS Product User IDs) rather than display names, so bans cannot be evaded by renaming.
+BanSystem is a server-only Satisfactory mod that enforces player bans on dedicated servers. It uses EOS Product User IDs rather than display names, so bans cannot be evaded by renaming.
 
 ---
 
@@ -20,7 +20,7 @@ Both permanent and timed bans are supported. Temporary bans carry an expiry time
 
 ## Cross-platform UID linking
 
-A single player may connect via Steam, EOS, or both. `/linkbans` associates two compound UIDs so that a ban on either identity blocks the player regardless of which platform they log in with.
+A single player may connect and later change their EOS identity (e.g. after an account migration or evasion). `/linkbans` associates two compound UIDs so that a ban on either identity blocks the player regardless of which EOS PUID they log in with.
 
 → See [Cross-Platform Linking](05-CrossPlatform.md)
 

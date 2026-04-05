@@ -1,12 +1,10 @@
-# BanSystem – Cross-Platform Linking
+# BanSystem – UID Linking
 
 ← [Back to index](README.md)
 
-Satisfactory supports crossplay between Steam and Epic Games (EOS). A player using a linked Steam + Epic account will have both a **Steam 64-bit ID** and an **EOS Product User ID** active at the same time. BanSystem stores each as a separate compound UID (`STEAM:xxx` and `EOS:xxx`).
+On CSS Dedicated Server, all players are identified exclusively by their **EOS Product User ID** regardless of which launcher they used (Steam, Epic Games Store, etc.). BanSystem stores each compound UID (`EOS:xxx`) in its ban database.
 
-Without linking, banning a player by their Steam ID does not block their EOS identity, and vice versa — a determined player could evade a Steam ban by switching to EOS, or reconnect under a new EOS PUID after an account migration.
-
-**UID linking** solves this by associating two compound UIDs so that a ban on either one also blocks the other.
+In rare cases a player may end up with more than one EOS PUID — for example after an account migration or when deliberately creating a secondary account to evade a ban. **UID linking** solves this by associating two compound UIDs so that a ban on either one also blocks the other.
 
 ---
 
@@ -26,7 +24,7 @@ If any match is found, the player is kicked — regardless of which identity tri
 Use `/linkbans` in-game (requires admin) or call the REST API to link UIDs:
 
 ```
-/linkbans STEAM:76561198000000000 EOS:00020aed06f0a6958c3c067fb4b73d51
+/linkbans EOS:00020aed06f0a6958c3c067fb4b73d51 EOS:00020aed06f0a6958c3c067fb4b73d52
 ```
 
 Both UIDs must already have their own ban records before linking. The link is stored on **both** records so enforcement works in both directions.
@@ -37,17 +35,17 @@ Both UIDs must already have their own ban records before linking. The link is st
    ```
    /ban SomePlayer Cheating
    ```
-2. The player reconnects from a different platform. Use `/playerhistory` to find the new UID:
+2. The player reconnects under a new EOS PUID. Use `/playerhistory` to find the new UID:
    ```
    /playerhistory SomePlayer
    ```
 3. Ban the new UID:
    ```
-   /ban EOS:00020aed06f0a6958c3c067fb4b73d51 Cheating (ban evasion)
+   /ban EOS:00020aed06f0a6958c3c067fb4b73d52 Cheating (ban evasion)
    ```
 4. Link the two bans so either identity is blocked:
    ```
-   /linkbans STEAM:76561198000000000 EOS:00020aed06f0a6958c3c067fb4b73d51
+   /linkbans EOS:00020aed06f0a6958c3c067fb4b73d51 EOS:00020aed06f0a6958c3c067fb4b73d52
    ```
 
 ---
@@ -55,7 +53,7 @@ Both UIDs must already have their own ban records before linking. The link is st
 ## Removing a link
 
 ```
-/unlinkbans STEAM:76561198000000000 EOS:00020aed06f0a6958c3c067fb4b73d51
+/unlinkbans EOS:00020aed06f0a6958c3c067fb4b73d51 EOS:00020aed06f0a6958c3c067fb4b73d52
 ```
 
 This removes the link from both records. The underlying bans themselves are not removed — use `/unban` separately if you want to lift them.
@@ -67,7 +65,7 @@ This removes the link from both records. The underlying bans themselves are not 
 `/bancheck <UID>` shows the full ban record including the `LinkedUids` list:
 
 ```
-/bancheck STEAM:76561198000000000
+/bancheck EOS:00020aed06f0a6958c3c067fb4b73d51
 ```
 
 The REST endpoint `GET /bans` also includes `LinkedUids` in every ban record.
@@ -90,10 +88,9 @@ Returns up to 20 matches sorted by most recently seen, showing the compound UID 
 
 | Platform | Compound UID format | Raw ID format |
 |----------|--------------------|--------------------|
-| Steam | `STEAM:<17-digit decimal>` | `76561198000000000` |
 | EOS | `EOS:<32-char hex>` | `00020aed06f0a6958c3c067fb4b73d51` |
 
-Both formats are accepted by all commands and REST endpoints. The `/whoami` command shows a player's compound UID in the correct format.
+The `/whoami` command shows a player's compound UID in the correct format.
 
 ---
 

@@ -37,8 +37,8 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBanRestApi, Log, All);
  *
  * POST /bans body:
  *   {
- *     "playerUID":       "76561198012345678",   // required
- *     "platform":        "STEAM",               // required: STEAM|EOS|UNKNOWN
+ *     "playerUID":       "00020aed06f0a6958c3c067fb4b73d51",  // required
+ *     "platform":        "EOS",                               // required: EOS|UNKNOWN
  *     "playerName":      "SomePlayer",          // optional
  *     "reason":          "Griefing",            // optional
  *     "bannedBy":        "admin",               // optional

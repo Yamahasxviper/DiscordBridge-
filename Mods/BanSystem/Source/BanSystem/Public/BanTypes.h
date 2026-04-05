@@ -19,15 +19,15 @@ struct BANSYSTEM_API FBanEntry
     UPROPERTY(BlueprintReadOnly, Category = "Ban System")
     int64 Id = 0;
 
-    /** Compound key: "STEAM:76561198012345678" or "EOS:00020aed...". */
+    /** Compound key: "EOS:00020aed...". */
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     FString Uid;
 
-    /** Raw platform user ID (Steam64 or EOS Product User ID). */
+    /** Raw EOS Product User ID. */
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     FString PlayerUID;
 
-    /** "STEAM" | "EOS" | "UNKNOWN" */
+    /** "EOS" | "UNKNOWN" */
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     FString Platform;
 
@@ -60,7 +60,7 @@ struct BANSYSTEM_API FBanEntry
 
     /**
      * Optional list of additional compound UIDs that are linked to this ban
-     * (cross-platform identity, e.g. "STEAM:xxx" and "EOS:yyy" for the same person).
+     * (cross-platform identity, e.g. two EOS UIDs for the same person across accounts).
      *
      * When UBanDatabase::IsCurrentlyBannedByAnyId() is called, it searches both
      * the primary Uid and every entry in this list.  Use /linkbans to associate

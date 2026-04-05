@@ -196,7 +196,7 @@ void UBanEnforcer::OnPostLogin(AGameModeBase* GameMode, APlayerController* NewPl
 
     // Attempt an immediate ban check when PlayerState and identity are ready.
     // On CSS dedicated servers APlayerState::UniqueId is typically set during
-    // AGameModeBase::Login() so this fast path fires for most Steam players.
+    // AGameModeBase::Login() so this fast path fires for most EOS players.
     if (NewPlayer->PlayerState)
     {
         const FUniqueNetIdRepl& NetIdAtLogin = NewPlayer->PlayerState->GetUniqueId();
@@ -388,7 +388,7 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
     // storage path — the inner pointer slot holds a raw EOS handle value, not a
     // valid C++ object, so calling NetId->GetType() causes a SIGSEGV.
     // FUniqueNetIdRepl::GetType() and FUniqueNetIdRepl::ToString() are safe for
-    // both V1 (Steam) and V2 (EOS PUID) identities.
+    // EOS PUID (V2) identities.
     const FString Platform = NetId.GetType().ToString().ToUpper();
     // Guard against an unresolved EOS identity: on CSS DS, FUniqueNetIdRepl::IsValid()
     // can return true before the EOS PUID provider has been assigned, leaving GetType()
@@ -400,11 +400,9 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
             *PC->PlayerState->GetPlayerName());
         return;
     }
-    // Normalize EOS PUIDs to lowercase so they match bans stored by chat commands
+    // Normalize to lowercase so UIDs match bans stored by chat commands
     // (which also lowercase EOS PUIDs via the /ban and /tempban resolution paths).
-    const FString RawId    = (Platform == TEXT("EOS"))
-        ? NetId.ToString().ToLower()
-        : NetId.ToString();
+    const FString RawId    = NetId.ToString().ToLower();
     const FString Uid      = UBanDatabase::MakeUid(Platform, RawId);
 
     UE_LOG(LogBanEnforcer, Log,
@@ -484,13 +482,11 @@ void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
         bool bMatched = false;
         if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
         {
-            // Use direct FUniqueNetIdRepl accessors — safe for V2 EOS PUIDs.
+            // Use direct FUniqueNetIdRepl accessors — safe for EOS V2 PUIDs.
             // (See PerformBanCheckForPlayer for the full explanation.)
             const FString Platform   = NetId.GetType().ToString().ToUpper();
-            // Normalize EOS PUIDs to lowercase to match stored ban UIDs.
-            const FString RawId      = (Platform == TEXT("EOS"))
-                ? NetId.ToString().ToLower()
-                : NetId.ToString();
+            // Normalize to lowercase to match stored ban UIDs.
+            const FString RawId      = NetId.ToString().ToLower();
             const FString PlayerUid  = UBanDatabase::MakeUid(Platform, RawId);
 
             if (PlayerUid == Uid)
@@ -513,9 +509,8 @@ void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
         if (!bMatched)
         {
             // ── Fallback B: match by the raw player ID embedded in the UID
-            //    against the PlayerState name (Steam players' display names often
-            //    equal their Steam64 ID on fresh connection, but this is
-            //    best-effort only).
+            //    against the PlayerState name (best-effort — only fires when
+            //    UniqueId is not yet set).
             const FString PlayerName = PC->PlayerState->GetPlayerName();
             if (PlayerName.Equals(UidRawId, ESearchCase::IgnoreCase))
             {
@@ -655,7 +650,7 @@ FString UBanEnforcer::ExtractEosPuidFromConnectionUrl(APlayerController* PC)
     //   0 - 7  : 4-byte LE header (length or version field)
     //   8 - 71 : 32 ASCII bytes that form the 32-char EOS PUID
     //            e.g. hex pair "34" = 0x34 = 52 = '4', so "3438" → "48"
-    //   72+    : additional platform data (Steam handle, flags)
+    //   72+    : additional platform data (flags, etc.)
     const TCHAR* Opt = Conn->URL.GetOption(TEXT("ClientIdentity="), nullptr);
     if (!Opt || !*Opt) return FString();
 
