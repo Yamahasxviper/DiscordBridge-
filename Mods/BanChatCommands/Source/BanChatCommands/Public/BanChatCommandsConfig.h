@@ -30,7 +30,7 @@
  * Product User ID regardless of their launch platform (Steam, Epic, etc.).
  * Use /whoami in-game to find the 32-character hex EOS PUID for any player.
  */
-UCLASS(Config = BanChatCommands, DefaultConfig, meta = (DisplayName = "Ban Chat Commands"))
+UCLASS(Config = BanChatCommands, meta = (DisplayName = "Ban Chat Commands"))
 class BANCHATCOMMANDS_API UBanChatCommandsConfig : public UObject
 {
     GENERATED_BODY()

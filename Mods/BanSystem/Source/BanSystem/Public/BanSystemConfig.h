@@ -31,7 +31,7 @@
  *   RestApiPort=3001
  *   MaxBackups=10
  */
-UCLASS(Config = BanSystem, DefaultConfig, meta = (DisplayName = "Ban System"))
+UCLASS(Config = BanSystem, meta = (DisplayName = "Ban System"))
 class BANSYSTEM_API UBanSystemConfig : public UObject
 {
     GENERATED_BODY()
