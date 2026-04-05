@@ -15,9 +15,9 @@ void FBanChatCommandsModule::StartupModule()
 {
     UE_LOG(LogBanChatCommands, Log, TEXT("BanChatCommands module starting up."));
 
-    // On every server start, write a backup to Saved/Config/BanChatCommands.ini.
-    // Mirrors DiscordBridge's convention — that file is never touched by mod
-    // updates so the admin list survives any wipe of the mod directory.
+    // On every server start, write a backup to Saved/BanChatCommands/BanChatCommands.ini.
+    // That folder is never touched by mod updates so the admin list survives
+    // any wipe of the mod directory.
     BackupConfigIfNeeded();
 
     WorldInitHandle = FWorldDelegates::OnWorldInitializedActors.AddLambda(
@@ -62,16 +62,16 @@ void FBanChatCommandsModule::BackupConfigIfNeeded()
     const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
     if (!Cfg) return;
 
-    // Saved/Config/BanChatCommands.ini — mirrors DiscordBridge's backup path convention.
-    // Never touched by mod updates or Alpakit dev deploys.
+    // Saved/BanChatCommands/BanChatCommands.ini — dedicated per-mod folder so it's
+    // easy to find, and never touched by mod updates or Alpakit dev deploys.
     const FString BackupPath = FPaths::Combine(
         FPaths::ProjectSavedDir(),
-        TEXT("Config"),
+        TEXT("BanChatCommands"),
         TEXT("BanChatCommands.ini"));
 
     // Write on every server start so the backup always reflects the current
-    // admin list.  Mirrors DiscordBridge's convention: Saved/Config/ is never
-    // touched by mod updates, so the list survives any wipe of the mod dir.
+    // admin list.  Saved/BanChatCommands/ is never touched by mod updates or
+    // Alpakit dev deploys, so the list survives any wipe of the mod directory.
     FString Content =
         FString(TEXT("; BanChatCommands admin configuration.\n"))
         + TEXT(";\n")

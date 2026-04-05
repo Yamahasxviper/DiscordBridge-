@@ -32,7 +32,7 @@ private:
     FDelegateHandle WorldInitHandle;
 
     /** On every server start, writes the current admin list to
-     *  Saved/Config/BanChatCommands.ini — mirrors DiscordBridge's backup
-     *  convention so the list survives any wipe of the mod directory. */
+     *  Saved/BanChatCommands/BanChatCommands.ini — that folder is never touched
+     *  by mod updates so the list survives any wipe of the mod directory. */
     static void BackupConfigIfNeeded();
 };

@@ -13,8 +13,8 @@ public:
     virtual void ShutdownModule() override;
 
 private:
-    /** On every server start, writes current settings to Saved/Config/BanSystem.ini.
-     *  Mirrors DiscordBridge's backup convention — that file is never touched by
-     *  mod updates so settings survive any wipe of the mod directory. */
+    /** On every server start, writes current settings to Saved/BanSystem/BanSystem.ini.
+     *  That folder is never touched by mod updates so settings survive any wipe
+     *  of the mod directory. */
     static void BackupConfigIfNeeded();
 };
