@@ -59,15 +59,6 @@ namespace BanChat
         return Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")) + TEXT(" UTC");
     }
 
-    /** Returns true if Id is a 17-digit decimal Steam64 ID. */
-    static bool IsValidSteam64(const FString& Id)
-    {
-        if (Id.Len() != 17) return false;
-        for (TCHAR c : Id)
-            if (c < '0' || c > '9') return false;
-        return true;
-    }
-
     /** Returns true if Id is a 32-character lowercase hex EOS Product User ID. */
     static bool IsValidEOSPUID(const FString& Id)
     {
@@ -150,9 +141,8 @@ namespace BanChat
      * Resolve a player argument to a compound ban UID.
      *
      * Resolution order:
-     *   1. 17-digit decimal → Steam64 ID  → UID "STEAM:xxx"
-     *   2. 32-char hex       → EOS PUID   → UID "EOS:xxx"
-     *   3. Otherwise         → display-name substring lookup against connected players.
+     *   1. 32-char hex       → EOS PUID   → UID "EOS:xxx"
+     *   2. Otherwise         → display-name substring lookup against connected players.
      *
      * Returns true on success and populates OutUid + OutDisplayName.
      */
@@ -161,15 +151,7 @@ namespace BanChat
                               FString& OutUid,
                               FString& OutDisplayName)
     {
-        // 1. Raw Steam64 ID
-        if (IsValidSteam64(Arg))
-        {
-            OutUid         = UBanDatabase::MakeUid(TEXT("STEAM"), Arg);
-            OutDisplayName = Arg;
-            return true;
-        }
-
-        // 2. Raw EOS PUID
+        // 1. Raw EOS PUID
         if (IsValidEOSPUID(Arg))
         {
             const FString Lower = Arg.ToLower();
@@ -183,7 +165,7 @@ namespace BanChat
         if (!World)
         {
             Sender->SendChatMessage(
-                FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid Steam64 ID or EOS PUID."), *Arg),
+                FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid EOS PUID."), *Arg),
                 FLinearColor::Red);
             return false;
         }
@@ -206,7 +188,7 @@ namespace BanChat
         {
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] No connected player found matching '%s'. "
-                    "Use a Steam64 ID or EOS PUID to target offline players."), *Arg),
+                    "Use an EOS PUID to target offline players."), *Arg),
                 FLinearColor::Red);
             return false;
         }
@@ -330,9 +312,8 @@ namespace BanChat
      * Validates and normalises a compound UID argument entered by the user.
      *
      * Accepts:
-     *   "STEAM:<17-digit decimal>"  → returned as-is
-     *   "EOS:<32-hex>"             → returned with lowercase hex part
-     *   "STEAM:<id>"               → platform prefix already present
+     *   "EOS:<32-hex>"  → returned with lowercase hex part
+     *   "<32-hex>"      → "EOS:" prefix added automatically
      *
      * On failure, sends an error to the sender and returns false.
      */
@@ -340,15 +321,9 @@ namespace BanChat
                                         const FString& Arg,
                                         FString& OutUid)
     {
-        // Try to parse an explicit compound UID supplied by the user (e.g. "STEAM:xxx" or "EOS:xxx").
+        // Try to parse an explicit compound UID supplied by the user (e.g. "EOS:xxx").
         FString Platform, RawId;
         UBanDatabase::ParseUid(Arg, Platform, RawId);
-
-        if (Platform == TEXT("STEAM") && IsValidSteam64(RawId))
-        {
-            OutUid = UBanDatabase::MakeUid(TEXT("STEAM"), RawId);
-            return true;
-        }
 
         if (Platform == TEXT("EOS") && IsValidEOSPUID(RawId))
         {
@@ -356,12 +331,7 @@ namespace BanChat
             return true;
         }
 
-        // Accept raw IDs without prefix.
-        if (IsValidSteam64(Arg))
-        {
-            OutUid = UBanDatabase::MakeUid(TEXT("STEAM"), Arg);
-            return true;
-        }
+        // Accept raw EOS PUID without prefix.
         if (IsValidEOSPUID(Arg))
         {
             OutUid = UBanDatabase::MakeUid(TEXT("EOS"), Arg.ToLower());
@@ -372,7 +342,7 @@ namespace BanChat
         {
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid compound UID "
-                    "(STEAM:<17digits> or EOS:<32hex>)."), *Arg),
+                    "(EOS:<32hex>)."), *Arg),
                 FLinearColor::Red);
         }
         return false;
@@ -495,7 +465,7 @@ ABanChatCommand::ABanChatCommand()
     MinNumberOfArguments = 1;
     bOnlyUsableByPlayer  = false; // allow console too
     Usage = NSLOCTEXT("BanChatCommands", "BanUsage",
-        "/ban <player|Steam64|PUID> [reason...]");
+        "/ban <player|PUID> [reason...]");
 }
 
 EExecutionStatus ABanChatCommand::ExecuteCommand_Implementation(
@@ -527,7 +497,7 @@ ATempBanChatCommand::ATempBanChatCommand()
     MinNumberOfArguments = 2;
     bOnlyUsableByPlayer  = false;
     Usage = NSLOCTEXT("BanChatCommands", "TempBanUsage",
-        "/tempban <player|Steam64|PUID> <minutes> [reason...]");
+        "/tempban <player|PUID> <minutes> [reason...]");
 }
 
 EExecutionStatus ATempBanChatCommand::ExecuteCommand_Implementation(
@@ -568,7 +538,7 @@ AUnbanChatCommand::AUnbanChatCommand()
     MinNumberOfArguments = 1;
     bOnlyUsableByPlayer  = false;
     Usage = NSLOCTEXT("BanChatCommands", "UnbanUsage",
-        "/unban <Steam64|PUID>");
+        "/unban <PUID>");
 }
 
 EExecutionStatus AUnbanChatCommand::ExecuteCommand_Implementation(
@@ -580,20 +550,16 @@ EExecutionStatus AUnbanChatCommand::ExecuteCommand_Implementation(
 
     const FString& Arg = Arguments[0];
 
-    // Build the compound UID — accept Steam64 or EOS PUID only (exact IDs required for unban).
+    // Build the compound UID — accept EOS PUID only (exact ID required for unban).
     FString Uid;
-    if (BanChat::IsValidSteam64(Arg))
-    {
-        Uid = UBanDatabase::MakeUid(TEXT("STEAM"), Arg);
-    }
-    else if (BanChat::IsValidEOSPUID(Arg))
+    if (BanChat::IsValidEOSPUID(Arg))
     {
         Uid = UBanDatabase::MakeUid(TEXT("EOS"), Arg.ToLower());
     }
     else
     {
         Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid Steam64 ID (17 digits) or "
+            FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid "
                 "EOS PUID (32 hex chars). /unban requires an exact ID."), *Arg),
             FLinearColor::Red);
         return EExecutionStatus::BAD_ARGUMENTS;
@@ -630,7 +596,7 @@ ABanCheckChatCommand::ABanCheckChatCommand()
     MinNumberOfArguments = 1;
     bOnlyUsableByPlayer  = false;
     Usage = NSLOCTEXT("BanChatCommands", "BanCheckUsage",
-        "/bancheck <player|Steam64|PUID>");
+        "/bancheck <player|PUID>");
 }
 
 EExecutionStatus ABanCheckChatCommand::ExecuteCommand_Implementation(
@@ -800,13 +766,7 @@ EExecutionStatus AWhoAmIChatCommand::ExecuteCommand_Implementation(
         RawId    = EosPuid;
     }
 
-    if (Platform == TEXT("STEAM"))
-    {
-        Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] Your Steam64: %s"), *RawId),
-            FLinearColor::Green);
-    }
-    else if (Platform == TEXT("EOS"))
+    if (Platform == TEXT("EOS"))
     {
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Your EOS PUID: %s"), *RawId),
