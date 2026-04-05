@@ -91,7 +91,7 @@ Ban functionality has been removed from this project. For ban enforcement, consi
 
 - Single primary config file (`DefaultDiscordBridge.ini`) covers all settings and is
   **not** overwritten by mod updates.
-- A full backup is written to `Saved/Config/DiscordBridge.ini` on every server start;
+- A full backup is written to `Saved/DiscordBridge/DiscordBridge.ini` on every server start;
   if the primary file is ever missing the bridge automatically restores all settings
   from the backup.
 - Whitelist data persists in `Saved/ServerWhitelist.json` across server restarts.

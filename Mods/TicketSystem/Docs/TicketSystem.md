@@ -86,7 +86,7 @@ All settings live in:
 <ServerRoot>/FactoryGame/Mods/TicketSystem/Config/DefaultTickets.ini
 ```
 
-A backup is written to `Saved/Config/TicketSystem.ini` on every server start
+A backup is written to `Saved/TicketSystem/TicketSystem.ini` on every server start
 so your settings survive mod updates.
 
 ### Quick setup (standalone mode)

@@ -202,11 +202,11 @@ FString FDiscordBridgeConfig::GetModConfigFilePath()
 
 FString FDiscordBridgeConfig::GetBackupConfigFilePath()
 {
-	// Backup config in Saved/Config/ – never touched by Alpakit mod updates.
+	// Backup config in Saved/DiscordBridge/ – never touched by Alpakit mod updates.
 	// Written automatically whenever the primary config has valid credentials.
 	// On a deployed server:
-	//   <ServerRoot>/FactoryGame/Saved/Config/DiscordBridge.ini
-	return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Config"), TEXT("DiscordBridge.ini"));
+	//   <ServerRoot>/FactoryGame/Saved/DiscordBridge/DiscordBridge.ini
+	return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("DiscordBridge"), TEXT("DiscordBridge.ini"));
 }
 
 FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
@@ -562,7 +562,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("# 2. Restart the server. The bridge starts automatically.\n")
 			TEXT("# Note: this file is NOT overwritten by mod updates, so your settings persist\n")
 			TEXT("#   across version upgrades. A backup is still written automatically to\n")
-			TEXT("#   <ServerRoot>/FactoryGame/Saved/Config/DiscordBridge.ini on every server start.\n")
+			TEXT("#   <ServerRoot>/FactoryGame/Saved/DiscordBridge/DiscordBridge.ini on every server start.\n")
 			TEXT("# Bot setup: Discord Developer Portal -> your app -> Bot\n")
 			TEXT("#   - Enable Server Members and Message Content intents.\n")
 			TEXT("#   - Invite the bot with Send Messages + Read Message History permissions.\n")

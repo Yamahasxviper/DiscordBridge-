@@ -11,7 +11,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogTicketSystem, Log, All);
  * FTicketConfig
  *
  * Plain-old-data struct that holds all settings loaded from
- * DefaultTickets.ini (and the Saved/Config/TicketSystem.ini backup).
+ * DefaultTickets.ini (and the Saved/TicketSystem/TicketSystem.ini backup).
  * Populated once per server start by FTicketConfig::Load().
  */
 struct TICKETSYSTEM_API FTicketConfig
@@ -108,7 +108,7 @@ struct TICKETSYSTEM_API FTicketConfig
 	/** Returns the absolute path to the primary config file (DefaultTickets.ini). */
 	static FString GetConfigFilePath();
 
-	/** Returns the absolute path to the backup config file (Saved/Config/TicketSystem.ini). */
+	/** Returns the absolute path to the backup config file (Saved/TicketSystem/TicketSystem.ini). */
 	static FString GetBackupFilePath();
 
 	/**

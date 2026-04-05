@@ -22,7 +22,7 @@ Edit that file, then restart the server. Your changes take effect on the next st
 
 > **Tip – surviving mod updates**
 > The mod automatically writes a backup of your `BotToken` and `ChannelId` to
-> `<ServerRoot>/FactoryGame/Saved/Config/DiscordBridge.ini` every time the server
+> `<ServerRoot>/FactoryGame/Saved/DiscordBridge/DiscordBridge.ini` every time the server
 > starts. If a mod update resets the primary config, the bridge falls back to that
 > backup so it keeps working until you copy your credentials back.
 
@@ -395,7 +395,7 @@ ShowPlayerCountInPresence=False
 ### The config gets reset after a mod update
 
 - This is expected behaviour for the primary config. Your credentials are saved
-  automatically to `<ServerRoot>/FactoryGame/Saved/Config/DiscordBridge.ini` each
+  automatically to `<ServerRoot>/FactoryGame/Saved/DiscordBridge/DiscordBridge.ini` each
   session and will be restored automatically. If you want to be safe, keep a
   separate copy of your `BotToken` and `ChannelId` somewhere secure.
 

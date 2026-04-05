@@ -136,7 +136,7 @@ The config file lives at:
 <ServerRoot>/FactoryGame/Mods/TicketSystem/Config/DefaultTickets.ini
 ```
 
-A backup is written automatically to `Saved/Config/TicketSystem.ini` on every server start, and settings are restored from the backup after a mod update.
+A backup is written automatically to `Saved/TicketSystem/TicketSystem.ini` on every server start, and settings are restored from the backup after a mod update.
 
 ### Settings reference
 
