@@ -8,10 +8,9 @@
 
 Commands that accept `<player|UID>` resolve the argument in this order:
 
-1. **Compound UID** — a string starting with `STEAM:` or `EOS:` is used as-is.
-2. **17-digit decimal** — treated as a raw Steam 64-bit ID (`STEAM:` prefix added automatically).
-3. **32-character hex string** — treated as a raw EOS Product User ID (`EOS:` prefix added automatically).
-4. **Display name** — case-insensitive substring match against currently connected players. If more than one player matches, the command lists all ambiguous matches and asks you to be more specific. Offline players must be targeted by UID.
+1. **Compound UID** — a string starting with `EOS:` is used as-is.
+2. **32-character hex string** — treated as a raw EOS Product User ID (`EOS:` prefix added automatically).
+3. **Display name** — case-insensitive substring match against currently connected players. If more than one player matches, the command lists all ambiguous matches and asks you to be more specific. Offline players must be targeted by UID.
 
 ---
 
@@ -27,9 +26,8 @@ Permanently bans a player. The ban is stored in BanSystem's database and enforce
 
 ```
 /ban SomePlayer Griefing
-/ban 76561198000000000 Cheating
-/ban STEAM:76561198000000000 Duplicate account
-/ban EOS:00020aed06f0a6958c3c067fb4b73d51 Cheating
+/ban 00020aed06f0a6958c3c067fb4b73d51 Cheating
+/ban EOS:00020aed06f0a6958c3c067fb4b73d51 Duplicate account
 ```
 
 ---
@@ -46,7 +44,7 @@ Temporarily bans a player for the specified number of minutes. The ban is lifted
 
 ```
 /tempban SomePlayer 60 Spamming
-/tempban 76561198000000000 1440 Toxic behaviour
+/tempban 00020aed06f0a6958c3c067fb4b73d51 1440 Toxic behaviour
 ```
 
 ---
@@ -57,12 +55,11 @@ Temporarily bans a player for the specified number of minutes. The ban is lifted
 /unban <UID>
 ```
 
-Removes an existing ban. You must supply the compound UID (`STEAM:xxx` or `EOS:xxx`); display names are not accepted for safety.
+Removes an existing ban. You must supply the compound UID (`EOS:xxx`); display names are not accepted for safety.
 
 **Requires admin.**
 
 ```
-/unban STEAM:76561198000000000
 /unban EOS:00020aed06f0a6958c3c067fb4b73d51
 ```
 
@@ -80,7 +77,7 @@ Reports the current ban status for a player. Shows the ban reason, expiry time (
 
 ```
 /bancheck SomePlayer
-/bancheck STEAM:76561198000000000
+/bancheck 00020aed06f0a6958c3c067fb4b73d51
 ```
 
 ---
@@ -113,7 +110,7 @@ Links two compound UIDs so that a ban on one also blocks the player when they co
 **Requires admin.**
 
 ```
-/linkbans STEAM:76561198000000000 EOS:00020aed06f0a6958c3c067fb4b73d51
+/linkbans EOS:00020aed06f0a6958c3c067fb4b73d51 EOS:aabbccdd11223344aabbccdd11223344
 ```
 
 ---
@@ -129,7 +126,7 @@ Removes the bidirectional link between two UIDs that was created by `/linkbans`.
 **Requires admin.**
 
 ```
-/unlinkbans STEAM:76561198000000000 EOS:00020aed06f0a6958c3c067fb4b73d51
+/unlinkbans EOS:00020aed06f0a6958c3c067fb4b73d51 EOS:aabbccdd11223344aabbccdd11223344
 ```
 
 ---
@@ -159,12 +156,13 @@ Useful when a player reconnects under a new EOS PUID: look up their old display 
 /whoami
 ```
 
-Shows the calling player's own compound UID. No admin required — any connected player can use this command to find the exact UID they need for a ban lookup or to give to a server admin.
+Shows the calling player's own EOS Product User ID. No admin required — any connected player can use this command to find the exact PUID they need for a ban lookup or to give to a server admin.
+
+On CSS Dedicated Server, all players — regardless of launch platform (Steam, Epic, etc.) — are identified by their EOS PUID.
 
 **No admin required.**
 
 Example output:
 ```
-[BanChatCommands] Your Steam64: STEAM:76561198000000000
-[BanChatCommands] Your EOS PUID: EOS:00020aed06f0a6958c3c067fb4b73d51
+[BanChatCommands] Your EOS PUID: 00020aed06f0a6958c3c067fb4b73d51
 ```

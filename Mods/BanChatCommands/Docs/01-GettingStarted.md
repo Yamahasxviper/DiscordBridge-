@@ -52,12 +52,6 @@ Once the server is running, connect as a player and type:
 You should receive a reply such as:
 
 ```
-[BanChatCommands] Your Steam64: 76561198000000000
-```
-
-or
-
-```
 [BanChatCommands] Your EOS PUID: 00020aed06f0a6958c3c067fb4b73d51
 ```
 
