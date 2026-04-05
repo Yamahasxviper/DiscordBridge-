@@ -19,9 +19,8 @@ void FBanSystemModule::StartupModule()
     // subclasses and initialise automatically when the game instance starts.
     // No manual setup is required here.
 
-    // Restore documentation comments to Config/DefaultBanSystem.ini.  UE's
-    // staging pipeline strips them via FConfigFile; this re-applies them on
-    // the first server start after each mod update.
+    // Re-apply documentation comments stripped by UE's staging pipeline.
+    // Must run before BackupConfigIfNeeded so live values are available.
     RestoreDefaultConfigDocs();
 
     // On every server start, write a backup to Saved/BanSystem/BanSystem.ini.

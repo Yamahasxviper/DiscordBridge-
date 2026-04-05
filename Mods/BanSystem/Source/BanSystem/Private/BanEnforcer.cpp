@@ -572,6 +572,24 @@ void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
             }
         }
 
+        if (!bMatched && UidPlatform == TEXT("IP"))
+        {
+            // ── Fallback C: IP ban — compare against the remote address cached
+            //    during the PreLogin hook.  Required when a ban is added at runtime
+            //    and the player is already connected (the EOS PUID may never match
+            //    the IP UID).
+            UGameInstance* GI = World->GetGameInstance();
+            if (GI)
+            {
+                if (UBanEnforcer* Enforcer = GI->GetSubsystem<UBanEnforcer>())
+                {
+                    const FString PlayerIp = Enforcer->GetCachedIpForPlayer(PC);
+                    if (!PlayerIp.IsEmpty() && PlayerIp.Equals(UidRawId, ESearchCase::IgnoreCase))
+                        bMatched = true;
+                }
+            }
+        }
+
         if (!bMatched) continue;
 
         GM->GameSession->KickPlayer(PC, FText::FromString(Reason));

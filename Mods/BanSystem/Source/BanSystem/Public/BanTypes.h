@@ -27,7 +27,7 @@ struct BANSYSTEM_API FBanEntry
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     FString PlayerUID;
 
-    /** "EOS" | "UNKNOWN" */
+    /** "EOS" | "UNKNOWN" | "IP" */
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     FString Platform;
 

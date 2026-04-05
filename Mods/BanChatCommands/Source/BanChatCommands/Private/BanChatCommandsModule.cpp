@@ -6,6 +6,7 @@
 #include "Commands/BanChatCommands.h"
 #include "Engine/World.h"
 #include "HAL/PlatformFileManager.h"
+#include "Misc/Crc.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -15,15 +16,28 @@ void FBanChatCommandsModule::StartupModule()
 {
     UE_LOG(LogBanChatCommands, Log, TEXT("BanChatCommands module starting up."));
 
-    // Restore documentation comments to Config/DefaultBanChatCommands.ini.
-    // UE's staging pipeline strips them via FConfigFile; this re-applies them
-    // on the first server start after each mod update.
+    // Re-apply documentation comments stripped by UE's staging pipeline.
     RestoreDefaultConfigDocs();
 
     // On every server start, write a backup to Saved/BanChatCommands/BanChatCommands.ini.
     // That folder is never touched by mod updates so the admin list survives
     // any wipe of the mod directory.
     BackupConfigIfNeeded();
+
+    // Record the initial admin-list hash so the first poll can detect changes.
+    LastConfigHash = ComputeAdminHash();
+
+    // Start the periodic config-reload ticker.  It fires every
+    // ConfigPollIntervalSeconds seconds for the lifetime of the module,
+    // reloading BanChatCommands.ini from disk and logging when the admin list
+    // changes.  No server restart or manual /reloadconfig needed.
+    ConfigPollHandle = FTSTicker::GetCoreTicker().AddTicker(
+        FTickerDelegate::CreateRaw(this, &FBanChatCommandsModule::OnConfigPollTick),
+        ConfigPollIntervalSeconds);
+
+    UE_LOG(LogBanChatCommands, Log,
+        TEXT("BanChatCommands: config auto-reload enabled — polling every %.0f seconds."),
+        ConfigPollIntervalSeconds);
 
     WorldInitHandle = FWorldDelegates::OnWorldInitializedActors.AddLambda(
         [](const UWorld::FActorsInitializedParams& Params)
@@ -53,14 +67,55 @@ void FBanChatCommandsModule::StartupModule()
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), APlayerHistoryChatCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AWhoAmIChatCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), ABanNameChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AReloadConfigChatCommand::StaticClass());
 
             UE_LOG(LogBanChatCommands, Log,
-                TEXT("BanChatCommands: Registered 10 commands (ban, tempban, unban, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname)."));;
+                TEXT("BanChatCommands: Registered 11 commands (ban, tempban, unban, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig)."));;
         }
     );
 
     UE_LOG(LogBanChatCommands, Log, TEXT("BanChatCommands module started."));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Automatic config-reload ticker
+// ─────────────────────────────────────────────────────────────────────────────
+
+uint32 FBanChatCommandsModule::ComputeAdminHash()
+{
+    const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
+    if (!Cfg) return 0;
+
+    // Sort so that order-only changes don't trigger a false positive.
+    TArray<FString> Sorted = Cfg->AdminEosPUIDs;
+    Sorted.Sort();
+    const FString Joined = FString::Join(Sorted, TEXT(","));
+    return FCrc::StrCrc32(*Joined);
+}
+
+bool FBanChatCommandsModule::OnConfigPollTick(float /*DeltaTime*/)
+{
+    // Force UE to re-read all UPROPERTY(Config) fields from the ini files on disk.
+    GetMutableDefault<UBanChatCommandsConfig>()->ReloadConfig();
+
+    const uint32 NewHash = ComputeAdminHash();
+    if (NewHash != LastConfigHash)
+    {
+        LastConfigHash = NewHash;
+        BackupConfigIfNeeded();
+
+        const int32 AdminCount = UBanChatCommandsConfig::Get()->AdminEosPUIDs.Num();
+        UE_LOG(LogBanChatCommands, Log,
+            TEXT("BanChatCommands: config auto-reloaded — %d admin(s) now active."),
+            AdminCount);
+    }
+
+    return true; // keep ticking
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Persistent config backup
+// ─────────────────────────────────────────────────────────────────────────────
 
 void FBanChatCommandsModule::BackupConfigIfNeeded()
 {
@@ -122,6 +177,10 @@ void FBanChatCommandsModule::BackupConfigIfNeeded()
             TEXT("BanChatCommands: Could not write backup config to '%s'."), *BackupPath);
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Default config docs restore
+// ─────────────────────────────────────────────────────────────────────────────
 
 void FBanChatCommandsModule::RestoreDefaultConfigDocs()
 {
@@ -195,6 +254,8 @@ void FBanChatCommandsModule::RestoreDefaultConfigDocs()
 
 void FBanChatCommandsModule::ShutdownModule()
 {
+    FTSTicker::GetCoreTicker().RemoveTicker(ConfigPollHandle);
+
     FWorldDelegates::OnWorldInitializedActors.Remove(WorldInitHandle);
     WorldInitHandle.Reset();
 
