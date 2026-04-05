@@ -397,6 +397,11 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
 {
     if (!World || !IsValid(PC) || !DB || !PC->PlayerState) return;
 
+    // Refresh the in-memory ban list from disk in case an admin manually edited
+    // bans.json (e.g. to remove a ban) without going through the REST API or
+    // chat commands.  This is a no-op when the file has not changed.
+    DB->ReloadIfChanged();
+
     const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
     if (!NetId.IsValid()) return;
 
@@ -600,6 +605,11 @@ void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
 void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, UBanDatabase* DB, const FString& Uid)
 {
     if (!World || !IsValid(PC) || !DB) return;
+
+    // Refresh the in-memory ban list from disk in case an admin manually edited
+    // bans.json (e.g. to remove a ban) without going through the REST API or
+    // chat commands.  This is a no-op when the file has not changed.
+    DB->ReloadIfChanged();
 
     FString Platform, RawId;
     UBanDatabase::ParseUid(Uid, Platform, RawId);

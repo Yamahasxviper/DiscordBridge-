@@ -132,6 +132,18 @@ public:
     /** Returns the resolved path of the JSON ban file. */
     FString GetDatabasePath() const;
 
+    /**
+     * Re-reads bans.json if it has been modified on disk since the last load
+     * or save.  Call this before any enforcement check so that manual edits to
+     * the file (e.g. to remove a ban) take effect immediately without a server
+     * restart.
+     *
+     * Must be called from the game thread.  The comparison is based on the
+     * file's last-write timestamp; if the timestamp has not changed this
+     * method returns immediately with no I/O.
+     */
+    void ReloadIfChanged();
+
 private:
     void LoadFromFile();
     bool SaveToFile() const;
@@ -142,6 +154,13 @@ private:
     TArray<FBanEntry>    Bans;
     int64                NextId = 1;
     FString              DbPath;
+
+    /**
+     * Last-write timestamp of DbPath as of the most recent load or save.
+     * Compared in ReloadIfChanged() to detect external edits.
+     * Mutable so SaveToFile() (which is const) can update it after writing.
+     */
+    mutable FDateTime    LastKnownFileModTime;
 
     /** Protects all in-memory and file operations so the HTTP thread and
      *  game thread can both access the ban list safely. */
