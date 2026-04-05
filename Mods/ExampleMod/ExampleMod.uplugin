@@ -12,16 +12,10 @@
 	"DocsURL": "https://docs.ficsit.app",
 	"MarketplaceURL": "",
 	"SupportURL": "",
-	"CanContainContent": true,
+	"CanContainContent": false,
 	"IsBetaVersion": false,
 	"IsExperimentalVersion": false,
 	"Installed": false,
-	"LocalizationTargets": [
-		{
-			"Name": "ExampleMod",
-			"LoadingPolicy": "Always"
-		}
-	],
 	"Plugins": [
 		{
 			"Name": "SML",
