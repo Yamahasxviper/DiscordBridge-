@@ -19,6 +19,10 @@ public class BanSystem : ModuleRules
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
+            // IPluginManager — used to find the plugin's own base directory so we
+            // can restore documentation comments in DefaultBanSystem.ini at startup
+            // (UE's staging pipeline strips comments from Default*.ini via FConfigFile).
+            "Projects",
             // Required for GameFramework/OnlineReplStructs.h (FUniqueNetIdRepl).
             // The CSS Alpakit server distribution does not ship OnlineReplStructs.h
             // through the standalone Engine dep — it is only reachable via FactoryGame's

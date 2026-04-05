@@ -17,4 +17,10 @@ private:
      *  That folder is never touched by mod updates so settings survive any wipe
      *  of the mod directory. */
     static void BackupConfigIfNeeded();
+
+    /** Restores documentation comments to Config/DefaultBanSystem.ini inside
+     *  the deployed plugin directory.  UE's staging pipeline strips comments
+     *  from Default*.ini via FConfigFile; this re-applies them on the first
+     *  server start after each mod update. */
+    static void RestoreDefaultConfigDocs();
 };

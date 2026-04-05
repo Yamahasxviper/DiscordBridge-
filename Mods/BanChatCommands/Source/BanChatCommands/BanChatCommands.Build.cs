@@ -19,5 +19,14 @@ public class BanChatCommands : ModuleRules
             // BanSystem — provides UBanDatabase, UBanEnforcer, FBanEntry, FBanTypes.
             "BanSystem",
         });
+
+        PrivateDependencyModuleNames.AddRange(new string[]
+        {
+            // IPluginManager — used to find the plugin's own base directory so we
+            // can restore documentation comments in DefaultBanChatCommands.ini at
+            // startup (UE's staging pipeline strips comments from Default*.ini via
+            // FConfigFile).
+            "Projects",
+        });
     }
 }

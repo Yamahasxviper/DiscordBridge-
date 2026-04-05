@@ -5,6 +5,7 @@
 #include "BanDatabase.h"
 #include "BanSystemConfig.h"
 #include "HAL/PlatformFileManager.h"
+#include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -18,6 +19,11 @@ void FBanSystemModule::StartupModule()
     // UBanDatabase, UBanRestApi, and UBanEnforcer are UGameInstanceSubsystem
     // subclasses and initialise automatically when the game instance starts.
     // No manual setup is required here.
+
+    // Restore documentation comments to Config/DefaultBanSystem.ini.  UE's
+    // staging pipeline strips them via FConfigFile; this re-applies them on
+    // the first server start after each mod update.
+    RestoreDefaultConfigDocs();
 
     // On every server start, write a backup to Saved/BanSystem/BanSystem.ini.
     // That folder is never touched by mod updates so settings survive any wipe
@@ -92,6 +98,79 @@ void FBanSystemModule::BackupConfigIfNeeded()
     {
         UE_LOG(LogBanSystem, Warning,
             TEXT("BanSystem: Could not write backup config to '%s'."), *BackupPath);
+    }
+}
+
+void FBanSystemModule::RestoreDefaultConfigDocs()
+{
+    // UE's staging pipeline reads Default*.ini through FConfigFile and writes
+    // them back to the staged directory, stripping all comments in the process.
+    // To ensure server admins always see the documented config file in the mod's
+    // Config/ folder, we re-write it with full comments on every server start.
+
+    const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("BanSystem"));
+    if (!Plugin.IsValid()) return;
+
+    const FString DefaultConfigPath = FPaths::Combine(
+        Plugin->GetBaseDir(), TEXT("Config"), TEXT("DefaultBanSystem.ini"));
+
+    static const FString Content =
+        FString(TEXT("; BanSystem configuration.\n"))
+        + TEXT(";\n")
+        + TEXT("; Settings in this file are read automatically by UBanSystemConfig\n")
+        + TEXT("; (UCLASS Config=BanSystem).\n")
+        + TEXT(";\n")
+        + TEXT("; RECOMMENDED: place your server-specific settings in\n")
+        + TEXT(";   Saved/BanSystem/BanSystem.ini\n")
+        + TEXT("; using the same section header below.  That file is never overwritten by mod\n")
+        + TEXT("; updates.  BanSystem writes your current settings there on every server start\n")
+        + TEXT("; so they survive any wipe of the mod directory.\n")
+        + TEXT(";\n")
+        + TEXT("; Example:\n")
+        + TEXT(";\n")
+        + TEXT("; [/Script/BanSystem.BanSystemConfig]\n")
+        + TEXT("; DatabasePath=/home/user/bans.json\n")
+        + TEXT("; RestApiPort=3001\n")
+        + TEXT("; MaxBackups=10\n")
+        + TEXT("\n")
+        + TEXT("[/Script/BanSystem.BanSystemConfig]\n")
+        + TEXT("\n")
+        + TEXT("; -- Database ------------------------------------------------------------------\n")
+        + TEXT(";\n")
+        + TEXT("; Absolute path to the JSON ban file.\n")
+        + TEXT("; Leave empty to use the default: <ProjectSaved>/BanSystem/bans.json\n")
+        + TEXT("; On Linux this is typically: /home/<user>/.config/Epic/FactoryGame/Saved/BanSystem/bans.json\n")
+        + TEXT("DatabasePath=\n")
+        + TEXT("\n")
+        + TEXT("; -- REST Management API -------------------------------------------------------\n")
+        + TEXT(";\n")
+        + TEXT("; Port for the local HTTP management API (default: 3000).\n")
+        + TEXT("; Mirrors the Tools/BanSystem API_PORT setting.\n")
+        + TEXT(";\n")
+        + TEXT("; The API binds to all interfaces (0.0.0.0).\n")
+        + TEXT("; Restrict external access with your server firewall if needed.\n")
+        + TEXT(";\n")
+        + TEXT("; Set to 0 to disable the REST API entirely.\n")
+        + TEXT("RestApiPort=3000\n")
+        + TEXT("\n")
+        + TEXT("; -- Backup --------------------------------------------------------------------\n")
+        + TEXT(";\n")
+        + TEXT("; Number of automatic database backups to keep (default: 5).\n")
+        + TEXT("; A backup is created on demand via POST /bans/backup.\n")
+        + TEXT("; Older backups beyond this limit are deleted automatically.\n")
+        + TEXT("MaxBackups=5\n");
+
+    if (FFileHelper::SaveStringToFile(Content, *DefaultConfigPath))
+    {
+        UE_LOG(LogBanSystem, Log,
+            TEXT("BanSystem: Restored documentation comments in '%s'."),
+            *DefaultConfigPath);
+    }
+    else
+    {
+        UE_LOG(LogBanSystem, Warning,
+            TEXT("BanSystem: Could not restore documentation comments in '%s' (read-only?)."),
+            *DefaultConfigPath);
     }
 }
 

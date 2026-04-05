@@ -6,6 +6,7 @@
 #include "Commands/BanChatCommands.h"
 #include "Engine/World.h"
 #include "HAL/PlatformFileManager.h"
+#include "Interfaces/IPluginManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -14,6 +15,11 @@
 void FBanChatCommandsModule::StartupModule()
 {
     UE_LOG(LogBanChatCommands, Log, TEXT("BanChatCommands module starting up."));
+
+    // Restore documentation comments to Config/DefaultBanChatCommands.ini.
+    // UE's staging pipeline strips them via FConfigFile; this re-applies them
+    // on the first server start after each mod update.
+    RestoreDefaultConfigDocs();
 
     // On every server start, write a backup to Saved/BanChatCommands/BanChatCommands.ini.
     // That folder is never touched by mod updates so the admin list survives
@@ -115,6 +121,62 @@ void FBanChatCommandsModule::BackupConfigIfNeeded()
     {
         UE_LOG(LogBanChatCommands, Warning,
             TEXT("BanChatCommands: Could not write backup config to '%s'."), *BackupPath);
+    }
+}
+
+void FBanChatCommandsModule::RestoreDefaultConfigDocs()
+{
+    // UE's staging pipeline reads Default*.ini through FConfigFile and writes
+    // them back to the staged directory, stripping all comments in the process.
+    // To ensure server admins always see the documented config file in the mod's
+    // Config/ folder, we re-write it with full comments on every server start.
+
+    const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("BanChatCommands"));
+    if (!Plugin.IsValid()) return;
+
+    const FString DefaultConfigPath = FPaths::Combine(
+        Plugin->GetBaseDir(), TEXT("Config"), TEXT("DefaultBanChatCommands.ini"));
+
+    static const FString Content =
+        FString(TEXT("; BanChatCommands admin configuration.\n"))
+        + TEXT(";\n")
+        + TEXT("; RECOMMENDED: place your admin list in\n")
+        + TEXT(";   Saved/BanChatCommands/BanChatCommands.ini\n")
+        + TEXT("; using the section header below.  That file is never overwritten by mod\n")
+        + TEXT("; updates.  BanChatCommands writes your current admin list there on every\n")
+        + TEXT("; server start so it survives any wipe of the mod directory.\n")
+        + TEXT(";\n")
+        + TEXT("; EOS Product User IDs -- Each +AdminEosPUIDs= entry grants that player permission to run\n")
+        + TEXT("; /ban, /tempban, /unban, /bancheck, /banlist, /linkbans, /unlinkbans, and /playerhistory\n")
+        + TEXT("; from in-game chat.\n")
+        + TEXT(";\n")
+        + TEXT("; EOS PUIDs are 32-character hex strings.  Players can find their own PUID by running\n")
+        + TEXT("; /whoami in-game.\n")
+        + TEXT(";\n")
+        + TEXT("; Note: On CSS Dedicated Server, all players are identified by their EOS Product User ID\n")
+        + TEXT("; regardless of their launch platform (Steam, Epic, etc.).\n")
+        + TEXT(";\n")
+        + TEXT("; If the list is empty, those commands are only usable from the server console.\n")
+        + TEXT("; /whoami is always available to all players regardless of this setting.\n")
+        + TEXT(";\n")
+        + TEXT("; Example:\n")
+        + TEXT(";   [/Script/BanChatCommands.BanChatCommandsConfig]\n")
+        + TEXT(";   +AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d51\n")
+        + TEXT("\n")
+        + TEXT("[/Script/BanChatCommands.BanChatCommandsConfig]\n")
+        + TEXT("; +AdminEosPUIDs=YOUR_EOS_PUID_HERE\n");
+
+    if (FFileHelper::SaveStringToFile(Content, *DefaultConfigPath))
+    {
+        UE_LOG(LogBanChatCommands, Log,
+            TEXT("BanChatCommands: Restored documentation comments in '%s'."),
+            *DefaultConfigPath);
+    }
+    else
+    {
+        UE_LOG(LogBanChatCommands, Warning,
+            TEXT("BanChatCommands: Could not restore documentation comments in '%s' (read-only?)."),
+            *DefaultConfigPath);
     }
 }
 

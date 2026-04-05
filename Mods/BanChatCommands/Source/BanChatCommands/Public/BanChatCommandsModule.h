@@ -35,4 +35,10 @@ private:
      *  Saved/BanChatCommands/BanChatCommands.ini — that folder is never touched
      *  by mod updates so the list survives any wipe of the mod directory. */
     static void BackupConfigIfNeeded();
+
+    /** Restores documentation comments to Config/DefaultBanChatCommands.ini
+     *  inside the deployed plugin directory.  UE's staging pipeline strips
+     *  comments from Default*.ini via FConfigFile; this re-applies them on the
+     *  first server start after each mod update. */
+    static void RestoreDefaultConfigDocs();
 };
