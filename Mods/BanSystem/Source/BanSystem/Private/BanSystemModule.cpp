@@ -19,9 +19,9 @@ void FBanSystemModule::StartupModule()
     // subclasses and initialise automatically when the game instance starts.
     // No manual setup is required here.
 
-    // On every server start, write a backup to Saved/Config/BanSystem.ini.
-    // Mirrors DiscordBridge's convention — that file is never touched by mod
-    // updates so settings survive any wipe of the mod directory.
+    // On every server start, write a backup to Saved/BanSystem/BanSystem.ini.
+    // That folder is never touched by mod updates so settings survive any wipe
+    // of the mod directory.
     BackupConfigIfNeeded();
 
     UE_LOG(LogBanSystem, Log, TEXT("BanSystem module started."));
@@ -32,16 +32,16 @@ void FBanSystemModule::BackupConfigIfNeeded()
     const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
     if (!Cfg) return;
 
-    // Saved/Config/BanSystem.ini — mirrors DiscordBridge's backup path convention.
-    // Never touched by mod updates or Alpakit dev deploys.
+    // Saved/BanSystem/BanSystem.ini — dedicated per-mod folder so it's easy to
+    // find, and never touched by mod updates or Alpakit dev deploys.
     const FString BackupPath = FPaths::Combine(
         FPaths::ProjectSavedDir(),
-        TEXT("Config"),
+        TEXT("BanSystem"),
         TEXT("BanSystem.ini"));
 
     // Write on every server start so the backup always reflects the current
-    // settings.  Mirrors DiscordBridge's convention: Saved/Config/ is never
-    // touched by mod updates, so the settings survive any wipe of the mod dir.
+    // settings.  Saved/BanSystem/ is never touched by mod updates or Alpakit
+    // dev deploys, so the settings survive any wipe of the mod directory.
     // NOTE: String concatenation (not Printf) to avoid misinterpreting any
     // '%' character that might appear in a custom DatabasePath.
     const FString Content =

@@ -12,12 +12,12 @@
  * Per-server configuration for BanChatCommands.
  *
  * RECOMMENDED: manage the admin list in the persistent override file:
- *   Saved/Config/BanChatCommands.ini
+ *   Saved/BanChatCommands/BanChatCommands.ini
  * That file is never touched by mod updates or Alpakit dev deploys.
  * BanChatCommands writes the current admin list there on every server start
  * so your configuration survives any wipe of the mod directory.
  *
- * Example Saved/Config/BanChatCommands.ini:
+ * Example Saved/BanChatCommands/BanChatCommands.ini:
  *
  *   [/Script/BanChatCommands.BanChatCommandsConfig]
  *   +AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d51
