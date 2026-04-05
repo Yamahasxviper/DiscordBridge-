@@ -309,3 +309,28 @@ public:
         const TArray<FString>& Arguments,
         const FString& Label) override;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /reloadconfig  — hot-reload BanChatCommands.ini without restarting
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /reloadconfig
+ *
+ * Reloads the BanChatCommands configuration (AdminEosPUIDs) from disk without
+ * restarting the server.  Useful after editing DefaultBanChatCommands.ini or
+ * Saved/Config/<Platform>/BanChatCommands.ini while the server is running.
+ *
+ * Requires admin (or server console).
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AReloadConfigChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AReloadConfigChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};

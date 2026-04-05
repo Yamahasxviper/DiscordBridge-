@@ -2,6 +2,7 @@
 
 #include "Commands/BanChatCommands.h"
 #include "BanChatCommandsConfig.h"
+#include "BanChatCommandsModule.h"
 #include "Command/CommandSender.h"
 #include "BanDatabase.h"
 #include "BanEnforcer.h"
@@ -990,6 +991,43 @@ EExecutionStatus ABanNameChatCommand::ExecuteCommand_Implementation(
             TEXT("[BanChatCommands] No IP address on record for this player — EOS PUID ban applied only."),
             FLinearColor::Yellow);
     }
+
+    return EExecutionStatus::COMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AReloadConfigChatCommand  — /reloadconfig
+// ─────────────────────────────────────────────────────────────────────────────
+
+AReloadConfigChatCommand::AReloadConfigChatCommand()
+{
+    CommandName          = TEXT("reloadconfig");
+    MinNumberOfArguments = 0;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "ReloadConfigUsage", "/reloadconfig");
+}
+
+EExecutionStatus AReloadConfigChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString AdminId;
+    if (!BanChat::IsAdminSender(Sender, AdminId))
+        return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    // Force UE to re-read all UPROPERTY(Config) fields from the ini files.
+    GetMutableDefault<UBanChatCommandsConfig>()->ReloadConfig();
+
+    // Update the persistent backup so it reflects the freshly-loaded values.
+    FBanChatCommandsModule::BackupConfigIfNeeded();
+
+    const int32 AdminCount = UBanChatCommandsConfig::Get()->AdminEosPUIDs.Num();
+    UE_LOG(LogBanChatCommands, Log,
+        TEXT("BanChatCommands: config reloaded by %s — %d admin(s) now active."),
+        Sender->IsPlayerSender() ? *AdminId : TEXT("console"), AdminCount);
+
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("[BanChatCommands] Config reloaded — %d admin(s) active."), AdminCount),
+        FLinearColor::Green);
 
     return EExecutionStatus::COMPLETED;
 }
