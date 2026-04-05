@@ -144,7 +144,7 @@ public class PackagePlugin : BuildCookRun
 		return new ParamList<string>("FactoryGameEGS", "FactoryGameSteam");
 	}
 
-	private void DeployStagedPlugin(ProjectParams ProjectParams, DeploymentContext SC, DirectoryReference GameDir)
+	private static void DeployStagedPlugin(ProjectParams ProjectParams, DeploymentContext SC, DirectoryReference GameDir)
 	{
 		// We only want to archive the staged files of the plugin, not the entire stage directory
 		var stagedPluginDirectory = DeploymentContext.ApplyDirectoryRemap(SC, SC.GetStagedFileLocation(ProjectParams.DLCFile));
@@ -157,49 +157,10 @@ public class PackagePlugin : BuildCookRun
 		var pluginName = ProjectParams.DLCFile.GetFileNameWithoutAnyExtensions();
 		var modDir = DirectoryReference.Combine(gameModsDir, pluginName);
 
-		// Before wiping the mod directory, preserve any Config/Default*.ini files that
-		// were intentionally excluded from the staged set via +ExcludedNonUSFFiles in
-		// PluginSettings.ini.  These are user-edited runtime config files (e.g.
-		// DefaultBanSystem.ini, DefaultBanChatCommands.ini) that hold server operator
-		// credentials and settings.  They should survive a dev deploy just as they
-		// survive a release-zip install where the file is simply absent from the archive.
-		var preservedConfigs = new Dictionary<string, string>();
-		var existingConfigDir = DirectoryReference.Combine(modDir, "Config");
-		var stagedConfigDir   = DirectoryReference.Combine(fullStagedPluginDirectory, "Config");
-		if (DirectoryReference.Exists(modDir) && DirectoryReference.Exists(existingConfigDir))
-		{
-			foreach (var file in System.IO.Directory.GetFiles(existingConfigDir.FullName, "Default*.ini"))
-			{
-				var fileName = System.IO.Path.GetFileName(file);
-				var stagedEquivalent = FileReference.Combine(stagedConfigDir, fileName);
-				if (!FileReference.Exists(stagedEquivalent))
-				{
-					preservedConfigs[fileName] = System.IO.File.ReadAllText(file);
-					Logger.LogInformation("Config backup: preserving excluded user config '{0}' across dev deploy.", fileName);
-				}
-			}
-		}
-
 		if (DirectoryReference.Exists(modDir))
 			DirectoryReference.Delete(modDir, true);
 
 		CopyDirectory_NoExceptions(fullStagedPluginDirectory, modDir);
-
-		// Restore the config files that were excluded from staging so that operator
-		// settings (database path, REST port, admin PUID list, etc.) are not silently
-		// deleted every time the developer hits "Package & Deploy" in Alpakit.
-		if (preservedConfigs.Count > 0)
-		{
-			if (!DirectoryReference.Exists(existingConfigDir))
-				DirectoryReference.CreateDirectory(existingConfigDir);
-
-			foreach (var (fileName, content) in preservedConfigs)
-			{
-				var destPath = System.IO.Path.Combine(existingConfigDir.FullName, fileName);
-				System.IO.File.WriteAllText(destPath, content);
-				Logger.LogInformation("Config backup: restored '{0}' after dev deploy.", fileName);
-			}
-		}
 	}
 
 	private static void ArchiveStagedPlugin(ProjectParams ProjectParams, DeploymentContext SC)

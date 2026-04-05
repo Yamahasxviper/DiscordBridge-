@@ -31,8 +31,8 @@ public:
 private:
     FDelegateHandle WorldInitHandle;
 
-    /** On first startup, writes a non-empty AdminEosPUIDs list to
-     *  Saved/Config/<Platform>/BanChatCommands.ini so the admin list survives
-     *  an Alpakit dev deploy that deletes and recreates the mod directory. */
+    /** On every server start, writes the current admin list to
+     *  Saved/Config/BanChatCommands.ini — mirrors DiscordBridge's backup
+     *  convention so the list survives any wipe of the mod directory. */
     static void BackupConfigIfNeeded();
 };
