@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
+#include "Ticker.h"
 
 /**
  * FBanChatCommandsModule
@@ -23,6 +24,9 @@
  *   /whoami       — show the caller's own EOS PUID.
  *   /reloadconfig — hot-reload BanChatCommands.ini without restarting.
  *
+ * Config changes are also picked up automatically every
+ * ConfigPollIntervalSeconds seconds without any manual intervention.
+ *
  * All commands delegate storage and enforcement to BanSystem subsystems.
  * Admin access to ban/tempban/unban/bancheck/banlist is controlled by the
  * AdminEosPUIDs list in UBanChatCommandsConfig (DefaultBanChatCommands.ini).
@@ -33,11 +37,30 @@ public:
     virtual void StartupModule()  override;
     virtual void ShutdownModule() override;
 
+    /** Writes the current admin list to Saved/BanChatCommands/BanChatCommands.ini.
+     *  Called on startup, after /reloadconfig, and after auto-reload detects changes.
+     *  That folder is never touched by mod updates so the list survives any wipe
+     *  of the mod directory. */
+    static void BackupConfigIfNeeded();
+
 private:
     FDelegateHandle WorldInitHandle;
 
-    /** On every server start, writes the current admin list to
-     *  Saved/BanChatCommands/BanChatCommands.ini — that folder is never touched
-     *  by mod updates so the list survives any wipe of the mod directory. */
-    static void BackupConfigIfNeeded();
+    // ── Auto-reload ───────────────────────────────────────────────────────────
+
+    /** How often (seconds) to poll for config-file changes. */
+    static constexpr float ConfigPollIntervalSeconds = 60.0f;
+
+    /** Handle to the recurring FTSTicker that drives config polling. */
+    FTSTicker::FDelegateHandle ConfigPollHandle;
+
+    /** Hash of AdminEosPUIDs at the last (re)load — used to detect changes. */
+    uint32 LastConfigHash = 0;
+
+    /** CRC32 over the sorted AdminEosPUIDs list. */
+    static uint32 ComputeAdminHash();
+
+    /** Ticker callback — reloads config from disk and logs when the admin list
+     *  changes.  Returns true to keep ticking. */
+    bool OnConfigPollTick(float DeltaTime);
 };
