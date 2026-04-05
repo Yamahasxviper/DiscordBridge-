@@ -20,7 +20,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBanChatCommands, Log, All);
  *   • Anything else            → player display-name lookup (case-insensitive,
  *     substring match); bans using the player's FUniqueNetIdRepl identity.
  *
- * Requires the caller's EOS PUID to be in AdminEosPUIDs (DefaultGame.ini),
+ * Requires the caller's EOS PUID to be in AdminEosPUIDs (BanChatCommands.ini),
  * or the command to be run from the server console.
  *
  * Examples:

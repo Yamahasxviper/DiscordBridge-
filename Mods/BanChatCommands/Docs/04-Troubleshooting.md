@@ -28,12 +28,12 @@
 
 **Symptom:** Typing `/ban` returns a permission error.
 
-**Cause:** Your platform ID is not in the admin list in `DefaultGame.ini`.
+**Cause:** Your platform ID is not in the admin list in `BanChatCommands.ini`.
 
 **Fix:**
 
 1. Type `/whoami` in-game to find your EOS PUID (e.g. `00020aed06f0a6958c3c067fb4b73d51`).
-2. Add it to `DefaultGame.ini`:
+2. Add the raw ID to `Saved/Config/<Platform>/BanChatCommands.ini`:
    ```ini
    [/Script/BanChatCommands.BanChatCommandsConfig]
    +AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d51
@@ -74,9 +74,9 @@ See the [BanSystem Troubleshooting guide](../../BanSystem/Docs/06-Troubleshootin
 
 ## Config changes not taking effect
 
-**Symptom:** You edited `DefaultGame.ini` but the change has no effect.
+**Symptom:** You edited `BanChatCommands.ini` but the change has no effect.
 
-**Fix:** The config is read at server startup. **Restart the server** after every edit to `DefaultGame.ini`.
+**Fix:** The config is read at server startup. **Restart the server** after every edit to the config file.
 
 ---
 

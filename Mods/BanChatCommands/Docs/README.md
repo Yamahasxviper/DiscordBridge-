@@ -6,7 +6,7 @@ Welcome to the BanChatCommands documentation. Use the links below to jump to the
 |-------|---------------|
 | [Features Overview](00-Features.md) | Everything BanChatCommands provides at a glance |
 | [Getting Started](01-GettingStarted.md) | Installation, dependencies, and first steps |
-| [Configuration](02-Configuration.md) | Admin setup and `DefaultGame.ini` settings |
+| [Configuration](02-Configuration.md) | Admin setup and `BanChatCommands.ini` settings |
 | [Commands Reference](03-Commands.md) | All 9 chat commands with full examples |
 | [Troubleshooting](04-Troubleshooting.md) | Fixes for common problems |
 
