@@ -146,13 +146,26 @@ namespace BanChat
                               FString& OutUid,
                               FString& OutDisplayName)
     {
-        // 1. Raw EOS PUID
+        // 1. Raw EOS PUID (32-char hex)
         if (IsValidEOSPUID(Arg))
         {
             const FString Lower = Arg.ToLower();
             OutUid         = UBanDatabase::MakeUid(TEXT("EOS"), Lower);
             OutDisplayName = Lower;
             return true;
+        }
+
+        // 2. Compound UID supplied directly, e.g. "EOS:<32hex>" — resolve without
+        //    requiring the player to be currently connected (offline ban / pre-ban).
+        {
+            FString Platform, RawId;
+            UBanDatabase::ParseUid(Arg, Platform, RawId);
+            if (Platform == TEXT("EOS") && IsValidEOSPUID(RawId))
+            {
+                OutUid         = UBanDatabase::MakeUid(TEXT("EOS"), RawId.ToLower());
+                OutDisplayName = RawId.ToLower();
+                return true;
+            }
         }
 
         // 3. Display-name lookup against connected PlayerControllers.
