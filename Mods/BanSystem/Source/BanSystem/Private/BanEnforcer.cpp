@@ -430,6 +430,34 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
     FBanEntry Entry;
     if (!DB->IsCurrentlyBannedByAnyId(Uid, Entry))
     {
+        // EOS identity is not banned — also check the player's IP address.
+        // This catches players who evade an existing /banname ban by reconnecting
+        // under a new EOS PUID while their IP ban record is still active.
+        const FString CachedIp = GetCachedIpForPlayer(PC);
+        if (!CachedIp.IsEmpty())
+        {
+            const FString IpUid = UBanDatabase::MakeUid(TEXT("IP"), CachedIp);
+            FBanEntry IpEntry;
+            if (DB->IsCurrentlyBannedByAnyId(IpUid, IpEntry))
+            {
+                const FString KickMsg = IpEntry.GetKickMessage();
+                UE_LOG(LogBanEnforcer, Log,
+                    TEXT("BanEnforcer: kicking IP-banned player '%s' (IP: %s) — %s"),
+                    *PC->PlayerState->GetPlayerName(), *CachedIp, *KickMsg);
+
+                AGameModeBase* GM = World->GetAuthGameMode();
+                if (GM && GM->GameSession)
+                    GM->GameSession->KickPlayer(PC, FText::FromString(KickMsg));
+
+                if (IsValid(PC))
+                {
+                    if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
+                        Conn->Close();
+                }
+                return;
+            }
+        }
+
         UE_LOG(LogBanEnforcer, Log,
             TEXT("BanEnforcer: player '%s' (%s) is not banned — allowing join"),
             *PC->PlayerState->GetPlayerName(), *Uid);
@@ -587,6 +615,32 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
     FBanEntry Entry;
     if (!DB->IsCurrentlyBannedByAnyId(Uid, Entry))
     {
+        // Also check the player's IP address — catches evasion via new EOS PUID.
+        const FString CachedIp = GetCachedIpForPlayer(PC);
+        if (!CachedIp.IsEmpty())
+        {
+            const FString IpUid = UBanDatabase::MakeUid(TEXT("IP"), CachedIp);
+            FBanEntry IpEntry;
+            if (DB->IsCurrentlyBannedByAnyId(IpUid, IpEntry))
+            {
+                const FString KickMsg = IpEntry.GetKickMessage();
+                UE_LOG(LogBanEnforcer, Log,
+                    TEXT("BanEnforcer: kicking IP-banned player '%s' (IP: %s) [URL-extracted path] — %s"),
+                    *PlayerName, *CachedIp, *KickMsg);
+
+                AGameModeBase* GM = World->GetAuthGameMode();
+                if (GM && GM->GameSession)
+                    GM->GameSession->KickPlayer(PC, FText::FromString(KickMsg));
+
+                if (IsValid(PC))
+                {
+                    if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
+                        Conn->Close();
+                }
+                return;
+            }
+        }
+
         UE_LOG(LogBanEnforcer, Log,
             TEXT("BanEnforcer: player '%s' (%s) is not banned — allowing join"),
             *PlayerName, *Uid);
