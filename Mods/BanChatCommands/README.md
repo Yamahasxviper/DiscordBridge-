@@ -1,5 +1,7 @@
 # BanChatCommands — In-Game Ban Commands for Satisfactory
 
+**Version 1.1.0** | Server-only | Requires SML `^3.11.3` + BanSystem `^1.0.0` | Game build `>=416835`
+
 A server-only Satisfactory mod that adds a full set of ban management commands to the in-game chat. Commands work from the Satisfactory in-game chat (for admin players) and from the server console.
 
 Requires the **BanSystem** mod.

@@ -27,14 +27,18 @@ The easiest way is through the **Satisfactory Mod Manager (SMM)**:
 BanChatCommands adds in-game chat commands (`/ban`, `/tempban`, `/whoami`, etc.) so you can manage bans from inside the game without needing the REST API.
 
 1. Search for **BanChatCommands** in SMM and install it alongside BanSystem.
-2. Open `<ServerRoot>/FactoryGame/Config/DefaultGame.ini` and add your admin player IDs:
+2. Add your admin EOS PUIDs to the BanChatCommands override config (this file is never overwritten by mod updates):
 
-```ini
-[/Script/BanChatCommands.BanChatCommandsConfig]
-+AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d51
-```
+   ```
+   <ServerRoot>/FactoryGame/Saved/Config/<Platform>/BanChatCommands.ini
+   ```
 
-Use `/whoami` in-game to find your own compound UID and identify the correct format for your account.
+   ```ini
+   [/Script/BanChatCommands.BanChatCommandsConfig]
+   +AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d51
+   ```
+
+Use `/whoami` in-game to find your own EOS PUID (32-character hex string). Add it without the `EOS:` prefix.
 
 → See [In-Game Commands](03-ChatCommands.md) for the full command reference.
 

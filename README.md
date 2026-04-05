@@ -8,6 +8,61 @@ a collection of editor utilities,
 and more.
 It also serves as the Unreal project used for developing mods.
 
+---
+
+## Custom Mods
+
+This fork includes several custom server-side mods built on top of SML:
+
+### [BanSystem](Mods/BanSystem/README.md)
+
+Persistent EOS-based ban system for Satisfactory dedicated servers.
+
+- Login-time ban enforcement (EOS PUID, not display name)
+- Permanent and temporary bans with auto-expiry
+- UID linking — ban one identity, block all linked identities
+- Player session registry (`player_sessions.json`) for audit and UID lookup
+- REST management API (default port 3000)
+- JSON file storage that survives restarts and mod updates
+
+→ [Full documentation](Mods/BanSystem/Docs/README.md)
+
+---
+
+### [BanChatCommands](Mods/BanChatCommands/README.md)
+
+In-game chat command interface for BanSystem. Requires BanSystem.
+
+| Command | Description |
+|---------|-------------|
+| `/ban <player\|UID> [reason]` | Permanently ban a player |
+| `/tempban <player\|UID> <minutes> [reason]` | Temporarily ban for N minutes |
+| `/unban <UID>` | Remove a ban |
+| `/bancheck <player\|UID>` | Query ban status |
+| `/banlist [page]` | List active bans (10 per page) |
+| `/linkbans <UID1> <UID2>` | Link two EOS UIDs for cross-identity enforcement |
+| `/unlinkbans <UID1> <UID2>` | Remove a UID link |
+| `/playerhistory <name\|UID>` | Look up session history |
+| `/whoami` | Show your own EOS PUID (no admin required) |
+
+→ [Full documentation](Mods/BanChatCommands/Docs/README.md)
+
+---
+
+### [SMLWebSocket](Mods/SMLWebSocket/README.md)
+
+RFC 6455 WebSocket client with SSL/OpenSSL support for Satisfactory mods.
+
+- `ws://` and `wss://` (plain TCP and TLS via OpenSSL)
+- Auto-reconnect with exponential back-off
+- Thread-safe delegate callbacks fired on the game thread
+- Blueprint and C++ API
+- Used by mods that need persistent WebSocket connections (e.g. DiscordBridge)
+
+→ [README](Mods/SMLWebSocket/README.md)
+
+---
+
 ## Documentation
 
 Learn how to set up and use this repo on the [modding documentation](https://docs.ficsit.app/).

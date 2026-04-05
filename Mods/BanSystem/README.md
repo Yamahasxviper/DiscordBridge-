@@ -1,6 +1,8 @@
 # BanSystem — Satisfactory Dedicated Server Ban Mod
 
-A server-only Alpakit C++ mod that provides a persistent, platform-aware ban system for Satisfactory dedicated servers. Bans are stored in a single JSON file and enforced at login time — banned players are kicked before they ever enter the game world.
+**Version 1.1.0** | Server-only | Requires SML `^3.11.3` | Game build `>=416835`
+
+A server-only Alpakit C++ mod that provides a persistent, EOS-based ban system for Satisfactory dedicated servers. Bans are stored in a single JSON file and enforced at login time — banned players are kicked before they ever enter the game world.
 
 ---
 

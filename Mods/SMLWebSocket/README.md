@@ -1,5 +1,7 @@
 # SMLWebSocket – RFC 6455 WebSocket Client for Satisfactory Mods
 
+**Version 1.1.0** | Server-only | Requires SML `^3.11.3` | Game build `>=416835`
+
 A standalone C++ mod that provides a **custom WebSocket client with SSL/OpenSSL support** for Satisfactory dedicated server mods built with Alpakit. It implements the full WebSocket protocol (RFC 6455) over TCP with optional TLS encryption, without requiring Unreal Engine's built-in WebSocket module (which is unavailable in Alpakit-packaged mods).
 
 ---
