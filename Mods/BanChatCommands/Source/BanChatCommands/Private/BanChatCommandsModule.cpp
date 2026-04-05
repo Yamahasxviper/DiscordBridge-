@@ -48,9 +48,10 @@ void FBanChatCommandsModule::StartupModule()
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), APlayerHistoryChatCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AWhoAmIChatCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), ABanNameChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AReloadConfigChatCommand::StaticClass());
 
             UE_LOG(LogBanChatCommands, Log,
-                TEXT("BanChatCommands: Registered 10 commands (ban, tempban, unban, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname)."));;
+                TEXT("BanChatCommands: Registered 11 commands (ban, tempban, unban, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig)."));;
         }
     );
 
