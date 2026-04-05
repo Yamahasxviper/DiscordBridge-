@@ -2,17 +2,22 @@
 
 ← [Back to index](README.md)
 
-All BanSystem settings live in a single INI file:
+All BanSystem settings are read from the mod's default INI file:
 
 ```
 <ServerRoot>/FactoryGame/Mods/BanSystem/Config/DefaultBanSystem.ini
 ```
 
-Edit the file and restart the server for changes to take effect.
+This file ships with the mod and may be replaced when you update BanSystem.
+**To keep your settings across updates**, put your overrides in the server's
+saved config instead — UE reads it last and it is never touched by mod updates:
 
-> **Mod updates do not overwrite your config**
-> `DefaultBanSystem.ini` is excluded from the packaged mod, so installing a
-> new version of BanSystem will never reset your settings.
+```
+<ServerRoot>/FactoryGame/Saved/Config/<Platform>/BanSystem.ini
+```
+
+Both files use the same `[/Script/BanSystem.BanSystemConfig]` section header.
+Restart the server for changes to take effect.
 
 ---
 
