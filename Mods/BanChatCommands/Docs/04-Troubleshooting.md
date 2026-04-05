@@ -32,11 +32,11 @@
 
 **Fix:**
 
-1. Type `/whoami` in-game to find your compound UID (e.g. `STEAM:76561198000000000`).
-2. Add the raw ID (the part **after** the colon) to `Saved/Config/<Platform>/BanChatCommands.ini`:
+1. Type `/whoami` in-game to find your EOS PUID (e.g. `00020aed06f0a6958c3c067fb4b73d51`).
+2. Add the raw ID to `Saved/Config/<Platform>/BanChatCommands.ini`:
    ```ini
    [/Script/BanChatCommands.BanChatCommandsConfig]
-   +AdminSteam64Ids=76561198000000000
+   +AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d51
    ```
 3. Restart the server.
 
@@ -88,6 +88,6 @@ See the [BanSystem Troubleshooting guide](../../BanSystem/Docs/06-Troubleshootin
 
 **Fix:** Use the full compound UID instead:
 ```
-/ban STEAM:76561198000000000 Reason
+/ban EOS:00020aed06f0a6958c3c067fb4b73d51 Reason
 ```
-Type `/whoami` to get your own UID, or use `/playerhistory <name>` to look up a past UID for a disconnected player.
+Type `/whoami` to get your own EOS PUID, or use `/playerhistory <name>` to look up a past UID for a disconnected player.

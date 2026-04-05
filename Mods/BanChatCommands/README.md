@@ -24,7 +24,7 @@ Requires the **BanSystem** mod.
 
 ## Admin setup
 
-Admin access is controlled by player platform IDs in the mod's own config file.  
+Admin access is controlled by player EOS Product User IDs in the mod's own config file.  
 To ensure your settings survive mod updates, add them to the server override file:
 
 ```
@@ -33,17 +33,16 @@ To ensure your settings survive mod updates, add them to the server override fil
 
 ```ini
 [/Script/BanChatCommands.BanChatCommandsConfig]
-+AdminSteam64Ids=76561198000000000
-+AdminSteam64Ids=76561198111111111
 +AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d51
 ```
 
-- Add one `+AdminSteam64Ids=` line per Steam admin.
-- Add one `+AdminEosPUIDs=` line per EOS admin (32-character hex string, case-insensitive).
-- When both lists are empty, admin commands can only be run from the **server console**.
+- Add one `+AdminEosPUIDs=` line per admin (32-character hex string, case-insensitive).
+- When the list is empty, admin commands can only be run from the **server console**.
 - `/whoami` is always available to all connected players.
 
-**How to find your UID:** Type `/whoami` in-game. The result will be in the format `STEAM:76561198000000000` or `EOS:00020aed...`. Add only the part **after** the colon to the appropriate list.
+> **Note:** On CSS Dedicated Server, all players are identified by their EOS Product User ID regardless of launch platform (Steam, Epic, etc.).
+
+**How to find your EOS PUID:** Type `/whoami` in-game. The result will be your 32-character hex EOS PUID.
 
 ---
 
@@ -51,10 +50,9 @@ To ensure your settings survive mod updates, add them to the server override fil
 
 Commands that accept `<player|UID>` resolve the target as follows:
 
-1. **Compound UID** (`STEAM:xxx` / `EOS:xxx`) — used directly.
-2. **17-digit decimal string** — treated as a raw Steam 64-bit ID.
-3. **32-character hex string** — treated as a raw EOS Product User ID.
-4. **Any other string** — matched case-insensitively against the display names of currently connected players (substring match).
+1. **Compound UID** (`EOS:xxx`) — used directly.
+2. **32-character hex string** — treated as a raw EOS Product User ID.
+3. **Any other string** — matched case-insensitively against the display names of currently connected players (substring match).
 
 If a display name matches more than one connected player, the command lists all ambiguous matches and asks you to be more specific. Offline players must be targeted by UID — use `/playerhistory <name>` to look up a past UID.
 
@@ -66,25 +64,25 @@ If a display name matches more than one connected player, the command lists all 
 ; Ban a currently-connected player by name
 /ban SomePlayer Griefing
 
-; Ban by Steam64 ID (player can be offline)
-/ban STEAM:76561198000000000 Cheating
-/ban 76561198000000000 Cheating
+; Ban by EOS PUID (player can be offline)
+/ban EOS:00020aed06f0a6958c3c067fb4b73d51 Cheating
+/ban 00020aed06f0a6958c3c067fb4b73d51 Cheating
 
 ; 24-hour ban
 /tempban SomePlayer 1440 Toxic behaviour
 
-; Unban by Steam64 ID
-/unban STEAM:76561198000000000
+; Unban by EOS PUID
+/unban EOS:00020aed06f0a6958c3c067fb4b73d51
 
 ; Check ban status
 /bancheck SomePlayer
-/bancheck STEAM:76561198000000000
+/bancheck 00020aed06f0a6958c3c067fb4b73d51
 
 ; List bans (first page)
 /banlist
 
-; Link a Steam ban to an EOS ban for the same person
-/linkbans STEAM:76561198000000000 EOS:00020aed06f0a6958c3c067fb4b73d51
+; Link two bans for the same person (e.g. old and new EOS PUID)
+/linkbans EOS:00020aed06f0a6958c3c067fb4b73d51 EOS:aabbccdd11223344aabbccdd11223344
 
 ; Look up a player's past UIDs (useful after they disconnect)
 /playerhistory SomePlayer

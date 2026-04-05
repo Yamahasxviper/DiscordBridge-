@@ -13,21 +13,19 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBanChatCommands, Log, All);
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * /ban <player|Steam64|PUID> [reason...]
+ * /ban <player|PUID> [reason...]
  *
  * Permanently bans a player.  The first argument is resolved as follows:
- *   • 17-digit decimal string  → Steam64 ID (stored as "STEAM:xxx" UID)
  *   • 32-char hex string       → EOS Product User ID (stored as "EOS:xxx" UID)
  *   • Anything else            → player display-name lookup (case-insensitive,
  *     substring match); bans using the player's FUniqueNetIdRepl identity.
  *
- * Requires the caller's Steam64 to be in AdminSteam64Ids (BanChatCommands.ini),
+ * Requires the caller's EOS PUID to be in AdminEosPUIDs (BanChatCommands.ini),
  * or the command to be run from the server console.
  *
  * Examples:
- *   /ban 76561198000000000
- *   /ban 76561198000000000 Cheating
  *   /ban BadPlayer Toxic behaviour
+ *   /ban 00020aed06f0a6958c3c067fb4b73d51 Cheating
  */
 UCLASS()
 class BANCHATCOMMANDS_API ABanChatCommand : public AChatCommandInstance
@@ -74,16 +72,16 @@ public:
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * /unban <Steam64|PUID>
+ * /unban <PUID>
  *
- * Removes an existing ban.  Accepts either a Steam64 ID or an EOS PUID.
- * The ban is looked up by compound UID ("STEAM:xxx" or "EOS:xxx").
+ * Removes an existing ban.  Accepts an EOS PUID (or a legacy STEAM:xxx compound UID
+ * for old ban records).  The ban is looked up by compound UID ("EOS:xxx").
  *
  * Requires admin.
  *
  * Examples:
- *   /unban 76561198000000000
  *   /unban 00020aed06f0a6958c3c067fb4b73d51
+ *   /unban EOS:00020aed06f0a6958c3c067fb4b73d51
  */
 UCLASS()
 class BANCHATCOMMANDS_API AUnbanChatCommand : public AChatCommandInstance
@@ -102,17 +100,16 @@ public:
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * /bancheck <player|Steam64|PUID>
+ * /bancheck <player|PUID>
  *
  * Reports ban status for a player.  Checks the ban database by compound UID.
- * Accepts a player display name (for online players), a Steam64 ID, or an
- * EOS PUID.
+ * Accepts a player display name (for online players) or an EOS PUID.
  *
  * Requires admin.
  *
  * Examples:
- *   /bancheck 76561198000000000
  *   /bancheck BadPlayer
+ *   /bancheck 00020aed06f0a6958c3c067fb4b73d51
  */
 UCLASS()
 class BANCHATCOMMANDS_API ABanCheckChatCommand : public AChatCommandInstance
@@ -259,15 +256,14 @@ private:
 /**
  * /whoami
  *
- * Shows the calling player's own platform identity (Steam64 ID or EOS Product
- * User ID, depending on how they connected to the server).
- * Useful for players who need their exact ID for a ban lookup.
+ * Shows the calling player's own EOS Product User ID.
+ * On CSS Dedicated Server all players — regardless of launch platform — are
+ * identified by their EOS PUID.  Useful for players who need their exact ID
+ * to give to a server admin.
  *
  * Available to all players (no admin requirement).
  *
  * Example output:
- *   [BanChatCommands] Your Steam64: 76561198000000000
- *   — or —
  *   [BanChatCommands] Your EOS PUID: 00020aed06f0a6958c3c067fb4b73d51
  */
 UCLASS()

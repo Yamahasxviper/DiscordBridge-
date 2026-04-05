@@ -81,10 +81,11 @@ namespace BanChat
      * Check whether the command sender is allowed to run admin commands.
      *
      * Console senders (non-player) are always permitted.  Player senders must
-     * have their compound UID (STEAM:xxx or EOS:xxx) listed in
-     * UBanChatCommandsConfig::AdminSteam64Ids (for Steam) or
-     * UBanChatCommandsConfig::AdminEosPUIDs (for EOS).
-     * When both lists are empty, player access is denied (console-only mode).
+     * have their EOS PUID listed in UBanChatCommandsConfig::AdminEosPUIDs.
+     * When the list is empty, player access is denied (console-only mode).
+     *
+     * Note: On CSS Dedicated Server all players are identified by their EOS
+     * Product User ID regardless of launch platform (Steam, Epic, etc.).
      *
      * @param Sender  The command sender to check.
      * @param OutUid  Populated with the sender's compound UID when they connect via a known platform.
