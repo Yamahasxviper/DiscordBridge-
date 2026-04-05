@@ -44,7 +44,7 @@ void UPlayerSessionRegistry::Deinitialize()
 //  Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
-void UPlayerSessionRegistry::RecordSession(const FString& Uid, const FString& DisplayName)
+void UPlayerSessionRegistry::RecordSession(const FString& Uid, const FString& DisplayName, const FString& IpAddress)
 {
     if (Uid.IsEmpty()) return;
 
@@ -59,6 +59,8 @@ void UPlayerSessionRegistry::RecordSession(const FString& Uid, const FString& Di
         {
             R.DisplayName = DisplayName;
             R.LastSeen    = NowStr;
+            if (!IpAddress.IsEmpty())
+                R.IpAddress = IpAddress;
             SaveToFile();
             return;
         }
@@ -69,6 +71,7 @@ void UPlayerSessionRegistry::RecordSession(const FString& Uid, const FString& Di
     NewRec.Uid         = Uid;
     NewRec.DisplayName = DisplayName;
     NewRec.LastSeen    = NowStr;
+    NewRec.IpAddress   = IpAddress;
     Records.Add(NewRec);
     SaveToFile();
 }
@@ -142,6 +145,7 @@ void UPlayerSessionRegistry::LoadFromFile()
             (*ObjPtr)->TryGetStringField(TEXT("uid"),         Rec.Uid);
             (*ObjPtr)->TryGetStringField(TEXT("displayName"), Rec.DisplayName);
             (*ObjPtr)->TryGetStringField(TEXT("lastSeen"),    Rec.LastSeen);
+            (*ObjPtr)->TryGetStringField(TEXT("ipAddress"),   Rec.IpAddress);
 
             if (!Rec.Uid.IsEmpty())
                 Records.Add(Rec);
@@ -160,6 +164,8 @@ bool UPlayerSessionRegistry::SaveToFile() const
         Obj->SetStringField(TEXT("uid"),         R.Uid);
         Obj->SetStringField(TEXT("displayName"), R.DisplayName);
         Obj->SetStringField(TEXT("lastSeen"),    R.LastSeen);
+        if (!R.IpAddress.IsEmpty())
+            Obj->SetStringField(TEXT("ipAddress"), R.IpAddress);
         SessionArr.Add(MakeShared<FJsonValueObject>(Obj));
     }
 

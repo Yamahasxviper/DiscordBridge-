@@ -870,3 +870,126 @@ EExecutionStatus APlayerHistoryChatCommand::ExecuteCommand_Implementation(
 
     return EExecutionStatus::COMPLETED;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ABanNameChatCommand  — /banname
+// ─────────────────────────────────────────────────────────────────────────────
+
+ABanNameChatCommand::ABanNameChatCommand()
+{
+    CommandName          = TEXT("banname");
+    MinNumberOfArguments = 1;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "BanNameUsage",
+        "/banname <name_substring> [reason...]");
+}
+
+EExecutionStatus ABanNameChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString AdminId;
+    if (!BanChat::IsAdminSender(Sender, AdminId))
+        return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    UWorld* World = GetWorld();
+    if (!World) return EExecutionStatus::UNCOMPLETED;
+    UGameInstance* GI = World->GetGameInstance();
+    if (!GI) return EExecutionStatus::UNCOMPLETED;
+
+    UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>();
+    if (!Registry)
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] PlayerSessionRegistry unavailable."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
+
+    UBanDatabase* DB = BanChat::GetDB(this);
+    if (!DB)
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
+
+    const FString NameArg  = Arguments[0];
+    const FString Reason   = Arguments.Num() > 1
+        ? BanChat::JoinArgs(Arguments, 1)
+        : TEXT("Banned by server administrator");
+    const FString BannedBy = Sender->GetSenderName();
+
+    // Look up the player by display-name substring.  Works for offline players
+    // as long as they connected at least once while the session registry was active.
+    TArray<FPlayerSessionRecord> Results = Registry->FindByName(NameArg);
+
+    if (Results.IsEmpty())
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] No session history found for '%s'. "
+                "The player must have connected at least once for /banname to work.  "
+                "Use /ban <PUID> to ban an unknown player directly."), *NameArg),
+            FLinearColor::Red);
+        return EExecutionStatus::BAD_ARGUMENTS;
+    }
+
+    if (Results.Num() > 1)
+    {
+        TArray<FString> Descriptions;
+        for (const FPlayerSessionRecord& R : Results)
+            Descriptions.Add(FString::Printf(TEXT("\"%s\" (%s)"), *R.DisplayName, *R.Uid));
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Ambiguous name '%s' — %d matches: %s.  "
+                "Use a more specific substring."),
+                *NameArg, Results.Num(), *FString::Join(Descriptions, TEXT(", "))),
+            FLinearColor::Yellow);
+        return EExecutionStatus::BAD_ARGUMENTS;
+    }
+
+    const FPlayerSessionRecord& Rec = Results[0];
+
+    // Ban the EOS PUID.  DoBan also kicks the player if they are currently online.
+    const EExecutionStatus EosBanResult =
+        BanChat::DoBan(this, Sender, Rec.Uid, Rec.DisplayName, 0, Reason, BannedBy);
+    if (EosBanResult != EExecutionStatus::COMPLETED)
+        return EosBanResult;
+
+    // If an IP address was recorded for this player, add an IP ban and link it
+    // to the EOS ban so enforcement triggers on either identity.
+    if (!Rec.IpAddress.IsEmpty())
+    {
+        const FString IpUid = UBanDatabase::MakeUid(TEXT("IP"), Rec.IpAddress);
+
+        FBanEntry IpEntry;
+        IpEntry.Uid          = IpUid;
+        IpEntry.PlayerUID    = Rec.IpAddress;
+        IpEntry.Platform     = TEXT("IP");
+        IpEntry.PlayerName   = Rec.DisplayName;
+        IpEntry.Reason       = Reason;
+        IpEntry.BannedBy     = BannedBy;
+        IpEntry.BanDate      = FDateTime::UtcNow();
+        IpEntry.bIsPermanent = true;
+        IpEntry.ExpireDate   = FDateTime(0);
+
+        if (DB->AddBan(IpEntry))
+        {
+            DB->LinkBans(Rec.Uid, IpUid);
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] Also banned IP %s — linked to EOS ban."),
+                    *Rec.IpAddress),
+                FLinearColor::Green);
+        }
+        else
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] Warning: failed to add IP ban for %s."),
+                    *Rec.IpAddress),
+                FLinearColor::Yellow);
+        }
+    }
+    else
+    {
+        Sender->SendChatMessage(
+            TEXT("[BanChatCommands] No IP address on record for this player — EOS PUID ban applied only."),
+            FLinearColor::Yellow);
+    }
+
+    return EExecutionStatus::COMPLETED;
+}

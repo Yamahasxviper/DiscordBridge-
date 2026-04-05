@@ -249,6 +249,39 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  /banname  — ban by display name (EOS PUID + IP in one command)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /banname <name_substring> [reason...]
+ *
+ * Looks up the player in the session registry (so offline players can be
+ * targeted) and permanently bans both their EOS PUID and, if an IP address
+ * was recorded at their last login, their IP address.  The two ban records
+ * are linked so enforcement triggers on either identity.
+ *
+ * If the name matches more than one session record the command lists all
+ * matches and asks for a more specific substring.
+ *
+ * Requires admin.
+ *
+ * Examples:
+ *   /banname BadPlayer Griefing
+ *   /banname bad Cheating
+ */
+UCLASS()
+class BANCHATCOMMANDS_API ABanNameChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    ABanNameChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  /whoami  — display the caller's own platform IDs
 // ─────────────────────────────────────────────────────────────────────────────
 

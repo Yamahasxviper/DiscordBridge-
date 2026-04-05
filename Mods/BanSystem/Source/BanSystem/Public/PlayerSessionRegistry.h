@@ -28,6 +28,10 @@ struct BANSYSTEM_API FPlayerSessionRecord
     /** ISO-8601 UTC timestamp of the most recent join with this UID. */
     UPROPERTY(BlueprintReadOnly, Category = "BanSystem")
     FString LastSeen;
+
+    /** Remote IP address recorded at the most recent join (may be empty for legacy records). */
+    UPROPERTY(BlueprintReadOnly, Category = "BanSystem")
+    FString IpAddress;
 };
 
 /**
@@ -64,7 +68,7 @@ public:
      * Thread-safe.  Called from the game thread by BanEnforcer after a successful
      * ban check.
      */
-    void RecordSession(const FString& Uid, const FString& DisplayName);
+    void RecordSession(const FString& Uid, const FString& DisplayName, const FString& IpAddress = FString());
 
     /**
      * Returns all session records whose display name contains the given substring

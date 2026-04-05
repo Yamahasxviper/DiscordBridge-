@@ -146,6 +146,13 @@ private:
      */
     void PerformBanCheckForUid(UWorld* World, APlayerController* PC, UBanDatabase* DB, const FString& Uid);
 
+    /**
+     * Returns the cached remote IP address for the player's UNetConnection, or
+     * an empty string if it was not captured (e.g. the PreLogin hook did not
+     * fire for this connection, or the player has already disconnected).
+     */
+    FString GetCachedIpForPlayer(APlayerController* PC) const;
+
     FDelegateHandle PostLoginHandle;
 
     /**
@@ -174,6 +181,14 @@ private:
      * ExtractEosPuidFromConnectionUrl() checks this map first.
      */
     TMap<TWeakObjectPtr<UNetConnection>, FString> CachedConnectionPuids;
+
+    /**
+     * Remote IP address cache populated by the PreLogin hook alongside
+     * CachedConnectionPuids.  Keyed by UNetConnection pointer; evicted on
+     * player logout.  Looked up in PerformBanCheckForPlayer /
+     * PerformBanCheckForUid to pass the IP to UPlayerSessionRegistry::RecordSession().
+     */
+    TMap<TWeakObjectPtr<UNetConnection>, FString> CachedConnectionIPs;
 
     /** Players queued for PlayerState / identity polling (CSS async init). */
     TArray<FPendingBanCheck> PendingBanChecks;
