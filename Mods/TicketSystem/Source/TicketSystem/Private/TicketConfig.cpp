@@ -70,7 +70,7 @@ FString FTicketConfig::GetBackupFilePath()
 {
 	return FPaths::Combine(
 		FPaths::ProjectSavedDir(),
-		TEXT("Config"),
+		TEXT("TicketSystem"),
 		TEXT("TicketSystem.ini"));
 }
 
@@ -174,6 +174,7 @@ FTicketConfig FTicketConfig::Load()
 			BackupContent += FString::Printf(TEXT("TicketReason=%s\n"), *Reason);
 		}
 
+		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
 		FFileHelper::SaveStringToFile(BackupContent, *BackupPath);
 	}
 

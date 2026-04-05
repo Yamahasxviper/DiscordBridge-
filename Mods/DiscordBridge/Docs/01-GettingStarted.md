@@ -43,7 +43,7 @@ Edit that file, then restart the server. Your changes take effect on the next st
 > `DefaultDiscordBridge.ini` is excluded from the packaged mod, so installing a new
 > version of DiscordBridge will never overwrite your credentials or other settings.
 > A backup is still written automatically to
-> `<ServerRoot>/FactoryGame/Saved/Config/DiscordBridge.ini` on every server start
+> `<ServerRoot>/FactoryGame/Saved/DiscordBridge/DiscordBridge.ini` on every server start
 > as an extra safety net.
 
 ---

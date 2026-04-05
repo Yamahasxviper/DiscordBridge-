@@ -15,7 +15,7 @@
  * and ban system – are in this single file.
  *
  * BACKUP config (auto-managed, extra safety net):
- *   <ServerRoot>/FactoryGame/Saved/Config/DiscordBridge.ini
+ *   <ServerRoot>/FactoryGame/Saved/DiscordBridge/DiscordBridge.ini
  * Written automatically on every server start.  If the primary file is ever
  * missing or has empty credentials (e.g. after a manual deletion or a direct
  * Alpakit dev-mode deploy that deletes and recreates the mod directory), the
@@ -324,9 +324,9 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 * FDiscordBridgeConfig, you must update DiscordBridgeConfig.cpp in ALL
 	 * four places marked with the tag [BACKUP-SYNC]:
 	 *   1. Primary config load   (Step 1 – read from DefaultDiscordBridge.ini)
-	 *   2. Backup restore        (Step 2 – read from Saved/Config/DiscordBridge.ini)
+	 *   2. Backup restore        (Step 2 – read from Saved/DiscordBridge/DiscordBridge.ini)
 	 *   3. Primary patch-back    (Step 2 PatchLine calls – write back to primary)
-	 *   4. Backup write          (Step 3 – write to Saved/Config/DiscordBridge.ini)
+	 *   4. Backup write          (Step 3 – write to Saved/DiscordBridge/DiscordBridge.ini)
 	 * Also add the key to the DefaultContent template and the second-pass upgrade
 	 * check so existing server configs pick up the new setting automatically.
 	 */

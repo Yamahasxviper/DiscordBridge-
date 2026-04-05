@@ -61,7 +61,7 @@ LogDiscordBridge: Error: Failed to create WebSocket – SMLWebSocket module not 
 ## The config gets reset after a mod update
 
 - This is expected behaviour for the primary config. Your credentials are saved
-  automatically to `<ServerRoot>/FactoryGame/Saved/Config/DiscordBridge.ini` each
+  automatically to `<ServerRoot>/FactoryGame/Saved/DiscordBridge/DiscordBridge.ini` each
   session and will be restored automatically. If you want to be safe, keep a
   separate copy of your `BotToken` and `ChannelId` somewhere secure.
 
