@@ -238,9 +238,6 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 * Message posted to Discord when a player joins the server.
 	 * Available placeholders:
 	 *   %PlayerName%       – in-game display name of the joining player.
-	 *   %SteamId%          – Steam64 ID (17-digit decimal, e.g. "76561198000000000").
-	 *                        Replaced with an empty string when the player did not
-	 *                        connect through Steam (e.g. Epic-direct / EOS-only).
 	 *   %EOSProductUserId% – EOS Product User ID (32-char lowercase hex, e.g.
 	 *                        "00020aed06f0a6958c3c067fb4b73d51").
 	 *                        Replaced with an empty string when no EOS session is
@@ -248,9 +245,6 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 *   %IpAddress%        – Remote IP address of the joining player (e.g. "1.2.3.4").
 	 *                        Replaced with an empty string when the address cannot
 	 *                        be determined (e.g. listen-server / local play).
-	 *
-	 * Both %SteamId% and %EOSProductUserId% may be populated simultaneously for a
-	 * Steam player whose account is linked to an Epic account.
 	 *
 	 * Leave empty to disable join notifications.
 	 * Default: ":green_circle: **%PlayerName%** joined the server."
