@@ -12,7 +12,7 @@
 	"DocsURL": "https://docs.ficsit.app",
 	"MarketplaceURL": "",
 	"SupportURL": "https://discord.ficsit.app",
-	"CanContainContent": true,
+	"CanContainContent": false,
 	"IsBetaVersion": false,
 	"IsExperimentalVersion": false,
 	"Installed": false,
@@ -21,12 +21,6 @@
 			"Name": "SML",
 			"Type": "Runtime",
 			"LoadingPhase": "PostDefault"
-		}
-	],
-	"LocalizationTargets": [
-		{
-			"Name": "SML",
-			"LoadingPolicy": "Always"
 		}
 	],
 	"Plugins": [
