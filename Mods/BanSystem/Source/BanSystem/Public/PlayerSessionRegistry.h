@@ -83,6 +83,12 @@ public:
     bool FindByUid(const FString& Uid, FPlayerSessionRecord& OutRecord) const;
 
     /**
+     * Returns all session records whose IP address contains the given substring.
+     * Useful for !playerhistory <IP>.
+     */
+    TArray<FPlayerSessionRecord> FindByIp(const FString& IpSubstring) const;
+
+    /**
      * All known session records, sorted by LastSeen descending.
      */
     TArray<FPlayerSessionRecord> GetAllRecords() const;

@@ -113,6 +113,8 @@ private:
 
 	/** Returns true if Id is a valid 32-character lowercase-hex EOS PUID. */
 	static bool IsValidEOSPUID(const FString& Id);
+	/** Returns true when Query looks like an IPv4/IPv6 address or partial IP (contains a dot). */
+	static bool IsValidIPQuery(const FString& Query);
 
 	// ── Command handlers ──────────────────────────────────────────────────────
 

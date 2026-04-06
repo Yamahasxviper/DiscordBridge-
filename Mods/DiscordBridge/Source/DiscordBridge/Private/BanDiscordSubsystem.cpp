@@ -703,7 +703,7 @@ void UBanDiscordSubsystem::HandlePlayerHistoryCommand(const TArray<FString>& Arg
 	{
 		CachedProvider->SendDiscordChannelMessage(
 			ChannelId,
-			TEXT("Usage: `!playerhistory <name|PUID>`"));
+			TEXT("Usage: `!playerhistory <name|PUID|IP>`"));
 		return;
 	}
 
@@ -734,6 +734,10 @@ void UBanDiscordSubsystem::HandlePlayerHistoryCommand(const TArray<FString>& Arg
 		if (Registry->FindByUid(UBanDatabase::MakeUid(TEXT("EOS"), Query.ToLower()), Record))
 			Results.Add(Record);
 	}
+	else if (IsValidIPQuery(Query))
+	{
+		Results = Registry->FindByIp(Query);
+	}
 	else
 	{
 		Results = Registry->FindByName(Query);
@@ -752,20 +756,21 @@ void UBanDiscordSubsystem::HandlePlayerHistoryCommand(const TArray<FString>& Arg
 	const int32 ShowCount = FMath::Min(Results.Num(), MaxResults);
 
 	FString Body;
-	Body.Reserve(1400);
+	Body.Reserve(1600);
 	Body += TEXT("```\n");
-	Body += FString::Printf(TEXT("%-16s  %-40s  %-20s\n"),
-	                        TEXT("Name"), TEXT("UID"), TEXT("Last Seen (UTC)"));
-	Body += FString(TEXT("─"), 80) + TEXT("\n");
+	Body += FString::Printf(TEXT("%-16s  %-40s  %-15s  %-20s\n"),
+	                        TEXT("Name"), TEXT("UID"), TEXT("IP"), TEXT("Last Seen (UTC)"));
+	Body += FString(TEXT("─"), 97) + TEXT("\n");
 
 	for (int32 i = 0; i < ShowCount; ++i)
 	{
 		const FPlayerSessionRecord& R = Results[i];
 		const FString NameShort = BanDiscordHelpers::Truncate(R.DisplayName, 16);
 		const FString UidShort  = BanDiscordHelpers::Truncate(R.Uid, 40);
+		const FString IpShort   = R.IpAddress.IsEmpty() ? TEXT("—") : BanDiscordHelpers::Truncate(R.IpAddress, 15);
 		const FString LastSeen  = BanDiscordHelpers::Truncate(R.LastSeen, 20);
-		Body += FString::Printf(TEXT("%-16s  %-40s  %s\n"),
-		                        *NameShort, *UidShort, *LastSeen);
+		Body += FString::Printf(TEXT("%-16s  %-40s  %-15s  %s\n"),
+		                        *NameShort, *UidShort, *IpShort, *LastSeen);
 	}
 	Body += TEXT("```");
 
