@@ -2075,24 +2075,40 @@ void UDiscordBridgeSubsystem::SendPlayerJoinNotification(const FString& PlayerNa
                                                           const FString& EOSProductUserId,
                                                           const FString& IpAddress)
 {
-	if (!Config.bPlayerEventsEnabled || Config.PlayerJoinMessage.IsEmpty())
+	if (!Config.bPlayerEventsEnabled)
 	{
 		return;
 	}
 
-	const FString& EffectiveChannelId = Config.PlayerEventsChannelId.IsEmpty()
-		? Config.ChannelId
-		: Config.PlayerEventsChannelId;
+	// ── Public join message (name only, no sensitive data) ───────────────────
+	if (!Config.PlayerJoinMessage.IsEmpty())
+	{
+		const FString& EffectiveChannelId = Config.PlayerEventsChannelId.IsEmpty()
+			? Config.ChannelId
+			: Config.PlayerEventsChannelId;
 
-	FString Message = Config.PlayerJoinMessage;
-	Message = Message.Replace(TEXT("%PlayerName%"),        *PlayerName);
-	Message = Message.Replace(TEXT("%EOSProductUserId%"),  EOSProductUserId.IsEmpty() ? TEXT("") : *EOSProductUserId);
-	Message = Message.Replace(TEXT("%IpAddress%"),         IpAddress.IsEmpty()        ? TEXT("") : *IpAddress);
+		FString Message = Config.PlayerJoinMessage;
+		Message = Message.Replace(TEXT("%PlayerName%"), *PlayerName);
 
-	UE_LOG(LogTemp, Log,
-	       TEXT("DiscordBridge: Player join notification for '%s'"), *PlayerName);
+		UE_LOG(LogTemp, Log,
+		       TEXT("DiscordBridge: Player join notification for '%s'"), *PlayerName);
 
-	SendMessageToChannel(EffectiveChannelId, Message);
+		SendMessageToChannel(EffectiveChannelId, Message);
+	}
+
+	// ── Private admin message (EOS PUID + IP, admin channel only) ────────────
+	if (!Config.PlayerJoinAdminChannelId.IsEmpty() && !Config.PlayerJoinAdminMessage.IsEmpty())
+	{
+		FString AdminMessage = Config.PlayerJoinAdminMessage;
+		AdminMessage = AdminMessage.Replace(TEXT("%PlayerName%"),        *PlayerName);
+		AdminMessage = AdminMessage.Replace(TEXT("%EOSProductUserId%"),  EOSProductUserId.IsEmpty() ? TEXT("") : *EOSProductUserId);
+		AdminMessage = AdminMessage.Replace(TEXT("%IpAddress%"),         IpAddress.IsEmpty()        ? TEXT("") : *IpAddress);
+
+		UE_LOG(LogTemp, Log,
+		       TEXT("DiscordBridge: Player admin-info notification for '%s'"), *PlayerName);
+
+		SendMessageToChannel(Config.PlayerJoinAdminChannelId, AdminMessage);
+	}
 }
 
 void UDiscordBridgeSubsystem::OnLogout(AGameModeBase* /*GameMode*/, AController* Exiting)
