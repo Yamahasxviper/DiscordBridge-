@@ -19,6 +19,7 @@
 	"RequiredOnRemote": false,
 	"SupportedTargetPlatforms": [
 		"Win64",
+		"WindowsServer",
 		"Linux"
 	],
 	"Modules": [
