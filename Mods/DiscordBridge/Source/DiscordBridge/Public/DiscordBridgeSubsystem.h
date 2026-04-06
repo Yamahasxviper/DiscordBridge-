@@ -557,10 +557,12 @@ private:
 	 * @param PlayerName       The in-game name of the player who joined.
 	 * @param Steam64Id        Steam64 ID (17-digit decimal) of the joining player, or empty.
 	 * @param EOSProductUserId EOS Product User ID (32-char hex) of the joining player, or empty.
+	 * @param IpAddress        Remote IP address of the joining player, or empty.
 	 */
 	void SendPlayerJoinNotification(const FString& PlayerName,
 	                                const FString& Steam64Id        = FString(),
-	                                const FString& EOSProductUserId = FString());
+	                                const FString& EOSProductUserId = FString(),
+	                                const FString& IpAddress        = FString());
 
 	/**
 	 * Fetch all guild members who hold WhitelistRoleId via the Discord REST API

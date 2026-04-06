@@ -245,6 +245,9 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 *                        "00020aed06f0a6958c3c067fb4b73d51").
 	 *                        Replaced with an empty string when no EOS session is
 	 *                        present (e.g. LAN / Null online service).
+	 *   %IpAddress%        – Remote IP address of the joining player (e.g. "1.2.3.4").
+	 *                        Replaced with an empty string when the address cannot
+	 *                        be determined (e.g. listen-server / local play).
 	 *
 	 * Both %SteamId% and %EOSProductUserId% may be populated simultaneously for a
 	 * Steam player whose account is linked to an Epic account.

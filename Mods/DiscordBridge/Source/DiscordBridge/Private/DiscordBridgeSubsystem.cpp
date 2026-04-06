@@ -2003,24 +2003,32 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 	FString ResolvedSteam64Id;
 	FString ResolvedEOSProductUserId;
 
+	// ── Resolve remote IP address ─────────────────────────────────────────────
+	FString ResolvedIpAddress;
+	if (const UNetConnection* Conn = Controller->GetNetConnection())
+	{
+		ResolvedIpAddress = Conn->LowLevelGetRemoteAddress(/*bAppendPort=*/false);
+	}
+
 	// Always log the available platform IDs so server operators can see them in
 	// the server log regardless of whether player-event notifications are enabled.
 	UE_LOG(LogTemp, Log,
-	       TEXT("DiscordBridge: player '%s' joined — SteamId: %s | EOS PUID: %s"),
+	       TEXT("DiscordBridge: player '%s' joined — SteamId: %s | EOS PUID: %s | IP: %s"),
 	       *PlayerName,
 	       ResolvedSteam64Id.IsEmpty()        ? TEXT("(none)") : *ResolvedSteam64Id,
-	       ResolvedEOSProductUserId.IsEmpty() ? TEXT("(none)") : *ResolvedEOSProductUserId);
+	       ResolvedEOSProductUserId.IsEmpty() ? TEXT("(none)") : *ResolvedEOSProductUserId,
+	       ResolvedIpAddress.IsEmpty()        ? TEXT("(none)") : *ResolvedIpAddress);
 
 	// ── Whitelist check ───────────────────────────────────────────────────────
 	if (!FWhitelistManager::IsEnabled())
 	{
-		SendPlayerJoinNotification(PlayerName, ResolvedSteam64Id, ResolvedEOSProductUserId);
+		SendPlayerJoinNotification(PlayerName, ResolvedSteam64Id, ResolvedEOSProductUserId, ResolvedIpAddress);
 		return;
 	}
 
 	if (FWhitelistManager::IsWhitelisted(PlayerName))
 	{
-		SendPlayerJoinNotification(PlayerName, ResolvedSteam64Id, ResolvedEOSProductUserId);
+		SendPlayerJoinNotification(PlayerName, ResolvedSteam64Id, ResolvedEOSProductUserId, ResolvedIpAddress);
 		return;
 	}
 
@@ -2035,7 +2043,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 		UE_LOG(LogTemp, Log,
 		       TEXT("DiscordBridge Whitelist: allowing '%s' – matches a Discord member with WhitelistRoleId."),
 		       *PlayerName);
-		SendPlayerJoinNotification(PlayerName, ResolvedSteam64Id, ResolvedEOSProductUserId);
+		SendPlayerJoinNotification(PlayerName, ResolvedSteam64Id, ResolvedEOSProductUserId, ResolvedIpAddress);
 		return;
 	}
 
@@ -2067,7 +2075,8 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 
 void UDiscordBridgeSubsystem::SendPlayerJoinNotification(const FString& PlayerName,
                                                           const FString& Steam64Id,
-                                                          const FString& EOSProductUserId)
+                                                          const FString& EOSProductUserId,
+                                                          const FString& IpAddress)
 {
 	if (!Config.bPlayerEventsEnabled || Config.PlayerJoinMessage.IsEmpty())
 	{
@@ -2082,6 +2091,7 @@ void UDiscordBridgeSubsystem::SendPlayerJoinNotification(const FString& PlayerNa
 	Message = Message.Replace(TEXT("%PlayerName%"),        *PlayerName);
 	Message = Message.Replace(TEXT("%SteamId%"),           Steam64Id.IsEmpty()        ? TEXT("") : *Steam64Id);
 	Message = Message.Replace(TEXT("%EOSProductUserId%"),  EOSProductUserId.IsEmpty() ? TEXT("") : *EOSProductUserId);
+	Message = Message.Replace(TEXT("%IpAddress%"),         IpAddress.IsEmpty()        ? TEXT("") : *IpAddress);
 
 	UE_LOG(LogTemp, Log,
 	       TEXT("DiscordBridge: Player join notification for '%s'"), *PlayerName);
