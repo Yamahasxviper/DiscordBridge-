@@ -70,6 +70,53 @@ namespace BanChat
     }
 
     /**
+     * Given a lowercase EOS PUID, attempts to resolve the player's real display name.
+     *
+     * Resolution order:
+     *   1. Currently-connected PlayerController whose EOS PUID matches.
+     *   2. PlayerSessionRegistry (persisted from previous sessions).
+     *   3. Falls back to the raw PUID string when neither source has a name.
+     */
+    static FString ResolveDisplayNameForPuid(UObject* Ctx, const FString& LowerPuid)
+    {
+        UWorld* World = Ctx ? Ctx->GetWorld() : nullptr;
+        if (!World) return LowerPuid;
+
+        // 1. Check currently-connected players.
+        for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+        {
+            APlayerController* PC = It->Get();
+            if (!PC || !PC->PlayerState) continue;
+
+            const FUniqueNetIdRepl& UniqueId = PC->PlayerState->GetUniqueId();
+            FString ConnectedPuid;
+            if (UniqueId.IsValid() && UniqueId.GetType() != FName(TEXT("NONE")))
+                ConnectedPuid = UniqueId.ToString().ToLower();
+            else
+                ConnectedPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+
+            if (!ConnectedPuid.IsEmpty() && ConnectedPuid == LowerPuid)
+                return PC->PlayerState->GetPlayerName();
+        }
+
+        // 2. Check the session registry for a previously-seen display name.
+        UGameInstance* GI = World->GetGameInstance();
+        UPlayerSessionRegistry* Registry = GI ? GI->GetSubsystem<UPlayerSessionRegistry>() : nullptr;
+        if (Registry)
+        {
+            FPlayerSessionRecord Record;
+            if (Registry->FindByUid(UBanDatabase::MakeUid(TEXT("EOS"), LowerPuid), Record)
+                && !Record.DisplayName.IsEmpty())
+            {
+                return Record.DisplayName;
+            }
+        }
+
+        // 3. No name found — fall back to the raw PUID.
+        return LowerPuid;
+    }
+
+    /**
      * Check whether the command sender is allowed to run admin commands.
      *
      * Console senders (non-player) are always permitted.  Player senders must
@@ -152,7 +199,7 @@ namespace BanChat
         {
             const FString Lower = Arg.ToLower();
             OutUid         = UBanDatabase::MakeUid(TEXT("EOS"), Lower);
-            OutDisplayName = Lower;
+            OutDisplayName = ResolveDisplayNameForPuid(Ctx, Lower);
             return true;
         }
 
@@ -164,8 +211,9 @@ namespace BanChat
             UBanDatabase::ParseUid(Arg, Platform, RawId);
             if (Platform == TEXT("EOS") && IsValidEOSPUID(RawId))
             {
-                OutUid         = UBanDatabase::MakeUid(TEXT("EOS"), RawId.ToLower());
-                OutDisplayName = RawId.ToLower();
+                const FString Lower = RawId.ToLower();
+                OutUid         = UBanDatabase::MakeUid(TEXT("EOS"), Lower);
+                OutDisplayName = ResolveDisplayNameForPuid(Ctx, Lower);
                 return true;
             }
             if (Platform == TEXT("IP") && !RawId.IsEmpty())
