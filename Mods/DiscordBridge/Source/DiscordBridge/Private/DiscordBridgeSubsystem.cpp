@@ -2,6 +2,7 @@
 
 #include "DiscordBridgeSubsystem.h"
 #include "TicketSubsystem.h"
+#include "BanDiscordSubsystem.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -119,6 +120,20 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		}
 	}
 
+	// Wire ourselves as the Discord provider into UBanDiscordSubsystem so that
+	// Discord ban commands are forwarded to BanSystem when it is installed.
+	// GetSubsystem<> returns nullptr when BanSystem is not loaded, so this is
+	// gracefully skipped on servers that do not have BanSystem installed.
+	Collection.InitializeDependency<UBanDiscordSubsystem>();
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UBanDiscordSubsystem* BanDiscord = GI->GetSubsystem<UBanDiscordSubsystem>())
+		{
+			CachedBanDiscordSubsystem = BanDiscord;
+			BanDiscord->SetProvider(this);
+		}
+	}
+
 }
 
 void UDiscordBridgeSubsystem::Deinitialize()
@@ -129,6 +144,13 @@ void UDiscordBridgeSubsystem::Deinitialize()
 		Tickets->SetProvider(nullptr);
 	}
 	CachedTicketSubsystem.Reset();
+
+	// Detach from BanDiscordSubsystem so ban commands stop firing after we shut down.
+	if (UBanDiscordSubsystem* BanDiscord = CachedBanDiscordSubsystem.Get())
+	{
+		BanDiscord->SetProvider(nullptr);
+	}
+	CachedBanDiscordSubsystem.Reset();
 
 	// Stop the chat-manager bind ticker if it is still running.
 	FTSTicker::GetCoreTicker().RemoveTicker(ChatManagerBindTickHandle);

@@ -17,6 +17,9 @@
 // Forward-declared so the header does not pull in TicketSystem's full header chain.
 class UTicketSubsystem;
 
+// Forward-declared so the header does not pull in BanSystem's full header chain.
+class UBanDiscordSubsystem;
+
 // ── Delegate declarations ─────────────────────────────────────────────────────
 
 /**
@@ -661,4 +664,12 @@ private:
 	 * root while still nulling automatically if the object is ever destroyed.
 	 */
 	TWeakObjectPtr<UTicketSubsystem> CachedTicketSubsystem;
+
+	/**
+	 * Weak reference to the BanDiscordSubsystem; populated during Initialize()
+	 * when BanSystem is installed alongside DiscordBridge.  Used to inject and
+	 * later detach the Discord provider so ban commands receive Discord events.
+	 * Using TWeakObjectPtr avoids adding a hard GC root.
+	 */
+	TWeakObjectPtr<UBanDiscordSubsystem> CachedBanDiscordSubsystem;
 };

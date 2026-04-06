@@ -39,6 +39,12 @@
 			"Enabled": true,
 			"Optional": false,
 			"SemVersion": "^1.0.0"
+		},
+		{
+			"Name": "BanSystem",
+			"Enabled": true,
+			"Optional": true,
+			"SemVersion": "^1.0.0"
 		}
 	]
 }
