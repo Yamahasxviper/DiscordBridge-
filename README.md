@@ -35,10 +35,10 @@ In-game chat command interface for BanSystem. Requires BanSystem.
 
 | Command | Description |
 |---------|-------------|
-| `/ban <player\|UID> [reason]` | Permanently ban a player |
-| `/tempban <player\|UID> <minutes> [reason]` | Temporarily ban for N minutes |
-| `/unban <UID>` | Remove a ban |
-| `/bancheck <player\|UID>` | Query ban status |
+| `/ban <player\|UID\|IP:address> [reason]` | Permanently ban a player or IP address |
+| `/tempban <player\|UID\|IP:address> <minutes> [reason]` | Temporarily ban for N minutes |
+| `/unban <UID\|IP:address>` | Remove a ban |
+| `/bancheck <player\|UID\|IP:address>` | Query ban status |
 | `/banlist [page]` | List active bans (10 per page) |
 | `/linkbans <UID1> <UID2>` | Link two EOS UIDs for cross-identity enforcement |
 | `/unlinkbans <UID1> <UID2>` | Remove a UID link |

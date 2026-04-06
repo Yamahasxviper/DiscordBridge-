@@ -2,7 +2,7 @@
 
 **Version 1.1.0** | Server-only | Requires SML `^3.11.3` | Game build `>=416835`
 
-A server-only Alpakit C++ mod that provides a persistent, EOS-based ban system for Satisfactory dedicated servers. Bans are stored in a single JSON file and enforced at login time — banned players are kicked before they ever enter the game world.
+A server-only Alpakit C++ mod that provides a persistent, EOS-based ban system for Satisfactory dedicated servers. Bans are stored in a single JSON file and enforced at login time — banned players are kicked before they ever enter the game world. Both **EOS PUID bans** and **IP address bans** are supported.
 
 ---
 
@@ -10,14 +10,15 @@ A server-only Alpakit C++ mod that provides a persistent, EOS-based ban system f
 
 | Feature | Details |
 |---------|---------|
-| Permanent bans | ✅ EOS |
-| Timed (temporary) bans | ✅ EOS |
+| Permanent bans | ✅ EOS PUID + IP address |
+| Timed (temporary) bans | ✅ EOS PUID + IP address |
 | Auto-expiry pruning | ✅ On startup and via REST API |
 | Persistent JSON storage | ✅ Survives restarts and updates |
 | Login-time enforcement | ✅ PostLogin hook + 20 s identity polling |
-| UID linking | ✅ Link multiple EOS UIDs for the same player |
+| IP ban enforcement | ✅ PreLogin hook caches remote IP; checked at every login |
+| UID linking | ✅ Link multiple EOS UIDs (or EOS + IP) for the same player |
 | REST management API | ✅ HTTP on configurable port (default 3000) |
-| Player session registry | ✅ Audit log of all known UIDs and names |
+| Player session registry | ✅ Audit log of all known UIDs, names, and IP addresses |
 | Blueprint-accessible API | ✅ Full UE Blueprint support |
 | Thread-safe | ✅ Game thread + REST API thread safe |
 
@@ -29,12 +30,12 @@ Install the optional **BanChatCommands** mod to get the full set of in-game chat
 
 | Command | Description |
 |---------|-------------|
-| `/ban <player\|UID> [reason...]` | Permanently ban a player |
-| `/tempban <player\|UID> <minutes> [reason...]` | Temporarily ban for N minutes |
-| `/unban <UID>` | Remove a ban |
-| `/bancheck <player\|UID>` | Query ban status |
+| `/ban <player\|UID\|IP:address> [reason...]` | Permanently ban a player or IP address |
+| `/tempban <player\|UID\|IP:address> <minutes> [reason...]` | Temporarily ban for N minutes |
+| `/unban <UID\|IP:address>` | Remove a ban |
+| `/bancheck <player\|UID\|IP:address>` | Query ban status |
 | `/banlist [page]` | List active bans (10 per page) |
-| `/linkbans <UID1> <UID2>` | Link two EOS UIDs for the same player |
+| `/linkbans <UID1> <UID2>` | Link two UIDs for the same player |
 | `/unlinkbans <UID1> <UID2>` | Remove a UID link |
 | `/playerhistory <name\|UID>` | Look up session history |
 | `/banname <name> [reason...]` | Ban offline player by name + IP from session history |
@@ -106,8 +107,9 @@ All bans use **compound UIDs** that encode both platform and raw ID in one strin
 | Platform | Format | Example |
 |----------|--------|---------|
 | EOS | `EOS:<32-char hex>` | `EOS:00020aed06f0a6958c3c067fb4b73d51` |
+| IP | `IP:<address>` | `IP:1.2.3.4` |
 
-Use `/whoami` in-game to see your own UID.
+Use `/whoami` in-game to see your own EOS UID. Use `/playerhistory <name>` to find a player's IP from session records.
 
 ---
 

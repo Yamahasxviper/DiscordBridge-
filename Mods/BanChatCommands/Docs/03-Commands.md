@@ -17,10 +17,10 @@ Commands that accept `<player|UID>` resolve the argument in this order:
 ## /ban
 
 ```
-/ban <player|UID> [reason...]
+/ban <player|UID|IP:address> [reason...]
 ```
 
-Permanently bans a player. The ban is stored in BanSystem's database and enforced at every future login attempt.
+Permanently bans a player or IP address. The ban is stored in BanSystem's database and enforced at every future login attempt.
 
 **Requires admin.**
 
@@ -28,6 +28,7 @@ Permanently bans a player. The ban is stored in BanSystem's database and enforce
 /ban SomePlayer Griefing
 /ban 00020aed06f0a6958c3c067fb4b73d51 Cheating
 /ban EOS:00020aed06f0a6958c3c067fb4b73d51 Duplicate account
+/ban IP:1.2.3.4 VPN evader
 ```
 
 ---
@@ -35,16 +36,17 @@ Permanently bans a player. The ban is stored in BanSystem's database and enforce
 ## /tempban
 
 ```
-/tempban <player|UID> <minutes> [reason...]
+/tempban <player|UID|IP:address> <minutes> [reason...]
 ```
 
-Temporarily bans a player for the specified number of minutes. The ban is lifted automatically when the time expires; BanSystem prunes expired bans on startup and periodically at runtime.
+Temporarily bans a player or IP address for the specified number of minutes. The ban is lifted automatically when the time expires; BanSystem prunes expired bans on startup and periodically at runtime.
 
 **Requires admin.**
 
 ```
 /tempban SomePlayer 60 Spamming
 /tempban 00020aed06f0a6958c3c067fb4b73d51 1440 Toxic behaviour
+/tempban IP:1.2.3.4 60 Suspicious traffic
 ```
 
 ---
@@ -52,15 +54,16 @@ Temporarily bans a player for the specified number of minutes. The ban is lifted
 ## /unban
 
 ```
-/unban <UID>
+/unban <UID|IP:address>
 ```
 
-Removes an existing ban. You must supply the compound UID (`EOS:xxx`); display names are not accepted for safety.
+Removes an existing ban. Accepts a compound EOS UID (`EOS:xxx`), a raw 32-char PUID, or an IP address (`IP:x.x.x.x`). Display names are not accepted for safety.
 
 **Requires admin.**
 
 ```
 /unban EOS:00020aed06f0a6958c3c067fb4b73d51
+/unban IP:1.2.3.4
 ```
 
 ---
@@ -68,16 +71,17 @@ Removes an existing ban. You must supply the compound UID (`EOS:xxx`); display n
 ## /bancheck
 
 ```
-/bancheck <player|UID>
+/bancheck <player|UID|IP:address>
 ```
 
-Reports the current ban status for a player. Shows the ban reason, expiry time (for temp bans), and linked UIDs if any.
+Reports the current ban status for a player or IP address. Shows the ban reason, expiry time (for temp bans), and linked UIDs if any.
 
 **Requires admin.**
 
 ```
 /bancheck SomePlayer
 /bancheck 00020aed06f0a6958c3c067fb4b73d51
+/bancheck IP:1.2.3.4
 ```
 
 ---
@@ -202,4 +206,60 @@ Forces BanChatCommands to re-read the admin list from disk immediately — no se
 
 ```
 /reloadconfig
+```
+
+---
+
+## IP address banning
+
+All commands that accept a UID also accept an **IP address** in the format `IP:<address>` (IPv4 or IPv6).
+
+IP bans are enforced at connection time — the player's remote IP is captured at `PreLogin` and checked against every `IP:` ban record before they enter the game. This means a banned player cannot evade by creating a new EOS account if their IP ban is still active.
+
+### UID format for IP bans
+
+| Format | Example |
+|--------|---------|
+| `IP:<address>` | `IP:1.2.3.4` |
+
+### Quick reference
+
+```
+; Permanently ban an IP address
+/ban IP:1.2.3.4 VPN evader
+
+; Temporarily ban an IP for 60 minutes
+/tempban IP:1.2.3.4 60 Suspicious traffic
+
+; Remove an IP ban
+/unban IP:1.2.3.4
+
+; Check if an IP is banned
+/bancheck IP:1.2.3.4
+```
+
+### Finding a player's IP
+
+Use `/playerhistory` to look up the IP address recorded at a player's last login:
+
+```
+/playerhistory SomePlayer
+```
+
+The response includes the EOS compound UID and IP from the session registry. You can then ban the IP separately or use `/banname` to ban both the EOS PUID and IP in a single step.
+
+### Banning EOS + IP together
+
+`/banname <name>` bans both the EOS PUID **and** the IP address (if recorded) in one command, and links the two records:
+
+```
+/banname SomePlayer Griefing
+```
+
+To do the same manually:
+
+```
+/ban EOS:00020aed06f0a6958c3c067fb4b73d51 Cheating
+/ban IP:1.2.3.4 Cheating
+/linkbans EOS:00020aed06f0a6958c3c067fb4b73d51 IP:1.2.3.4
 ```
