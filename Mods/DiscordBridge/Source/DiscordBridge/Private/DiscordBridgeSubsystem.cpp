@@ -107,17 +107,15 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	Connect();
 
-	// Inject ourselves as the Discord provider into TicketSubsystem (if installed).
-	if (FModuleManager::Get().IsModuleLoaded(TEXT("TicketSystem")))
+	// Wire ourselves as the Discord provider into UTicketSubsystem (always
+	// present now that TicketSystem is merged into this module).
+	Collection.InitializeDependency<UTicketSubsystem>();
+	if (UGameInstance* GI = GetGameInstance())
 	{
-		Collection.InitializeDependency<UTicketSubsystem>();
-		if (UGameInstance* GI = GetGameInstance())
+		if (UTicketSubsystem* Tickets = GI->GetSubsystem<UTicketSubsystem>())
 		{
-			if (UTicketSubsystem* Tickets = GI->GetSubsystem<UTicketSubsystem>())
-			{
-				CachedTicketSubsystem = Tickets;
-				Tickets->SetProvider(this);
-			}
+			CachedTicketSubsystem = Tickets;
+			Tickets->SetProvider(this);
 		}
 	}
 

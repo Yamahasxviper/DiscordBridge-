@@ -14,7 +14,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogTicketSystem, Log, All);
  * DefaultTickets.ini (and the Saved/TicketSystem/TicketSystem.ini backup).
  * Populated once per server start by FTicketConfig::Load().
  */
-struct TICKETSYSTEM_API FTicketConfig
+struct DISCORDBRIDGE_API FTicketConfig
 {
 	// ── Standalone Discord connectivity ────────────────────────────────────────
 

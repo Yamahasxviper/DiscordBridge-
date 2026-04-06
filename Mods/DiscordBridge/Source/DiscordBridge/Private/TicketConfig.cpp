@@ -63,14 +63,14 @@ FString FTicketConfig::GetConfigFilePath()
 	// FPaths::ProjectModsDir() is not part of Satisfactory's CSS custom
 	// Unreal Engine build and would cause a compile/link failure.
 	return FPaths::ProjectDir() /
-	       TEXT("Mods/TicketSystem/Config/DefaultTickets.ini");
+	       TEXT("Mods/DiscordBridge/Config/DefaultTickets.ini");
 }
 
 FString FTicketConfig::GetBackupFilePath()
 {
 	return FPaths::Combine(
 		FPaths::ProjectSavedDir(),
-		TEXT("TicketSystem"),
+		TEXT("DiscordBridge"),
 		TEXT("TicketSystem.ini"));
 }
 

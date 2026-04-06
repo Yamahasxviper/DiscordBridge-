@@ -1,7 +1,6 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 
 #include "TicketSubsystem.h"
-#include "TicketDiscordProvider.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -40,37 +39,14 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	// check works correctly immediately after a server restart.
 	LoadTicketState();
 
-	// If a BotToken is supplied in DefaultTickets.ini, start the built-in
-	// standalone Discord provider so TicketSystem works without DiscordBridge.
-	// When DiscordBridge IS installed it will call SetProvider(this) shortly
-	// after and the built-in provider will be automatically disconnected.
-	if (!Config.BotToken.IsEmpty())
-	{
-		InternalProvider = NewObject<UTicketDiscordProvider>(this);
-		InternalProvider->Connect(Config.BotToken, Config.GuildId);
-		SetProvider(InternalProvider);
-
-		UE_LOG(LogTicketSystem, Log,
-		       TEXT("TicketSystem: Built-in Discord provider started (standalone mode)."));
-	}
-	else
-	{
-		UE_LOG(LogTicketSystem, Log,
-		       TEXT("TicketSystem: Initialized. Waiting for Discord provider to be injected via SetProvider()."));
-	}
+	UE_LOG(LogTicketSystem, Log,
+	       TEXT("TicketSystem: Initialized. Waiting for Discord provider to be injected via SetProvider()."));
 }
 
 void UTicketSubsystem::Deinitialize()
 {
 	// Detach from the provider (unsubscribes delegates, clears CachedProvider).
 	SetProvider(nullptr);
-
-	// Ensure the built-in provider's Gateway connection is closed.
-	if (InternalProvider)
-	{
-		InternalProvider->Disconnect();
-		InternalProvider = nullptr;
-	}
 
 	TicketChannelToOpener.Empty();
 	OpenerToTicketChannel.Empty();
@@ -100,27 +76,6 @@ void UTicketSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 	if (InProvider && InProvider == CachedProvider)
 	{
 		return;
-	}
-
-	// If the built-in provider is active and an external provider (e.g.
-	// DiscordBridge) is taking over, disconnect the built-in one first so two
-	// separate Discord Gateway connections are not maintained simultaneously.
-	if (InternalProvider &&
-	    CachedProvider == static_cast<IDiscordBridgeProvider*>(InternalProvider) &&
-	    InProvider     != static_cast<IDiscordBridgeProvider*>(InternalProvider))
-	{
-		// Unsubscribe before disconnecting to avoid firing stale callbacks.
-		InternalProvider->UnsubscribeInteraction(InteractionDelegateHandle);
-		InternalProvider->UnsubscribeRawMessage(RawMessageDelegateHandle);
-		InteractionDelegateHandle.Reset();
-		RawMessageDelegateHandle.Reset();
-		CachedProvider = nullptr;
-
-		InternalProvider->Disconnect();
-		InternalProvider = nullptr;
-
-		UE_LOG(LogTicketSystem, Log,
-		       TEXT("TicketSystem: Built-in Discord provider replaced by external provider."));
 	}
 
 	// Unsubscribe from the current provider before switching.
