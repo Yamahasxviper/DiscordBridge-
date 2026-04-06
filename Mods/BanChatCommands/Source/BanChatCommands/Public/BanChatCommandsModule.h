@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
-#include "Ticker.h"
+#include "Containers/Ticker.h"
 
 /**
  * FBanChatCommandsModule
