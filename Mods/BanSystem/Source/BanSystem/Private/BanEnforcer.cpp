@@ -453,8 +453,16 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
                 if (IsValid(PC))
                 {
                     PC->ClientWasKicked(FText::FromString(KickMsg));
-                    if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
-                        Conn->Close();
+                    TWeakObjectPtr<APlayerController> WeakPC(PC);
+                    FTimerHandle KickTimerHandle;
+                    World->GetTimerManager().SetTimer(KickTimerHandle,
+                        FTimerDelegate::CreateLambda([WeakPC]()
+                        {
+                            APlayerController* PCToKick = WeakPC.Get();
+                            if (!IsValid(PCToKick)) return;
+                            if (UNetConnection* Conn = Cast<UNetConnection>(PCToKick->Player))
+                                Conn->Close();
+                        }), 20.0f, false);
                 }
                 return;
             }
@@ -487,13 +495,21 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
     // they are disconnected.  We do NOT call GM->GameSession->KickPlayer()
     // because AFGGameSession::KickPlayer registers with UFGServerSubsystem and
     // blocks reconnection even after the ban is lifted.
+    // A 20-second timer gives the player time to read the reason before
+    // they are actually disconnected.
     if (IsValid(PC))
     {
         PC->ClientWasKicked(FText::FromString(KickMsg));
-        if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
-        {
-            Conn->Close();
-        }
+        TWeakObjectPtr<APlayerController> WeakPC(PC);
+        FTimerHandle KickTimerHandle;
+        World->GetTimerManager().SetTimer(KickTimerHandle,
+            FTimerDelegate::CreateLambda([WeakPC]()
+            {
+                APlayerController* PCToKick = WeakPC.Get();
+                if (!IsValid(PCToKick)) return;
+                if (UNetConnection* Conn = Cast<UNetConnection>(PCToKick->Player))
+                    Conn->Close();
+            }), 20.0f, false);
     }
 }
 
@@ -582,14 +598,21 @@ void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
 
         if (!bMatched) continue;
 
-        // Send the ban reason to the client, then close the connection.
+        // Send the ban reason to the client, then close the connection after
+        // 20 seconds so the player has time to read the reason.
         if (IsValid(PC))
         {
             PC->ClientWasKicked(FText::FromString(Reason));
-            if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
-            {
-                Conn->Close();
-            }
+            TWeakObjectPtr<APlayerController> WeakPC(PC);
+            FTimerHandle KickTimerHandle;
+            World->GetTimerManager().SetTimer(KickTimerHandle,
+                FTimerDelegate::CreateLambda([WeakPC]()
+                {
+                    APlayerController* PCToKick = WeakPC.Get();
+                    if (!IsValid(PCToKick)) return;
+                    if (UNetConnection* Conn = Cast<UNetConnection>(PCToKick->Player))
+                        Conn->Close();
+                }), 20.0f, false);
         }
 
         UE_LOG(LogBanEnforcer, Log,
@@ -644,8 +667,16 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
                 if (IsValid(PC))
                 {
                     PC->ClientWasKicked(FText::FromString(KickMsg));
-                    if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
-                        Conn->Close();
+                    TWeakObjectPtr<APlayerController> WeakPC(PC);
+                    FTimerHandle KickTimerHandle;
+                    World->GetTimerManager().SetTimer(KickTimerHandle,
+                        FTimerDelegate::CreateLambda([WeakPC]()
+                        {
+                            APlayerController* PCToKick = WeakPC.Get();
+                            if (!IsValid(PCToKick)) return;
+                            if (UNetConnection* Conn = Cast<UNetConnection>(PCToKick->Player))
+                                Conn->Close();
+                        }), 20.0f, false);
                 }
                 return;
             }
@@ -670,14 +701,21 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
         TEXT("BanEnforcer: kicking banned player %s (%s) — %s"),
         *RawId, *Platform, *KickMsg);
 
-    // Send the ban reason to the client, then close the connection.
+    // Send the ban reason to the client, then close the connection after
+    // 20 seconds so the player has time to read the reason.
     if (IsValid(PC))
     {
         PC->ClientWasKicked(FText::FromString(KickMsg));
-        if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
-        {
-            Conn->Close();
-        }
+        TWeakObjectPtr<APlayerController> WeakPC(PC);
+        FTimerHandle KickTimerHandle;
+        World->GetTimerManager().SetTimer(KickTimerHandle,
+            FTimerDelegate::CreateLambda([WeakPC]()
+            {
+                APlayerController* PCToKick = WeakPC.Get();
+                if (!IsValid(PCToKick)) return;
+                if (UNetConnection* Conn = Cast<UNetConnection>(PCToKick->Player))
+                    Conn->Close();
+            }), 20.0f, false);
     }
 }
 
