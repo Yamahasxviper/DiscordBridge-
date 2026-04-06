@@ -38,7 +38,7 @@ coexist; DiscordBridge always takes priority when present regardless of whether
 |-----|---------|-------|
 | SML | `^3.11.3` | Required |
 | SMLWebSocket | `^1.0.0` | Required (provides the Gateway WebSocket client) |
-| DiscordBridge | `^1.0.2` | Optional – powers the ticket panel in paired mode |
+| DiscordBridge | `^1.0.4` | Optional – only needed in paired mode |
 
 **Required bot permissions** (grant via the Discord Developer Portal or server
 settings):

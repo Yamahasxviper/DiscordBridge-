@@ -61,7 +61,7 @@ Set to an **empty string** to disable Discord-based whitelist management entirel
 | `!whitelist add <name>` | Add a player by in-game name |
 | `!whitelist remove <name>` | Remove a player by in-game name |
 | `!whitelist list` | List all whitelisted players and current enabled/disabled state |
-| `!whitelist status` | Show the current enabled/disabled state of **both** the whitelist and the ban system |
+| `!whitelist status` | Show the current enabled/disabled state of the whitelist |
 | `!whitelist role add <discord_id>` | Grant the `WhitelistRoleId` Discord role to a user |
 | `!whitelist role remove <discord_id>` | Revoke the `WhitelistRoleId` Discord role from a user |
 
@@ -152,7 +152,7 @@ Set to an **empty string** to disable in-game whitelist commands.
 | `!whitelist add <name>` | Add a player by in-game name |
 | `!whitelist remove <name>` | Remove a player by in-game name |
 | `!whitelist list` | List all whitelisted players and current enabled/disabled state |
-| `!whitelist status` | Show the current enabled/disabled state of **both** the whitelist and the ban system |
+| `!whitelist status` | Show the current enabled/disabled state of the whitelist |
 
 > **Note:** In-game whitelist commands support the same operations as the Discord commands,
 > except for role management (`!whitelist role add/remove`) which is Discord-only.

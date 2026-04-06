@@ -85,7 +85,7 @@ Each `TicketReason=` line adds one button to the panel. Discord allows at most *
 |-----|---------|-------|
 | SML | `^3.11.3` | Required |
 | SMLWebSocket | `^1.0.0` | Required — provides the Discord Gateway WebSocket client |
-| DiscordBridge | `^1.0.2` | Optional — powers the panel in paired mode |
+| DiscordBridge | `^1.0.4` | Optional — powers the panel in paired mode |
 
 ### Required bot permissions
 

@@ -52,9 +52,17 @@ is configured through a single INI file with no external service or dashboard re
 
 ---
 
-## Ban system
+## Player notifications
 
-Ban functionality has been removed from this project. For ban enforcement, consider using a separate dedicated ban mod or server-level tooling.
+- Posts a Discord message when a player **joins**, **leaves**, or **times out**.
+- All three events can be sent to a dedicated channel (`PlayerEventsChannelId`) or
+  left to use the main `ChannelId`.
+- Each message is independently configurable (`PlayerJoinMessage`,
+  `PlayerLeaveMessage`, `PlayerTimeoutMessage`).
+- Join messages support additional placeholders: `%SteamId%` and `%EOSProductUserId%`.
+- Disabled by default — set `PlayerEventsEnabled=True` to opt in.
+
+→ See [Player Notifications](04-PlayerNotifications.md)
 
 ---
 
