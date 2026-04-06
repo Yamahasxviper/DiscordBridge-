@@ -35,10 +35,10 @@ Permanently ban a player or IP address.
 
 | Argument | Description |
 |----------|-------------|
-| `player` | In-game display name (case-insensitive substring match; player must be online) |
+| `player` | In-game display name (case-insensitive substring match; player must be **online**) |
 | `UID` | Compound UID (`EOS:xxx`) or raw 32-char EOS PUID |
 | `IP:address` | IP address ban (e.g. `IP:1.2.3.4`) |
-| `reason` | Optional ban reason (everything after the UID) |
+| `reason` | Optional ban reason (everything after the target) |
 
 **Examples:**
 ```
@@ -66,6 +66,7 @@ Ban a player or IP address for a set number of minutes.
 ```
 /tempban SomePlayer 60 Spamming
 /tempban EOS:00020aed06f0a6958c3c067fb4b73d51 1440 Toxic behaviour (24 h)
+/tempban EOS:00020aed06f0a6958c3c067fb4b73d51 10080 Repeated griefing (1 week)
 /tempban IP:1.2.3.4 60 Suspicious VPN
 ```
 
@@ -73,13 +74,11 @@ Ban a player or IP address for a set number of minutes.
 
 ### `/unban`
 
-Remove an existing ban.
+Remove an existing ban by UID or IP address. Display names are **not** accepted — use `/bancheck` to find the UID first if needed.
 
 ```
 /unban <UID|IP:address>
 ```
-
-Accepts a compound EOS UID (`EOS:xxx`), a raw 32-char EOS PUID, or an IP address (`IP:x.x.x.x`). Display names are not accepted here — use `/bancheck` to find the UID first if needed.
 
 **Examples:**
 ```
@@ -87,6 +86,27 @@ Accepts a compound EOS UID (`EOS:xxx`), a raw 32-char EOS PUID, or an IP address
 /unban 00020aed06f0a6958c3c067fb4b73d51
 /unban IP:1.2.3.4
 ```
+
+---
+
+### `/unbanname`
+
+Remove the ban for an offline player by display-name substring, using the player session registry. Also removes the associated IP ban if one was recorded.
+
+```
+/unbanname <name_substring>
+```
+
+**Examples:**
+```
+/unbanname SomePlayer
+/unbanname some
+```
+
+**Notes:**
+- The player does not need to be currently connected.
+- If the name matches more than one session record, all matches are listed and you must use a more specific substring.
+- The player must have connected at least once while the session registry was active. If no record exists, use `/unban <PUID>` directly.
 
 ---
 
@@ -121,40 +141,43 @@ List all currently active bans, paginated (10 per page).
 ```
 /banlist
 /banlist 2
+/banlist 3
 ```
 
 ---
 
 ### `/linkbans`
 
-Link two compound UIDs together so that a ban on either identity blocks the player from joining regardless of which platform they use.
+Link two compound UIDs together so that a ban on either identity blocks the player from joining regardless of which account they use.
 
 ```
 /linkbans <UID1> <UID2>
 ```
 
-Both UIDs must already exist as ban records. The link is stored on both records.
+Both UIDs must already exist as ban records. The link is stored on both records. Works for EOS-to-EOS pairs as well as EOS-to-IP pairs.
 
-→ See [Cross-Platform Linking](05-CrossPlatform.md) for details and use cases.
+→ See [UID Linking](05-CrossPlatform.md) for details and use cases.
 
-**Example:**
+**Examples:**
 ```
 /linkbans EOS:00020aed06f0a6958c3c067fb4b73d51 EOS:00020aed06f0a6958c3c067fb4b73d52
+/linkbans EOS:00020aed06f0a6958c3c067fb4b73d51 IP:1.2.3.4
 ```
 
 ---
 
 ### `/unlinkbans`
 
-Remove the link between two compound UIDs.
+Remove the link between two compound UIDs. The underlying bans are not removed.
 
 ```
 /unlinkbans <UID1> <UID2>
 ```
 
-**Example:**
+**Examples:**
 ```
 /unlinkbans EOS:00020aed06f0a6958c3c067fb4b73d51 EOS:00020aed06f0a6958c3c067fb4b73d52
+/unlinkbans EOS:00020aed06f0a6958c3c067fb4b73d51 IP:1.2.3.4
 ```
 
 ---
@@ -162,19 +185,23 @@ Remove the link between two compound UIDs.
 ### `/playerhistory`
 
 Look up past session records for a player by display name or UID.
-Returns up to 20 results from the session registry.
+Returns up to 20 results from the session registry, sorted by most recently seen.
 
 ```
 /playerhistory <name_substring|UID>
 ```
 
-Useful for finding a player's compound UID after they have disconnected, or for spotting EOS PUID changes that may indicate ban evasion.
-
 **Examples:**
 ```
 /playerhistory SomePlayer
+/playerhistory some
 /playerhistory EOS:00020aed06f0a6958c3c067fb4b73d51
 ```
+
+**Use cases:**
+- Find the UID of a player who has disconnected.
+- Detect EOS PUID changes that may indicate ban evasion.
+- Retrieve the IP address recorded at a player's last login.
 
 ---
 
