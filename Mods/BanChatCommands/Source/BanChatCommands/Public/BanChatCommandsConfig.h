@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
+#include "Math/Color.h"
 #include "BanChatCommandsConfig.generated.h"
 
 /**
@@ -47,6 +48,39 @@ public:
      */
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
     TArray<FString> AdminEosPUIDs;
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Chat message colours (RGB, 0.0 – 1.0 per channel, A is ignored)
+    //
+    //  Used for every response message sent by BanChatCommands.
+    //  Values are linear-light floats identical to those used by Unreal Engine
+    //  internally.  Pure primary/secondary colours as quick reference:
+    //
+    //    Red      (R=1.0,G=0.0,B=0.0,A=1.0)
+    //    Green    (R=0.0,G=1.0,B=0.0,A=1.0)
+    //    Blue     (R=0.0,G=0.0,B=1.0,A=1.0)
+    //    Yellow   (R=1.0,G=1.0,B=0.0,A=1.0)
+    //    Cyan     (R=0.0,G=1.0,B=1.0,A=1.0)
+    //    Magenta  (R=1.0,G=0.0,B=1.0,A=1.0)
+    //    White    (R=1.0,G=1.0,B=1.0,A=1.0)
+    //    Orange   (R=1.0,G=0.5,B=0.0,A=1.0)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /** Colour for error / permission-denied messages. Default: red. */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands|Colors")
+    FLinearColor ChatColorError = FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);
+
+    /** Colour for success / action-completed messages. Default: green. */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands|Colors")
+    FLinearColor ChatColorSuccess = FLinearColor(0.0f, 1.0f, 0.0f, 1.0f);
+
+    /** Colour for warning / ambiguous-result messages. Default: yellow. */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands|Colors")
+    FLinearColor ChatColorWarning = FLinearColor(1.0f, 1.0f, 0.0f, 1.0f);
+
+    /** Colour for informational / neutral messages. Default: white. */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands|Colors")
+    FLinearColor ChatColorInfo = FLinearColor(1.0f, 1.0f, 1.0f, 1.0f);
 
     /** Returns the singleton config instance. */
     static const UBanChatCommandsConfig* Get();

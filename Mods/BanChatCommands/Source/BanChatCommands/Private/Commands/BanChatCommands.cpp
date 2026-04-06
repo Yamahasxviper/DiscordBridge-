@@ -174,7 +174,7 @@ namespace BanChat
         {
             Sender->SendChatMessage(
                 TEXT("[BanChatCommands] You do not have permission to use this command."),
-                FLinearColor::Red);
+                BanChat::ColorError());
             return false;
         }
         return true;
@@ -230,7 +230,7 @@ namespace BanChat
         {
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid EOS PUID."), *Arg),
-                FLinearColor::Red);
+                BanChat::ColorError());
             return false;
         }
 
@@ -253,7 +253,7 @@ namespace BanChat
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] No connected player found matching '%s'. "
                     "Use an EOS PUID to target offline players."), *Arg),
-                FLinearColor::Red);
+                BanChat::ColorError());
             return false;
         }
 
@@ -262,7 +262,7 @@ namespace BanChat
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] Ambiguous name '%s'. Matching players: %s"),
                     *Arg, *FString::Join(Matches, TEXT(", "))),
-                FLinearColor::Yellow);
+                BanChat::ColorWarning());
             return false;
         }
 
@@ -287,14 +287,14 @@ namespace BanChat
                 Sender->SendChatMessage(
                     FString::Printf(TEXT("[BanChatCommands] Resolved '%s' → EOS: %s (via connection URL)"),
                         *Arg, *EosPuid),
-                    FLinearColor::White);
+                    BanChat::ColorInfo());
                 return true;
             }
 
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] Found player '%s' but could not resolve "
                     "their platform identity."), *Matches[0]),
-                FLinearColor::Red);
+                BanChat::ColorError());
             return false;
         }
 
@@ -307,7 +307,7 @@ namespace BanChat
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Resolved '%s' → EOS: %s"),
                 *Arg, *RawId),
-            FLinearColor::White);
+            BanChat::ColorInfo());
         return true;
     }
 
@@ -322,7 +322,7 @@ namespace BanChat
         UBanDatabase* DB = GetDB(Ctx);
         if (!DB)
         {
-            Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+            Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), BanChat::ColorError());
             return EExecutionStatus::UNCOMPLETED;
         }
 
@@ -355,7 +355,7 @@ namespace BanChat
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] Banned '%s' (%s: %s) %s — reason: %s"),
                     *DisplayName, *Platform, *RawId, *DurStr, *Reason),
-                FLinearColor::Green);
+                BanChat::ColorSuccess());
 
             // Kick immediately if the player is currently connected.
             UWorld* World = Ctx ? Ctx->GetWorld() : nullptr;
@@ -366,7 +366,7 @@ namespace BanChat
 
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Failed to ban %s '%s'."), *Platform, *RawId),
-            FLinearColor::Red);
+            BanChat::ColorError());
         return EExecutionStatus::UNCOMPLETED;
     }
 
@@ -412,9 +412,33 @@ namespace BanChat
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid compound UID "
                     "(EOS:<32hex> or IP:<address>)."), *Arg),
-                FLinearColor::Red);
+                BanChat::ColorError());
         }
         return false;
+    }
+
+    // ── Config-driven colour accessors ───────────────────────────────────────
+    // Each falls back to the matching FLinearColor constant if the config object
+    // is somehow unavailable (shouldn't happen at runtime but is safe to handle).
+    static FLinearColor ColorError()
+    {
+        const UBanChatCommandsConfig* C = UBanChatCommandsConfig::Get();
+        return C ? C->ChatColorError : FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);
+    }
+    static FLinearColor ColorSuccess()
+    {
+        const UBanChatCommandsConfig* C = UBanChatCommandsConfig::Get();
+        return C ? C->ChatColorSuccess : FLinearColor(0.0f, 1.0f, 0.0f, 1.0f);
+    }
+    static FLinearColor ColorWarning()
+    {
+        const UBanChatCommandsConfig* C = UBanChatCommandsConfig::Get();
+        return C ? C->ChatColorWarning : FLinearColor(1.0f, 1.0f, 0.0f, 1.0f);
+    }
+    static FLinearColor ColorInfo()
+    {
+        const UBanChatCommandsConfig* C = UBanChatCommandsConfig::Get();
+        return C ? C->ChatColorInfo : FLinearColor(1.0f, 1.0f, 1.0f, 1.0f);
     }
 
 } // namespace BanChat
@@ -449,14 +473,14 @@ EExecutionStatus ALinkBansChatCommand::ExecuteCommand_Implementation(
     {
         Sender->SendChatMessage(
             TEXT("[BanChatCommands] Cannot link a UID to itself."),
-            FLinearColor::Red);
+            BanChat::ColorError());
         return EExecutionStatus::BAD_ARGUMENTS;
     }
 
     UBanDatabase* DB = BanChat::GetDB(this);
     if (!DB)
     {
-        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), BanChat::ColorError());
         return EExecutionStatus::UNCOMPLETED;
     }
 
@@ -465,7 +489,7 @@ EExecutionStatus ALinkBansChatCommand::ExecuteCommand_Implementation(
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Linked %s ↔ %s. "
                 "A ban on either identity will now block both."), *UidA, *UidB),
-            FLinearColor::Green);
+            BanChat::ColorSuccess());
         return EExecutionStatus::COMPLETED;
     }
 
@@ -473,7 +497,7 @@ EExecutionStatus ALinkBansChatCommand::ExecuteCommand_Implementation(
         FString::Printf(TEXT("[BanChatCommands] Could not link — no ban record found for '%s' or '%s'. "
             "Both UIDs must have existing ban records before they can be linked."),
             *UidA, *UidB),
-        FLinearColor::Red);
+        BanChat::ColorError());
     return EExecutionStatus::UNCOMPLETED;
 }
 
@@ -506,7 +530,7 @@ EExecutionStatus AUnlinkBansChatCommand::ExecuteCommand_Implementation(
     UBanDatabase* DB = BanChat::GetDB(this);
     if (!DB)
     {
-        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), BanChat::ColorError());
         return EExecutionStatus::UNCOMPLETED;
     }
 
@@ -514,13 +538,13 @@ EExecutionStatus AUnlinkBansChatCommand::ExecuteCommand_Implementation(
     {
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Removed link between %s and %s."), *UidA, *UidB),
-            FLinearColor::Green);
+            BanChat::ColorSuccess());
         return EExecutionStatus::COMPLETED;
     }
 
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] No link found between %s and %s."), *UidA, *UidB),
-        FLinearColor::Yellow);
+        BanChat::ColorWarning());
     return EExecutionStatus::UNCOMPLETED;
 }
 
@@ -599,21 +623,21 @@ EExecutionStatus ABanChatCommand::ExecuteCommand_Implementation(
                         Sender->SendChatMessage(
                             FString::Printf(TEXT("[BanChatCommands] Also banned IP %s — linked to EOS ban."),
                                 *Rec.IpAddress),
-                            FLinearColor::Green);
+                            BanChat::ColorSuccess());
                     }
                     else
                     {
                         Sender->SendChatMessage(
                             FString::Printf(TEXT("[BanChatCommands] Warning: failed to add IP ban for %s."),
                                 *Rec.IpAddress),
-                            FLinearColor::Yellow);
+                            BanChat::ColorWarning());
                     }
                 }
                 else if (bFound)
                 {
                     Sender->SendChatMessage(
                         TEXT("[BanChatCommands] No IP address on record for this player — EOS PUID ban applied only."),
-                        FLinearColor::Yellow);
+                        BanChat::ColorWarning());
                 }
             }
         }
@@ -650,7 +674,7 @@ EExecutionStatus ATempBanChatCommand::ExecuteCommand_Implementation(
     {
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Expected a number for <minutes>, got '%s'."), *Arguments[1]),
-            FLinearColor::Red);
+            BanChat::ColorError());
         return EExecutionStatus::BAD_ARGUMENTS;
     }
 
@@ -708,7 +732,7 @@ EExecutionStatus AUnbanChatCommand::ExecuteCommand_Implementation(
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid "
                     "UID. Use an EOS PUID (32 hex chars) or IP:<address>."), *Arg),
-                FLinearColor::Red);
+                BanChat::ColorError());
             return EExecutionStatus::BAD_ARGUMENTS;
         }
     }
@@ -716,7 +740,7 @@ EExecutionStatus AUnbanChatCommand::ExecuteCommand_Implementation(
     UBanDatabase* DB = BanChat::GetDB(this);
     if (!DB)
     {
-        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), BanChat::ColorError());
         return EExecutionStatus::UNCOMPLETED;
     }
 
@@ -724,13 +748,13 @@ EExecutionStatus AUnbanChatCommand::ExecuteCommand_Implementation(
     {
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Removed ban for %s."), *Uid),
-            FLinearColor::Green);
+            BanChat::ColorSuccess());
         return EExecutionStatus::COMPLETED;
     }
 
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] No active ban found for %s."), *Uid),
-        FLinearColor::Yellow);
+        BanChat::ColorWarning());
     return EExecutionStatus::UNCOMPLETED;
 }
 
@@ -762,14 +786,14 @@ EExecutionStatus AUnbanNameChatCommand::ExecuteCommand_Implementation(
     UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>();
     if (!Registry)
     {
-        Sender->SendChatMessage(TEXT("[BanChatCommands] PlayerSessionRegistry unavailable."), FLinearColor::Red);
+        Sender->SendChatMessage(TEXT("[BanChatCommands] PlayerSessionRegistry unavailable."), BanChat::ColorError());
         return EExecutionStatus::UNCOMPLETED;
     }
 
     UBanDatabase* DB = BanChat::GetDB(this);
     if (!DB)
     {
-        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), BanChat::ColorError());
         return EExecutionStatus::UNCOMPLETED;
     }
 
@@ -782,7 +806,7 @@ EExecutionStatus AUnbanNameChatCommand::ExecuteCommand_Implementation(
             FString::Printf(TEXT("[BanChatCommands] No session history found for '%s'. "
                 "The player must have connected at least once for /unbanname to work.  "
                 "Use /unban <PUID> to unban a player directly."), *NameArg),
-            FLinearColor::Red);
+            BanChat::ColorError());
         return EExecutionStatus::BAD_ARGUMENTS;
     }
 
@@ -795,7 +819,7 @@ EExecutionStatus AUnbanNameChatCommand::ExecuteCommand_Implementation(
             FString::Printf(TEXT("[BanChatCommands] Ambiguous name '%s' — %d matches: %s.  "
                 "Use a more specific substring."),
                 *NameArg, Results.Num(), *FString::Join(Descriptions, TEXT(", "))),
-            FLinearColor::Yellow);
+            BanChat::ColorWarning());
         return EExecutionStatus::BAD_ARGUMENTS;
     }
 
@@ -808,7 +832,7 @@ EExecutionStatus AUnbanNameChatCommand::ExecuteCommand_Implementation(
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Removed EOS ban for '%s' (%s)."),
                 *Rec.DisplayName, *Rec.Uid),
-            FLinearColor::Green);
+            BanChat::ColorSuccess());
         bAnyRemoved = true;
     }
     else
@@ -816,7 +840,7 @@ EExecutionStatus AUnbanNameChatCommand::ExecuteCommand_Implementation(
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] No active EOS ban found for '%s' (%s)."),
                 *Rec.DisplayName, *Rec.Uid),
-            FLinearColor::Yellow);
+            BanChat::ColorWarning());
     }
 
     // Remove the IP ban if there is a recorded IP address.
@@ -828,7 +852,7 @@ EExecutionStatus AUnbanNameChatCommand::ExecuteCommand_Implementation(
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] Also removed IP ban for %s."),
                     *Rec.IpAddress),
-                FLinearColor::Green);
+                BanChat::ColorSuccess());
             bAnyRemoved = true;
         }
         else
@@ -836,7 +860,7 @@ EExecutionStatus AUnbanNameChatCommand::ExecuteCommand_Implementation(
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] No active IP ban found for %s."),
                     *Rec.IpAddress),
-                FLinearColor::Yellow);
+                BanChat::ColorWarning());
         }
     }
 
@@ -870,7 +894,7 @@ EExecutionStatus ABanCheckChatCommand::ExecuteCommand_Implementation(
     UBanDatabase* DB = BanChat::GetDB(this);
     if (!DB)
     {
-        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), BanChat::ColorError());
         return EExecutionStatus::UNCOMPLETED;
     }
 
@@ -882,7 +906,7 @@ EExecutionStatus ABanCheckChatCommand::ExecuteCommand_Implementation(
                 "Reason: %s  Expires: %s  Banned by: %s"),
                 *DisplayName, *Uid,
                 *Entry.Reason, *BanChat::FormatExpiry(Entry), *Entry.BannedBy),
-            FLinearColor::Red);
+            BanChat::ColorError());
         return EExecutionStatus::COMPLETED;
     }
 
@@ -891,13 +915,13 @@ EExecutionStatus ABanCheckChatCommand::ExecuteCommand_Implementation(
     {
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Ban for %s was expired and has been removed."), *Uid),
-            FLinearColor::Yellow);
+            BanChat::ColorWarning());
     }
     else
     {
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Not banned: %s"), *Uid),
-            FLinearColor::White);
+            BanChat::ColorInfo());
     }
 
     return EExecutionStatus::COMPLETED;
@@ -925,7 +949,7 @@ EExecutionStatus ABanListChatCommand::ExecuteCommand_Implementation(
     UBanDatabase* DB = BanChat::GetDB(this);
     if (!DB)
     {
-        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), BanChat::ColorError());
         return EExecutionStatus::UNCOMPLETED;
     }
 
@@ -933,7 +957,7 @@ EExecutionStatus ABanListChatCommand::ExecuteCommand_Implementation(
 
     if (AllBans.IsEmpty())
     {
-        Sender->SendChatMessage(TEXT("[BanChatCommands] No active bans."), FLinearColor::White);
+        Sender->SendChatMessage(TEXT("[BanChatCommands] No active bans."), BanChat::ColorInfo());
         return EExecutionStatus::COMPLETED;
     }
 
@@ -947,7 +971,7 @@ EExecutionStatus ABanListChatCommand::ExecuteCommand_Implementation(
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] Active bans (%d total) — page %d/%d:"),
             AllBans.Num(), PageClamped, TotalPages),
-        FLinearColor::White);
+        BanChat::ColorInfo());
 
     for (int32 i = Start; i < End; ++i)
     {
@@ -957,14 +981,14 @@ EExecutionStatus ABanListChatCommand::ExecuteCommand_Implementation(
                 *E.Platform, *E.PlayerUID,
                 E.PlayerName.IsEmpty() ? TEXT("(unknown)") : *E.PlayerName,
                 *E.BannedBy, *BanChat::FormatExpiry(E)),
-            FLinearColor::White);
+            BanChat::ColorInfo());
     }
 
     if (TotalPages > 1)
     {
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Use /banlist <page> to view more.")),
-            FLinearColor::White);
+            BanChat::ColorInfo());
     }
 
     return EExecutionStatus::COMPLETED;
@@ -989,7 +1013,7 @@ EExecutionStatus AWhoAmIChatCommand::ExecuteCommand_Implementation(
     if (!PC || !PC->PlayerState)
     {
         Sender->SendChatMessage(TEXT("[BanChatCommands] No player state available."),
-            FLinearColor::Red);
+            BanChat::ColorError());
         return EExecutionStatus::UNCOMPLETED;
     }
 
@@ -1014,7 +1038,7 @@ EExecutionStatus AWhoAmIChatCommand::ExecuteCommand_Implementation(
             Sender->SendChatMessage(
                 TEXT("[BanChatCommands] Could not resolve your platform identity. "
                      "Try again in a moment."),
-                FLinearColor::Yellow);
+                BanChat::ColorWarning());
             return EExecutionStatus::UNCOMPLETED;
         }
         RawId = EosPuid;
@@ -1022,7 +1046,7 @@ EExecutionStatus AWhoAmIChatCommand::ExecuteCommand_Implementation(
 
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] Your EOS PUID: %s"), *RawId),
-        FLinearColor::Green);
+        BanChat::ColorSuccess());
 
     return EExecutionStatus::COMPLETED;
 }
@@ -1055,7 +1079,7 @@ EExecutionStatus APlayerHistoryChatCommand::ExecuteCommand_Implementation(
     UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>();
     if (!Registry)
     {
-        Sender->SendChatMessage(TEXT("[BanChatCommands] PlayerSessionRegistry unavailable."), FLinearColor::Red);
+        Sender->SendChatMessage(TEXT("[BanChatCommands] PlayerSessionRegistry unavailable."), BanChat::ColorError());
         return EExecutionStatus::UNCOMPLETED;
     }
 
@@ -1079,7 +1103,7 @@ EExecutionStatus APlayerHistoryChatCommand::ExecuteCommand_Implementation(
         {
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] No session history found for UID %s."), *SearchUid),
-                FLinearColor::Yellow);
+                BanChat::ColorWarning());
             return EExecutionStatus::COMPLETED;
         }
     }
@@ -1091,7 +1115,7 @@ EExecutionStatus APlayerHistoryChatCommand::ExecuteCommand_Implementation(
         {
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] No session history found for name '%s'."), *Arg),
-                FLinearColor::Yellow);
+                BanChat::ColorWarning());
             return EExecutionStatus::COMPLETED;
         }
     }
@@ -1101,7 +1125,7 @@ EExecutionStatus APlayerHistoryChatCommand::ExecuteCommand_Implementation(
 
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] Session history for '%s' (%d result(s)):"), *Arg, Results.Num()),
-        FLinearColor::White);
+        BanChat::ColorInfo());
 
     UBanDatabase* DB = BanChat::GetDB(this);
 
@@ -1116,7 +1140,7 @@ EExecutionStatus APlayerHistoryChatCommand::ExecuteCommand_Implementation(
         Sender->SendChatMessage(
             FString::Printf(TEXT("  %s | \"%s\" | last seen: %s%s"),
                 *Rec.Uid, *Rec.DisplayName, *Rec.LastSeen, *BanStatus),
-            bBanned ? FLinearColor::Red : FLinearColor::White);
+            bBanned ? BanChat::ColorError() : BanChat::ColorInfo());
     }
 
     return EExecutionStatus::COMPLETED;
@@ -1150,14 +1174,14 @@ EExecutionStatus ABanNameChatCommand::ExecuteCommand_Implementation(
     UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>();
     if (!Registry)
     {
-        Sender->SendChatMessage(TEXT("[BanChatCommands] PlayerSessionRegistry unavailable."), FLinearColor::Red);
+        Sender->SendChatMessage(TEXT("[BanChatCommands] PlayerSessionRegistry unavailable."), BanChat::ColorError());
         return EExecutionStatus::UNCOMPLETED;
     }
 
     UBanDatabase* DB = BanChat::GetDB(this);
     if (!DB)
     {
-        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), BanChat::ColorError());
         return EExecutionStatus::UNCOMPLETED;
     }
 
@@ -1177,7 +1201,7 @@ EExecutionStatus ABanNameChatCommand::ExecuteCommand_Implementation(
             FString::Printf(TEXT("[BanChatCommands] No session history found for '%s'. "
                 "The player must have connected at least once for /banname to work.  "
                 "Use /ban <PUID> to ban an unknown player directly."), *NameArg),
-            FLinearColor::Red);
+            BanChat::ColorError());
         return EExecutionStatus::BAD_ARGUMENTS;
     }
 
@@ -1190,7 +1214,7 @@ EExecutionStatus ABanNameChatCommand::ExecuteCommand_Implementation(
             FString::Printf(TEXT("[BanChatCommands] Ambiguous name '%s' — %d matches: %s.  "
                 "Use a more specific substring."),
                 *NameArg, Results.Num(), *FString::Join(Descriptions, TEXT(", "))),
-            FLinearColor::Yellow);
+            BanChat::ColorWarning());
         return EExecutionStatus::BAD_ARGUMENTS;
     }
 
@@ -1225,21 +1249,21 @@ EExecutionStatus ABanNameChatCommand::ExecuteCommand_Implementation(
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] Also banned IP %s — linked to EOS ban."),
                     *Rec.IpAddress),
-                FLinearColor::Green);
+                BanChat::ColorSuccess());
         }
         else
         {
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] Warning: failed to add IP ban for %s."),
                     *Rec.IpAddress),
-                FLinearColor::Yellow);
+                BanChat::ColorWarning());
         }
     }
     else
     {
         Sender->SendChatMessage(
             TEXT("[BanChatCommands] No IP address on record for this player — EOS PUID ban applied only."),
-            FLinearColor::Yellow);
+            BanChat::ColorWarning());
     }
 
     return EExecutionStatus::COMPLETED;
@@ -1277,7 +1301,7 @@ EExecutionStatus AReloadConfigChatCommand::ExecuteCommand_Implementation(
 
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] Config reloaded — %d admin(s) active."), AdminCount),
-        FLinearColor::Green);
+        BanChat::ColorSuccess());
 
     return EExecutionStatus::COMPLETED;
 }
