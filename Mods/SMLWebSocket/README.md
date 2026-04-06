@@ -13,7 +13,7 @@ SMLWebSocket provides a **drop-in replacement** built directly on:
 - **FSocket / ISocketSubsystem** – Unreal's low-level TCP socket layer (always available)
 - **OpenSSL** – for TLS on `wss://` URLs (available on Win64 and Linux server targets)
 
-Mods that require a live WebSocket connection (such as DiscordBridge, BanSystem, and TicketSystem in standalone mode) list SMLWebSocket as a dependency and use `USMLWebSocketClient` instead of the engine's built-in client.
+Mods that require a live WebSocket connection (such as DiscordBridge and TicketSystem in standalone mode) list SMLWebSocket as a dependency and use `USMLWebSocketClient` instead of the engine's built-in client.
 
 ---
 

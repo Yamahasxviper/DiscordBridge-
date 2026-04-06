@@ -164,7 +164,7 @@ Set to an **empty string** to disable Discord-based whitelist management entirel
 | `!whitelist add <name>` | Add a player by in-game name |
 | `!whitelist remove <name>` | Remove a player by in-game name |
 | `!whitelist list` | List all whitelisted players and current enabled/disabled state |
-| `!whitelist status` | Show the current enabled/disabled state of **both** the whitelist and the ban system |
+| `!whitelist status` | Show the current enabled/disabled state of the whitelist |
 | `!whitelist role add <discord_id>` | Grant the `WhitelistRoleId` Discord role to a user |
 | `!whitelist role remove <discord_id>` | Revoke the `WhitelistRoleId` Discord role from a user |
 
@@ -237,7 +237,7 @@ WhitelistKickReason=You are not whitelisted. DM an admin on Discord to request a
 
 ### IN-GAME COMMANDS
 
-These settings control commands that server admins can type directly in the **Satisfactory in-game chat** to manage the whitelist and ban list without using Discord.
+These settings control commands that server admins can type directly in the **Satisfactory in-game chat** to manage the whitelist without using Discord.
 
 #### `InGameWhitelistCommandPrefix`
 
@@ -255,29 +255,9 @@ Set to an **empty string** to disable in-game whitelist commands.
 | `!whitelist add <name>` | Add a player by in-game name |
 | `!whitelist remove <name>` | Remove a player by in-game name |
 | `!whitelist list` | List all whitelisted players and current enabled/disabled state |
-| `!whitelist status` | Show the current enabled/disabled state of **both** the whitelist and the ban system |
+| `!whitelist status` | Show the current enabled/disabled state of the whitelist |
 
 > **Note:** In-game whitelist commands do not support `!whitelist role add/remove` (that is Discord-only).
-
----
-
-#### `InGameBanCommandPrefix`
-
-The prefix that triggers ban management commands in the in-game chat.
-Set to an **empty string** to disable in-game ban commands.
-
-**Default:** `!ban`
-
-**Supported commands** (type these in the Satisfactory in-game chat):
-
-| Command | Effect |
-|---------|--------|
-| `!ban on` | Enable the ban system; currently-connected banned players are kicked immediately |
-| `!ban off` | Disable the ban system |
-| `!ban add <name>` | Ban a player by in-game name; kicks immediately if the player is connected and ban system is enabled |
-| `!ban remove <name>` | Unban a player by in-game name |
-| `!ban list` | List all banned players and current enabled/disabled state |
-| `!ban status` | Show the current enabled/disabled state of **both** the ban system and the whitelist |
 
 ---
 
@@ -296,9 +276,8 @@ to Discord when the server starts or stops.
 
 > **Scope note:** `ServerStatusMessagesEnabled` and `StatusChannelId` apply
 > **only** to the online/offline notifications listed here.  Kick notifications
-> (`BanKickDiscordMessage`, `WhitelistKickDiscordMessage`) always go to the
-> main `ChannelId`, and command responses always return to the channel where
-> the command was typed.
+> (`WhitelistKickDiscordMessage`) always go to the main `ChannelId`, and command
+> responses always return to the channel where the command was typed.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
@@ -361,6 +340,39 @@ PlayerCountActivityType=3
 ; Disable presence entirely
 ShowPlayerCountInPresence=False
 ```
+
+---
+
+### PLAYER NOTIFICATIONS
+
+Controls whether DiscordBridge posts a message to Discord when a player **joins**,
+**leaves**, or **times out**.  All three event types are **disabled by default**.
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `PlayerEventsEnabled` | bool | `False` | Master switch for all player join/leave/timeout notifications. |
+| `PlayerEventsChannelId` | string | *(empty)* | Snowflake ID of a dedicated channel for these notifications. Falls back to the main `ChannelId` when empty. |
+| `PlayerJoinMessage` | string | `:green_circle: **%PlayerName%** joined the server.` | Posted when a player joins. Leave empty to disable. Supports `%PlayerName%`, `%SteamId%`, `%EOSProductUserId%`. |
+| `PlayerLeaveMessage` | string | `:red_circle: **%PlayerName%** left the server.` | Posted when a player leaves cleanly. Also used as fallback when `PlayerTimeoutMessage` is empty. Leave empty to disable. |
+| `PlayerTimeoutMessage` | string | `:yellow_circle: **%PlayerName%** timed out.` | Posted when a player's connection is lost without a clean disconnect. Leave empty to fall back to `PlayerLeaveMessage`. |
+
+**Examples:**
+
+```ini
+; Enable with default messages
+PlayerEventsEnabled=True
+
+; Route to a dedicated channel
+PlayerEventsChannelId=111222333444555666777
+
+; Include EOS PUID in join message for admin reference
+PlayerJoinMessage=:green_circle: **%PlayerName%** joined. (EOS: %EOSProductUserId%)
+
+; Disable timeout-specific notification (reuses leave message)
+PlayerTimeoutMessage=
+```
+
+→ See [Player Notifications](04-PlayerNotifications.md)
 
 ---
 

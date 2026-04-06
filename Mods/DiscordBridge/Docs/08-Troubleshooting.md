@@ -76,12 +76,6 @@ LogDiscordBridge: Error: Failed to create WebSocket – SMLWebSocket module not 
 
 ---
 
-## Ban commands are not recognised / banned players can still join
-
-Ban functionality has been removed from DiscordBridge. There is no built-in ban system in this mod. For player ban enforcement, use a dedicated external tool or server-level tooling.
-
----
-
 ## In-game commands are not recognised
 
 1. Make sure `InGameWhitelistCommandPrefix` is set (defaults to `!whitelist`) and not empty in the config file.

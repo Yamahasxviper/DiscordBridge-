@@ -1,5 +1,55 @@
 # DiscordBridge – Release Notes
 
+## v1.0.4 – Player Join / Leave / Timeout Notifications
+
+*Compatible with Satisfactory build ≥ 416835 and SML ≥ 3.11.3*
+
+---
+
+### New feature – player join / leave / timeout notifications
+
+A new group of settings lets the bridge post a Discord message whenever a player
+joins, leaves, or times out from the server.  All three notification types are
+**disabled by default**; set `PlayerEventsEnabled=True` to opt in.
+
+**New settings**
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `PlayerEventsEnabled` | bool | `False` | Master switch for all player join/leave/timeout notifications. |
+| `PlayerEventsChannelId` | string | *(empty)* | Snowflake ID of a dedicated channel for these notifications. Falls back to the main `ChannelId` when empty. |
+| `PlayerJoinMessage` | string | `:green_circle: **%PlayerName%** joined the server.` | Posted when a player joins. Leave empty to disable. |
+| `PlayerLeaveMessage` | string | `:red_circle: **%PlayerName%** left the server.` | Posted when a player leaves cleanly. Also used as a fallback when `PlayerTimeoutMessage` is empty. Leave empty to disable. |
+| `PlayerTimeoutMessage` | string | `:yellow_circle: **%PlayerName%** timed out.` | Posted when a player's connection is lost without a clean disconnect. Leave empty to fall back to `PlayerLeaveMessage`. |
+
+**Placeholders available in `PlayerJoinMessage`**
+
+| Placeholder | Replaced with |
+|-------------|---------------|
+| `%PlayerName%` | In-game display name of the joining player |
+| `%SteamId%` | Steam64 ID (17-digit decimal). Empty string when the player did not connect through Steam. |
+| `%EOSProductUserId%` | EOS Product User ID (32-char lowercase hex). Empty string when no EOS session is present. |
+
+**Minimal example**
+
+```ini
+PlayerEventsEnabled=True
+PlayerJoinMessage=:green_circle: **%PlayerName%** joined the server.
+PlayerLeaveMessage=:red_circle: **%PlayerName%** left the server.
+PlayerTimeoutMessage=:yellow_circle: **%PlayerName%** timed out.
+```
+
+**Routing notifications to a separate channel**
+
+```ini
+PlayerEventsEnabled=True
+PlayerEventsChannelId=111222333444555666777
+```
+
+→ See [Player Notifications](Docs/04-PlayerNotifications.md)
+
+---
+
 ## v1.0.3 – Config no longer overwritten by mod updates
 
 *Compatible with Satisfactory build ≥ 416835 and SML ≥ 3.11.3*
@@ -23,7 +73,7 @@ to appear to "reset".
 | Mod update via SMM | Config overwritten → backup restores on next start | Config untouched |
 | Manual mod update | Config overwritten → backup restores on next start | Config untouched |
 
-The automatic backup (`Saved/Config/DiscordBridge.ini`) is still written on every
+The automatic backup (`Saved/DiscordBridge/DiscordBridge.ini`) is still written on every
 server start as an extra safety net.  The backup restore path still works for any
 edge case where the primary file is missing (e.g. a full mod-directory wipe).
 
@@ -32,7 +82,7 @@ edge case where the primary file is missing (e.g. a full mod-directory wipe).
 Alpakit dev mode deletes and recreates the entire mod directory on each deploy, so
 `DefaultDiscordBridge.ini` will still be absent after each deploy and the backup
 restore will run once on the next server start.  This is expected behaviour for the
-dev workflow; the backup file in `Saved/Config/` acts as the persisted copy of your
+dev workflow; the backup file in `Saved/DiscordBridge/` acts as the persisted copy of your
 settings between deploys.
 
 ---
@@ -47,7 +97,7 @@ settings between deploys.
 
 When the server detected that `DefaultDiscordBridge.ini` had been reset by a mod
 update (empty `BotToken`/`ChannelId`) and restored settings from the
-`Saved/Config/DiscordBridge.ini` backup, any format string that contained a
+`Saved/DiscordBridge/DiscordBridge.ini` backup, any format string that contained a
 `%ServerName%` placeholder could be silently corrupted.
 
 **Root cause**: the backup was read via Unreal Engine's `FConfigFile::Read` +
@@ -111,7 +161,7 @@ was configured:
 
 `SendStatusMessageToDiscord()` is now called exclusively for the two server
 status events (online/offline).  Kick notifications always go to `ChannelId`
-and whitelist/ban command responses always reply to the channel where the
+and whitelist command responses always reply to the channel where the
 command was typed.
 
 ---
@@ -157,35 +207,10 @@ or dashboard required.
 - The presence can be disabled entirely with `ShowPlayerCountInPresence=False`.
 
 #### Ban system
-- Manage a server-side ban list directly from the bridged Discord channel or from
-  inside the game using `!ban` commands.
-- Banned players are kicked automatically when they attempt to join the server.
-- Dedicated Discord channel support (`BanChannelId`) provides an isolated admin
-  audit log for ban events.
-- Role-gated commands (`BanCommandRoleId`) restrict who can issue `!ban` commands.
-- Role management commands (`!ban role add/remove <discord_id>`) let existing ban
-  admins promote or demote other Discord members without requiring Discord server
-  admin access.
-- Configurable kick message shown to the player in-game (`BanKickReason`) and
-  Discord notification posted when a banned player is kicked (`BanKickDiscordMessage`).
-- The ban command interface can be disabled independently of ban enforcement
-  (`BanCommandsEnabled=False` keeps bans active without accepting new commands).
 
-**Discord ban commands**
-
-| Command | Effect |
-|---------|--------|
-| `!ban on` | Enable the ban system |
-| `!ban off` | Disable the ban system |
-| `!ban add <name>` | Ban a player by in-game name |
-| `!ban remove <name>` | Unban a player by in-game name |
-| `!ban list` | List all banned players |
-| `!ban status` | Show enabled/disabled state of ban system and whitelist |
-| `!ban role add <discord_id>` | Grant the ban admin role to a Discord user |
-| `!ban role remove <discord_id>` | Revoke the ban admin role from a Discord user |
-
-**In-game ban commands** (`!ban on/off/add/remove/list/status`) are also supported,
-excluding role management which is Discord-only.
+> **Note:** The built-in ban system was removed from DiscordBridge in a subsequent
+> release.  There is no `!ban` command in the current version.  The whitelist
+> (`!whitelist`) remains fully functional.
 
 #### Whitelist
 - Restrict which players can join the server and manage the list from Discord or
@@ -207,7 +232,7 @@ excluding role management which is Discord-only.
 | `!whitelist add <name>` | Add a player by in-game name |
 | `!whitelist remove <name>` | Remove a player by in-game name |
 | `!whitelist list` | List all whitelisted players |
-| `!whitelist status` | Show enabled/disabled state of whitelist and ban system |
+| `!whitelist status` | Show enabled/disabled state of the whitelist |
 | `!whitelist role add <discord_id>` | Grant the whitelist role to a Discord user |
 | `!whitelist role remove <discord_id>` | Revoke the whitelist role from a Discord user |
 
@@ -216,12 +241,10 @@ supported, excluding role management which is Discord-only.
 
 #### Configuration
 - Single primary config file (`DefaultDiscordBridge.ini`) covers all settings.
-- Automatic full backup: **all** settings (connection, chat, presence, whitelist,
-  ban) are saved to `<ServerRoot>/FactoryGame/Saved/Config/DiscordBridge.ini` on
+- Automatic full backup: **all** settings (connection, chat, presence, whitelist)
+  are saved to `<ServerRoot>/FactoryGame/Saved/DiscordBridge/DiscordBridge.ini` on
   every startup.  If a mod update resets the primary config, the bridge restores
   every setting from the backup automatically on the next server start.
-- All ban data is persisted in `<ServerRoot>/FactoryGame/Saved/ServerBanlist.json`
-  and survives server restarts.
 - All whitelist data is persisted in
   `<ServerRoot>/FactoryGame/Saved/ServerWhitelist.json` and survives server restarts.
 
