@@ -38,8 +38,6 @@ Mods/**/Metadata/Crypto.json
 Mods/**/Binaries/*
 Mods/**/Intermediate/*
 
-# Mod content (binary assets - not needed for server-only mods)
-Mods/**/Content/
 
 # Anything from Rider
 .idea
