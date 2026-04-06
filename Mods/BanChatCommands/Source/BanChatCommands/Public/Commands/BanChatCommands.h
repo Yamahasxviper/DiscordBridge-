@@ -282,6 +282,39 @@ public:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  /unbanname  — remove EOS + IP bans by display name
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /unbanname <name_substring>
+ *
+ * Looks up the player in the session registry by display name and removes
+ * both their EOS PUID ban and, if an IP address was recorded, their IP ban.
+ * Works for offline players as long as they connected at least once while
+ * the session registry was active.
+ *
+ * If the name matches more than one session record the command lists all
+ * matches and asks for a more specific substring.
+ *
+ * Requires admin.
+ *
+ * Examples:
+ *   /unbanname BadPlayer
+ *   /unbanname bad
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AUnbanNameChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AUnbanNameChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  /whoami  — display the caller's own platform IDs
 // ─────────────────────────────────────────────────────────────────────────────
 

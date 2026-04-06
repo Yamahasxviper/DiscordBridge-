@@ -544,8 +544,9 @@ EExecutionStatus ABanChatCommand::ExecuteCommand_Implementation(
     if (!BanChat::IsAdminSender(Sender, AdminId))
         return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
 
+    const FString& Arg = Arguments[0];
     FString Uid, DisplayName;
-    if (!BanChat::ResolveTarget(this, Sender, Arguments[0], Uid, DisplayName))
+    if (!BanChat::ResolveTarget(this, Sender, Arg, Uid, DisplayName))
         return EExecutionStatus::BAD_ARGUMENTS;
 
     const FString Reason = Arguments.Num() > 1
@@ -553,7 +554,72 @@ EExecutionStatus ABanChatCommand::ExecuteCommand_Implementation(
         : TEXT("Banned by server administrator");
 
     const FString BannedBy = Sender->GetSenderName();
-    return BanChat::DoBan(this, Sender, Uid, DisplayName, 0, Reason, BannedBy);
+    const EExecutionStatus BanResult = BanChat::DoBan(this, Sender, Uid, DisplayName, 0, Reason, BannedBy);
+    if (BanResult != EExecutionStatus::COMPLETED)
+        return BanResult;
+
+    // If the argument was a display name (not a raw PUID or compound UID), also
+    // ban the player's recorded IP address and link the two ban records together.
+    {
+        FString TmpPlatform, TmpRawId;
+        UBanDatabase::ParseUid(Arg, TmpPlatform, TmpRawId);
+        const bool bWasNameResolution = !BanChat::IsValidEOSPUID(Arg)
+            && TmpPlatform == TEXT("UNKNOWN");
+
+        if (bWasNameResolution)
+        {
+            UWorld* World = GetWorld();
+            UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
+            UPlayerSessionRegistry* Registry = GI
+                ? GI->GetSubsystem<UPlayerSessionRegistry>() : nullptr;
+            UBanDatabase* DB = BanChat::GetDB(this);
+
+            if (Registry && DB)
+            {
+                FPlayerSessionRecord Rec;
+                const bool bFound = Registry->FindByUid(Uid, Rec);
+                if (bFound && !Rec.IpAddress.IsEmpty())
+                {
+                    const FString IpUid = UBanDatabase::MakeUid(TEXT("IP"), Rec.IpAddress);
+
+                    FBanEntry IpEntry;
+                    IpEntry.Uid          = IpUid;
+                    IpEntry.PlayerUID    = Rec.IpAddress;
+                    IpEntry.Platform     = TEXT("IP");
+                    IpEntry.PlayerName   = DisplayName;
+                    IpEntry.Reason       = Reason;
+                    IpEntry.BannedBy     = BannedBy;
+                    IpEntry.BanDate      = FDateTime::UtcNow();
+                    IpEntry.bIsPermanent = true;
+                    IpEntry.ExpireDate   = FDateTime(0);
+
+                    if (DB->AddBan(IpEntry))
+                    {
+                        DB->LinkBans(Uid, IpUid);
+                        Sender->SendChatMessage(
+                            FString::Printf(TEXT("[BanChatCommands] Also banned IP %s — linked to EOS ban."),
+                                *Rec.IpAddress),
+                            FLinearColor::Green);
+                    }
+                    else
+                    {
+                        Sender->SendChatMessage(
+                            FString::Printf(TEXT("[BanChatCommands] Warning: failed to add IP ban for %s."),
+                                *Rec.IpAddress),
+                            FLinearColor::Yellow);
+                    }
+                }
+                else if (bFound)
+                {
+                    Sender->SendChatMessage(
+                        TEXT("[BanChatCommands] No IP address on record for this player — EOS PUID ban applied only."),
+                        FLinearColor::Yellow);
+                }
+            }
+        }
+    }
+
+    return EExecutionStatus::COMPLETED;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -666,6 +732,115 @@ EExecutionStatus AUnbanChatCommand::ExecuteCommand_Implementation(
         FString::Printf(TEXT("[BanChatCommands] No active ban found for %s."), *Uid),
         FLinearColor::Yellow);
     return EExecutionStatus::UNCOMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AUnbanNameChatCommand  — /unbanname
+// ─────────────────────────────────────────────────────────────────────────────
+
+AUnbanNameChatCommand::AUnbanNameChatCommand()
+{
+    CommandName          = TEXT("unbanname");
+    MinNumberOfArguments = 1;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "UnbanNameUsage",
+        "/unbanname <name_substring>");
+}
+
+EExecutionStatus AUnbanNameChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString AdminId;
+    if (!BanChat::IsAdminSender(Sender, AdminId))
+        return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    UWorld* World = GetWorld();
+    if (!World) return EExecutionStatus::UNCOMPLETED;
+    UGameInstance* GI = World->GetGameInstance();
+    if (!GI) return EExecutionStatus::UNCOMPLETED;
+
+    UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>();
+    if (!Registry)
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] PlayerSessionRegistry unavailable."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
+
+    UBanDatabase* DB = BanChat::GetDB(this);
+    if (!DB)
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
+
+    const FString NameArg = Arguments[0];
+    TArray<FPlayerSessionRecord> Results = Registry->FindByName(NameArg);
+
+    if (Results.IsEmpty())
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] No session history found for '%s'. "
+                "The player must have connected at least once for /unbanname to work.  "
+                "Use /unban <PUID> to unban a player directly."), *NameArg),
+            FLinearColor::Red);
+        return EExecutionStatus::BAD_ARGUMENTS;
+    }
+
+    if (Results.Num() > 1)
+    {
+        TArray<FString> Descriptions;
+        for (const FPlayerSessionRecord& R : Results)
+            Descriptions.Add(FString::Printf(TEXT("\"%s\" (%s)"), *R.DisplayName, *R.Uid));
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Ambiguous name '%s' — %d matches: %s.  "
+                "Use a more specific substring."),
+                *NameArg, Results.Num(), *FString::Join(Descriptions, TEXT(", "))),
+            FLinearColor::Yellow);
+        return EExecutionStatus::BAD_ARGUMENTS;
+    }
+
+    const FPlayerSessionRecord& Rec = Results[0];
+    bool bAnyRemoved = false;
+
+    // Remove the EOS PUID ban.
+    if (DB->RemoveBanByUid(Rec.Uid))
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Removed EOS ban for '%s' (%s)."),
+                *Rec.DisplayName, *Rec.Uid),
+            FLinearColor::Green);
+        bAnyRemoved = true;
+    }
+    else
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] No active EOS ban found for '%s' (%s)."),
+                *Rec.DisplayName, *Rec.Uid),
+            FLinearColor::Yellow);
+    }
+
+    // Remove the IP ban if there is a recorded IP address.
+    if (!Rec.IpAddress.IsEmpty())
+    {
+        const FString IpUid = UBanDatabase::MakeUid(TEXT("IP"), Rec.IpAddress);
+        if (DB->RemoveBanByUid(IpUid))
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] Also removed IP ban for %s."),
+                    *Rec.IpAddress),
+                FLinearColor::Green);
+            bAnyRemoved = true;
+        }
+        else
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] No active IP ban found for %s."),
+                    *Rec.IpAddress),
+                FLinearColor::Yellow);
+        }
+    }
+
+    return bAnyRemoved ? EExecutionStatus::COMPLETED : EExecutionStatus::UNCOMPLETED;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
