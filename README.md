@@ -33,19 +33,71 @@ Persistent EOS-based ban system for Satisfactory dedicated servers.
 
 In-game chat command interface for BanSystem. Requires BanSystem.
 
-| Command | Description |
-|---------|-------------|
-| `/ban <player\|UID\|IP:address> [reason]` | Permanently ban a player or IP address |
-| `/tempban <player\|UID\|IP:address> <minutes> [reason]` | Temporarily ban for N minutes |
-| `/unban <UID\|IP:address>` | Remove a ban |
-| `/bancheck <player\|UID\|IP:address>` | Query ban status |
-| `/banlist [page]` | List active bans (10 per page) |
-| `/linkbans <UID1> <UID2>` | Link two EOS UIDs for cross-identity enforcement |
-| `/unlinkbans <UID1> <UID2>` | Remove a UID link |
-| `/playerhistory <name\|UID>` | Look up session history |
-| `/banname <name> [reason]` | Ban offline player by name + IP from session history |
-| `/reloadconfig` | Hot-reload admin config without restarting the server |
-| `/whoami` | Show your own EOS PUID (no admin required) |
+**Player targeting** — commands that accept `<player|UID>` resolve the target in this order:
+1. Compound UID starting with `EOS:` — used directly.
+2. Raw 32-character hex string — `EOS:` prefix added automatically.
+3. Display name — case-insensitive substring match against **currently connected** players. Use a UID or `/banname` for offline players.
+
+| Command | Admin | Description |
+|---------|:-----:|-------------|
+| `/ban <player\|UID\|IP:address> [reason]` | ✅ | Permanently ban a player, EOS UID, or IP address |
+| `/tempban <player\|UID\|IP:address> <minutes> [reason]` | ✅ | Temporarily ban for N minutes (auto-lifted on expiry) |
+| `/unban <UID\|IP:address>` | ✅ | Remove a ban by EOS UID or IP address (not display name) |
+| `/unbanname <name_substring>` | ✅ | Remove ban for an offline player by display-name — also removes their IP ban if recorded |
+| `/bancheck <player\|UID\|IP:address>` | ✅ | Show ban status, reason, expiry, and linked UIDs |
+| `/banlist [page]` | ✅ | List all active bans, 10 per page |
+| `/linkbans <UID1> <UID2>` | ✅ | Link two EOS UIDs so a ban on either blocks the player |
+| `/unlinkbans <UID1> <UID2>` | ✅ | Remove a previously created UID link |
+| `/playerhistory <name\|UID>` | ✅ | Search session history by display name or UID (up to 20 results) |
+| `/banname <name_substring> [reason]` | ✅ | Ban offline player by name: bans EOS PUID + IP and links them |
+| `/reloadconfig` | ✅ | Hot-reload admin config without restarting the server |
+| `/whoami` | ❌ | Show your own EOS PUID — open to all players |
+
+#### Common workflows
+
+**Ban an online player**
+```
+/ban SomePlayer Griefing
+```
+
+**Ban an offline player by name (EOS + IP together)**
+```
+/banname SomePlayer Griefing
+```
+
+**Temporary ban (e.g. 24 hours = 1440 minutes)**
+```
+/tempban SomePlayer 1440 Toxic behaviour
+```
+
+**Ban directly by EOS UID or IP**
+```
+/ban EOS:00020aed06f0a6958c3c067fb4b73d51 Cheating
+/ban IP:1.2.3.4 VPN evader
+/tempban IP:1.2.3.4 60 Suspicious traffic
+```
+
+**Unban a player**
+```
+/unban EOS:00020aed06f0a6958c3c067fb4b73d51
+/unban IP:1.2.3.4
+/unbanname SomePlayer
+```
+
+**Handle ban evasion (new EOS PUID)**
+```
+; 1. Find the new UID from session history
+/playerhistory SomePlayer
+; 2. Ban the new UID
+/ban EOS:00020aed06f0a6958c3c067fb4b73d52 Cheating (ban evasion)
+; 3. Link the two bans so either identity is blocked
+/linkbans EOS:00020aed06f0a6958c3c067fb4b73d51 EOS:00020aed06f0a6958c3c067fb4b73d52
+```
+
+**Find your own EOS PUID (to become an admin)**
+```
+/whoami
+```
 
 → [Full documentation](Mods/BanChatCommands/Docs/README.md)
 

@@ -6,13 +6,14 @@ BanChatCommands is a server-only Satisfactory mod that adds a full set of ban ma
 
 ---
 
-## Eleven built-in commands
+## Twelve built-in commands
 
 | Command | Admin required | Purpose |
 |---------|:--------------:|---------|
 | `/ban` | ✅ | Permanently ban a player |
 | `/tempban` | ✅ | Temporarily ban for N minutes |
-| `/unban` | ✅ | Remove an existing ban |
+| `/unban` | ✅ | Remove an existing ban by UID or IP address |
+| `/unbanname` | ✅ | Remove ban for an offline player by display-name substring |
 | `/bancheck` | ✅ | Check whether a player is currently banned |
 | `/banlist` | ✅ | List all active bans (paginated, 10 per page) |
 | `/linkbans` | ✅ | Link two UIDs so one ban covers both identities |
@@ -49,6 +50,12 @@ All commands — including admin-only ones — can always be run from the **serv
 ## Session audit trail
 
 The `/playerhistory` command queries the **player session registry** provided by BanSystem. Every time a player connects, their compound UID and display name are recorded. This lets you look up a player's past UIDs even after they have disconnected.
+
+---
+
+## Offline player unbanning with `/unbanname`
+
+`/unbanname <name>` searches the session registry by display-name substring and removes the ban — even if the player is not currently online. If an IP address was recorded at their last login, that IP ban is also removed. This is the counterpart to `/banname`.
 
 ---
 
