@@ -1037,7 +1037,7 @@ APlayerHistoryChatCommand::APlayerHistoryChatCommand()
     MinNumberOfArguments = 1;
     bOnlyUsableByPlayer  = false;
     Usage = NSLOCTEXT("BanChatCommands", "PlayerHistoryUsage",
-        "/playerhistory <name_substring|UID>");
+        "/playerhistory <name_substring|UID|IP>");
 }
 
 EExecutionStatus APlayerHistoryChatCommand::ExecuteCommand_Implementation(
@@ -1061,20 +1061,33 @@ EExecutionStatus APlayerHistoryChatCommand::ExecuteCommand_Implementation(
 
     const FString& Arg = Arguments[0];
 
-    // Determine whether the argument looks like a compound UID (contains ':')
-    // or a display-name substring.
-    FString SearchUid;
-    const bool bIsUid = BanChat::ParseAndNormaliseUidArg(nullptr, Arg, SearchUid);
+    // Determine lookup mode: compound UID, IP address/prefix, or name substring.
+    FString ParsePlatform, ParseRawId;
+    UBanDatabase::ParseUid(Arg, ParsePlatform, ParseRawId);
 
     TArray<FPlayerSessionRecord> Results;
-    if (bIsUid)
+    if (ParsePlatform == TEXT("EOS") && BanChat::IsValidEOSPUID(ParseRawId))
     {
-        // Look up by UID — show the recorded display name.
+        // EOS:<puid>  — exact UID lookup.
         FPlayerSessionRecord Rec;
-        if (Registry->FindByUid(SearchUid, Rec))
-        {
+        if (Registry->FindByUid(UBanDatabase::MakeUid(TEXT("EOS"), ParseRawId.ToLower()), Rec))
             Results.Add(Rec);
+        else
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] No session history found for UID %s."),
+                    *UBanDatabase::MakeUid(TEXT("EOS"), ParseRawId.ToLower())),
+                FLinearColor::Yellow);
+            return EExecutionStatus::COMPLETED;
         }
+    }
+    else if (BanChat::IsValidEOSPUID(Arg))
+    {
+        // Raw 32-hex PUID without prefix.
+        FPlayerSessionRecord Rec;
+        const FString SearchUid = UBanDatabase::MakeUid(TEXT("EOS"), Arg.ToLower());
+        if (Registry->FindByUid(SearchUid, Rec))
+            Results.Add(Rec);
         else
         {
             Sender->SendChatMessage(
@@ -1083,9 +1096,22 @@ EExecutionStatus APlayerHistoryChatCommand::ExecuteCommand_Implementation(
             return EExecutionStatus::COMPLETED;
         }
     }
+    else if (ParsePlatform == TEXT("IP") || (ParsePlatform == TEXT("UNKNOWN") && Arg.Contains(TEXT("."))))
+    {
+        // IP:<addr>  or bare address substring (e.g. "192.168.1." for subnet search).
+        const FString IpQuery = (ParsePlatform == TEXT("IP")) ? ParseRawId : Arg;
+        Results = Registry->FindByIp(IpQuery);
+        if (Results.IsEmpty())
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] No session history found for IP '%s'."), *IpQuery),
+                FLinearColor::Yellow);
+            return EExecutionStatus::COMPLETED;
+        }
+    }
     else
     {
-        // Look up by display-name substring.
+        // Display-name substring search.
         Results = Registry->FindByName(Arg);
         if (Results.IsEmpty())
         {
@@ -1114,8 +1140,10 @@ EExecutionStatus APlayerHistoryChatCommand::ExecuteCommand_Implementation(
             : TEXT("");
 
         Sender->SendChatMessage(
-            FString::Printf(TEXT("  %s | \"%s\" | last seen: %s%s"),
-                *Rec.Uid, *Rec.DisplayName, *Rec.LastSeen, *BanStatus),
+            FString::Printf(TEXT("  %s | \"%s\" | ip: %s | last seen: %s%s"),
+                *Rec.Uid, *Rec.DisplayName,
+                Rec.IpAddress.IsEmpty() ? TEXT("—") : *Rec.IpAddress,
+                *Rec.LastSeen, *BanStatus),
             bBanned ? FLinearColor::Red : FLinearColor::White);
     }
 

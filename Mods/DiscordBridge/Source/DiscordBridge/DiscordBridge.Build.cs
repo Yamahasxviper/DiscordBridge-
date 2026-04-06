@@ -35,5 +35,16 @@ public class DiscordBridge : ModuleRules
 			// listed here because this module does not use UStruct-to-JSON conversion.
 			"Json",
 		});
+
+		// BanSystem is an optional companion mod.  Declaring it here gives the
+		// BanDiscordSubsystem compile-time access to UBanDatabase, UBanEnforcer,
+		// UPlayerSessionRegistry, and FBanEntry without exposing those types in
+		// DiscordBridge's own public headers.
+		// If BanSystem is not installed at runtime GetSubsystem<> simply returns
+		// nullptr and UBanDiscordSubsystem is never activated.
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
+			"BanSystem",
+		});
 	}
 }

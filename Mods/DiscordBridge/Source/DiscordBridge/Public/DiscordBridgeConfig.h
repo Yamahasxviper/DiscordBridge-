@@ -236,24 +236,38 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 
 	/**
 	 * Message posted to Discord when a player joins the server.
-	 * Available placeholders:
-	 *   %PlayerName%       – in-game display name of the joining player.
-	 *   %SteamId%          – Steam64 ID (17-digit decimal, e.g. "76561198000000000").
-	 *                        Replaced with an empty string when the player did not
-	 *                        connect through Steam (e.g. Epic-direct / EOS-only).
-	 *   %EOSProductUserId% – EOS Product User ID (32-char lowercase hex, e.g.
-	 *                        "00020aed06f0a6958c3c067fb4b73d51").
-	 *                        Replaced with an empty string when no EOS session is
-	 *                        present (e.g. LAN / Null online service).
-	 *
-	 * Both %SteamId% and %EOSProductUserId% may be populated simultaneously for a
-	 * Steam player whose account is linked to an Epic account.
-	 *
+	 * Available placeholder: %PlayerName%
 	 * Leave empty to disable join notifications.
 	 * Default: ":green_circle: **%PlayerName%** joined the server."
 	 */
 	FString PlayerJoinMessage{
 		TEXT(":green_circle: **%PlayerName%** joined the server.")
+	};
+
+	/**
+	 * Snowflake ID of a private Discord channel where sensitive join details
+	 * (EOS Product User ID and IP address) are posted for admins only.
+	 * Leave empty to disable admin-info notifications entirely.
+	 *
+	 * Example: PlayerJoinAdminChannelId=111222333444555666777
+	 */
+	FString PlayerJoinAdminChannelId;
+
+	/**
+	 * Message posted to the admin channel when a player joins.
+	 * Available placeholders:
+	 *   %PlayerName%       – in-game display name of the joining player.
+	 *   %EOSProductUserId% – EOS Product User ID (32-char lowercase hex).
+	 *                        Empty string when no EOS session is present.
+	 *   %IpAddress%        – Remote IP address of the joining player.
+	 *                        Empty string when the address cannot be determined.
+	 *
+	 * Only posted when PlayerJoinAdminChannelId is set.
+	 * Leave empty to disable (PlayerJoinAdminChannelId is then ignored).
+	 * Default: ":shield: **%PlayerName%** joined | EOS: `%EOSProductUserId%` | IP: `%IpAddress%`"
+	 */
+	FString PlayerJoinAdminMessage{
+		TEXT(":shield: **%PlayerName%** joined | EOS: `%EOSProductUserId%` | IP: `%IpAddress%`")
 	};
 
 	/**

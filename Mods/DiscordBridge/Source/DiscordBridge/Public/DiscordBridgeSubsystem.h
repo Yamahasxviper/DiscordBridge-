@@ -17,6 +17,9 @@
 // Forward-declared so the header does not pull in TicketSystem's full header chain.
 class UTicketSubsystem;
 
+// Forward-declared so the header does not pull in BanSystem's full header chain.
+class UBanDiscordSubsystem;
+
 // ── Delegate declarations ─────────────────────────────────────────────────────
 
 /**
@@ -552,12 +555,12 @@ private:
 	 * No-op when PlayerEventsEnabled is false or PlayerJoinMessage is empty.
 	 *
 	 * @param PlayerName       The in-game name of the player who joined.
-	 * @param Steam64Id        Steam64 ID (17-digit decimal) of the joining player, or empty.
 	 * @param EOSProductUserId EOS Product User ID (32-char hex) of the joining player, or empty.
+	 * @param IpAddress        Remote IP address of the joining player, or empty.
 	 */
 	void SendPlayerJoinNotification(const FString& PlayerName,
-	                                const FString& Steam64Id        = FString(),
-	                                const FString& EOSProductUserId = FString());
+	                                const FString& EOSProductUserId = FString(),
+	                                const FString& IpAddress        = FString());
 
 	/**
 	 * Fetch all guild members who hold WhitelistRoleId via the Discord REST API
@@ -661,4 +664,12 @@ private:
 	 * root while still nulling automatically if the object is ever destroyed.
 	 */
 	TWeakObjectPtr<UTicketSubsystem> CachedTicketSubsystem;
+
+	/**
+	 * Weak reference to the BanDiscordSubsystem; populated during Initialize()
+	 * when BanSystem is installed alongside DiscordBridge.  Used to inject and
+	 * later detach the Discord provider so ban commands receive Discord events.
+	 * Using TWeakObjectPtr avoids adding a hard GC root.
+	 */
+	TWeakObjectPtr<UBanDiscordSubsystem> CachedBanDiscordSubsystem;
 };

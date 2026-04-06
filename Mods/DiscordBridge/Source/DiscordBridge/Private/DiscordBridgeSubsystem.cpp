@@ -2,6 +2,7 @@
 
 #include "DiscordBridgeSubsystem.h"
 #include "TicketSubsystem.h"
+#include "BanDiscordSubsystem.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -119,6 +120,20 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		}
 	}
 
+	// Wire ourselves as the Discord provider into UBanDiscordSubsystem so that
+	// Discord ban commands are forwarded to BanSystem when it is installed.
+	// GetSubsystem<> returns nullptr when BanSystem is not loaded, so this is
+	// gracefully skipped on servers that do not have BanSystem installed.
+	Collection.InitializeDependency<UBanDiscordSubsystem>();
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UBanDiscordSubsystem* BanDiscord = GI->GetSubsystem<UBanDiscordSubsystem>())
+		{
+			CachedBanDiscordSubsystem = BanDiscord;
+			BanDiscord->SetProvider(this);
+		}
+	}
+
 }
 
 void UDiscordBridgeSubsystem::Deinitialize()
@@ -129,6 +144,13 @@ void UDiscordBridgeSubsystem::Deinitialize()
 		Tickets->SetProvider(nullptr);
 	}
 	CachedTicketSubsystem.Reset();
+
+	// Detach from BanDiscordSubsystem so ban commands stop firing after we shut down.
+	if (UBanDiscordSubsystem* BanDiscord = CachedBanDiscordSubsystem.Get())
+	{
+		BanDiscord->SetProvider(nullptr);
+	}
+	CachedBanDiscordSubsystem.Reset();
 
 	// Stop the chat-manager bind ticker if it is still running.
 	FTSTicker::GetCoreTicker().RemoveTicker(ChatManagerBindTickHandle);
@@ -1977,28 +1999,34 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 		}
 	}
 
-	// ── Resolve Steam64 ID and EOS PUID ─────────────────────────────────────
-	FString ResolvedSteam64Id;
+	// ── Resolve EOS PUID ─────────────────────────────────────────────────────
 	FString ResolvedEOSProductUserId;
+
+	// ── Resolve remote IP address ─────────────────────────────────────────────
+	FString ResolvedIpAddress;
+	if (const UNetConnection* Conn = Controller->GetNetConnection())
+	{
+		ResolvedIpAddress = Conn->LowLevelGetRemoteAddress(/*bAppendPort=*/false);
+	}
 
 	// Always log the available platform IDs so server operators can see them in
 	// the server log regardless of whether player-event notifications are enabled.
 	UE_LOG(LogTemp, Log,
-	       TEXT("DiscordBridge: player '%s' joined — SteamId: %s | EOS PUID: %s"),
+	       TEXT("DiscordBridge: player '%s' joined — EOS PUID: %s | IP: %s"),
 	       *PlayerName,
-	       ResolvedSteam64Id.IsEmpty()        ? TEXT("(none)") : *ResolvedSteam64Id,
-	       ResolvedEOSProductUserId.IsEmpty() ? TEXT("(none)") : *ResolvedEOSProductUserId);
+	       ResolvedEOSProductUserId.IsEmpty() ? TEXT("(none)") : *ResolvedEOSProductUserId,
+	       ResolvedIpAddress.IsEmpty()        ? TEXT("(none)") : *ResolvedIpAddress);
 
 	// ── Whitelist check ───────────────────────────────────────────────────────
 	if (!FWhitelistManager::IsEnabled())
 	{
-		SendPlayerJoinNotification(PlayerName, ResolvedSteam64Id, ResolvedEOSProductUserId);
+		SendPlayerJoinNotification(PlayerName, ResolvedEOSProductUserId, ResolvedIpAddress);
 		return;
 	}
 
 	if (FWhitelistManager::IsWhitelisted(PlayerName))
 	{
-		SendPlayerJoinNotification(PlayerName, ResolvedSteam64Id, ResolvedEOSProductUserId);
+		SendPlayerJoinNotification(PlayerName, ResolvedEOSProductUserId, ResolvedIpAddress);
 		return;
 	}
 
@@ -2013,7 +2041,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 		UE_LOG(LogTemp, Log,
 		       TEXT("DiscordBridge Whitelist: allowing '%s' – matches a Discord member with WhitelistRoleId."),
 		       *PlayerName);
-		SendPlayerJoinNotification(PlayerName, ResolvedSteam64Id, ResolvedEOSProductUserId);
+		SendPlayerJoinNotification(PlayerName, ResolvedEOSProductUserId, ResolvedIpAddress);
 		return;
 	}
 
@@ -2044,27 +2072,43 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UDiscordBridgeSubsystem::SendPlayerJoinNotification(const FString& PlayerName,
-                                                          const FString& Steam64Id,
-                                                          const FString& EOSProductUserId)
+                                                          const FString& EOSProductUserId,
+                                                          const FString& IpAddress)
 {
-	if (!Config.bPlayerEventsEnabled || Config.PlayerJoinMessage.IsEmpty())
+	if (!Config.bPlayerEventsEnabled)
 	{
 		return;
 	}
 
-	const FString& EffectiveChannelId = Config.PlayerEventsChannelId.IsEmpty()
-		? Config.ChannelId
-		: Config.PlayerEventsChannelId;
+	// ── Public join message (name only, no sensitive data) ───────────────────
+	if (!Config.PlayerJoinMessage.IsEmpty())
+	{
+		const FString& EffectiveChannelId = Config.PlayerEventsChannelId.IsEmpty()
+			? Config.ChannelId
+			: Config.PlayerEventsChannelId;
 
-	FString Message = Config.PlayerJoinMessage;
-	Message = Message.Replace(TEXT("%PlayerName%"),        *PlayerName);
-	Message = Message.Replace(TEXT("%SteamId%"),           Steam64Id.IsEmpty()        ? TEXT("") : *Steam64Id);
-	Message = Message.Replace(TEXT("%EOSProductUserId%"),  EOSProductUserId.IsEmpty() ? TEXT("") : *EOSProductUserId);
+		FString Message = Config.PlayerJoinMessage;
+		Message = Message.Replace(TEXT("%PlayerName%"), *PlayerName);
 
-	UE_LOG(LogTemp, Log,
-	       TEXT("DiscordBridge: Player join notification for '%s'"), *PlayerName);
+		UE_LOG(LogTemp, Log,
+		       TEXT("DiscordBridge: Player join notification for '%s'"), *PlayerName);
 
-	SendMessageToChannel(EffectiveChannelId, Message);
+		SendMessageToChannel(EffectiveChannelId, Message);
+	}
+
+	// ── Private admin message (EOS PUID + IP, admin channel only) ────────────
+	if (!Config.PlayerJoinAdminChannelId.IsEmpty() && !Config.PlayerJoinAdminMessage.IsEmpty())
+	{
+		FString AdminMessage = Config.PlayerJoinAdminMessage;
+		AdminMessage = AdminMessage.Replace(TEXT("%PlayerName%"),        *PlayerName);
+		AdminMessage = AdminMessage.Replace(TEXT("%EOSProductUserId%"),  EOSProductUserId.IsEmpty() ? TEXT("") : *EOSProductUserId);
+		AdminMessage = AdminMessage.Replace(TEXT("%IpAddress%"),         IpAddress.IsEmpty()        ? TEXT("") : *IpAddress);
+
+		UE_LOG(LogTemp, Log,
+		       TEXT("DiscordBridge: Player admin-info notification for '%s'"), *PlayerName);
+
+		SendMessageToChannel(Config.PlayerJoinAdminChannelId, AdminMessage);
+	}
 }
 
 void UDiscordBridgeSubsystem::OnLogout(AGameModeBase* /*GameMode*/, AController* Exiting)

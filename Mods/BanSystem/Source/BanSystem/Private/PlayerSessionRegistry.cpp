@@ -104,6 +104,19 @@ bool UPlayerSessionRegistry::FindByUid(const FString& Uid, FPlayerSessionRecord&
     return false;
 }
 
+TArray<FPlayerSessionRecord> UPlayerSessionRegistry::FindByIp(const FString& IpSubstring) const
+{
+    FScopeLock Lock(&Mutex);
+
+    TArray<FPlayerSessionRecord> Result;
+    for (const FPlayerSessionRecord& R : Records)
+    {
+        if (!R.IpAddress.IsEmpty() && R.IpAddress.Contains(IpSubstring, ESearchCase::IgnoreCase))
+            Result.Add(R);
+    }
+    return Result;
+}
+
 TArray<FPlayerSessionRecord> UPlayerSessionRegistry::GetAllRecords() const
 {
     FScopeLock Lock(&Mutex);

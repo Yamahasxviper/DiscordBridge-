@@ -276,6 +276,8 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.bPlayerEventsEnabled   = GetIniBoolOrDefault  (ConfigFile, TEXT("PlayerEventsEnabled"),   Config.bPlayerEventsEnabled);
 		Config.PlayerEventsChannelId  = GetIniStringOrDefault(ConfigFile, TEXT("PlayerEventsChannelId"),  Config.PlayerEventsChannelId);
 		Config.PlayerJoinMessage      = GetIniStringOrDefault(ConfigFile, TEXT("PlayerJoinMessage"),      Config.PlayerJoinMessage);
+		Config.PlayerJoinAdminChannelId = GetIniStringOrDefault(ConfigFile, TEXT("PlayerJoinAdminChannelId"), Config.PlayerJoinAdminChannelId);
+		Config.PlayerJoinAdminMessage   = GetIniStringOrDefault(ConfigFile, TEXT("PlayerJoinAdminMessage"),   Config.PlayerJoinAdminMessage);
 		Config.PlayerLeaveMessage     = GetIniStringOrDefault(ConfigFile, TEXT("PlayerLeaveMessage"),     Config.PlayerLeaveMessage);
 		Config.PlayerTimeoutMessage   = GetIniStringOrDefault(ConfigFile, TEXT("PlayerTimeoutMessage"),   Config.PlayerTimeoutMessage);
 
@@ -501,9 +503,17 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("# Leave empty to use the main bridged channel (ChannelId).\n")
 						TEXT("PlayerEventsChannelId=\n")
 						TEXT("#\n")
-						TEXT("# Message posted when a player joins. Leave empty to disable.\n")
+						TEXT("# Message posted when a player joins (public channel). Leave empty to disable.\n")
 						TEXT("# Placeholder: %PlayerName%\n")
 						TEXT("PlayerJoinMessage=\n")
+						TEXT("#\n")
+						TEXT("# Snowflake ID of a PRIVATE admin-only channel for sensitive join details.\n")
+						TEXT("# Leave empty to disable admin-info notifications.\n")
+						TEXT("PlayerJoinAdminChannelId=\n")
+						TEXT("#\n")
+						TEXT("# Message posted to the admin channel when a player joins.\n")
+						TEXT("# Placeholders: %PlayerName%, %EOSProductUserId%, %IpAddress%\n")
+						TEXT("PlayerJoinAdminMessage=\n")
 						TEXT("#\n")
 						TEXT("# Message posted when a player leaves cleanly. Leave empty to disable.\n")
 						TEXT("# Also used as fallback when PlayerTimeoutMessage is empty.\n")
@@ -638,8 +648,13 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("# Snowflake ID of the channel where player notifications are posted.\n")
 			TEXT("# Leave empty to use the main bridged channel (ChannelId).\n")
 			TEXT("PlayerEventsChannelId=\n")
-			TEXT("# Message posted when a player joins. Leave empty to disable. Placeholder: %PlayerName%\n")
+			TEXT("# Message posted when a player joins (public channel). Leave empty to disable. Placeholder: %PlayerName%\n")
 			TEXT("PlayerJoinMessage=\n")
+			TEXT("# Snowflake ID of a PRIVATE admin-only channel for sensitive join details (EOS PUID, IP).\n")
+			TEXT("# Leave empty to disable admin-info notifications.\n")
+			TEXT("PlayerJoinAdminChannelId=\n")
+			TEXT("# Message for the admin channel. Placeholders: %PlayerName%, %EOSProductUserId%, %IpAddress%\n")
+			TEXT("PlayerJoinAdminMessage=\n")
 			TEXT("# Message posted when a player leaves cleanly. Leave empty to disable. Placeholder: %PlayerName%\n")
 			TEXT("PlayerLeaveMessage=\n")
 			TEXT("# Message posted when a player times out. Leave empty to use PlayerLeaveMessage. Placeholder: %PlayerName%\n")
@@ -729,6 +744,8 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.bPlayerEventsEnabled    = GetRawBoolOrDefault  (BackupValues, TEXT("PlayerEventsEnabled"),    Config.bPlayerEventsEnabled);
 		Config.PlayerEventsChannelId   = GetRawStringOrDefault(BackupValues, TEXT("PlayerEventsChannelId"),   Config.PlayerEventsChannelId);
 		Config.PlayerJoinMessage       = GetRawStringOrDefault(BackupValues, TEXT("PlayerJoinMessage"),       Config.PlayerJoinMessage);
+		Config.PlayerJoinAdminChannelId  = GetRawStringOrDefault(BackupValues, TEXT("PlayerJoinAdminChannelId"),  Config.PlayerJoinAdminChannelId);
+		Config.PlayerJoinAdminMessage    = GetRawStringOrDefault(BackupValues, TEXT("PlayerJoinAdminMessage"),    Config.PlayerJoinAdminMessage);
 		Config.PlayerLeaveMessage      = GetRawStringOrDefault(BackupValues, TEXT("PlayerLeaveMessage"),      Config.PlayerLeaveMessage);
 		Config.PlayerTimeoutMessage    = GetRawStringOrDefault(BackupValues, TEXT("PlayerTimeoutMessage"),    Config.PlayerTimeoutMessage);
 
@@ -820,6 +837,8 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("PlayerEventsEnabled"),           Config.bPlayerEventsEnabled ? TEXT("True") : TEXT("False"));
 				PatchLine(TEXT("PlayerEventsChannelId"),         Config.PlayerEventsChannelId);
 				PatchLine(TEXT("PlayerJoinMessage"),             Config.PlayerJoinMessage);
+				PatchLine(TEXT("PlayerJoinAdminChannelId"),      Config.PlayerJoinAdminChannelId);
+				PatchLine(TEXT("PlayerJoinAdminMessage"),        Config.PlayerJoinAdminMessage);
 				PatchLine(TEXT("PlayerLeaveMessage"),            Config.PlayerLeaveMessage);
 				PatchLine(TEXT("PlayerTimeoutMessage"),          Config.PlayerTimeoutMessage);
 
@@ -881,6 +900,8 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			+ TEXT("PlayerEventsEnabled=") + (Config.bPlayerEventsEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
 			+ TEXT("PlayerEventsChannelId=") + Config.PlayerEventsChannelId + TEXT("\n")
 			+ TEXT("PlayerJoinMessage=") + Config.PlayerJoinMessage + TEXT("\n")
+			+ TEXT("PlayerJoinAdminChannelId=") + Config.PlayerJoinAdminChannelId + TEXT("\n")
+			+ TEXT("PlayerJoinAdminMessage=") + Config.PlayerJoinAdminMessage + TEXT("\n")
 			+ TEXT("PlayerLeaveMessage=") + Config.PlayerLeaveMessage + TEXT("\n")
 			+ TEXT("PlayerTimeoutMessage=") + Config.PlayerTimeoutMessage + TEXT("\n");
 
