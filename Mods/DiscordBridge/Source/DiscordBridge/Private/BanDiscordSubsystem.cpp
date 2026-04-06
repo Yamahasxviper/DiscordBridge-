@@ -259,6 +259,18 @@ bool UBanDiscordSubsystem::IsValidEOSPUID(const FString& Id)
 	return true;
 }
 
+bool UBanDiscordSubsystem::IsValidIPQuery(const FString& Query)
+{
+	// Accept explicit "IP:<addr>" prefix or a bare address that contains a dot
+	// (IPv4: "1.2.3.4" or partial "192.168.1.").
+	FString Platform, RawId;
+	UBanDatabase::ParseUid(Query, Platform, RawId);
+	if (Platform == TEXT("IP") && !RawId.IsEmpty())
+		return true;
+	// "UNKNOWN" is what ParseUid returns for strings without a colon prefix.
+	return Platform == TEXT("UNKNOWN") && Query.Contains(TEXT("."));
+}
+
 bool UBanDiscordSubsystem::ResolveTarget(const FString& Arg,
                                           FString& OutUid,
                                           FString& OutDisplayName,
@@ -736,7 +748,9 @@ void UBanDiscordSubsystem::HandlePlayerHistoryCommand(const TArray<FString>& Arg
 	}
 	else if (IsValidIPQuery(Query))
 	{
-		Results = Registry->FindByIp(Query);
+		// Strip the "IP:" prefix if present before querying.
+		const FString IpQuery = (Platform == TEXT("IP")) ? RawId : Query;
+		Results = Registry->FindByIp(IpQuery);
 	}
 	else
 	{
