@@ -423,22 +423,22 @@ namespace BanChat
     static FLinearColor ColorError()
     {
         const UBanChatCommandsConfig* C = UBanChatCommandsConfig::Get();
-        return C ? C->ChatColorError : FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);
+        return C ? FLinearColor::FromSRGBColor(C->ChatColorError) : FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);
     }
     static FLinearColor ColorSuccess()
     {
         const UBanChatCommandsConfig* C = UBanChatCommandsConfig::Get();
-        return C ? C->ChatColorSuccess : FLinearColor(0.0f, 1.0f, 0.0f, 1.0f);
+        return C ? FLinearColor::FromSRGBColor(C->ChatColorSuccess) : FLinearColor(0.0f, 1.0f, 0.0f, 1.0f);
     }
     static FLinearColor ColorWarning()
     {
         const UBanChatCommandsConfig* C = UBanChatCommandsConfig::Get();
-        return C ? C->ChatColorWarning : FLinearColor(1.0f, 1.0f, 0.0f, 1.0f);
+        return C ? FLinearColor::FromSRGBColor(C->ChatColorWarning) : FLinearColor(1.0f, 1.0f, 0.0f, 1.0f);
     }
     static FLinearColor ColorInfo()
     {
         const UBanChatCommandsConfig* C = UBanChatCommandsConfig::Get();
-        return C ? C->ChatColorInfo : FLinearColor(1.0f, 1.0f, 1.0f, 1.0f);
+        return C ? FLinearColor::FromSRGBColor(C->ChatColorInfo) : FLinearColor(1.0f, 1.0f, 1.0f, 1.0f);
     }
 
 } // namespace BanChat
