@@ -450,12 +450,9 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
                     TEXT("BanEnforcer: kicking IP-banned player '%s' (IP: %s) — %s"),
                     *PC->PlayerState->GetPlayerName(), *CachedIp, *KickMsg);
 
-                AGameModeBase* GM = World->GetAuthGameMode();
-                if (GM && GM->GameSession)
-                    GM->GameSession->KickPlayer(PC, FText::FromString(KickMsg));
-
                 if (IsValid(PC))
                 {
+                    PC->ClientWasKicked(FText::FromString(KickMsg));
                     if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
                         Conn->Close();
                 }
@@ -485,21 +482,14 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
         TEXT("BanEnforcer: kicking banned player %s (%s) — %s"),
         *RawId, *Platform, *KickMsg);
 
-    // Try the standard session kick first (sends a kick message to the client).
-    AGameModeBase* GM = World->GetAuthGameMode();
-    if (GM && GM->GameSession)
-    {
-        GM->GameSession->KickPlayer(PC, FText::FromString(KickMsg));
-    }
-
-    // Hard fallback: close the net connection directly.
-    // CSS's AFGGameSession::KickPlayer may not fully disconnect the client in all
-    // server configurations.  Closing UNetConnection guarantees disconnection.
-    // NOTE: Do NOT call PC->Destroy() — the connection close triggers the standard
-    // UE cleanup path.  Explicitly destroying the PC before that runs can cause
-    // crashes and ghost players.
+    // Send the ban reason to the client, then close the connection.
+    // PC->ClientWasKicked() delivers the FText message to the player before
+    // they are disconnected.  We do NOT call GM->GameSession->KickPlayer()
+    // because AFGGameSession::KickPlayer registers with UFGServerSubsystem and
+    // blocks reconnection even after the ban is lifted.
     if (IsValid(PC))
     {
+        PC->ClientWasKicked(FText::FromString(KickMsg));
         if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
         {
             Conn->Close();
@@ -592,15 +582,10 @@ void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
 
         if (!bMatched) continue;
 
-        GM->GameSession->KickPlayer(PC, FText::FromString(Reason));
-
-        // Hard fallback: close the net connection directly in case
-        // CSS's AFGGameSession::KickPlayer does not fully disconnect the client.
-        // NOTE: Do NOT call PC->Destroy() — the connection close triggers the
-        // standard UE cleanup path.  Explicitly destroying the PC before that
-        // cleanup runs can cause crashes or leave ghost players.
+        // Send the ban reason to the client, then close the connection.
         if (IsValid(PC))
         {
+            PC->ClientWasKicked(FText::FromString(Reason));
             if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
             {
                 Conn->Close();
@@ -656,12 +641,9 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
                     TEXT("BanEnforcer: kicking IP-banned player '%s' (IP: %s) [URL-extracted path] — %s"),
                     *PlayerName, *CachedIp, *KickMsg);
 
-                AGameModeBase* GM = World->GetAuthGameMode();
-                if (GM && GM->GameSession)
-                    GM->GameSession->KickPlayer(PC, FText::FromString(KickMsg));
-
                 if (IsValid(PC))
                 {
+                    PC->ClientWasKicked(FText::FromString(KickMsg));
                     if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
                         Conn->Close();
                 }
@@ -688,17 +670,10 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
         TEXT("BanEnforcer: kicking banned player %s (%s) — %s"),
         *RawId, *Platform, *KickMsg);
 
-    AGameModeBase* GM = World->GetAuthGameMode();
-    if (GM && GM->GameSession)
-    {
-        GM->GameSession->KickPlayer(PC, FText::FromString(KickMsg));
-    }
-
-    // Hard fallback: close the net connection directly.
-    // NOTE: Do NOT call PC->Destroy() — the connection close triggers the
-    // standard UE cleanup path.
+    // Send the ban reason to the client, then close the connection.
     if (IsValid(PC))
     {
+        PC->ClientWasKicked(FText::FromString(KickMsg));
         if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
         {
             Conn->Close();
