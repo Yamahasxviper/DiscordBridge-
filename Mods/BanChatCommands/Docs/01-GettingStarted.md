@@ -33,7 +33,7 @@ When the server starts you should see these log lines:
 
 ```
 LogBanChatCommands: BanChatCommands module starting up.
-LogBanChatCommands: BanChatCommands: Registered 9 commands (ban, tempban, unban, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami).
+LogBanChatCommands: BanChatCommands: Registered 11 commands (ban, tempban, unban, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig).
 LogBanChatCommands: BanChatCommands module started.
 ```
 

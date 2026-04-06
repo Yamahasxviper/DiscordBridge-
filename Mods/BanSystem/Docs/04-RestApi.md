@@ -95,8 +95,8 @@ Create a new ban.
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `playerUID` | ✅ | Raw EOS Product User ID (32-char hex) |
-| `platform` | ✅ | `"EOS"` or `"UNKNOWN"` |
+| `playerUID` | ✅ | Raw EOS Product User ID (32-char hex), **or** an IP address when `platform` is `"IP"` |
+| `platform` | ✅ | `"EOS"`, `"UNKNOWN"`, or `"IP"` |
 | `playerName` | ❌ | Display name at time of ban (informational) |
 | `reason` | ❌ | Ban reason text |
 | `bannedBy` | ❌ | Admin username or identifier |
@@ -105,6 +105,13 @@ Create a new ban.
 **Response — success:**
 ```json
 {"success": true, "entry": { ... }}
+```
+
+**IP ban example:**
+```sh
+curl -X POST http://localhost:3000/bans \
+  -H "Content-Type: application/json" \
+  -d '{"playerUID":"1.2.3.4","platform":"IP","reason":"VPN evader","bannedBy":"admin"}'
 ```
 
 ---
@@ -184,8 +191,24 @@ curl -X POST http://localhost:3000/bans \
   -H "Content-Type: application/json" \
   -d '{"playerUID":"00020aed06f0a6958c3c067fb4b73d51","platform":"EOS","reason":"Toxic","bannedBy":"admin","durationMinutes":1440}'
 
-# Remove a ban
+# Ban an IP address permanently
+curl -X POST http://localhost:3000/bans \
+  -H "Content-Type: application/json" \
+  -d '{"playerUID":"1.2.3.4","platform":"IP","reason":"VPN evader","bannedBy":"admin"}'
+
+# Ban an IP address for 24 hours
+curl -X POST http://localhost:3000/bans \
+  -H "Content-Type: application/json" \
+  -d '{"playerUID":"1.2.3.4","platform":"IP","reason":"Suspicious traffic","bannedBy":"admin","durationMinutes":1440}'
+
+# Check if an IP is banned
+curl "http://localhost:3000/bans/check/IP%3A1.2.3.4"
+
+# Remove an EOS ban
 curl -X DELETE "http://localhost:3000/bans/EOS%3A00020aed06f0a6958c3c067fb4b73d51"
+
+# Remove an IP ban
+curl -X DELETE "http://localhost:3000/bans/IP%3A1.2.3.4"
 
 # Create a backup
 curl -X POST http://localhost:3000/bans/backup

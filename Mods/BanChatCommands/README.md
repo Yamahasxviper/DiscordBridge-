@@ -12,14 +12,16 @@ Requires the **BanSystem** mod.
 
 | Command | Admin | Description |
 |---------|-------|-------------|
-| `/ban <player\|UID> [reason...]` | ✅ | Permanently ban a player |
-| `/tempban <player\|UID> <minutes> [reason...]` | ✅ | Temporarily ban for N minutes |
-| `/unban <UID>` | ✅ | Remove an existing ban |
-| `/bancheck <player\|UID>` | ✅ | Check if a player is currently banned |
+| `/ban <player\|UID\|IP:address> [reason...]` | ✅ | Permanently ban a player or IP address |
+| `/tempban <player\|UID\|IP:address> <minutes> [reason...]` | ✅ | Temporarily ban for N minutes |
+| `/unban <UID\|IP:address>` | ✅ | Remove an existing ban |
+| `/bancheck <player\|UID\|IP:address>` | ✅ | Check if a player or IP is currently banned |
 | `/banlist [page]` | ✅ | List active bans (10 per page) |
 | `/linkbans <UID1> <UID2>` | ✅ | Link two UIDs for cross-platform ban enforcement |
 | `/unlinkbans <UID1> <UID2>` | ✅ | Remove a UID link |
 | `/playerhistory <name\|UID>` | ✅ | Search the session audit log |
+| `/banname <name> [reason...]` | ✅ | Ban offline player by name + IP from session history |
+| `/reloadconfig` | ✅ | Hot-reload admin config without restarting the server |
 | `/whoami` | ❌ | Show your own compound UID (open to all players) |
 
 ---
@@ -70,15 +72,25 @@ If a display name matches more than one connected player, the command lists all 
 /ban EOS:00020aed06f0a6958c3c067fb4b73d51 Cheating
 /ban 00020aed06f0a6958c3c067fb4b73d51 Cheating
 
+; Ban by IP address (IPv4 or IPv6)
+/ban IP:1.2.3.4 VPN evader
+
 ; 24-hour ban
 /tempban SomePlayer 1440 Toxic behaviour
+
+; 60-minute IP ban
+/tempban IP:1.2.3.4 60 Suspicious traffic
 
 ; Unban by EOS PUID
 /unban EOS:00020aed06f0a6958c3c067fb4b73d51
 
-; Check ban status
+; Unban by IP address
+/unban IP:1.2.3.4
+
+; Check ban status (works for name, UID, or IP)
 /bancheck SomePlayer
 /bancheck 00020aed06f0a6958c3c067fb4b73d51
+/bancheck IP:1.2.3.4
 
 ; List bans (first page)
 /banlist
@@ -86,8 +98,17 @@ If a display name matches more than one connected player, the command lists all 
 ; Link two bans for the same person (e.g. old and new EOS PUID)
 /linkbans EOS:00020aed06f0a6958c3c067fb4b73d51 EOS:aabbccdd11223344aabbccdd11223344
 
-; Look up a player's past UIDs (useful after they disconnect)
+; Link an EOS ban to an IP ban
+/linkbans EOS:00020aed06f0a6958c3c067fb4b73d51 IP:1.2.3.4
+
+; Look up a player's past UIDs and IP (useful after they disconnect)
 /playerhistory SomePlayer
+
+; Ban offline player by name — also bans IP if recorded (EOS + IP linked)
+/banname SomePlayer Griefing
+
+; Hot-reload admin config without restarting the server
+/reloadconfig
 
 ; Show your own UID (no admin required)
 /whoami

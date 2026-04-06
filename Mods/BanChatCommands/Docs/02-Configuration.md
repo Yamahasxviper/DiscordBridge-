@@ -52,4 +52,4 @@ If the list is empty, **no player** can run admin commands from chat — only th
 
 ## Applying changes
 
-Restart the dedicated server after editing the config file. Changes are not hot-reloaded at runtime.
+Restart the dedicated server after editing the config file, or use the `/reloadconfig` chat command to hot-reload the admin list without a restart. Changes applied via `/reloadconfig` take effect immediately — no server restart required.
