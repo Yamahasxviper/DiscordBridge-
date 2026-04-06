@@ -24,10 +24,6 @@ public class DiscordBridge : ModuleRules
 			// Our own SSL-backed WebSocket client plugin (SMLWebSocket mod in this repo).
 			// Confirmed available: built alongside this mod by Alpakit.
 			"SMLWebSocket",
-			// TicketSystem – provides IDiscordBridgeProvider and UTicketSubsystem.
-			// DiscordBridge implements IDiscordBridgeProvider and injects itself into
-			// UTicketSubsystem::SetProvider() when TicketSystem is loaded.
-			"TicketSystem",
 			// Unreal HTTP module – confirmed present in Satisfactory's custom UE build.
 			// Verified: FactoryGame.Build.cs lists "HTTP" in PublicDependencyModuleNames,
 			// which makes it transitively available to every SML-dependent mod.
