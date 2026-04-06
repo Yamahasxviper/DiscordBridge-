@@ -15,6 +15,7 @@
 // Full definition required for Cast<> between AFGPlayerController and APlayerController
 // (UE Cast<> rejects incomplete types via static_assert in Casts.h).
 #include "FGPlayerController.h"
+#include "Math/Color.h"
 
 DEFINE_LOG_CATEGORY(LogBanChatCommands);
 
@@ -420,25 +421,30 @@ namespace BanChat
     // ── Config-driven colour accessors ───────────────────────────────────────
     // Each falls back to the matching FLinearColor constant if the config object
     // is somehow unavailable (shouldn't happen at runtime but is safe to handle).
+    static FLinearColor ParseHex(const FString& Hex, FLinearColor Fallback)
+    {
+        return Hex.IsEmpty() ? Fallback : FLinearColor::FromSRGBColor(FColor::FromHex(Hex));
+    }
+
     static FLinearColor ColorError()
     {
         const UBanChatCommandsConfig* C = UBanChatCommandsConfig::Get();
-        return C ? FLinearColor::FromSRGBColor(C->ChatColorError) : FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);
+        return C ? ParseHex(C->ChatColorError, FLinearColor(1.0f, 0.0f, 0.0f, 1.0f)) : FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);
     }
     static FLinearColor ColorSuccess()
     {
         const UBanChatCommandsConfig* C = UBanChatCommandsConfig::Get();
-        return C ? FLinearColor::FromSRGBColor(C->ChatColorSuccess) : FLinearColor(0.0f, 1.0f, 0.0f, 1.0f);
+        return C ? ParseHex(C->ChatColorSuccess, FLinearColor(0.0f, 1.0f, 0.0f, 1.0f)) : FLinearColor(0.0f, 1.0f, 0.0f, 1.0f);
     }
     static FLinearColor ColorWarning()
     {
         const UBanChatCommandsConfig* C = UBanChatCommandsConfig::Get();
-        return C ? FLinearColor::FromSRGBColor(C->ChatColorWarning) : FLinearColor(1.0f, 1.0f, 0.0f, 1.0f);
+        return C ? ParseHex(C->ChatColorWarning, FLinearColor(1.0f, 1.0f, 0.0f, 1.0f)) : FLinearColor(1.0f, 1.0f, 0.0f, 1.0f);
     }
     static FLinearColor ColorInfo()
     {
         const UBanChatCommandsConfig* C = UBanChatCommandsConfig::Get();
-        return C ? FLinearColor::FromSRGBColor(C->ChatColorInfo) : FLinearColor(1.0f, 1.0f, 1.0f, 1.0f);
+        return C ? ParseHex(C->ChatColorInfo, FLinearColor(1.0f, 1.0f, 1.0f, 1.0f)) : FLinearColor(1.0f, 1.0f, 1.0f, 1.0f);
     }
 
 } // namespace BanChat

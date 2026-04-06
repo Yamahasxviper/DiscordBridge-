@@ -4,7 +4,6 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
-#include "Math/Color.h"
 #include "BanChatCommandsConfig.generated.h"
 
 /**
@@ -50,39 +49,39 @@ public:
     TArray<FString> AdminEosPUIDs;
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Chat message colours (standard RGB format, 0 – 255 per channel)
+    //  Chat message colours (hex colour code, e.g. #FF0000 for red)
     //
     //  Used for every response message sent by BanChatCommands.
-    //  Set values using the (R=...,G=...,B=...,A=255) format in the ini file.
-    //  The A (alpha) channel must be present but is ignored by the renderer.
+    //  Set values as a 6-digit hex colour code in the ini file.
+    //  The leading # is optional but recommended for readability.
     //
     //  Quick colour reference:
-    //    Red      (R=255,G=0,  B=0,  A=255)
-    //    Green    (R=0,  G=255,B=0,  A=255)
-    //    Blue     (R=0,  G=0,  B=255,A=255)
-    //    Yellow   (R=255,G=255,B=0,  A=255)
-    //    Cyan     (R=0,  G=255,B=255,A=255)
-    //    Magenta  (R=255,G=0,  B=255,A=255)
-    //    White    (R=255,G=255,B=255,A=255)
-    //    Orange   (R=255,G=128,B=0,  A=255)
-    //    Purple   (R=128,G=0,  B=255,A=255)
+    //    Red       #FF0000
+    //    Green     #00FF00
+    //    Blue      #0000FF
+    //    Yellow    #FFFF00
+    //    Cyan      #00FFFF
+    //    Magenta   #FF00FF
+    //    White     #FFFFFF
+    //    Orange    #FF8000
+    //    Purple    #8000FF
     // ─────────────────────────────────────────────────────────────────────
 
     /** Colour for error / permission-denied messages. Default: red. */
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands|Colors")
-    FColor ChatColorError = FColor(255, 0, 0, 255);
+    FString ChatColorError = TEXT("#FF0000");
 
     /** Colour for success / action-completed messages. Default: green. */
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands|Colors")
-    FColor ChatColorSuccess = FColor(0, 255, 0, 255);
+    FString ChatColorSuccess = TEXT("#00FF00");
 
     /** Colour for warning / ambiguous-result messages. Default: yellow. */
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands|Colors")
-    FColor ChatColorWarning = FColor(255, 255, 0, 255);
+    FString ChatColorWarning = TEXT("#FFFF00");
 
     /** Colour for informational / neutral messages. Default: white. */
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands|Colors")
-    FColor ChatColorInfo = FColor(255, 255, 255, 255);
+    FString ChatColorInfo = TEXT("#FFFFFF");
 
     /** Returns the singleton config instance. */
     static const UBanChatCommandsConfig* Get();
