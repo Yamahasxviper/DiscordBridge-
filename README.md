@@ -43,6 +43,8 @@ In-game chat command interface for BanSystem. Requires BanSystem.
 | `/linkbans <UID1> <UID2>` | Link two EOS UIDs for cross-identity enforcement |
 | `/unlinkbans <UID1> <UID2>` | Remove a UID link |
 | `/playerhistory <name\|UID>` | Look up session history |
+| `/banname <name> [reason]` | Ban offline player by name + IP from session history |
+| `/reloadconfig` | Hot-reload admin config without restarting the server |
 | `/whoami` | Show your own EOS PUID (no admin required) |
 
 → [Full documentation](Mods/BanChatCommands/Docs/README.md)

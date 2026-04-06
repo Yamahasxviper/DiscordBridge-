@@ -166,3 +166,40 @@ Example output:
 ```
 [BanChatCommands] Your EOS PUID: 00020aed06f0a6958c3c067fb4b73d51
 ```
+
+---
+
+## /banname
+
+```
+/banname <name_substring> [reason...]
+```
+
+Bans a player by display-name substring using the **player session registry** — the player does not need to be currently connected. When a match is found, both their EOS PUID **and** their recorded IP address (if any) are permanently banned and the two records are linked together.
+
+If the name substring matches more than one session record, the command lists all ambiguous matches and asks you to use a more specific substring.
+
+**Requires admin.**
+
+```
+/banname SomePlayer Griefing
+/banname some Cheating
+```
+
+> **Note:** The player must have connected at least once while the session registry was active. If no record exists, use `/ban <PUID>` directly.
+
+---
+
+## /reloadconfig
+
+```
+/reloadconfig
+```
+
+Forces BanChatCommands to re-read the admin list from disk immediately — no server restart required. Useful after editing `DefaultBanChatCommands.ini` or `Saved/Config/<Platform>/BanChatCommands.ini` while the server is running.
+
+**Requires admin (or server console).**
+
+```
+/reloadconfig
+```

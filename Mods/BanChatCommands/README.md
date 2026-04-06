@@ -20,6 +20,8 @@ Requires the **BanSystem** mod.
 | `/linkbans <UID1> <UID2>` | ✅ | Link two UIDs for cross-platform ban enforcement |
 | `/unlinkbans <UID1> <UID2>` | ✅ | Remove a UID link |
 | `/playerhistory <name\|UID>` | ✅ | Search the session audit log |
+| `/banname <name> [reason...]` | ✅ | Ban offline player by name + IP from session history |
+| `/reloadconfig` | ✅ | Hot-reload admin config without restarting the server |
 | `/whoami` | ❌ | Show your own compound UID (open to all players) |
 
 ---
@@ -88,6 +90,12 @@ If a display name matches more than one connected player, the command lists all 
 
 ; Look up a player's past UIDs (useful after they disconnect)
 /playerhistory SomePlayer
+
+; Ban offline player by name — also bans IP if recorded (EOS + IP linked)
+/banname SomePlayer Griefing
+
+; Hot-reload admin config without restarting the server
+/reloadconfig
 
 ; Show your own UID (no admin required)
 /whoami

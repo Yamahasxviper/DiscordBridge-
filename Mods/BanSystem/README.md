@@ -25,7 +25,7 @@ A server-only Alpakit C++ mod that provides a persistent, EOS-based ban system f
 
 ## In-Game Commands (via BanChatCommands mod)
 
-Install the optional **BanChatCommands** mod to get the full set of in-game chat commands. Admin access is controlled by player platform ID in `DefaultGame.ini`.
+Install the optional **BanChatCommands** mod to get the full set of in-game chat commands. Admin access is controlled by player platform ID in `BanChatCommands.ini`.
 
 | Command | Description |
 |---------|-------------|
@@ -37,6 +37,8 @@ Install the optional **BanChatCommands** mod to get the full set of in-game chat
 | `/linkbans <UID1> <UID2>` | Link two EOS UIDs for the same player |
 | `/unlinkbans <UID1> <UID2>` | Remove a UID link |
 | `/playerhistory <name\|UID>` | Look up session history |
+| `/banname <name> [reason...]` | Ban offline player by name + IP from session history |
+| `/reloadconfig` | Hot-reload admin config without restarting the server |
 | `/whoami` | Show your own compound UID *(no admin required)* |
 
 → See [BanChatCommands README](../BanChatCommands/README.md) for setup.

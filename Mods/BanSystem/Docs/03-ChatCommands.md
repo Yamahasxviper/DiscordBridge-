@@ -185,6 +185,36 @@ Use this to find out your EOS Product User ID so you can add it to the admin lis
 
 ---
 
+### `/banname`
+
+Ban an offline player by display-name substring using the player session registry. Permanently bans both their EOS PUID and their recorded IP address (if any), and links the two records together.
+
+```
+/banname <name_substring> [reason...]
+```
+
+The player does not need to be currently connected — the command searches session history. If the name matches more than one record, all matches are listed.
+
+**Examples:**
+```
+/banname SomePlayer Griefing
+/banname some Cheating
+```
+
+---
+
+### `/reloadconfig`
+
+Hot-reload the BanChatCommands admin list from disk without restarting the server.
+
+```
+/reloadconfig
+```
+
+Useful after editing `DefaultBanChatCommands.ini` or `Saved/Config/<Platform>/BanChatCommands.ini` while the server is running.
+
+---
+
 ## Player name vs UID resolution
 
 When you pass a display name (anything that is not a recognised UID format) to `/ban`, `/tempban`, or `/bancheck`:

@@ -12,7 +12,7 @@
 
 1. Confirm the log line at server startup:
    ```
-   LogBanChatCommands: BanChatCommands: Registered 9 commands (ban, tempban, unban, bancheck, banlist, ...)
+   LogBanChatCommands: BanChatCommands: Registered 11 commands (ban, tempban, unban, bancheck, banlist, ...)
    ```
    If this line is absent, BanChatCommands did not load.
 

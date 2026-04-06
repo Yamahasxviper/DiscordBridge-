@@ -48,7 +48,7 @@ Every player UID and display name seen at join time is written to `player_sessio
 
 ## In-game chat commands (BanChatCommands mod)
 
-The optional **BanChatCommands** mod provides `/ban`, `/tempban`, `/unban`, `/bancheck`, `/banlist`, `/linkbans`, `/unlinkbans`, `/playerhistory`, and `/whoami` directly from the Satisfactory in-game chat.
+The optional **BanChatCommands** mod provides `/ban`, `/tempban`, `/unban`, `/bancheck`, `/banlist`, `/linkbans`, `/unlinkbans`, `/playerhistory`, `/banname`, `/reloadconfig`, and `/whoami` directly from the Satisfactory in-game chat.
 
 → See [In-Game Commands](03-ChatCommands.md)
 

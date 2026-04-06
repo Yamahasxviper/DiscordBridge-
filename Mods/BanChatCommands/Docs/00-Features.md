@@ -6,7 +6,7 @@ BanChatCommands is a server-only Satisfactory mod that adds a full set of ban ma
 
 ---
 
-## Nine built-in commands
+## Eleven built-in commands
 
 | Command | Admin required | Purpose |
 |---------|:--------------:|---------|
@@ -18,6 +18,8 @@ BanChatCommands is a server-only Satisfactory mod that adds a full set of ban ma
 | `/linkbans` | ✅ | Link two UIDs so one ban covers both identities |
 | `/unlinkbans` | ✅ | Remove a previously created UID link |
 | `/playerhistory` | ✅ | Search the session audit log by name or UID |
+| `/banname` | ✅ | Ban offline player by name + IP from session history |
+| `/reloadconfig` | ✅ | Hot-reload admin config without restarting the server |
 | `/whoami` | ❌ | Show your own compound UID — open to all players |
 
 ---
@@ -47,6 +49,18 @@ All commands — including admin-only ones — can always be run from the **serv
 ## Session audit trail
 
 The `/playerhistory` command queries the **player session registry** provided by BanSystem. Every time a player connects, their compound UID and display name are recorded. This lets you look up a player's past UIDs even after they have disconnected.
+
+---
+
+## Offline player banning with `/banname`
+
+`/banname <name> [reason]` searches the session registry by display-name substring and permanently bans the player — even if they are not currently online. If an IP address was recorded at their last login, it is banned too and linked to the EOS PUID ban for combined enforcement.
+
+---
+
+## Live config reload with `/reloadconfig`
+
+`/reloadconfig` forces BanChatCommands to re-read the admin list from disk immediately. No server restart is needed after adding or removing admins — just edit the config file and run `/reloadconfig`.
 
 ---
 
