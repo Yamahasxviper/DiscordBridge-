@@ -1,0 +1,38 @@
+{
+	"FileVersion": 3,
+	"Version": 2,
+	"VersionName": "1.1.0",
+	"SemVersion": "1.1.0",
+	"GameVersion": ">=416835",
+	"FriendlyName": "SML WebSocket",
+	"Description": "RFC 6455 WebSocket client with SSL/OpenSSL support for Satisfactory mods. Implements WebSocket over TCP with optional TLS, compatible with Alpakit packages. Used by DiscordBridge and other mods that need persistent WebSocket connections on dedicated servers.",
+	"Category": "Networking",
+	"CreatedBy": "Yamahasxviper",
+	"CreatedByURL": "https://github.com/Yamahasxviper/DiscordBridge-",
+	"DocsURL": "https://docs.ficsit.app",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"RequiredOnRemote": false,
+	"SupportedTargetPlatforms": [
+		"Win64",
+		"Linux"
+	],
+	"Modules": [
+		{
+			"Name": "SMLWebSocket",
+			"Type": "ServerOnly",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "SML",
+			"Enabled": true,
+			"SemVersion": "^3.11.3"
+		}
+	]
+}

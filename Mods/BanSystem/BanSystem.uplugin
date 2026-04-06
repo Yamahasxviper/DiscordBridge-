@@ -1,0 +1,39 @@
+{
+	"FileVersion": 3,
+	"Version": 2,
+	"VersionName": "1.1.0",
+	"SemVersion": "1.1.0",
+	"GameVersion": ">=416835",
+	"FriendlyName": "Ban System",
+	"Description": "Persistent EOS-based ban system for Satisfactory dedicated servers. Features include login-time enforcement, permanent and temporary bans, UID linking, player session registry, REST management API, and JSON file storage.",
+	"Category": "Modding",
+	"CreatedBy": "Yamahasxviper",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"RequiredOnRemote": false,
+	"SupportedTargetPlatforms": [
+		"Win64",
+		"WindowsServer",
+		"Linux"
+	],
+	"Modules": [
+		{
+			"Name": "BanSystem",
+			"Type": "ServerOnly",
+			"LoadingPhase": "PostDefault"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "SML",
+			"Enabled": true,
+			"SemVersion": "^3.11.3"
+		}
+	]
+}
