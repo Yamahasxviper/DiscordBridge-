@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Text.Json;
 using AutomationTool;
 using EpicGames.Core;
 using UnrealBuildTool;
@@ -38,6 +40,7 @@ public class PackagePlugin : BuildCookRun
 
 			foreach (var SC in deploymentContexts)
 			{
+				RemoveStagedContentDirIfUnneeded(projectParams, SC);
 				ArchiveStagedPlugin(projectParams, SC);
 			}
 
@@ -224,6 +227,36 @@ public class PackagePlugin : BuildCookRun
 			FileReference.Delete(DestinationFile);
 
 		ZipFile.CreateFromDirectory(SourceDirectory.FullName, DestinationFile.FullName);
+	}
+
+	private static bool PluginCanContainContent(FileReference PluginFile)
+	{
+		var json = File.ReadAllText(PluginFile.FullName);
+		using var doc = JsonDocument.Parse(json);
+		if (doc.RootElement.TryGetProperty("CanContainContent", out var prop))
+			return prop.GetBoolean();
+		return false;
+	}
+
+	private static void RemoveStagedContentDirIfUnneeded(ProjectParams ProjectParams, DeploymentContext SC)
+	{
+		// Pure C++ plugins (CanContainContent: false) should never ship a Content
+		// directory.  UE's staging pipeline may still create an empty one as part of
+		// the plugin directory structure (e.g. when the editor auto-creates it for a
+		// newly registered plugin).  Remove it here so the packaged mod is clean.
+		if (PluginCanContainContent(ProjectParams.DLCFile))
+			return;
+
+		var stagedPluginDirectory = DeploymentContext.ApplyDirectoryRemap(SC, SC.GetStagedFileLocation(ProjectParams.DLCFile));
+		var fullStagedPluginDirectory = DirectoryReference.Combine(SC.StageDirectory, stagedPluginDirectory.Directory.Name);
+		var contentDir = DirectoryReference.Combine(fullStagedPluginDirectory, "Content");
+
+		if (DirectoryReference.Exists(contentDir))
+		{
+			DirectoryReference.Delete(contentDir, true);
+			LogInformation("Removed empty staged Content directory for {0} (CanContainContent: false)",
+				ProjectParams.DLCFile.GetFileNameWithoutAnyExtensions());
+		}
 	}
 
 	private static string GetPluginPathRelativeToStageRoot(ProjectParams ProjectParams)
