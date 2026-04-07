@@ -24,16 +24,24 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBanRestApi, Log, All);
  * Local HTTP REST management API for the ban system.
  * Direct port of the Express server in Tools/BanSystem/src/apiServer.ts.
  *
- * Routes (all return JSON):
+ * Routes (all return JSON unless noted):
  *   GET    /health             – liveness probe
  *   GET    /bans               – list active bans
  *   GET    /bans/all           – list all bans (including expired)
- *   GET    /bans/check/:uid    – check if PLATFORM:rawId is currently banned
- *   POST   /bans               – create a ban
- *   DELETE /bans/:uid          – remove ban by compound UID
- *   DELETE /bans/id/:id        – remove ban by integer row ID
- *   POST   /bans/prune         – delete expired temporary bans
- *   POST   /bans/backup        – create a database backup
+ *   GET    /bans/check/:uid    – check if UID is currently banned
+ *   GET    /bans/export.csv    – export all bans as CSV (text/csv)
+ *   POST   /bans               – create a ban (requires API key if configured)
+ *   PATCH  /bans/:uid          – update ban reason/duration (requires API key if configured)
+ *   DELETE /bans/:uid          – remove ban by compound UID (requires API key if configured)
+ *   DELETE /bans/id/:id        – remove ban by integer row ID (requires API key if configured)
+ *   POST   /bans/prune         – delete expired temporary bans (requires API key if configured)
+ *   POST   /bans/backup        – create a database backup (requires API key if configured)
+ *   GET    /players            – list player session registry records
+ *   GET    /warnings           – list all warnings (?uid=UID to filter)
+ *   POST   /warnings           – issue a warning (requires API key if configured)
+ *   DELETE /warnings/:uid      – clear all warnings for a UID (requires API key if configured)
+ *   GET    /audit              – audit log entries, newest first (?limit=N, ?uid=UID)
+ *   GET    /metrics            – server statistics
  *
  * POST /bans body:
  *   {
