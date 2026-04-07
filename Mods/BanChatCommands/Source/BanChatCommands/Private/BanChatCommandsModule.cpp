@@ -4,6 +4,7 @@
 #include "BanChatCommandsConfig.h"
 #include "Command/ChatCommandLibrary.h"
 #include "Commands/BanChatCommands.h"
+#include "MuteRegistry.h"
 #include "Engine/World.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/Crc.h"
@@ -39,6 +40,11 @@ void FBanChatCommandsModule::StartupModule()
     UE_LOG(LogBanChatCommands, Log,
         TEXT("BanChatCommands: config auto-reload enabled — polling every %.0f seconds."),
         ConfigPollIntervalSeconds);
+
+    // Start the mute expiry ticker — checks timed mutes every 30 s.
+    MuteExpiryHandle = FTSTicker::GetCoreTicker().AddTicker(
+        FTickerDelegate::CreateRaw(this, &FBanChatCommandsModule::OnMuteExpiryTick),
+        30.0f);
 
     WorldInitHandle = FWorldDelegates::OnWorldInitializedActors.AddLambda(
         [](const UWorld::FActorsInitializedParams& Params)
@@ -81,9 +87,16 @@ void FBanChatCommandsModule::StartupModule()
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AHistoryChatCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AMuteChatCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AUnmuteChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ANoteChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ANotesChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ADurationChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ATempUnmuteChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AMuteCheckChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ABanReasonChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AStaffChatCommand::StaticClass());
 
             UE_LOG(LogBanChatCommands, Log,
-                TEXT("BanChatCommands: Registered 24 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns, announce, stafflist, reason, history, mute, unmute)."));
+                TEXT("BanChatCommands: Registered 31 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns, announce, stafflist, reason, history, mute, unmute, note, notes, duration, tempunmute, mutecheck, banreason, staffchat)."));
         }
     );
 
@@ -286,6 +299,7 @@ void FBanChatCommandsModule::RestoreDefaultConfigIfNeeded()
 void FBanChatCommandsModule::ShutdownModule()
 {
     FTSTicker::GetCoreTicker().RemoveTicker(ConfigPollHandle);
+    FTSTicker::GetCoreTicker().RemoveTicker(MuteExpiryHandle);
 
     FWorldDelegates::OnWorldInitializedActors.Remove(WorldInitHandle);
     WorldInitHandle.Reset();
@@ -294,5 +308,24 @@ void FBanChatCommandsModule::ShutdownModule()
 }
 
 #undef LOCTEXT_NAMESPACE
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Mute expiry ticker
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool FBanChatCommandsModule::OnMuteExpiryTick(float /*DeltaTime*/)
+{
+    // Walk all game instances and tick UMuteRegistry on each.
+    // In practice there is one game instance on a dedicated server, but this
+    // approach is future-proof if multiple worlds/instances ever run.
+    for (const FWorldContext& WCtx : GEngine->GetWorldContexts())
+    {
+        UGameInstance* GI = WCtx.OwningGameInstance;
+        if (!GI) continue;
+        UMuteRegistry* MuteReg = GI->GetSubsystem<UMuteRegistry>();
+        if (MuteReg) MuteReg->TickExpiry();
+    }
+    return true; // keep ticking
+}
 
 IMPLEMENT_MODULE(FBanChatCommandsModule, BanChatCommands)

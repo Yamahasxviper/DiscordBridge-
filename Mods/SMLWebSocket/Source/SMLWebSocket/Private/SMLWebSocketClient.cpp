@@ -5,6 +5,9 @@
 #include "SMLWebSocketRunnable.h"
 #include "HAL/RunnableThread.h"
 #include "Async/Async.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // USMLWebSocketClient
@@ -74,6 +77,8 @@ void USMLWebSocketClient::SendText(const FString& Message)
 {
 	if (bIsConnected && Runnable.IsValid())
 	{
+		StatBytesSent.fetch_add(FTCHARToUTF8(Message.GetCharArray().GetData()).Length());
+		StatMessagesSent.fetch_add(1);
 		Runnable->EnqueueText(Message);
 		return;
 	}
@@ -159,6 +164,13 @@ void USMLWebSocketClient::Internal_OnConnected()
 	bIsConnected = true;
 	SetConnectionState(EWebSocketState::Connected);
 
+	// Reset connection stats for the new session.
+	StatBytesSent.store(0);
+	StatBytesReceived.store(0);
+	StatMessagesSent.store(0);
+	StatMessagesReceived.store(0);
+	StatConnectTime = FPlatformTime::Seconds();
+
 	// Flush messages that were queued while the connection was down.
 	{
 		FScopeLock Lock(&QueueMutex);
@@ -183,7 +195,18 @@ void USMLWebSocketClient::Internal_OnConnected()
 
 void USMLWebSocketClient::Internal_OnMessage(const FString& Message)
 {
+	StatBytesReceived.fetch_add(FTCHARToUTF8(Message.GetCharArray().GetData()).Length());
+	StatMessagesReceived.fetch_add(1);
+
 	OnMessage.Broadcast(Message);
+
+	// Fire OnJsonMessage when the text parses as JSON.
+	TSharedPtr<FJsonObject> Obj;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Message);
+	if (FJsonSerializer::Deserialize(Reader, Obj) && Obj.IsValid())
+	{
+		OnJsonMessage.Broadcast(Message);
+	}
 }
 
 void USMLWebSocketClient::Internal_OnBinaryMessage(const TArray<uint8>& Data, bool bIsFinal)
@@ -235,4 +258,25 @@ void USMLWebSocketClient::FlushQueue()
 		Runnable->EnqueueText(Msg);
 	}
 	PendingSendQueue.Empty();
+}
+
+void USMLWebSocketClient::SendJson(const FString& JsonString)
+{
+	SendText(JsonString);
+}
+
+FSMLWebSocketStats USMLWebSocketClient::GetConnectionStats() const
+{
+	FSMLWebSocketStats Stats;
+	Stats.BytesSent        = StatBytesSent.load();
+	Stats.BytesReceived    = StatBytesReceived.load();
+	Stats.MessagesSent     = StatMessagesSent.load();
+	Stats.MessagesReceived = StatMessagesReceived.load();
+
+	if (bIsConnected && StatConnectTime > 0.0)
+		Stats.ConnectedForSeconds = static_cast<float>(FPlatformTime::Seconds() - StatConnectTime);
+	else
+		Stats.ConnectedForSeconds = 0.0f;
+
+	return Stats;
 }

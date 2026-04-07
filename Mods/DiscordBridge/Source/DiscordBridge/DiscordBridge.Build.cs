@@ -45,6 +45,10 @@ public class DiscordBridge : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"BanSystem",
+			// BanChatCommands is an optional companion mod.  Declared here so that
+			// DiscordBridgeSubsystem can bind to UMuteRegistry::OnPlayerMuted when
+			// bNotifyMuteEvents=true.  Falls back gracefully when not installed.
+			"BanChatCommands",
 		});
 	}
 }

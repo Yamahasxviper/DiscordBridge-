@@ -465,6 +465,92 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 */
 	FString AfkKickReason{ TEXT("Kicked for inactivity (AFK).") };
 
+	// ── Scheduled announcements ───────────────────────────────────────────────
+
+	/**
+	 * A single scheduled announcement entry.
+	 * ScheduledAnnouncements is an array of these structs.
+	 */
+
+	/**
+	 * Interval in minutes between repeating server announcements.
+	 * When non-zero, DiscordBridge posts AnnouncementMessage to
+	 * AnnouncementChannelId (falls back to ChannelId) at the configured interval.
+	 * Set to 0 to disable scheduled announcements.
+	 * Default: 0.
+	 */
+	int32 AnnouncementIntervalMinutes{ 0 };
+
+	/**
+	 * The message text to post as a periodic server announcement.
+	 * HTML-style Discord markdown is supported (bold, italic, URLs, etc.).
+	 * Only used when AnnouncementIntervalMinutes > 0.
+	 */
+	FString AnnouncementMessage{ TEXT("") };
+
+	/**
+	 * Channel ID to post scheduled announcements to.
+	 * Falls back to ChannelId when empty.
+	 */
+	FString AnnouncementChannelId{ TEXT("") };
+
+	// ── Embed mode flags ─────────────────────────────────────────────────────
+
+	/**
+	 * When true, game-phase change notifications are sent as rich Discord embeds
+	 * (colour-coded, with title and description).
+	 * When false, they are sent as plain text messages.
+	 * Only has an effect when PhaseEventsChannelId is set.
+	 * Default: true.
+	 */
+	bool bUseEmbedsForPhaseEvents{ true };
+
+	/**
+	 * When true, schematic-unlock notifications are sent as rich Discord embeds.
+	 * When false, they are sent as plain text messages.
+	 * Only has an effect when SchematicEventsChannelId is set.
+	 * Default: true.
+	 */
+	bool bUseEmbedsForSchematicEvents{ true };
+
+	// ── Webhook fallback ─────────────────────────────────────────────────────
+
+	/**
+	 * Secondary (fallback) Discord webhook URL.
+	 * When non-empty and the primary bot send fails, DiscordBridge retries the
+	 * message to this webhook URL.  Useful for posting to a second channel or
+	 * alerting a backup logging server on primary failure.
+	 * Leave empty to disable (default).
+	 */
+	FString FallbackWebhookUrl{ TEXT("") };
+
+	// ── Slash commands ────────────────────────────────────────────────────────
+
+	/**
+	 * When true, DiscordBridge registers its built-in Discord application
+	 * slash commands (/players, /stats, /server) with the Discord API on startup.
+	 * Requires the bot to have "applications.commands" scope.
+	 * Default: false.
+	 */
+	bool bEnableSlashCommands{ false };
+
+	// ── Mute notifications ────────────────────────────────────────────────────
+
+	/**
+	 * When true, DiscordBridge posts a notification to the moderator channel
+	 * (ModeratorChannelId, falling back to ChannelId) whenever a player is
+	 * muted or unmuted via /mute or /unmute.
+	 * Only has an effect when BanChatCommands mod is installed.
+	 * Default: false.
+	 */
+	bool bNotifyMuteEvents{ false };
+
+	/**
+	 * Channel ID to post mute/unmute notifications to.
+	 * Falls back to BanEventsChannelId, then ChannelId, when empty.
+	 */
+	FString ModeratorChannelId{ TEXT("") };
+
 	/**
 	 * Loads configuration from the primary mod-folder INI, falling back to the
 	 * Saved/Config backup when credentials are missing.  If the primary file does

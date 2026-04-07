@@ -43,6 +43,18 @@ void FBanSystemModule::StartupModule()
             Cfg->BackupIntervalHours);
     }
 
+    // Start the scheduled prune ticker if PruneIntervalHours > 0.
+    if (Cfg && Cfg->PruneIntervalHours > 0.0f)
+    {
+        PruneAccumulatedSeconds = 0.0f;
+        PruneTickHandle = FTSTicker::GetCoreTicker().AddTicker(
+            FTickerDelegate::CreateRaw(this, &FBanSystemModule::OnPruneTick),
+            1.0f);
+        UE_LOG(LogBanSystem, Log,
+            TEXT("BanSystem: scheduled prune enabled — every %.1f hour(s)."),
+            Cfg->PruneIntervalHours);
+    }
+
     UE_LOG(LogBanSystem, Log, TEXT("BanSystem module started."));
 }
 
@@ -149,7 +161,18 @@ void FBanSystemModule::BackupConfigIfNeeded()
         + TEXT("; -- Ban Expiry Notifications ------------------------------------------------\n")
         + TEXT(";\n")
         + TEXT("; When true, post a Discord notification when a temporary ban expires (default: false).\n")
-        + TEXT("bNotifyBanExpired=") + (Cfg->bNotifyBanExpired ? TEXT("true") : TEXT("false")) + TEXT("\n");
+        + TEXT("bNotifyBanExpired=") + (Cfg->bNotifyBanExpired ? TEXT("true") : TEXT("false")) + TEXT("\n")
+        + TEXT("\n")
+        + TEXT("; -- Auto-Prune --------------------------------------------------------------\n")
+        + TEXT(";\n")
+        + TEXT("; Interval in hours between automatic expired-ban prune runs (0 = disabled).\n")
+        + TEXT("PruneIntervalHours=") + FString::SanitizeFloat(Cfg->PruneIntervalHours) + TEXT("\n")
+        + TEXT("\n")
+        + TEXT("; -- WebSocket Push Events ---------------------------------------------------\n")
+        + TEXT(";\n")
+        + TEXT("; When true, BanSystem pushes live JSON events to WebSocketPushUrl via SMLWebSocket.\n")
+        + TEXT("bPushEventsToWebSocket=") + (Cfg->bPushEventsToWebSocket ? TEXT("true") : TEXT("false")) + TEXT("\n")
+        + TEXT("WebSocketPushUrl=") + Cfg->WebSocketPushUrl + TEXT("\n");
 
     IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
     PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
@@ -283,6 +306,11 @@ void FBanSystemModule::ShutdownModule()
         FTSTicker::GetCoreTicker().RemoveTicker(BackupTickHandle);
         BackupTickHandle.Reset();
     }
+    if (PruneTickHandle.IsValid())
+    {
+        FTSTicker::GetCoreTicker().RemoveTicker(PruneTickHandle);
+        PruneTickHandle.Reset();
+    }
     UE_LOG(LogBanSystem, Log, TEXT("BanSystem module shut down."));
 }
 
@@ -320,6 +348,42 @@ bool FBanSystemModule::OnBackupTick(float DeltaTime)
             else
             {
                 UE_LOG(LogBanSystem, Warning, TEXT("BanSystem: scheduled backup failed"));
+            }
+            break;
+        }
+    }
+
+    return true; // keep ticking
+}
+
+bool FBanSystemModule::OnPruneTick(float DeltaTime)
+{
+    const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+    if (!Cfg || Cfg->PruneIntervalHours <= 0.0f) return true;
+
+    PruneAccumulatedSeconds += DeltaTime;
+    const float IntervalSeconds = Cfg->PruneIntervalHours * 3600.0f;
+    if (PruneAccumulatedSeconds < IntervalSeconds) return true;
+
+    PruneAccumulatedSeconds = 0.0f;
+
+    if (GEngine)
+    {
+        for (const FWorldContext& Ctx : GEngine->GetWorldContexts())
+        {
+            UWorld* World = Ctx.World();
+            if (!World) continue;
+            if (World->GetNetMode() != NM_DedicatedServer && World->GetNetMode() != NM_ListenServer) continue;
+            UGameInstance* GI = World->GetGameInstance();
+            if (!GI) continue;
+            UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
+            if (!DB) continue;
+
+            const int32 Pruned = DB->PruneExpiredBans();
+            if (Pruned > 0)
+            {
+                UE_LOG(LogBanSystem, Log,
+                    TEXT("BanSystem: auto-prune removed %d expired ban(s)."), Pruned);
             }
             break;
         }

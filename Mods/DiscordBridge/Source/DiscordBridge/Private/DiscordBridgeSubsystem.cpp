@@ -23,6 +23,7 @@
 #include "TimerManager.h"
 #include "WhitelistManager.h"
 #include "Patching/NativeHookManager.h"
+#include "MuteRegistry.h"
 
 // Discord Gateway endpoint (v10, JSON encoding)
 static const FString DiscordGatewayUrl = TEXT("wss://gateway.discord.gg/?v=10&encoding=json");
@@ -154,6 +155,9 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	// Start AFK kick ticker when configured.
 	StartAfkKickTicker();
 
+	// Start scheduled announcement ticker when configured.
+	StartAnnouncementTicker();
+
 }
 
 void UDiscordBridgeSubsystem::Deinitialize()
@@ -196,6 +200,8 @@ void UDiscordBridgeSubsystem::Deinitialize()
 	// Stop the AFK kick ticker.
 	FTSTicker::GetCoreTicker().RemoveTicker(AfkKickTickerHandle);
 	AfkKickTickerHandle.Reset();
+	FTSTicker::GetCoreTicker().RemoveTicker(AnnouncementTickerHandle);
+	AnnouncementTickerHandle.Reset();
 
 	Disconnect();
 	Super::Deinitialize();
@@ -744,6 +750,12 @@ void UDiscordBridgeSubsystem::HandleReady(const TSharedPtr<FJsonObject>& DataObj
 	       TEXT("DiscordBridge: Gateway ready. Bot user ID: %s, Guild ID: %s"),
 	       *BotUserId, *GuildId);
 
+	// Register slash commands if configured.
+	if (Config.bEnableSlashCommands && !GuildId.IsEmpty() && !Config.BotToken.IsEmpty())
+	{
+		RegisterSlashCommands();
+	}
+
 	// Set bot presence. When the player-count feature is enabled, send the first
 	// update immediately and start the periodic refresh ticker.  Otherwise just
 	// set the bot to "online" with no activity.
@@ -1040,6 +1052,20 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 	{
 		const FString TargetName = Content.Mid(Config.PlayerStatsCommandPrefix.Len()).TrimStartAndEnd();
 		HandlePlayerStatsCommand(MsgChannelId, TargetName);
+		return;
+	}
+
+	// !server command
+	if (Content.Equals(TEXT("!server"), ESearchCase::IgnoreCase))
+	{
+		HandleServerCommand(MsgChannelId);
+		return;
+	}
+
+	// !online command
+	if (Content.Equals(TEXT("!online"), ESearchCase::IgnoreCase))
+	{
+		HandleOnlineCommand(MsgChannelId);
 		return;
 	}
 
@@ -1457,21 +1483,27 @@ void UDiscordBridgeSubsystem::SendMessageBodyToChannel(const FString& TargetChan
 	Request->SetContentAsString(BodyString);
 
 	Request->OnProcessRequestComplete().BindLambda(
-		[TargetChannelId](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
+		[this, TargetChannelId, BodyString](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
 		{
-			if (!bConnected || !Resp.IsValid())
+			if (!bConnected || !Resp.IsValid() ||
+			    Resp->GetResponseCode() < 200 || Resp->GetResponseCode() >= 300)
 			{
 				UE_LOG(LogTemp, Warning,
-				       TEXT("DiscordBridge: SendMessageBodyToChannel request failed (channel=%s)."),
-				       *TargetChannelId);
-				return;
-			}
-			if (Resp->GetResponseCode() < 200 || Resp->GetResponseCode() >= 300)
-			{
-				UE_LOG(LogTemp, Warning,
-				       TEXT("DiscordBridge: SendMessageBodyToChannel returned HTTP %d (channel=%s): %s"),
-				       Resp->GetResponseCode(), *TargetChannelId,
-				       *Resp->GetContentAsString());
+				       TEXT("DiscordBridge: SendMessageBodyToChannel failed (channel=%s, HTTP=%d). Trying fallback."),
+				       *TargetChannelId,
+				       Resp.IsValid() ? Resp->GetResponseCode() : 0);
+
+				// Fallback webhook: POST the same body to FallbackWebhookUrl when configured.
+				if (!Config.FallbackWebhookUrl.IsEmpty())
+				{
+					TSharedRef<IHttpRequest, ESPMode::ThreadSafe> FbReq =
+						FHttpModule::Get().CreateRequest();
+					FbReq->SetURL(Config.FallbackWebhookUrl);
+					FbReq->SetVerb(TEXT("POST"));
+					FbReq->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+					FbReq->SetContentAsString(BodyString);
+					FbReq->ProcessRequest();
+				}
 			}
 		});
 
@@ -3300,6 +3332,33 @@ bAllBound = false;
 }
 }
 
+// Bind to UMuteRegistry delegates when bNotifyMuteEvents=true.
+if (!bBoundMuteEvents && Config.bNotifyMuteEvents)
+{
+UWorld* W = GetWorld();
+UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
+UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
+if (MuteReg)
+{
+MuteReg->OnPlayerMuted.AddLambda(
+[this](const FMuteEntry& Entry, bool bIsTimed)
+{
+NotifyMuteEvent(Entry.PlayerName, Entry.Uid, true, Entry.Reason);
+});
+MuteReg->OnPlayerUnmuted.AddLambda(
+[this](const FString& Uid)
+{
+NotifyMuteEvent(Uid, Uid, false, TEXT(""));
+});
+bBoundMuteEvents = true;
+UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Bound to UMuteRegistry mute-event delegates."));
+}
+else
+{
+bAllBound = false; // keep ticking until BanChatCommands loads
+}
+}
+
 return bAllBound; // return true → stop ticker
 }
 
@@ -3322,6 +3381,8 @@ const FString& TargetChannel = Config.PhaseEventsChannelId.IsEmpty()
 
 if (TargetChannel.IsEmpty()) return;
 
+if (Config.bUseEmbedsForPhaseEvents)
+{
 TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
 EmbedObj->SetStringField(TEXT("title"), TEXT("🏭 New Game Phase Reached!"));
 EmbedObj->SetNumberField(TEXT("color"), 16766720); // gold
@@ -3332,6 +3393,14 @@ TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
 Body->SetArrayField(TEXT("embeds"),
 TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(EmbedObj) });
 SendMessageBodyToChannel(TargetChannel, Body);
+}
+else
+{
+TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+Body->SetStringField(TEXT("content"),
+FString::Printf(TEXT("🏭 New game phase reached: **%s**"), *PhaseName));
+SendMessageBodyToChannel(TargetChannel, Body);
+}
 }
 
 void UDiscordBridgeSubsystem::OnGameCompleted(bool /*bSuppressNarrative*/)
@@ -3396,6 +3465,8 @@ const FString& TargetChannel = Config.SchematicEventsChannelId.IsEmpty()
 
 if (TargetChannel.IsEmpty()) return;
 
+if (Config.bUseEmbedsForSchematicEvents)
+{
 TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
 EmbedObj->SetStringField(TEXT("title"), TEXT("🔬 Unlock Achieved!"));
 EmbedObj->SetNumberField(TEXT("color"), 3066993); // green
@@ -3421,4 +3492,232 @@ TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
 Body->SetArrayField(TEXT("embeds"),
 TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(EmbedObj) });
 SendMessageBodyToChannel(TargetChannel, Body);
+}
+else
+{
+TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+Body->SetStringField(TEXT("content"),
+FString::Printf(TEXT("🔬 Unlock achieved: **%s** (%s)"), *SchematicName, *TypeLabel));
+SendMessageBodyToChannel(TargetChannel, Body);
+}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scheduled announcements
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::StartAnnouncementTicker()
+{
+if (Config.AnnouncementIntervalMinutes <= 0) return;
+if (AnnouncementTickerHandle.IsValid()) return;
+
+AnnouncementAccumulatedSeconds = 0.0f;
+AnnouncementTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+FTickerDelegate::CreateUObject(this, &UDiscordBridgeSubsystem::AnnouncementTick),
+1.0f);
+
+UE_LOG(LogTemp, Log,
+TEXT("DiscordBridge: Scheduled announcements enabled — every %d minute(s)."),
+Config.AnnouncementIntervalMinutes);
+}
+
+bool UDiscordBridgeSubsystem::AnnouncementTick(float DeltaTime)
+{
+if (Config.AnnouncementIntervalMinutes <= 0) return true;
+if (!bGatewayReady) return true;
+if (Config.AnnouncementMessage.IsEmpty()) return true;
+
+AnnouncementAccumulatedSeconds += DeltaTime;
+const float IntervalSeconds = Config.AnnouncementIntervalMinutes * 60.0f;
+if (AnnouncementAccumulatedSeconds < IntervalSeconds) return true;
+
+AnnouncementAccumulatedSeconds = 0.0f;
+
+const FString& Target = Config.AnnouncementChannelId.IsEmpty()
+? Config.ChannelId : Config.AnnouncementChannelId;
+
+if (!Target.IsEmpty())
+{
+TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+Body->SetStringField(TEXT("content"), Config.AnnouncementMessage);
+SendMessageBodyToChannel(Target, Body);
+}
+
+return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !server command
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::HandleServerCommand(const FString& ResponseChannelId)
+{
+if (Config.BotToken.IsEmpty()) return;
+
+UWorld* World = GetWorld();
+AGameStateBase* GS = World ? World->GetGameState<AGameStateBase>() : nullptr;
+const int32 PlayerCount = GS ? GS->PlayerArray.Num() : 0;
+
+TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
+EmbedObj->SetStringField(TEXT("title"),
+FString::Printf(TEXT("🖥️ Server: %s"),
+Config.ServerName.IsEmpty() ? TEXT("(unnamed)") : *Config.ServerName));
+EmbedObj->SetNumberField(TEXT("color"), 5793266); // teal
+
+TArray<TSharedPtr<FJsonValue>> Fields;
+auto AddField = [&](const FString& Name, const FString& Value, bool bInline = true)
+{
+TSharedPtr<FJsonObject> F = MakeShared<FJsonObject>();
+F->SetStringField(TEXT("name"),   Name);
+F->SetStringField(TEXT("value"),  Value.IsEmpty() ? TEXT("—") : Value);
+F->SetBoolField  (TEXT("inline"), bInline);
+Fields.Add(MakeShared<FJsonValueObject>(F));
+};
+
+AddField(TEXT("Players Online"), FString::FromInt(PlayerCount));
+AddField(TEXT("Status"),         TEXT("✅ Online"));
+AddField(TEXT("Time (UTC)"),     FDateTime::UtcNow().ToString(TEXT("%Y-%m-%d %H:%M:%S")), false);
+
+EmbedObj->SetArrayField(TEXT("fields"), Fields);
+EmbedObj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+
+TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+Body->SetArrayField(TEXT("embeds"),
+TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(EmbedObj) });
+SendMessageBodyToChannel(ResponseChannelId, Body);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !online command
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::HandleOnlineCommand(const FString& ResponseChannelId)
+{
+if (Config.BotToken.IsEmpty()) return;
+
+UWorld* World = GetWorld();
+AGameStateBase* GS = World ? World->GetGameState<AGameStateBase>() : nullptr;
+
+if (!GS || GS->PlayerArray.Num() == 0)
+{
+SendMessageToChannel(ResponseChannelId, TEXT("👤 No players are currently online."));
+return;
+}
+
+FString PlayerList;
+int32 Idx = 1;
+for (APlayerState* PS : GS->PlayerArray)
+{
+if (!PS) continue;
+PlayerList += FString::Printf(TEXT("%d. **%s**\n"), Idx++, *PS->GetPlayerName());
+}
+
+TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
+EmbedObj->SetStringField(TEXT("title"),
+FString::Printf(TEXT("👥 Online Players (%d)"), GS->PlayerArray.Num()));
+EmbedObj->SetNumberField(TEXT("color"), 3066993); // green
+EmbedObj->SetStringField(TEXT("description"), PlayerList);
+EmbedObj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+
+TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+Body->SetArrayField(TEXT("embeds"),
+TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(EmbedObj) });
+SendMessageBodyToChannel(ResponseChannelId, Body);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mute event notifications
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::NotifyMuteEvent(const FString& PlayerName, const FString& Uid,
+                                               bool bIsMuted, const FString& Reason)
+{
+if (!Config.bNotifyMuteEvents || !bGatewayReady) return;
+
+const FString& Target = !Config.ModeratorChannelId.IsEmpty() ? Config.ModeratorChannelId
+: !Config.BanEventsChannelId.IsEmpty() ? Config.BanEventsChannelId
+: Config.ChannelId;
+
+if (Target.IsEmpty()) return;
+
+const FString Emoji  = bIsMuted ? TEXT("🔇") : TEXT("🔊");
+const FString Action = bIsMuted ? TEXT("Muted") : TEXT("Unmuted");
+const FString Colour = bIsMuted ? TEXT("15158332") : TEXT("3066993"); // red / green
+
+TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
+EmbedObj->SetStringField(TEXT("title"),
+FString::Printf(TEXT("%s Player %s: %s"), *Emoji, *Action, *PlayerName));
+EmbedObj->SetNumberField(TEXT("color"), FCString::Atoi(*Colour));
+if (bIsMuted && !Reason.IsEmpty())
+EmbedObj->SetStringField(TEXT("description"),
+FString::Printf(TEXT("**Reason:** %s"), *Reason));
+EmbedObj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+
+TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+Body->SetArrayField(TEXT("embeds"),
+TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(EmbedObj) });
+SendMessageBodyToChannel(Target, Body);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Slash command registration
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::RegisterSlashCommands()
+{
+// The Discord bulk-overwrite endpoint replaces ALL guild application commands
+// atomically.  We register three commands: /players, /stats, /server.
+const FString Url = FString::Printf(
+TEXT("https://discord.com/api/v10/applications/%s/guilds/%s/commands"),
+*BotUserId, *GuildId);
+
+// Build the commands array.
+auto MakeCmd = [](const FString& Name, const FString& Desc) -> TSharedPtr<FJsonValue>
+{
+TSharedPtr<FJsonObject> Cmd = MakeShared<FJsonObject>();
+Cmd->SetNumberField(TEXT("type"),        1); // CHAT_INPUT
+Cmd->SetStringField(TEXT("name"),        Name);
+Cmd->SetStringField(TEXT("description"), Desc);
+return MakeShared<FJsonValueObject>(Cmd);
+};
+
+TArray<TSharedPtr<FJsonValue>> Commands;
+Commands.Add(MakeCmd(TEXT("players"), TEXT("Show the list of online players.")));
+Commands.Add(MakeCmd(TEXT("stats"),   TEXT("Show server statistics.")));
+Commands.Add(MakeCmd(TEXT("server"),  TEXT("Show server info embed.")));
+
+TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+Body->SetArrayField(TEXT("commands_ignored_placeholder"), Commands);
+
+// Bulk overwrite (PUT): send commands array directly.
+FString BodyStr;
+{
+TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&BodyStr);
+FJsonSerializer::Serialize(Commands, W);
+}
+
+TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
+FHttpModule::Get().CreateRequest();
+Request->SetURL(Url);
+Request->SetVerb(TEXT("PUT"));
+Request->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+Request->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
+Request->SetContentAsString(BodyStr);
+Request->OnProcessRequestComplete().BindLambda(
+[](FHttpRequestPtr, FHttpResponsePtr Resp, bool bSuccess)
+{
+if (bSuccess && Resp.IsValid() &&
+(Resp->GetResponseCode() == 200 || Resp->GetResponseCode() == 201))
+{
+UE_LOG(LogTemp, Log,
+TEXT("DiscordBridge: Slash commands registered successfully."));
+}
+else
+{
+UE_LOG(LogTemp, Warning,
+TEXT("DiscordBridge: Slash command registration failed (HTTP %d)."),
+Resp.IsValid() ? Resp->GetResponseCode() : 0);
+}
+});
+Request->ProcessRequest();
 }

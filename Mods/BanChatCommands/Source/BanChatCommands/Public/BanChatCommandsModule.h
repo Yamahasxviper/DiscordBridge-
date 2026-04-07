@@ -59,6 +59,13 @@ private:
     /** Handle to the recurring FTSTicker that drives config polling. */
     FTSTicker::FDelegateHandle ConfigPollHandle;
 
+    /** Handle to the recurring ticker that expires timed mutes every 30 s. */
+    FTSTicker::FDelegateHandle MuteExpiryHandle;
+
+    /** Ticker callback — calls UMuteRegistry::TickExpiry() on all instances.
+     *  Returns true to keep ticking. */
+    bool OnMuteExpiryTick(float DeltaTime);
+
     /** Hash of AdminEosPUIDs at the last (re)load — used to detect changes. */
     uint32 LastConfigHash = 0;
 
