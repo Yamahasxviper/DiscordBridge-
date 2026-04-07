@@ -690,4 +690,64 @@ private:
 	 * Using TWeakObjectPtr avoids adding a hard GC root.
 	 */
 	TWeakObjectPtr<UBanDiscordSubsystem> CachedBanDiscordSubsystem;
+
+	// ── !stats / !playerstats ─────────────────────────────────────────────────
+
+	/** Handle the !stats Discord command — send a server-stats embed. */
+	void HandleStatsCommand(const FString& ResponseChannelId);
+
+	/** Handle the !playerstats <name> Discord command — send per-player stats embed. */
+	void HandlePlayerStatsCommand(const FString& ResponseChannelId,
+	                              const FString& TargetPlayerName);
+
+	// ── Per-player stat counters (populated by FGStatisticsSubsystem hooks) ──
+
+	struct FPlayerStatCounters
+	{
+		int32 BuildingsBuilt     = 0;
+		int32 ItemsPickedUp      = 0;
+		int32 BuildingsDismantled = 0;
+	};
+
+	/** In-memory per-player statistics map keyed by in-game display name. */
+	TMap<FString, FPlayerStatCounters> PlayerStats;
+
+	// ── Reaction voting ───────────────────────────────────────────────────────
+
+	struct FPendingVote
+	{
+		FString   MessageId;
+		FString   ChannelId;
+		FString   PlayerName;
+		FDateTime ExpiresAt;
+	};
+
+	/** Active join votes awaiting expiry check, keyed by Discord message snowflake. */
+	TMap<FString, FPendingVote> PendingVotes;
+
+	/** Add 👍/👎 reactions to a join message and optionally track the vote. */
+	void AddJoinReactions(const FString& MessageId, const FString& ChannelId,
+	                      const FString& PlayerName);
+
+	/** Fetch reaction counts and kick if the 👎 threshold is met. */
+	void CheckVoteResult(const FString& MessageId);
+
+	// ── AFK kick ─────────────────────────────────────────────────────────────
+
+	struct FPlayerAfkState
+	{
+		int32     LastBuildCount   = 0;
+		FDateTime LastActivityTime;
+	};
+
+	/** Per-player AFK idle tracking map keyed by in-game display name. */
+	TMap<FString, FPlayerAfkState> AfkStates;
+
+	FTSTicker::FDelegateHandle AfkKickTickerHandle;
+
+	/** Start the AFK kick periodic ticker (no-op when AfkKickMinutes=0). */
+	void StartAfkKickTicker();
+
+	/** Ticker callback — checks each player's idle time and kicks AFKers. */
+	bool AfkKickTick(float DeltaTime);
 };

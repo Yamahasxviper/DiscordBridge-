@@ -950,6 +950,18 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.PlayersCommandChannelId = GetRawStringOrDefault (BackupValues, TEXT("PlayersCommandChannelId"), Config.PlayersCommandChannelId);
 		Config.DiscordInviteUrl        = GetRawStringOrDefault (BackupValues, TEXT("DiscordInviteUrl"),        Config.DiscordInviteUrl);
 
+		// New fields
+		Config.StatsCommandPrefix       = GetRawStringOrFallback(BackupValues, TEXT("StatsCommandPrefix"),       Config.StatsCommandPrefix);
+		Config.PlayerStatsCommandPrefix = GetRawStringOrFallback(BackupValues, TEXT("PlayerStatsCommandPrefix"), Config.PlayerStatsCommandPrefix);
+		Config.PhaseEventsChannelId     = GetRawStringOrDefault (BackupValues, TEXT("PhaseEventsChannelId"),     Config.PhaseEventsChannelId);
+		Config.SchematicEventsChannelId = GetRawStringOrDefault (BackupValues, TEXT("SchematicEventsChannelId"), Config.SchematicEventsChannelId);
+		Config.BanEventsChannelId       = GetRawStringOrDefault (BackupValues, TEXT("BanEventsChannelId"),       Config.BanEventsChannelId);
+		Config.bEnableJoinReactionVoting = GetRawBoolOrDefault  (BackupValues, TEXT("EnableJoinReactionVoting"), Config.bEnableJoinReactionVoting);
+		Config.VoteKickThreshold        = GetRawIntOrDefault    (BackupValues, TEXT("VoteKickThreshold"),        Config.VoteKickThreshold);
+		Config.VoteWindowMinutes        = GetRawIntOrDefault    (BackupValues, TEXT("VoteWindowMinutes"),        Config.VoteWindowMinutes);
+		Config.AfkKickMinutes           = GetRawIntOrDefault    (BackupValues, TEXT("AfkKickMinutes"),           Config.AfkKickMinutes);
+		Config.AfkKickReason            = GetRawStringOrDefault (BackupValues, TEXT("AfkKickReason"),            Config.AfkKickReason);
+
 		// Only log the "restored from backup" message when credentials were
 		// actually recovered (i.e. previously blank in primary but now non-empty
 		// from the backup). Avoid a misleading message when the backup also has
@@ -1046,6 +1058,16 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("PlayersCommandPrefix"),          Config.PlayersCommandPrefix);
 				PatchLine(TEXT("PlayersCommandChannelId"),       Config.PlayersCommandChannelId);
 				PatchLine(TEXT("DiscordInviteUrl"),              Config.DiscordInviteUrl);
+				PatchLine(TEXT("StatsCommandPrefix"),            Config.StatsCommandPrefix);
+				PatchLine(TEXT("PlayerStatsCommandPrefix"),      Config.PlayerStatsCommandPrefix);
+				PatchLine(TEXT("PhaseEventsChannelId"),          Config.PhaseEventsChannelId);
+				PatchLine(TEXT("SchematicEventsChannelId"),      Config.SchematicEventsChannelId);
+				PatchLine(TEXT("BanEventsChannelId"),            Config.BanEventsChannelId);
+				PatchLine(TEXT("EnableJoinReactionVoting"),      Config.bEnableJoinReactionVoting ? TEXT("True") : TEXT("False"));
+				PatchLine(TEXT("VoteKickThreshold"),             *FString::FromInt(Config.VoteKickThreshold));
+				PatchLine(TEXT("VoteWindowMinutes"),             *FString::FromInt(Config.VoteWindowMinutes));
+				PatchLine(TEXT("AfkKickMinutes"),                *FString::FromInt(Config.AfkKickMinutes));
+				PatchLine(TEXT("AfkKickReason"),                 Config.AfkKickReason);
 
 				// ChatRelayBlocklist is a multi-value array field.  Remove all
 				// existing Key= / +Key= lines then append the restored values.
@@ -1152,7 +1174,28 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		{
 			BackupBlocklistLines += TEXT("+ChatRelayBlocklist=") + Item + TEXT("\n");
 		}
-		const FString FullBackupContent = BackupContent + BackupBlocklistLines;
+		// ChatRelayBlocklistReplacements array
+		FString BackupReplLines;
+		for (const FChatRelayReplacement& R : Config.ChatRelayBlocklistReplacements)
+		{
+			BackupReplLines += TEXT("+ChatRelayBlocklistReplacements=(Pattern=\"") + R.Pattern
+				+ TEXT("\",Replacement=\"") + R.Replacement + TEXT("\")\n");
+		}
+
+		// New config fields for the backup
+		const FString NewFieldLines =
+			TEXT("StatsCommandPrefix=") + Config.StatsCommandPrefix + TEXT("\n")
+			+ TEXT("PlayerStatsCommandPrefix=") + Config.PlayerStatsCommandPrefix + TEXT("\n")
+			+ TEXT("PhaseEventsChannelId=") + Config.PhaseEventsChannelId + TEXT("\n")
+			+ TEXT("SchematicEventsChannelId=") + Config.SchematicEventsChannelId + TEXT("\n")
+			+ TEXT("BanEventsChannelId=") + Config.BanEventsChannelId + TEXT("\n")
+			+ TEXT("EnableJoinReactionVoting=") + (Config.bEnableJoinReactionVoting ? TEXT("True") : TEXT("False")) + TEXT("\n")
+			+ TEXT("VoteKickThreshold=") + FString::FromInt(Config.VoteKickThreshold) + TEXT("\n")
+			+ TEXT("VoteWindowMinutes=") + FString::FromInt(Config.VoteWindowMinutes) + TEXT("\n")
+			+ TEXT("AfkKickMinutes=") + FString::FromInt(Config.AfkKickMinutes) + TEXT("\n")
+			+ TEXT("AfkKickReason=") + Config.AfkKickReason + TEXT("\n");
+
+		const FString FullBackupContent = BackupContent + BackupBlocklistLines + BackupReplLines + NewFieldLines;
 
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupFilePath));
 
