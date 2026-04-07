@@ -48,6 +48,20 @@ public:
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
     TArray<FString> AdminEosPUIDs;
 
+    /**
+     * EOS Product User IDs of moderators who may run a subset of moderation commands
+     * (/kick and /modban only). Moderators cannot run /ban, /unban, /tempban, or other
+     * full admin commands. Add one entry per line: +ModeratorEosPUIDs=<hex>
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
+    TArray<FString> ModeratorEosPUIDs;
+
+    /**
+     * Number of bans shown per page in /banlist (default: 10).
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
+    int32 BanListPageSize = 10;
+
     /** Returns the singleton config instance. */
     static const UBanChatCommandsConfig* Get();
 
@@ -56,4 +70,11 @@ public:
      * server administrator.  Comparison is case-insensitive for EOS PUIDs.
      */
     bool IsAdminUid(const FString& Uid) const;
+
+    /**
+     * Returns true when the compound UID ("EOS:xxx") belongs to either a configured
+     * server administrator or moderator.  Admins automatically pass this check.
+     * Comparison is case-insensitive for EOS PUIDs.
+     */
+    bool IsModeratorUid(const FString& Uid) const;
 };
