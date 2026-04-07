@@ -1,0 +1,273 @@
+// Copyright Yamahasxviper. All Rights Reserved.
+
+#include "MuteRegistry.h"
+#include "BanSystemConfig.h"
+
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonWriter.h"
+#include "Serialization/JsonSerializer.h"
+#include "Misc/Paths.h"
+#include "Misc/FileHelper.h"
+#include "HAL/PlatformFileManager.h"
+
+DEFINE_LOG_CATEGORY(LogMuteRegistry);
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  USubsystem lifecycle
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UMuteRegistry::Initialize(FSubsystemCollectionBase& Collection)
+{
+    Super::Initialize(Collection);
+
+    FilePath = GetRegistryPath();
+
+    const FString Dir = FPaths::GetPath(FilePath);
+    IPlatformFile& PF = FPlatformFileManager::Get().GetPlatformFile();
+    if (!PF.DirectoryExists(*Dir))
+        PF.CreateDirectoryTree(*Dir);
+
+    LoadFromFile();
+
+    UE_LOG(LogMuteRegistry, Log,
+        TEXT("MuteRegistry: loaded %s (%d mute(s))"),
+        *FilePath, Mutes.Num());
+}
+
+void UMuteRegistry::Deinitialize()
+{
+    Super::Deinitialize();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Public API
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UMuteRegistry::MutePlayer(const FString& Uid, const FString& PlayerName,
+                                const FString& Reason, const FString& MutedBy,
+                                int32 ExpiryMinutes)
+{
+    if (Uid.IsEmpty()) return;
+
+    FMuteEntry Entry;
+    Entry.Uid         = Uid;
+    Entry.PlayerName  = PlayerName;
+    Entry.Reason      = Reason;
+    Entry.MutedBy     = MutedBy;
+    Entry.MuteDate    = FDateTime::UtcNow();
+
+    if (ExpiryMinutes > 0)
+    {
+        Entry.bIsIndefinite = false;
+        Entry.ExpireDate    = FDateTime::UtcNow() + FTimespan::FromMinutes(ExpiryMinutes);
+    }
+    else
+    {
+        Entry.bIsIndefinite = true;
+        Entry.ExpireDate    = FDateTime(0);
+    }
+
+    {
+        FScopeLock Lock(&Mutex);
+        // Replace any existing mute for this UID.
+        Mutes.RemoveAll([&Uid](const FMuteEntry& M)
+        {
+            return M.Uid.Equals(Uid, ESearchCase::IgnoreCase);
+        });
+        Mutes.Add(Entry);
+        SaveToFile();
+    }
+
+    // Broadcast outside the lock.
+    OnPlayerMuted.Broadcast(Entry, ExpiryMinutes > 0);
+}
+
+bool UMuteRegistry::UnmutePlayer(const FString& Uid)
+{
+    bool bRemoved = false;
+
+    {
+        FScopeLock Lock(&Mutex);
+        const int32 Before = Mutes.Num();
+        Mutes.RemoveAll([&Uid](const FMuteEntry& M)
+        {
+            return M.Uid.Equals(Uid, ESearchCase::IgnoreCase);
+        });
+        bRemoved = Mutes.Num() < Before;
+        if (bRemoved) SaveToFile();
+    }
+
+    if (bRemoved)
+        OnPlayerUnmuted.Broadcast(Uid);
+
+    return bRemoved;
+}
+
+bool UMuteRegistry::IsMuted(const FString& Uid) const
+{
+    FScopeLock Lock(&Mutex);
+    for (const FMuteEntry& M : Mutes)
+    {
+        if (M.Uid.Equals(Uid, ESearchCase::IgnoreCase))
+            return !M.IsExpired();
+    }
+    return false;
+}
+
+bool UMuteRegistry::GetMuteEntry(const FString& Uid, FMuteEntry& OutEntry) const
+{
+    FScopeLock Lock(&Mutex);
+    for (const FMuteEntry& M : Mutes)
+    {
+        if (M.Uid.Equals(Uid, ESearchCase::IgnoreCase))
+        {
+            if (M.IsExpired()) return false;
+            OutEntry = M;
+            return true;
+        }
+    }
+    return false;
+}
+
+TArray<FMuteEntry> UMuteRegistry::GetAllMutes() const
+{
+    FScopeLock Lock(&Mutex);
+    TArray<FMuteEntry> Result;
+    for (const FMuteEntry& M : Mutes)
+    {
+        if (!M.IsExpired()) Result.Add(M);
+    }
+    return Result;
+}
+
+void UMuteRegistry::TickExpiry()
+{
+    TArray<FString> Expired;
+
+    {
+        FScopeLock Lock(&Mutex);
+        const int32 Before = Mutes.Num();
+        Mutes.RemoveAll([&Expired](const FMuteEntry& M) -> bool
+        {
+            if (!M.bIsIndefinite && M.IsExpired())
+            {
+                Expired.Add(M.Uid);
+                return true;
+            }
+            return false;
+        });
+
+        if (Mutes.Num() < Before)
+        {
+            SaveToFile();
+            UE_LOG(LogMuteRegistry, Log,
+                TEXT("MuteRegistry: expired %d timed mute(s)."), Expired.Num());
+        }
+    }
+
+    for (const FString& Uid : Expired)
+        OnPlayerUnmuted.Broadcast(Uid);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  File I/O
+// ─────────────────────────────────────────────────────────────────────────────
+
+FString UMuteRegistry::GetRegistryPath() const
+{
+    const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+    FString BaseDir;
+    if (Cfg && !Cfg->DatabasePath.IsEmpty())
+        BaseDir = FPaths::GetPath(Cfg->DatabasePath);
+    else
+        BaseDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("BanSystem"));
+
+    return FPaths::Combine(BaseDir, TEXT("mutes.json"));
+}
+
+void UMuteRegistry::LoadFromFile()
+{
+    FScopeLock Lock(&Mutex);
+    Mutes.Empty();
+
+    FString RawJson;
+    if (!FFileHelper::LoadFileToString(RawJson, *FilePath))
+        return;
+
+    TSharedPtr<FJsonObject> Root;
+    TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(RawJson);
+    if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+    {
+        UE_LOG(LogMuteRegistry, Warning,
+            TEXT("MuteRegistry: failed to parse %s — starting empty"), *FilePath);
+        return;
+    }
+
+    const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+    if (Root->TryGetArrayField(TEXT("mutes"), Arr) && Arr)
+    {
+        for (const TSharedPtr<FJsonValue>& Val : *Arr)
+        {
+            if (!Val.IsValid()) continue;
+            const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+            if (!Val->TryGetObject(ObjPtr) || !ObjPtr) continue;
+
+            FMuteEntry Entry;
+            (*ObjPtr)->TryGetStringField(TEXT("uid"),        Entry.Uid);
+            (*ObjPtr)->TryGetStringField(TEXT("playerName"), Entry.PlayerName);
+            (*ObjPtr)->TryGetStringField(TEXT("reason"),     Entry.Reason);
+            (*ObjPtr)->TryGetStringField(TEXT("mutedBy"),    Entry.MutedBy);
+            (*ObjPtr)->TryGetBoolField  (TEXT("isIndefinite"), Entry.bIsIndefinite);
+
+            FString DateStr;
+            if ((*ObjPtr)->TryGetStringField(TEXT("muteDate"), DateStr))
+                FDateTime::ParseIso8601(*DateStr, Entry.MuteDate);
+            if ((*ObjPtr)->TryGetStringField(TEXT("expireDate"), DateStr))
+                FDateTime::ParseIso8601(*DateStr, Entry.ExpireDate);
+
+            if (!Entry.Uid.IsEmpty() && !Entry.IsExpired())
+                Mutes.Add(Entry);
+        }
+    }
+}
+
+bool UMuteRegistry::SaveToFile() const
+{
+    // Caller must already hold Mutex.
+    TArray<TSharedPtr<FJsonValue>> MuteArr;
+    MuteArr.Reserve(Mutes.Num());
+    for (const FMuteEntry& M : Mutes)
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        Obj->SetStringField(TEXT("uid"),         M.Uid);
+        Obj->SetStringField(TEXT("playerName"),  M.PlayerName);
+        Obj->SetStringField(TEXT("reason"),      M.Reason);
+        Obj->SetStringField(TEXT("mutedBy"),     M.MutedBy);
+        Obj->SetStringField(TEXT("muteDate"),    M.MuteDate.ToIso8601());
+        Obj->SetStringField(TEXT("expireDate"),  M.ExpireDate.ToIso8601());
+        Obj->SetBoolField  (TEXT("isIndefinite"), M.bIsIndefinite);
+        MuteArr.Add(MakeShared<FJsonValueObject>(Obj));
+    }
+
+    TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetArrayField(TEXT("mutes"), MuteArr);
+
+    FString JsonStr;
+    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonStr);
+    if (!FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
+    {
+        UE_LOG(LogMuteRegistry, Error,
+            TEXT("MuteRegistry: failed to serialize mutes"));
+        return false;
+    }
+
+    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath))
+    {
+        UE_LOG(LogMuteRegistry, Error,
+            TEXT("MuteRegistry: failed to write %s"), *FilePath);
+        return false;
+    }
+
+    return true;
+}

@@ -410,6 +410,25 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.AfkKickMinutes = GetIniIntOrDefault   (ConfigFile, TEXT("AfkKickMinutes"), Config.AfkKickMinutes);
 		Config.AfkKickReason  = GetIniStringOrDefault(ConfigFile, TEXT("AfkKickReason"),  Config.AfkKickReason);
 
+		// Scheduled announcements
+		Config.AnnouncementIntervalMinutes = GetIniIntOrDefault   (ConfigFile, TEXT("AnnouncementIntervalMinutes"), Config.AnnouncementIntervalMinutes);
+		Config.AnnouncementMessage         = GetIniStringOrDefault(ConfigFile, TEXT("AnnouncementMessage"),         Config.AnnouncementMessage);
+		Config.AnnouncementChannelId       = GetIniStringOrDefault(ConfigFile, TEXT("AnnouncementChannelId"),       Config.AnnouncementChannelId);
+
+		// Embed mode flags
+		Config.bUseEmbedsForPhaseEvents     = GetIniBoolOrDefault(ConfigFile, TEXT("UseEmbedsForPhaseEvents"),     Config.bUseEmbedsForPhaseEvents);
+		Config.bUseEmbedsForSchematicEvents = GetIniBoolOrDefault(ConfigFile, TEXT("UseEmbedsForSchematicEvents"), Config.bUseEmbedsForSchematicEvents);
+
+		// Webhook fallback
+		Config.FallbackWebhookUrl = GetIniStringOrDefault(ConfigFile, TEXT("FallbackWebhookUrl"), Config.FallbackWebhookUrl);
+
+		// Slash commands
+		Config.bEnableSlashCommands = GetIniBoolOrDefault(ConfigFile, TEXT("EnableSlashCommands"), Config.bEnableSlashCommands);
+
+		// Mute notifications
+		Config.bNotifyMuteEvents  = GetIniBoolOrDefault  (ConfigFile, TEXT("NotifyMuteEvents"),  Config.bNotifyMuteEvents);
+		Config.ModeratorChannelId = GetIniStringOrDefault(ConfigFile, TEXT("ModeratorChannelId"), Config.ModeratorChannelId);
+
 		// Trim leading/trailing whitespace from credential fields to prevent
 		// subtle mismatches when operators accidentally include spaces.
 		Config.BotToken  = Config.BotToken.TrimStartAndEnd();
@@ -962,6 +981,25 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.AfkKickMinutes           = GetRawIntOrDefault    (BackupValues, TEXT("AfkKickMinutes"),           Config.AfkKickMinutes);
 		Config.AfkKickReason            = GetRawStringOrDefault (BackupValues, TEXT("AfkKickReason"),            Config.AfkKickReason);
 
+		// Scheduled announcements
+		Config.AnnouncementIntervalMinutes = GetRawIntOrDefault    (BackupValues, TEXT("AnnouncementIntervalMinutes"), Config.AnnouncementIntervalMinutes);
+		Config.AnnouncementMessage         = GetRawStringOrDefault (BackupValues, TEXT("AnnouncementMessage"),         Config.AnnouncementMessage);
+		Config.AnnouncementChannelId       = GetRawStringOrDefault (BackupValues, TEXT("AnnouncementChannelId"),       Config.AnnouncementChannelId);
+
+		// Embed mode flags
+		Config.bUseEmbedsForPhaseEvents     = GetRawBoolOrDefault(BackupValues, TEXT("UseEmbedsForPhaseEvents"),     Config.bUseEmbedsForPhaseEvents);
+		Config.bUseEmbedsForSchematicEvents = GetRawBoolOrDefault(BackupValues, TEXT("UseEmbedsForSchematicEvents"), Config.bUseEmbedsForSchematicEvents);
+
+		// Webhook fallback
+		Config.FallbackWebhookUrl = GetRawStringOrDefault(BackupValues, TEXT("FallbackWebhookUrl"), Config.FallbackWebhookUrl);
+
+		// Slash commands
+		Config.bEnableSlashCommands = GetRawBoolOrDefault(BackupValues, TEXT("EnableSlashCommands"), Config.bEnableSlashCommands);
+
+		// Mute notifications
+		Config.bNotifyMuteEvents  = GetRawBoolOrDefault  (BackupValues, TEXT("NotifyMuteEvents"),  Config.bNotifyMuteEvents);
+		Config.ModeratorChannelId = GetRawStringOrDefault(BackupValues, TEXT("ModeratorChannelId"), Config.ModeratorChannelId);
+
 		// Only log the "restored from backup" message when credentials were
 		// actually recovered (i.e. previously blank in primary but now non-empty
 		// from the backup). Avoid a misleading message when the backup also has
@@ -1068,6 +1106,15 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("VoteWindowMinutes"),             *FString::FromInt(Config.VoteWindowMinutes));
 				PatchLine(TEXT("AfkKickMinutes"),                *FString::FromInt(Config.AfkKickMinutes));
 				PatchLine(TEXT("AfkKickReason"),                 Config.AfkKickReason);
+				PatchLine(TEXT("AnnouncementIntervalMinutes"),   *FString::FromInt(Config.AnnouncementIntervalMinutes));
+				PatchLine(TEXT("AnnouncementMessage"),           Config.AnnouncementMessage);
+				PatchLine(TEXT("AnnouncementChannelId"),         Config.AnnouncementChannelId);
+				PatchLine(TEXT("UseEmbedsForPhaseEvents"),       Config.bUseEmbedsForPhaseEvents     ? TEXT("True") : TEXT("False"));
+				PatchLine(TEXT("UseEmbedsForSchematicEvents"),   Config.bUseEmbedsForSchematicEvents ? TEXT("True") : TEXT("False"));
+				PatchLine(TEXT("FallbackWebhookUrl"),            Config.FallbackWebhookUrl);
+				PatchLine(TEXT("EnableSlashCommands"),           Config.bEnableSlashCommands ? TEXT("True") : TEXT("False"));
+				PatchLine(TEXT("NotifyMuteEvents"),              Config.bNotifyMuteEvents  ? TEXT("True") : TEXT("False"));
+				PatchLine(TEXT("ModeratorChannelId"),            Config.ModeratorChannelId);
 
 				// ChatRelayBlocklist is a multi-value array field.  Remove all
 				// existing Key= / +Key= lines then append the restored values.
@@ -1193,7 +1240,26 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			+ TEXT("VoteKickThreshold=") + FString::FromInt(Config.VoteKickThreshold) + TEXT("\n")
 			+ TEXT("VoteWindowMinutes=") + FString::FromInt(Config.VoteWindowMinutes) + TEXT("\n")
 			+ TEXT("AfkKickMinutes=") + FString::FromInt(Config.AfkKickMinutes) + TEXT("\n")
-			+ TEXT("AfkKickReason=") + Config.AfkKickReason + TEXT("\n");
+			+ TEXT("AfkKickReason=") + Config.AfkKickReason + TEXT("\n")
+			+ TEXT("\n")
+			+ TEXT("; -- Scheduled Announcements ------------------------------------------------\n")
+			+ TEXT("AnnouncementIntervalMinutes=") + FString::FromInt(Config.AnnouncementIntervalMinutes) + TEXT("\n")
+			+ TEXT("AnnouncementMessage=") + Config.AnnouncementMessage + TEXT("\n")
+			+ TEXT("AnnouncementChannelId=") + Config.AnnouncementChannelId + TEXT("\n")
+			+ TEXT("\n")
+			+ TEXT("; -- Embed Mode Flags -------------------------------------------------------\n")
+			+ TEXT("UseEmbedsForPhaseEvents=")     + (Config.bUseEmbedsForPhaseEvents     ? TEXT("True") : TEXT("False")) + TEXT("\n")
+			+ TEXT("UseEmbedsForSchematicEvents=") + (Config.bUseEmbedsForSchematicEvents ? TEXT("True") : TEXT("False")) + TEXT("\n")
+			+ TEXT("\n")
+			+ TEXT("; -- Webhook Fallback -------------------------------------------------------\n")
+			+ TEXT("FallbackWebhookUrl=") + Config.FallbackWebhookUrl + TEXT("\n")
+			+ TEXT("\n")
+			+ TEXT("; -- Slash Commands ---------------------------------------------------------\n")
+			+ TEXT("EnableSlashCommands=") + (Config.bEnableSlashCommands ? TEXT("True") : TEXT("False")) + TEXT("\n")
+			+ TEXT("\n")
+			+ TEXT("; -- Mute Notifications -----------------------------------------------------\n")
+			+ TEXT("NotifyMuteEvents=")  + (Config.bNotifyMuteEvents  ? TEXT("True") : TEXT("False")) + TEXT("\n")
+			+ TEXT("ModeratorChannelId=") + Config.ModeratorChannelId + TEXT("\n");
 
 		const FString FullBackupContent = BackupContent + BackupBlocklistLines + BackupReplLines + NewFieldLines;
 

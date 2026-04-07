@@ -672,3 +672,255 @@ public:
         const TArray<FString>& Arguments,
         const FString& Label) override;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /note  — add a private admin note to a player record
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /note <player|PUID> <text...>
+ *
+ * Adds a private admin-only note to a player's record.  Notes are NOT shown
+ * to the player and do NOT count toward the auto-ban warning threshold.
+ * Use /notes <player> to view all notes for a player.
+ *
+ * Requires admin.
+ */
+UCLASS()
+class BANCHATCOMMANDS_API ANoteChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    ANoteChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /notes  — list notes for a player
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /notes <player|PUID>
+ *
+ * Lists all private admin notes on record for a player.
+ *
+ * Requires admin.
+ */
+UCLASS()
+class BANCHATCOMMANDS_API ANotesChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    ANotesChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /duration  — show remaining time on active tempban
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /duration <player|PUID>
+ *
+ * Shows the remaining time on a player's active temporary ban,
+ * formatted as "X days Y hours Z minutes remaining".
+ * For permanent bans reports "permanent".
+ *
+ * Requires admin.
+ */
+UCLASS()
+class BANCHATCOMMANDS_API ADurationChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    ADurationChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /tempunmute  — timed mute that auto-expires
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /tempunmute <player|PUID> <minutes>
+ *
+ * Applies (or updates) a timed mute that automatically expires after
+ * <minutes> minutes.  If the player is already muted indefinitely, this
+ * replaces the indefinite mute with a timed one.
+ *
+ * Requires admin.
+ */
+UCLASS()
+class BANCHATCOMMANDS_API ATempUnmuteChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    ATempUnmuteChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /mutecheck  — check mute status
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /mutecheck <player|PUID>
+ *
+ * Shows whether a player is currently muted and when the mute expires.
+ *
+ * Requires moderator or admin.
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AMuteCheckChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AMuteCheckChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /banreason  — edit the reason on an active ban
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /banreason <player|PUID> <new reason...>
+ *
+ * Edits the reason on an existing active ban without changing its duration.
+ * Avoids the need to unban and re-ban just to correct a reason.
+ *
+ * Requires admin.
+ */
+UCLASS()
+class BANCHATCOMMANDS_API ABanReasonChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    ABanReasonChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /staffchat  — staff-only in-game message
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /staffchat <message...>
+ *
+ * Sends a chat message visible ONLY to online admins and moderators.
+ * Regular players cannot see the message.  Useful for in-game staff
+ * coordination without cluttering public chat.
+ *
+ * Requires moderator or admin.
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AStaffChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AStaffChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  UPlayerNoteRegistry  — per-player private admin notes
+// ─────────────────────────────────────────────────────────────────────────────
+
+#include "Subsystems/GameInstanceSubsystem.h"
+
+USTRUCT(BlueprintType)
+struct BANCHATCOMMANDS_API FPlayerNoteEntry
+{
+    GENERATED_BODY()
+
+    /** Auto-incremented integer primary key (0 when not yet persisted). */
+    UPROPERTY(BlueprintReadOnly, Category = "BanChatCommands")
+    int64 Id = 0;
+
+    /** Compound UID of the noted player: "EOS:xxx". */
+    UPROPERTY(BlueprintReadWrite, Category = "BanChatCommands")
+    FString Uid;
+
+    /** Display name at time of note. */
+    UPROPERTY(BlueprintReadWrite, Category = "BanChatCommands")
+    FString PlayerName;
+
+    /** The note text. */
+    UPROPERTY(BlueprintReadWrite, Category = "BanChatCommands")
+    FString Note;
+
+    /** Admin who added the note. */
+    UPROPERTY(BlueprintReadWrite, Category = "BanChatCommands")
+    FString AddedBy;
+
+    /** UTC timestamp when the note was added. */
+    UPROPERTY(BlueprintReadWrite, Category = "BanChatCommands")
+    FDateTime NoteDate;
+
+    FPlayerNoteEntry()
+        : Id(0)
+        , NoteDate(FDateTime::UtcNow())
+    {}
+};
+
+/**
+ * UPlayerNoteRegistry
+ *
+ * GameInstance subsystem that stores private admin notes about players.
+ * Persists notes to notes.json (same directory as bans.json).
+ * Notes are NOT shown to players and do NOT count toward warning thresholds.
+ *
+ * Thread-safe: all public methods acquire the internal Mutex.
+ */
+UCLASS()
+class BANCHATCOMMANDS_API UPlayerNoteRegistry : public UGameInstanceSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+    virtual void Deinitialize() override;
+
+    /** Add a note for the given player UID. Thread-safe. */
+    void AddNote(const FString& Uid, const FString& PlayerName,
+                 const FString& Note, const FString& AddedBy);
+
+    /** Returns all notes for the given UID (case-insensitive). Thread-safe. */
+    TArray<FPlayerNoteEntry> GetNotesForUid(const FString& Uid) const;
+
+    /** Returns every note in the registry. Thread-safe. */
+    TArray<FPlayerNoteEntry> GetAllNotes() const;
+
+    /** Delete the note with the given Id. Returns true if found. Thread-safe. */
+    bool DeleteNote(int64 Id);
+
+private:
+    void    LoadFromFile();
+    bool    SaveToFile() const;
+    FString GetRegistryPath() const;
+
+    TArray<FPlayerNoteEntry> Notes;
+    mutable FCriticalSection Mutex;
+    FString FilePath;
+};

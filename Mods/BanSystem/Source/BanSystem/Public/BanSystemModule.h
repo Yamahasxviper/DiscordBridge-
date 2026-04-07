@@ -27,7 +27,13 @@ private:
     /** Ticker callback that fires at BackupIntervalHours to trigger a scheduled backup. */
     bool OnBackupTick(float DeltaTime);
 
+    /** Ticker callback that fires at PruneIntervalHours to prune expired bans. */
+    bool OnPruneTick(float DeltaTime);
+
     FTSTicker::FDelegateHandle BackupTickHandle;
+    FTSTicker::FDelegateHandle PruneTickHandle;
     /** Accumulated time since the last scheduled backup (seconds). */
     float BackupAccumulatedSeconds = 0.0f;
+    /** Accumulated time since the last scheduled prune (seconds). */
+    float PruneAccumulatedSeconds = 0.0f;
 };

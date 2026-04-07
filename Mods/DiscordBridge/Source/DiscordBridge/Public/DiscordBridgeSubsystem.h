@@ -778,4 +778,41 @@ private:
 
 	/** True once AFGSchematicManager delegate has been successfully bound. */
 	bool bBoundSchematic = false;
+
+	/** True once UMuteRegistry mute-event delegates have been bound. */
+	bool bBoundMuteEvents = false;
+
+	// ── Scheduled announcements ───────────────────────────────────────────────
+
+	/** Accumulated seconds since last scheduled announcement was posted. */
+	float AnnouncementAccumulatedSeconds = 0.0f;
+
+	/** Ticker handle for periodic server announcements. */
+	FTSTicker::FDelegateHandle AnnouncementTickerHandle;
+
+	/** Start the announcement ticker when AnnouncementIntervalMinutes > 0. */
+	void StartAnnouncementTicker();
+
+	/** Ticker callback — posts the announcement message at the configured interval. */
+	bool AnnouncementTick(float DeltaTime);
+
+	// ── !server / !online commands ────────────────────────────────────────────
+
+	/** Handle the !server Discord command — post a server info embed. */
+	void HandleServerCommand(const FString& ResponseChannelId);
+
+	/** Handle the !online Discord command — post a list of online players with session times. */
+	void HandleOnlineCommand(const FString& ResponseChannelId);
+
+	// ── Mute event notifications ──────────────────────────────────────────────
+
+	/** Post a mute/unmute notification to the moderator channel when bNotifyMuteEvents=true. */
+	void NotifyMuteEvent(const FString& PlayerName, const FString& Uid,
+	                     bool bIsMuted, const FString& Reason);
+
+	// ── Slash command registration ────────────────────────────────────────────
+
+	/** Register built-in Discord application slash commands (/players, /stats, /server)
+	 *  with the Discord REST API. Called on READY when bEnableSlashCommands=true. */
+	void RegisterSlashCommands();
 };

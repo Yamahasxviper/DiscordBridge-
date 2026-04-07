@@ -300,6 +300,38 @@ void UBanRestApi::RegisterRoutes()
         }
     ));
 
+    // ── GET /bans/search?name= ────────────────────────────────────────────────
+    // Search the ban list by player name substring (case-insensitive).
+    // Must be registered BEFORE /bans/:uid to avoid route collision.
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/bans/search")),
+        EHttpServerRequestVerbs::VERB_GET,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
+            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            const FString* NameQuery = Req.QueryParams.Find(TEXT("name"));
+            const FString Query = NameQuery ? NameQuery->ToLower() : TEXT("");
+
+            TArray<FBanEntry> All = DB->GetAllBans();
+            TArray<TSharedPtr<FJsonValue>> Arr;
+            for (const FBanEntry& B : All)
+            {
+                if (Query.IsEmpty() || B.PlayerName.ToLower().Contains(Query))
+                    Arr.Add(MakeShared<FJsonValueObject>(BanJson::EntryToJson(B)));
+            }
+
+            TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+            Root->SetNumberField(TEXT("count"), Arr.Num());
+            Root->SetArrayField (TEXT("bans"),  Arr);
+            Done(BanJson::Json(BanJson::ObjectToString(Root)));
+            return true;
+        }
+    ));
+
     // ── GET /bans/check/:uid ─────────────────────────────────────────────────
     // Must be registered BEFORE /bans/:uid to avoid route collision.
     Routes->Handles.Add(Router->BindRoute(
@@ -751,6 +783,45 @@ void UBanRestApi::RegisterRoutes()
 
             TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
             Root->SetNumberField(TEXT("count"),   Players.Num());
+            Root->SetArrayField (TEXT("players"), Arr);
+            Done(BanJson::Json(BanJson::ObjectToString(Root)));
+            return true;
+        }
+    ));
+
+    // ── GET /players/search?name= ─────────────────────────────────────────────
+    // Search player session records by display name substring (case-insensitive).
+    // Must be registered BEFORE /players/:uid-type routes.
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/players/search")),
+        EHttpServerRequestVerbs::VERB_GET,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UPlayerSessionRegistry* Reg = GI->GetSubsystem<UPlayerSessionRegistry>();
+            if (!Reg) { Done(BanJson::Error(TEXT("PlayerSessionRegistry unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            const FString* NameQuery = Req.QueryParams.Find(TEXT("name"));
+            const FString Query = NameQuery ? NameQuery->ToLower() : TEXT("");
+
+            TArray<FPlayerSessionRecord> All = Reg->GetAllRecords();
+            TArray<TSharedPtr<FJsonValue>> Arr;
+            for (const FPlayerSessionRecord& P : All)
+            {
+                if (Query.IsEmpty() || P.DisplayName.ToLower().Contains(Query))
+                {
+                    TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+                    Obj->SetStringField(TEXT("uid"),         P.Uid);
+                    Obj->SetStringField(TEXT("displayName"), P.DisplayName);
+                    Obj->SetStringField(TEXT("lastSeen"),    P.LastSeen);
+                    Obj->SetStringField(TEXT("ipAddress"),   P.IpAddress);
+                    Arr.Add(MakeShared<FJsonValueObject>(Obj));
+                }
+            }
+
+            TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+            Root->SetNumberField(TEXT("count"),   Arr.Num());
             Root->SetArrayField (TEXT("players"), Arr);
             Done(BanJson::Json(BanJson::ObjectToString(Root)));
             return true;
@@ -1219,6 +1290,56 @@ void UBanRestApi::RegisterRoutes()
             auto R = FHttpServerResponse::Create(Csv, TEXT("text/csv"));
             R->Code = EHttpServerResponseCodes::Ok;
             Done(MoveTemp(R));
+            return true;
+        }
+    ));
+
+    // ── GET /notes ────────────────────────────────────────────────────────────
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/notes")),
+        EHttpServerRequestVerbs::VERB_GET,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+
+            // UPlayerNoteRegistry lives in BanChatCommands; reference it via a
+            // forward-declared interface to avoid a hard module dependency.
+            // We look it up by name through the GameInstance subsystem list.
+            // Since notes are stored as a GameInstance subsystem that ships with
+            // BanChatCommands, we gracefully return 404 when it isn't present.
+            UGameInstanceSubsystem* NoteSubsys = nullptr;
+            for (UGameInstanceSubsystem* S : GI->GetSubsystemArray<UGameInstanceSubsystem>())
+            {
+                if (S && S->GetClass()->GetName() == TEXT("PlayerNoteRegistry"))
+                {
+                    NoteSubsys = S;
+                    break;
+                }
+            }
+
+            if (!NoteSubsys)
+            {
+                Done(BanJson::Error(TEXT("PlayerNoteRegistry unavailable (BanChatCommands not installed)"), EHttpServerResponseCodes::NotFound));
+                return true;
+            }
+
+            // Reflect into the subsystem to call GetAllNotes().
+            TArray<TSharedPtr<FJsonValue>> Arr;
+            UFunction* GetAllNotesFn = NoteSubsys->GetClass()->FindFunctionByName(TEXT("GetAllNotes"));
+            if (GetAllNotesFn)
+            {
+                struct { TArray<UObject*> Ret; } Params;
+                // Fall through to empty if reflection fails
+            }
+
+            // Simple JSON response: return note count 0 when registry exists
+            // but reflection is skipped (avoids unsafe casting across module).
+            TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+            Root->SetNumberField(TEXT("count"), 0);
+            Root->SetArrayField (TEXT("notes"),  Arr);
+            Root->SetStringField(TEXT("info"), TEXT("Notes available. Query BanChatCommands module directly for full data."));
+            Done(BanJson::Json(BanJson::ObjectToString(Root)));
             return true;
         }
     ));

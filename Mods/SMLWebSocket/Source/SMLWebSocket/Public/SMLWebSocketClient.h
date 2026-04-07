@@ -34,6 +34,36 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FSMLWebSocketOnErrorDelegate, const 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FSMLWebSocketOnReconnectingDelegate, int32, AttemptNumber, float, DelaySeconds);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FSMLWebSocketOnReconnectedDelegate);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FSMLWebSocketOnStateChangedDelegate, EWebSocketState, OldState, EWebSocketState, NewState);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FSMLWebSocketOnJsonMessageDelegate, const FString&, JsonString);
+
+/**
+ * Connection statistics returned by GetConnectionStats().
+ */
+USTRUCT(BlueprintType)
+struct SMLWEBSOCKET_API FSMLWebSocketStats
+{
+	GENERATED_BODY()
+
+	/** Total bytes sent since connection was established. */
+	UPROPERTY(BlueprintReadOnly, Category="SML|WebSocket")
+	int64 BytesSent = 0;
+
+	/** Total bytes received since connection was established. */
+	UPROPERTY(BlueprintReadOnly, Category="SML|WebSocket")
+	int64 BytesReceived = 0;
+
+	/** Number of text messages sent since connection was established. */
+	UPROPERTY(BlueprintReadOnly, Category="SML|WebSocket")
+	int32 MessagesSent = 0;
+
+	/** Number of text messages received since connection was established. */
+	UPROPERTY(BlueprintReadOnly, Category="SML|WebSocket")
+	int32 MessagesReceived = 0;
+
+	/** Seconds since the connection was established (0 when not connected). */
+	UPROPERTY(BlueprintReadOnly, Category="SML|WebSocket")
+	float ConnectedForSeconds = 0.0f;
+};
 
 /**
  * Custom WebSocket client with SSL/OpenSSL support and automatic reconnect.
@@ -120,6 +150,15 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="SML|WebSocket")
 	FSMLWebSocketOnStateChangedDelegate OnStateChanged;
 
+	/**
+	 * Called on the game thread when a received text frame parses as valid JSON.
+	 * Fires in addition to OnMessage.  The JsonString parameter is the raw JSON
+	 * string (same as the OnMessage payload); callers should deserialise it with
+	 * FJsonSerializer.  Messages that fail JSON parsing are silently skipped.
+	 */
+	UPROPERTY(BlueprintAssignable, Category="SML|WebSocket")
+	FSMLWebSocketOnJsonMessageDelegate OnJsonMessage;
+
 	// ── Reconnect configuration ───────────────────────────────────────────────
 
 	/**
@@ -148,6 +187,14 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket", meta=(ClampMin="0", UIMin="0"))
 	int32 MaxReconnectAttempts{0};
+
+	/**
+	 * Maximum seconds to wait for the TCP/TLS connection to be established
+	 * before aborting and firing OnError.  0 = no timeout (blocks indefinitely).
+	 * Default: 10 seconds.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket", meta=(ClampMin="0.0", UIMin="0.0"))
+	float ConnectTimeoutSeconds{10.0f};
 
 	/**
 	 * When true, text messages sent while disconnected are queued and flushed
@@ -331,6 +378,29 @@ public:
 	UFUNCTION(BlueprintCallable, Category="SML|WebSocket")
 	void FlushQueue();
 
+	// ── JSON helpers ──────────────────────────────────────────────────────────
+
+	/**
+	 * Convenience helper: serialises a JSON string and sends it as a UTF-8
+	 * text frame.  Equivalent to calling SendText() with a pre-serialised
+	 * JSON string.  Fires OnJsonMessage on the receiving end when the peer
+	 * also uses SMLWebSocket.
+	 *
+	 * @param JsonString  A pre-serialised JSON string (e.g. from FJsonSerializer).
+	 */
+	UFUNCTION(BlueprintCallable, Category="SML|WebSocket")
+	void SendJson(const FString& JsonString);
+
+	// ── Diagnostics ───────────────────────────────────────────────────────────
+
+	/**
+	 * Returns a snapshot of connection statistics: bytes sent/received,
+	 * messages sent/received, and seconds since last connect.
+	 * All counters reset when a new connection is established.
+	 */
+	UFUNCTION(BlueprintPure, Category="SML|WebSocket")
+	FSMLWebSocketStats GetConnectionStats() const;
+
 private:
 	friend class FSMLWebSocketRunnable;
 
@@ -373,4 +443,13 @@ private:
 	 * events from a replaced connection from firing on the game thread.
 	 */
 	uint32 ConnectionGeneration{0};
+
+	// ── Stats ─────────────────────────────────────────────────────────────────
+
+	std::atomic<int64> StatBytesSent{0};
+	std::atomic<int64> StatBytesReceived{0};
+	std::atomic<int32> StatMessagesSent{0};
+	std::atomic<int32> StatMessagesReceived{0};
+	/** Absolute time (FPlatformTime::Seconds()) when the last connect was established. 0 = not connected. */
+	double StatConnectTime{0.0};
 };

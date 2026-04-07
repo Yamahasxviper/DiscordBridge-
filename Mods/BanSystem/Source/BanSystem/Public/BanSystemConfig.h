@@ -163,6 +163,33 @@ public:
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
     bool bNotifyBanExpired = false;
 
+    /**
+     * Interval in hours between automatic expired-ban prune runs (default: 0 = disabled).
+     * When non-zero, BanSystem schedules a recurring timer that calls
+     * PruneExpiredBans() every PruneIntervalHours so bans.json never grows
+     * unbounded on busy servers.
+     * Set to 0 to rely solely on the manual POST /bans/prune endpoint.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    float PruneIntervalHours = 0.0f;
+
+    /**
+     * When true, BanSystem pushes live JSON events (ban, unban, warn, join) to
+     * a WebSocket endpoint configured in WebSocketPushUrl.
+     * Requires SMLWebSocket mod to be installed.
+     * Default: false.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    bool bPushEventsToWebSocket = false;
+
+    /**
+     * WebSocket endpoint to push live events to when bPushEventsToWebSocket=true.
+     * Example: ws://localhost:9000/events
+     * Leave empty to disable.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    FString WebSocketPushUrl;
+
     /** Returns the singleton config instance. */
     static const UBanSystemConfig* Get();
 };
