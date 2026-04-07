@@ -136,9 +136,9 @@ namespace BanJson
         const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
         if (!Cfg || Cfg->RestApiKey.IsEmpty()) return true;
 
-        const FString* KeyHeader = Req.Headers.Find(TEXT("X-Api-Key"));
-        if (!KeyHeader) return false;
-        return (*KeyHeader).Equals(Cfg->RestApiKey, ESearchCase::CaseSensitive);
+        const TArray<FString>* KeyHeaderValues = Req.Headers.Find(TEXT("X-Api-Key"));
+        if (!KeyHeaderValues || KeyHeaderValues->IsEmpty()) return false;
+        return (*KeyHeaderValues)[0].Equals(Cfg->RestApiKey, ESearchCase::CaseSensitive);
     }
 
     static TSharedPtr<FJsonObject> WarningToJson(const FWarningEntry& W)
@@ -578,7 +578,7 @@ void UBanRestApi::RegisterRoutes()
                 Csv += CsvQuote(E.BannedBy)   + TEXT(",");
                 Csv += E.BanDate.ToIso8601()  + TEXT(",");
                 Csv += (E.bIsPermanent ? FString() : E.ExpireDate.ToIso8601()) + TEXT(",");
-                Csv += (E.bIsPermanent ? TEXT("true") : TEXT("false")) + TEXT(",");
+                Csv += FString(E.bIsPermanent ? TEXT("true") : TEXT("false")) + TEXT(",");
                 Csv += CsvQuote(LinkedStr)    + TEXT("\n");
             }
 

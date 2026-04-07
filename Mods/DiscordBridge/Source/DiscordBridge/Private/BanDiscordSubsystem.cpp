@@ -8,6 +8,7 @@
 #include "BanTypes.h"
 #include "PlayerSessionRegistry.h"
 
+#include "Misc/DefaultValueHelper.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 

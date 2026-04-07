@@ -246,9 +246,9 @@ bool FSMLWebSocketServerRunnable::PerformHandshake(FClientState& Client)
     const FString Accept = FBase64::Encode(Hash, 20);
 
     // Send HTTP 101 response.
-    FString Response = TEXT("HTTP/1.1 101 Switching Protocols\r\n")
-                       TEXT("Upgrade: websocket\r\n")
-                       TEXT("Connection: Upgrade\r\n")
+    FString Response = FString(TEXT("HTTP/1.1 101 Switching Protocols\r\n")
+                               TEXT("Upgrade: websocket\r\n")
+                               TEXT("Connection: Upgrade\r\n"))
                        + TEXT("Sec-WebSocket-Accept: ") + Accept + TEXT("\r\n")
                        + TEXT("\r\n");
     FTCHARToUTF8 ResponseUtf8(*Response);
