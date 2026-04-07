@@ -213,6 +213,43 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 */
 	FString InGameWhitelistCommandPrefix{ TEXT("!whitelist") };
 
+	// ── Chat relay filter ─────────────────────────────────────────────────────
+
+	/**
+	 * List of blocked keywords/phrases (case-insensitive).  Any in-game chat message
+	 * that contains one of these strings will be silently dropped and not relayed to
+	 * Discord.  Useful for blocking spam, slurs, or other unwanted content.
+	 *
+	 * Add one entry per line using +ChatRelayBlocklist= syntax:
+	 *   +ChatRelayBlocklist=spam
+	 *   +ChatRelayBlocklist=badword
+	 *
+	 * Leave empty to relay all messages (default).
+	 */
+	TArray<FString> ChatRelayBlocklist;
+
+	// ── Bot commands ──────────────────────────────────────────────────────────
+
+	/**
+	 * The prefix for the !players Discord command (default: !players).
+	 * Discord users can type this in the bot channel to see the list of online players.
+	 */
+	FString PlayersCommandPrefix{ TEXT("!players") };
+
+	/**
+	 * Snowflake ID of the Discord channel where !players responses are posted.
+	 * Leave empty to post to the main bridged channel (ChannelId).
+	 */
+	FString PlayersCommandChannelId;
+
+	/**
+	 * Discord invite link shown to players when they type /discord or !discord
+	 * in the Satisfactory in-game chat.
+	 * Leave empty to disable the /discord in-game command.
+	 * Example: https://discord.gg/yourserver
+	 */
+	FString DiscordInviteUrl;
+
 	// ── Player join / leave / timeout notifications ───────────────────────────
 
 	/**
@@ -294,6 +331,14 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 		TEXT(":yellow_circle: **%PlayerName%** timed out.")
 	};
 
+	/**
+	 * When true, player join/leave/timeout events are posted as rich Discord embeds
+	 * (colour-coded with player info fields) instead of plain text messages.
+	 * Join = green (3066993), Leave = red (15158332), Timeout = orange (16776960).
+	 * Default: false (plain text).
+	 */
+	bool bUseEmbedsForPlayerEvents{ false };
+
 	// ── Player count presence ─────────────────────────────────────────────────
 
 	/** When true, the bot's Discord presence activity shows the current player count. */
@@ -343,6 +388,9 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 *   4. Backup write          (Step 3 – write to Saved/DiscordBridge/DiscordBridge.ini)
 	 * Also add the key to the DefaultContent template and the second-pass upgrade
 	 * check so existing server configs pick up the new setting automatically.
+	 * For TArray fields use ParseRawIniArray (primary load) / ParseRawIniArray on
+	 * the already-loaded backup string (restore), PatchArrayLines (patch-back), and
+	 * per-item +Key=value lines (backup write).
 	 */
 	static FDiscordBridgeConfig LoadOrCreate();
 

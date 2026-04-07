@@ -182,6 +182,70 @@ namespace
 		const FString* Found = Raw.Find(Key);
 		return (Found && !Found->IsEmpty()) ? FCString::Atoi(**Found) : Default;
 	}
+
+	// Parses all values for a given key from a raw INI file content string.
+	// Accepts both "Key=value" (single value) and "+Key=value" (array-entry)
+	// notation.  Values are returned in document order; empty values are skipped.
+	// This mirrors the raw-parser style already used for scalar fields so that
+	// array fields survive the same %property% expansion pitfall (see comment
+	// above ParseRawIniSection).
+	TArray<FString> ParseRawIniArray(const FString& RawContent,
+	                                 const FString& Section,
+	                                 const FString& Key)
+	{
+		TArray<FString> Result;
+		const FString SectionHeader = FString(TEXT("[")) + Section + TEXT("]");
+		const FString PlainPrefix   = Key + TEXT("=");
+		const FString PlusPrefix    = TEXT("+") + Key + TEXT("=");
+
+		bool  bInSection = false;
+		int32 Pos        = 0;
+
+		while (Pos < RawContent.Len())
+		{
+			int32      LineEnd  = RawContent.Find(
+				TEXT("\n"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Pos);
+			const bool bLastLine = (LineEnd == INDEX_NONE);
+			if (bLastLine)
+				LineEnd = RawContent.Len();
+
+			FString Line = RawContent.Mid(Pos, LineEnd - Pos);
+			if (!Line.IsEmpty() && Line[Line.Len() - 1] == TEXT('\r'))
+				Line.RemoveAt(Line.Len() - 1, 1, /*bAllowShrinking=*/false);
+
+			Pos = bLastLine ? RawContent.Len() : (LineEnd + 1);
+
+			const FString Trimmed = Line.TrimStart();
+			if (Trimmed.IsEmpty() ||
+			    Trimmed.StartsWith(TEXT(";")) ||
+			    Trimmed.StartsWith(TEXT("#")))
+				continue;
+
+			if (Trimmed.StartsWith(TEXT("[")))
+			{
+				bInSection = (Trimmed.TrimEnd() == SectionHeader);
+				continue;
+			}
+
+			if (!bInSection)
+				continue;
+
+			if (Line.StartsWith(PlusPrefix))
+			{
+				const FString Val = Line.Mid(PlusPrefix.Len());
+				if (!Val.IsEmpty())
+					Result.Add(Val);
+			}
+			else if (Line.StartsWith(PlainPrefix))
+			{
+				const FString Val = Line.Mid(PlainPrefix.Len());
+				if (!Val.IsEmpty())
+					Result.Add(Val);
+			}
+		}
+
+		return Result;
+	}
 } // anonymous namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -280,6 +344,19 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.PlayerJoinAdminMessage   = GetIniStringOrDefault(ConfigFile, TEXT("PlayerJoinAdminMessage"),   Config.PlayerJoinAdminMessage);
 		Config.PlayerLeaveMessage     = GetIniStringOrDefault(ConfigFile, TEXT("PlayerLeaveMessage"),     Config.PlayerLeaveMessage);
 		Config.PlayerTimeoutMessage   = GetIniStringOrDefault(ConfigFile, TEXT("PlayerTimeoutMessage"),   Config.PlayerTimeoutMessage);
+		Config.bUseEmbedsForPlayerEvents = GetIniBoolOrDefault(ConfigFile, TEXT("UseEmbedsForPlayerEvents"), Config.bUseEmbedsForPlayerEvents);
+
+		// Chat relay filter – use raw file parsing to support +Key= array syntax.
+		{
+			FString RawPrimary;
+			FFileHelper::LoadFileToString(RawPrimary, *ModFilePath);
+			Config.ChatRelayBlocklist = ParseRawIniArray(RawPrimary, TEXT("DiscordBridge"), TEXT("ChatRelayBlocklist"));
+		}
+
+		// Bot commands
+		Config.PlayersCommandPrefix    = GetIniStringOrFallback(ConfigFile, TEXT("PlayersCommandPrefix"),    Config.PlayersCommandPrefix);
+		Config.PlayersCommandChannelId = GetIniStringOrDefault (ConfigFile, TEXT("PlayersCommandChannelId"), Config.PlayersCommandChannelId);
+		Config.DiscordInviteUrl        = GetIniStringOrDefault (ConfigFile, TEXT("DiscordInviteUrl"),        Config.DiscordInviteUrl);
 
 		// Trim leading/trailing whitespace from credential fields to prevent
 		// subtle mismatches when operators accidentally include spaces.
@@ -525,6 +602,51 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("PlayerTimeoutMessage=\n");
 				}
 
+				// New fields added in the chat-filter / bot-commands / embed update.
+				if (!ConfigFile.GetString(ConfigSection, TEXT("UseEmbedsForPlayerEvents"), TmpVal))
+				{
+					AppendContent2 +=
+						TEXT("\n")
+						TEXT("# UseEmbedsForPlayerEvents (added by mod update) ----------------------\n")
+						TEXT("# When True, player join/leave/timeout events are sent as rich Discord\n")
+						TEXT("# embeds (colour-coded) instead of plain text. Default: False.\n")
+						TEXT("UseEmbedsForPlayerEvents=False\n");
+				}
+
+				{
+					// ChatRelayBlocklist is an array field (multi-line +Key=value).
+					// Check for its presence in the raw file rather than via FConfigFile.
+					FString UpgradeRaw;
+					FFileHelper::LoadFileToString(UpgradeRaw, *ModFilePath);
+					if (!UpgradeRaw.Contains(TEXT("ChatRelayBlocklist")))
+					{
+						AppendContent2 +=
+							TEXT("\n")
+							TEXT("# -- CHAT RELAY FILTER (added by mod update) --------------------------\n")
+							TEXT("# Block in-game chat keywords from being relayed to Discord.\n")
+							TEXT("# Add one keyword per line using: +ChatRelayBlocklist=keyword\n")
+							TEXT("# Matching is case-insensitive. Leave empty to relay all messages.\n")
+							TEXT("# Example:\n")
+							TEXT("# +ChatRelayBlocklist=spam\n");
+					}
+				}
+
+				if (!ConfigFile.GetString(ConfigSection, TEXT("PlayersCommandPrefix"), TmpVal))
+				{
+					AppendContent2 +=
+						TEXT("\n")
+						TEXT("# -- BOT COMMANDS (added by mod update) --------------------------------\n")
+						TEXT("# Prefix for the !players Discord command. Default: !players\n")
+						TEXT("PlayersCommandPrefix=!players\n")
+						TEXT("#\n")
+						TEXT("# Channel for !players responses. Leave empty to use ChannelId.\n")
+						TEXT("PlayersCommandChannelId=\n")
+						TEXT("#\n")
+						TEXT("# Discord invite link shown to players who type /discord in-game.\n")
+						TEXT("# Leave empty to disable the /discord in-game command.\n")
+						TEXT("DiscordInviteUrl=\n");
+				}
+
 				if (!AppendContent2.IsEmpty())
 				{
 					UE_LOG(LogTemp, Log,
@@ -658,7 +780,25 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("# Message posted when a player leaves cleanly. Leave empty to disable. Placeholder: %PlayerName%\n")
 			TEXT("PlayerLeaveMessage=\n")
 			TEXT("# Message posted when a player times out. Leave empty to use PlayerLeaveMessage. Placeholder: %PlayerName%\n")
-			TEXT("PlayerTimeoutMessage=\n");
+			TEXT("PlayerTimeoutMessage=\n")
+			TEXT("# When True, join/leave/timeout events are sent as colour-coded Discord embeds. Default: False\n")
+			TEXT("UseEmbedsForPlayerEvents=False\n")
+			TEXT("\n")
+			TEXT("# -- CHAT RELAY FILTER --------------------------------------------------------\n")
+			TEXT("# Block in-game chat keywords from being relayed to Discord (case-insensitive).\n")
+			TEXT("# Add one keyword per line using: +ChatRelayBlocklist=keyword\n")
+			TEXT("# Leave empty to relay all messages (default).\n")
+			TEXT("# Example:\n")
+			TEXT("# +ChatRelayBlocklist=spam\n")
+			TEXT("\n")
+			TEXT("# -- BOT COMMANDS -------------------------------------------------------------\n")
+			TEXT("# Prefix for the !players Discord command. Default: !players\n")
+			TEXT("PlayersCommandPrefix=!players\n")
+			TEXT("# Channel for !players responses. Leave empty to use ChannelId.\n")
+			TEXT("PlayersCommandChannelId=\n")
+			TEXT("# Discord invite link shown to players who type /discord in-game.\n")
+			TEXT("# Leave empty to disable the /discord in-game command.\n")
+			TEXT("DiscordInviteUrl=\n");
 
 		// Ensure the Config directory exists before writing.
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(ModFilePath));
@@ -748,6 +888,15 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.PlayerJoinAdminMessage    = GetRawStringOrDefault(BackupValues, TEXT("PlayerJoinAdminMessage"),    Config.PlayerJoinAdminMessage);
 		Config.PlayerLeaveMessage      = GetRawStringOrDefault(BackupValues, TEXT("PlayerLeaveMessage"),      Config.PlayerLeaveMessage);
 		Config.PlayerTimeoutMessage    = GetRawStringOrDefault(BackupValues, TEXT("PlayerTimeoutMessage"),    Config.PlayerTimeoutMessage);
+		Config.bUseEmbedsForPlayerEvents = GetRawBoolOrDefault(BackupValues, TEXT("UseEmbedsForPlayerEvents"), Config.bUseEmbedsForPlayerEvents);
+
+		// Chat relay filter (array field – parse from raw backup content)
+		Config.ChatRelayBlocklist = ParseRawIniArray(BackupFileContent, TEXT("DiscordBridge"), TEXT("ChatRelayBlocklist"));
+
+		// Bot commands
+		Config.PlayersCommandPrefix    = GetRawStringOrFallback(BackupValues, TEXT("PlayersCommandPrefix"),    Config.PlayersCommandPrefix);
+		Config.PlayersCommandChannelId = GetRawStringOrDefault (BackupValues, TEXT("PlayersCommandChannelId"), Config.PlayersCommandChannelId);
+		Config.DiscordInviteUrl        = GetRawStringOrDefault (BackupValues, TEXT("DiscordInviteUrl"),        Config.DiscordInviteUrl);
 
 		// Only log the "restored from backup" message when credentials were
 		// actually recovered (i.e. previously blank in primary but now non-empty
@@ -841,6 +990,42 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("PlayerJoinAdminMessage"),        Config.PlayerJoinAdminMessage);
 				PatchLine(TEXT("PlayerLeaveMessage"),            Config.PlayerLeaveMessage);
 				PatchLine(TEXT("PlayerTimeoutMessage"),          Config.PlayerTimeoutMessage);
+				PatchLine(TEXT("UseEmbedsForPlayerEvents"),      Config.bUseEmbedsForPlayerEvents ? TEXT("True") : TEXT("False"));
+				PatchLine(TEXT("PlayersCommandPrefix"),          Config.PlayersCommandPrefix);
+				PatchLine(TEXT("PlayersCommandChannelId"),       Config.PlayersCommandChannelId);
+				PatchLine(TEXT("DiscordInviteUrl"),              Config.DiscordInviteUrl);
+
+				// ChatRelayBlocklist is a multi-value array field.  Remove all
+				// existing Key= / +Key= lines then append the restored values.
+				{
+					const FString PlainPfx = TEXT("ChatRelayBlocklist=");
+					const FString PlusPfx  = TEXT("+ChatRelayBlocklist=");
+					FString Rebuilt;
+					Rebuilt.Reserve(PrimaryContent.Len());
+					int32 Pos = 0;
+					while (Pos <= PrimaryContent.Len())
+					{
+						const int32 NL = PrimaryContent.Find(
+							TEXT("\n"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Pos);
+						const bool  bLast   = (NL == INDEX_NONE);
+						const int32 LineEnd = bLast ? PrimaryContent.Len() : NL;
+						const FString RawLine = PrimaryContent.Mid(Pos, LineEnd - Pos);
+						Pos = bLast ? (PrimaryContent.Len() + 1) : (NL + 1);
+						FString Cmp = RawLine;
+						if (!Cmp.IsEmpty() && Cmp[Cmp.Len()-1] == TEXT('\r'))
+							Cmp.RemoveAt(Cmp.Len()-1, 1, /*bAllowShrinking=*/false);
+						if (!Cmp.StartsWith(PlainPfx) && !Cmp.StartsWith(PlusPfx))
+						{
+							Rebuilt += RawLine;
+							if (!bLast) Rebuilt += TEXT("\n");
+						}
+					}
+					if (!Rebuilt.IsEmpty() && Rebuilt[Rebuilt.Len()-1] != TEXT('\n'))
+						Rebuilt += TEXT("\n");
+					for (const FString& Item : Config.ChatRelayBlocklist)
+						Rebuilt += PlusPfx + Item + TEXT("\n");
+					PrimaryContent = MoveTemp(Rebuilt);
+				}
 
 				if (FFileHelper::SaveStringToFile(PrimaryContent, *ModFilePath))
 				{
@@ -903,11 +1088,23 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			+ TEXT("PlayerJoinAdminChannelId=") + Config.PlayerJoinAdminChannelId + TEXT("\n")
 			+ TEXT("PlayerJoinAdminMessage=") + Config.PlayerJoinAdminMessage + TEXT("\n")
 			+ TEXT("PlayerLeaveMessage=") + Config.PlayerLeaveMessage + TEXT("\n")
-			+ TEXT("PlayerTimeoutMessage=") + Config.PlayerTimeoutMessage + TEXT("\n");
+			+ TEXT("PlayerTimeoutMessage=") + Config.PlayerTimeoutMessage + TEXT("\n")
+			+ TEXT("UseEmbedsForPlayerEvents=") + (Config.bUseEmbedsForPlayerEvents ? TEXT("True") : TEXT("False")) + TEXT("\n")
+			+ TEXT("PlayersCommandPrefix=") + Config.PlayersCommandPrefix + TEXT("\n")
+			+ TEXT("PlayersCommandChannelId=") + Config.PlayersCommandChannelId + TEXT("\n")
+			+ TEXT("DiscordInviteUrl=") + Config.DiscordInviteUrl + TEXT("\n");
+
+		// ChatRelayBlocklist is an array; append each item as +Key=value.
+		FString BackupBlocklistLines;
+		for (const FString& Item : Config.ChatRelayBlocklist)
+		{
+			BackupBlocklistLines += TEXT("+ChatRelayBlocklist=") + Item + TEXT("\n");
+		}
+		const FString FullBackupContent = BackupContent + BackupBlocklistLines;
 
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupFilePath));
 
-		if (FFileHelper::SaveStringToFile(BackupContent, *BackupFilePath))
+		if (FFileHelper::SaveStringToFile(FullBackupContent, *BackupFilePath))
 		{
 			if (Config.BotToken.IsEmpty())
 			{
