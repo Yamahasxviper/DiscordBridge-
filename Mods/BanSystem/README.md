@@ -28,19 +28,31 @@ A server-only Alpakit C++ mod that provides a persistent, EOS-based ban system f
 
 Install the optional **BanChatCommands** mod to get the full set of in-game chat commands. Admin access is controlled by player platform ID in `BanChatCommands.ini`.
 
-| Command | Description |
-|---------|-------------|
-| `/ban <player\|UID\|IP:address> [reason...]` | Permanently ban a player or IP address |
-| `/tempban <player\|UID\|IP:address> <minutes> [reason...]` | Temporarily ban for N minutes |
-| `/unban <UID\|IP:address>` | Remove a ban |
-| `/bancheck <player\|UID\|IP:address>` | Query ban status |
-| `/banlist [page]` | List active bans (10 per page) |
-| `/linkbans <UID1> <UID2>` | Link two UIDs for the same player |
-| `/unlinkbans <UID1> <UID2>` | Remove a UID link |
-| `/playerhistory <name\|UID>` | Look up session history |
-| `/banname <name> [reason...]` | Ban offline player by name + IP from session history |
-| `/reloadconfig` | Hot-reload admin config without restarting the server |
-| `/whoami` | Show your own compound UID *(no admin required)* |
+| Command | Role | Description |
+|---------|------|-------------|
+| `/ban <player\|UID\|IP:address> [reason...]` | Admin | Permanently ban a player or IP address |
+| `/tempban <player\|UID\|IP:address> <minutes> [reason...]` | Admin | Temporarily ban for N minutes |
+| `/unban <UID\|IP:address>` | Admin | Remove a ban |
+| `/unbanname <name_substring>` | Admin | Remove ban for an offline player by display-name |
+| `/bancheck <player\|UID\|IP:address>` | Admin | Query ban status |
+| `/banlist [page]` | Admin | List active bans (10 per page) |
+| `/linkbans <UID1> <UID2>` | Admin | Link two UIDs for the same player |
+| `/unlinkbans <UID1> <UID2>` | Admin | Remove a UID link |
+| `/playerhistory <name\|UID>` | Admin | Look up session history |
+| `/banname <name> [reason...]` | Admin | Ban offline player by name + IP from session history |
+| `/reloadconfig` | Admin | Hot-reload admin/moderator config without restarting |
+| `/warn <player\|UID> <reason...>` | Admin | Issue a formal warning |
+| `/warnings <player\|UID>` | Admin | List all warnings for a player |
+| `/clearwarns <player\|UID>` | Admin | Remove all warnings for a player |
+| `/reason <UID>` | Admin | Show the ban reason for a UID |
+| `/announce <message...>` | Admin | Server-wide broadcast (also posts to Discord) |
+| `/stafflist` | Admin | Show currently-online admins and moderators |
+| `/kick <player\|UID> [reason...]` | Moderator | Disconnect without banning |
+| `/modban <player\|UID> [reason...]` | Moderator | 30-minute temporary ban |
+| `/mute <player\|UID> [minutes] [reason...]` | Moderator | Silence in-game chat (in-memory) |
+| `/unmute <player\|UID>` | Moderator | Remove a chat mute |
+| `/history` | All | Show your own session and warning history |
+| `/whoami` | All | Show your own compound UID *(no admin required)* |
 
 → See [BanChatCommands README](../BanChatCommands/README.md) for setup.
 
@@ -57,12 +69,14 @@ The mod starts a local HTTP server (default port **3000**) with the same endpoin
 | `GET` | `/bans/all` | All bans including expired |
 | `GET` | `/bans/check/:uid` | Check if a UID is banned |
 | `POST` | `/bans` | Create a ban |
+| `PATCH` | `/bans/:uid` | Update an existing ban (reason, duration, make permanent) |
 | `DELETE` | `/bans/:uid` | Remove by compound UID |
 | `DELETE` | `/bans/id/:id` | Remove by row ID |
 | `POST` | `/bans/prune` | Delete expired bans |
 | `POST` | `/bans/backup` | Create a database backup |
 
 Set `RestApiPort=0` in `DefaultBanSystem.ini` to disable the REST API entirely.
+Set `RestApiKey` to require an `X-Api-Key` header on all mutating requests.
 
 → See [REST API](Docs/04-RestApi.md)
 
@@ -91,9 +105,16 @@ Edit `<ServerRoot>/FactoryGame/Mods/BanSystem/Config/DefaultBanSystem.ini`:
 
 ```ini
 [/Script/BanSystem.BanSystemConfig]
-DatabasePath=          ; leave empty for default Saved/BanSystem/bans.json
-RestApiPort=3000       ; HTTP REST port; set 0 to disable
-MaxBackups=5           ; automatic backup count limit
+DatabasePath=              ; leave empty for default Saved/BanSystem/bans.json
+RestApiPort=3000           ; HTTP REST port; set 0 to disable
+MaxBackups=5               ; max backup file count
+RestApiKey=                ; optional API key for mutating REST requests
+DiscordWebhookUrl=         ; optional Discord webhook for ban/warn/kick notifications
+AutoBanWarnCount=0         ; warnings before auto-ban (0 = disabled)
+AutoBanWarnMinutes=0       ; auto-ban duration in minutes (0 = permanent)
+SessionRetentionDays=0     ; session record age limit (0 = keep forever)
+BackupIntervalHours=0      ; recurring auto-backup interval (0 = disabled)
+bNotifyBanExpired=False    ; notify Discord when a temp ban expires
 ```
 
 → See [Configuration](Docs/02-Configuration.md) for the full reference.

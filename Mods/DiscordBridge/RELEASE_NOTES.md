@@ -1,5 +1,176 @@
 # DiscordBridge – Release Notes
 
+## v1.1.0 – Game Events, Stats Commands, AFK Kick, Reaction Voting & More
+
+*Compatible with Satisfactory build ≥ 416835 and SML ≥ 3.11.3*
+
+---
+
+### New feature – game phase and schematic unlock announcements
+
+DiscordBridge now listens to `AFGGamePhaseManager` and `AFGSchematicManager` and
+posts Discord messages when the server's game phase changes or a player purchases
+a schematic (milestone).
+
+**New settings**
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `PhaseEventsChannelId` | string | *(empty)* | Channel for game-phase-change announcements. Falls back to `ChannelId`. |
+| `SchematicEventsChannelId` | string | *(empty)* | Channel for schematic-unlock announcements. Falls back to `PhaseEventsChannelId`, then `ChannelId`. |
+
+→ See [Game Events](Docs/10-GameEvents.md)
+
+---
+
+### New feature – `!stats` and `!playerstats` Discord commands
+
+Discord users can now type `!stats` in the bridged channel to get a live server
+summary, or `!playerstats <PlayerName>` to retrieve per-player session counters.
+
+**New settings**
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `StatsCommandPrefix` | string | `!stats` | The trigger word for the global stats command. Clear to disable. |
+| `PlayerStatsCommandPrefix` | string | `!playerstats` | The trigger word for the per-player stats command. Clear to disable. |
+
+→ See [Stats Commands](Docs/11-StatsCommands.md)
+
+---
+
+### New feature – reaction-based vote-kick
+
+When enabled, a join notification embed is posted for each player. Discord users
+react with 👎 to vote against the player; once the threshold is reached the player
+is automatically kicked.
+
+**New settings**
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `bEnableJoinReactionVoting` | bool | `False` | Master switch for reaction voting. |
+| `VoteKickThreshold` | int | `0` | Minimum 👎 reactions required to kick. `0` disables kicking even when voting is on. |
+| `VoteWindowMinutes` | int | `5` | How long (minutes) after the join embed the vote window remains open. |
+
+→ See [Reaction Voting](Docs/12-ReactionVoting.md)
+
+---
+
+### New feature – AFK auto-kick
+
+Players who have not moved or sent a message for a configurable number of minutes
+are automatically kicked.
+
+**New settings**
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `AfkKickMinutes` | int | `0` | AFK threshold in minutes. `0` disables. |
+| `AfkKickReason` | string | `Kicked for inactivity (AFK).` | Kick message shown to the player. |
+
+→ See [AFK Kick](Docs/13-AfkKick.md)
+
+---
+
+### New feature – admin-only join log channel
+
+A separate private channel can receive detailed join notifications that include
+the player's EOS PUID and IP address — hidden from the public bridged channel.
+
+**New settings**
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `PlayerJoinAdminChannelId` | string | *(empty)* | Channel ID for admin-only join details. Leave empty to disable. |
+| `PlayerJoinAdminMessage` | string | *(see below)* | Format string for the admin log entry. |
+
+Default `PlayerJoinAdminMessage`:
+```
+:shield: **%PlayerName%** joined | EOS: `%EOSProductUserId%` | IP: `%IpAddress%`
+```
+
+→ See [Player Notifications](Docs/04-PlayerNotifications.md)
+
+---
+
+### New feature – ban events channel
+
+When DiscordBridge is used alongside BanSystem, ban/unban actions can now be
+routed to a dedicated Discord channel.
+
+**New setting**
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `BanEventsChannelId` | string | *(empty)* | Channel for ban/unban notifications. Falls back to `ChannelId`. |
+
+---
+
+### New feature – player event embeds
+
+Join/leave notifications can now be posted as rich Discord embeds instead of
+plain text messages.
+
+**New setting**
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `bUseEmbedsForPlayerEvents` | bool | `False` | Post join/leave/timeout events as embed messages. Required for reaction voting. |
+
+→ See [Player Notifications](Docs/04-PlayerNotifications.md)
+
+---
+
+### New feature – chat relay find-and-replace
+
+In addition to the blocklist (which drops entire messages), you can now define
+find-and-replace rules that substitute matched text with a replacement string
+(default `***`) before the message is relayed to Discord.
+
+**New setting**
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `ChatRelayBlocklistReplacements` | array | *(empty)* | Ordered list of `(Pattern, Replacement)` substitution rules. |
+
+**Example (DefaultDiscordBridge.ini):**
+```ini
++ChatRelayBlocklistReplacements=(Pattern="badword",Replacement="***")
++ChatRelayBlocklistReplacements=(Pattern="slur",Replacement="[removed]")
+```
+
+→ See [Chat Bridge](Docs/03-ChatBridge.md)
+
+---
+
+### New feature – `!players` command
+
+Typing `!players` in the bridged channel now returns the current online player list.
+The response can be routed to a dedicated channel.
+
+**New settings**
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `PlayersCommandPrefix` | string | `!players` | Trigger word. Clear to disable. |
+| `PlayersCommandChannelId` | string | *(empty)* | Optional channel to reply in. Falls back to the originating channel. |
+
+---
+
+### New feature – Discord invite URL broadcast
+
+When `DiscordInviteUrl` is set, the URL is automatically announced in the game
+chat so players can see it without being told manually.
+
+**New setting**
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `DiscordInviteUrl` | string | *(empty)* | Discord invite URL. When non-empty it is periodically announced in-game. |
+
+---
+
 ## v1.0.4 – Player Join / Leave / Timeout Notifications
 
 *Compatible with Satisfactory build ≥ 416835 and SML ≥ 3.11.3*

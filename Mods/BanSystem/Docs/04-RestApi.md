@@ -6,7 +6,15 @@ BanSystem starts a local HTTP server on startup (default port **3000**) that exp
 
 Set `RestApiPort=0` in `DefaultBanSystem.ini` to disable the REST API entirely.
 
-> **Security:** The REST API has no authentication. Restrict access with your server firewall so that only trusted machines can reach the port.
+> **Security:** Restrict external access with your server firewall so that only
+> trusted machines can reach the port.  
+> Optionally set `RestApiKey` in `DefaultBanSystem.ini` to require an API key
+> on all mutating endpoints (`POST`, `DELETE`, `PATCH`). Include the key in the
+> `X-Api-Key` request header:
+> ```
+> X-Api-Key: mysecretkey
+> ```
+> Read-only `GET` endpoints are never gated.
 
 ---
 
@@ -112,6 +120,49 @@ Create a new ban.
 curl -X POST http://localhost:3000/bans \
   -H "Content-Type: application/json" \
   -d '{"playerUID":"1.2.3.4","platform":"IP","reason":"VPN evader","bannedBy":"admin"}'
+```
+
+---
+
+### `PATCH /bans/:uid`
+
+Update an existing ban. Only the fields you include are changed; omitted fields
+keep their current values.
+
+**URL parameter:** `:uid` — compound UID, URL-encoded.
+
+**Request body (all fields optional):**
+```json
+{
+  "reason":          "Updated reason",
+  "bIsPermanent":    true,
+  "durationMinutes": 0
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `reason` | New ban reason text |
+| `bIsPermanent` | Set to `true` to convert a temp ban to permanent |
+| `durationMinutes` | New duration in minutes (ignored when `bIsPermanent` is true; `0` when both are absent = keep existing duration) |
+
+**Response — success:**
+```json
+{"success": true, "entry": { ... }}
+```
+
+**Example — extend a ban to 48 hours:**
+```sh
+curl -X PATCH "http://localhost:3000/bans/EOS%3A00020aed06f0a6958c3c067fb4b73d51" \
+  -H "Content-Type: application/json" \
+  -d '{"durationMinutes":2880}'
+```
+
+**Example — convert to permanent:**
+```sh
+curl -X PATCH "http://localhost:3000/bans/EOS%3A00020aed06f0a6958c3c067fb4b73d51" \
+  -H "Content-Type: application/json" \
+  -d '{"bIsPermanent":true}'
 ```
 
 ---

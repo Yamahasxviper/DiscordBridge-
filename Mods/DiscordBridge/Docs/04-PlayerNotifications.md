@@ -116,4 +116,53 @@ PlayerTimeoutMessage=:yellow_circle: **%PlayerName%** timed out.
 
 ---
 
+## `bUseEmbedsForPlayerEvents`
+
+When `True`, join/leave/timeout notifications are posted as **rich Discord embeds**
+instead of plain text messages. Embeds display the player name as the embed title,
+making the notifications easier to scan in Discord.
+
+This setting is **required** for [reaction voting](12-ReactionVoting.md) to work —
+the vote reactions are added to the embed message for the joining player.
+
+**Default:** `False`
+
+```ini
+bUseEmbedsForPlayerEvents=True
+```
+
+---
+
+## `PlayerJoinAdminChannelId`
+
+The snowflake ID of a **private admin-only channel** that receives detailed join
+information for every player — including their EOS Product User ID and IP address.
+This keeps sensitive data off the public bridged channel.
+
+Leave **empty** to disable the admin join log (default).
+
+```ini
+PlayerJoinAdminChannelId=111222333444555666888
+```
+
+---
+
+## `PlayerJoinAdminMessage`
+
+Format string for the admin join log entry posted to `PlayerJoinAdminChannelId`.
+
+| Placeholder | Replaced with |
+|-------------|---------------|
+| `%PlayerName%` | In-game display name |
+| `%EOSProductUserId%` | 32-char hex EOS Product User ID |
+| `%IpAddress%` | Player's remote IP address |
+
+**Default:** `:shield: **%PlayerName%** joined | EOS: \`%EOSProductUserId%\` | IP: \`%IpAddress%\``
+
+```ini
+PlayerJoinAdminMessage=:shield: **%PlayerName%** joined | EOS: `%EOSProductUserId%` | IP: `%IpAddress%`
+```
+
+---
+
 *For further help visit the Satisfactory Modding Discord: <https://discord.gg/xkVJ73E>*

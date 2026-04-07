@@ -64,9 +64,50 @@ In addition to EOS PUID bans, BanSystem supports **IP address bans**. IP UIDs us
 
 ## In-game chat commands (BanChatCommands mod)
 
-The optional **BanChatCommands** mod provides `/ban`, `/tempban`, `/unban`, `/bancheck`, `/banlist`, `/linkbans`, `/unlinkbans`, `/playerhistory`, `/banname`, `/reloadconfig`, and `/whoami` directly from the Satisfactory in-game chat.
+The optional **BanChatCommands** mod provides a full set of in-game chat commands
+including `/ban`, `/tempban`, `/unban`, `/bancheck`, `/banlist`, `/linkbans`,
+`/unlinkbans`, `/playerhistory`, `/banname`, `/reloadconfig`, `/kick`, `/modban`,
+`/warn`, `/warnings`, `/clearwarns`, `/announce`, `/stafflist`, `/reason`,
+`/history`, `/mute`, `/unmute`, and `/whoami` directly from the Satisfactory
+in-game chat.
 
 → See [In-Game Commands](03-ChatCommands.md)
+
+---
+
+## Warning system
+
+BanSystem's `PlayerWarningRegistry` subsystem stores formal warnings issued by
+admins via `/warn`. Warnings are persistent — they survive server restarts and are
+attached to the player's compound EOS UID.
+
+Automatic escalation bans can be configured:
+
+- **Simple threshold** (`AutoBanWarnCount` / `AutoBanWarnMinutes`): ban the player
+  when they reach N warnings, for a fixed duration.
+- **Escalation tiers** (`WarnEscalationTiers`): define multiple thresholds, each
+  with its own ban duration. The highest matching tier wins.
+
+---
+
+## Discord webhook notifications
+
+When `DiscordWebhookUrl` is set, `BanDiscordNotifier` posts a rich embed to the
+configured Discord webhook whenever:
+
+- A player is **banned** (permanent or temporary)
+- A player is **unbanned**
+- A **warning** is issued
+- A player is **kicked**
+- A temporary ban **expires** (opt-in via `bNotifyBanExpired=True`)
+
+---
+
+## Automatic scheduled backups
+
+When `BackupIntervalHours` is non-zero, BanSystem schedules a recurring timer that
+writes a timestamped backup of `bans.json` automatically. This supplements the
+on-demand `POST /bans/backup` REST endpoint.
 
 ---
 

@@ -6,20 +6,31 @@
 
 ## Quick reference
 
-| Command | Admin | Syntax |
-|---------|:-----:|--------|
-| `/ban` | ✅ | `/ban <player\|UID\|IP:address> [reason...]` |
-| `/tempban` | ✅ | `/tempban <player\|UID\|IP:address> <minutes> [reason...]` |
-| `/unban` | ✅ | `/unban <UID\|IP:address>` |
-| `/unbanname` | ✅ | `/unbanname <name_substring>` |
-| `/bancheck` | ✅ | `/bancheck <player\|UID\|IP:address>` |
-| `/banlist` | ✅ | `/banlist [page]` |
-| `/linkbans` | ✅ | `/linkbans <UID1> <UID2>` |
-| `/unlinkbans` | ✅ | `/unlinkbans <UID1> <UID2>` |
-| `/playerhistory` | ✅ | `/playerhistory <name_substring\|UID>` |
-| `/banname` | ✅ | `/banname <name_substring> [reason...]` |
-| `/reloadconfig` | ✅ | `/reloadconfig` |
-| `/whoami` | ❌ | `/whoami` |
+| Command | Role | Syntax |
+|---------|:----:|--------|
+| `/ban` | Admin | `/ban <player\|UID\|IP:address> [reason...]` |
+| `/tempban` | Admin | `/tempban <player\|UID\|IP:address> <minutes> [reason...]` |
+| `/unban` | Admin | `/unban <UID\|IP:address>` |
+| `/unbanname` | Admin | `/unbanname <name_substring>` |
+| `/bancheck` | Admin | `/bancheck <player\|UID\|IP:address>` |
+| `/banlist` | Admin | `/banlist [page]` |
+| `/linkbans` | Admin | `/linkbans <UID1> <UID2>` |
+| `/unlinkbans` | Admin | `/unlinkbans <UID1> <UID2>` |
+| `/playerhistory` | Admin | `/playerhistory <name_substring\|UID>` |
+| `/banname` | Admin | `/banname <name_substring> [reason...]` |
+| `/reloadconfig` | Admin | `/reloadconfig` |
+| `/warn` | Admin | `/warn <player\|UID> <reason...>` |
+| `/warnings` | Admin | `/warnings <player\|UID>` |
+| `/clearwarns` | Admin | `/clearwarns <player\|UID>` |
+| `/reason` | Admin | `/reason <UID>` |
+| `/announce` | Admin | `/announce <message...>` |
+| `/stafflist` | Admin | `/stafflist` |
+| `/kick` | Moderator | `/kick <player\|UID> [reason...]` |
+| `/modban` | Moderator | `/modban <player\|UID> [reason...]` |
+| `/mute` | Moderator | `/mute <player\|UID> [minutes] [reason...]` |
+| `/unmute` | Moderator | `/unmute <player\|UID>` |
+| `/history` | All | `/history` |
+| `/whoami` | All | `/whoami` |
 
 ---
 
@@ -392,4 +403,202 @@ To do the same manually:
 /ban EOS:00020aed06f0a6958c3c067fb4b73d51 Cheating
 /ban IP:1.2.3.4 Cheating
 /linkbans EOS:00020aed06f0a6958c3c067fb4b73d51 IP:1.2.3.4
+```
+
+---
+
+## /kick
+
+```
+/kick <player|UID> [reason...]
+```
+
+Disconnects a player from the server without creating a ban record. The player can
+reconnect immediately after being kicked.
+
+**Requires moderator or admin.**
+
+```
+/kick SomePlayer Stop griefing
+/kick EOS:00020aed06f0a6958c3c067fb4b73d51 Please calm down
+```
+
+> **Tip:** Set `bCreateWarnOnKick=True` in `BanChatCommands.ini` to automatically
+> record a warning entry when a player is kicked, preserving the kick reason in
+> their warning history.
+
+---
+
+## /modban
+
+```
+/modban <player|UID> [reason...]
+```
+
+Issues a **30-minute temporary ban** — a quick moderator shortcut that doesn't
+require specifying a duration. For longer bans, use `/tempban` (admin required).
+
+**Requires moderator or admin.**
+
+```
+/modban SomePlayer Spamming chat
+/modban 00020aed06f0a6958c3c067fb4b73d51 Harassment
+```
+
+---
+
+## /warn
+
+```
+/warn <player|UID> <reason...>
+```
+
+Issues a formal warning to a player. Warnings are stored persistently in
+BanSystem's `PlayerWarningRegistry`. If BanSystem's warning-escalation thresholds
+are configured, reaching a threshold automatically bans the player.
+
+**Requires admin.**
+
+```
+/warn SomePlayer Please follow the server rules
+/warn 00020aed06f0a6958c3c067fb4b73d51 Toxic chat behaviour
+```
+
+---
+
+## /warnings
+
+```
+/warnings <player|UID>
+```
+
+Lists all recorded warnings for a player, showing the warning number, reason,
+issuing admin, and date.
+
+**Requires admin.**
+
+```
+/warnings SomePlayer
+/warnings EOS:00020aed06f0a6958c3c067fb4b73d51
+```
+
+---
+
+## /clearwarns
+
+```
+/clearwarns <player|UID>
+```
+
+Clears all warnings for a player from the `PlayerWarningRegistry` and reports
+how many were removed.
+
+**Requires admin.**
+
+```
+/clearwarns SomePlayer
+/clearwarns EOS:00020aed06f0a6958c3c067fb4b73d51
+```
+
+---
+
+## /announce
+
+```
+/announce <message...>
+```
+
+Broadcasts a message to **all connected players** via the in-game chat. Also
+mirrors the announcement to the bridged Discord channel (via DiscordBridge, if
+installed).
+
+**Requires admin.**
+
+```
+/announce Server restarting in 5 minutes — please save and disconnect!
+/announce Welcome to the server! Type /whoami to see your UID.
+```
+
+---
+
+## /stafflist
+
+```
+/stafflist
+```
+
+Lists all currently-online admins and moderators so players know who to contact
+for help or to report rule violations.
+
+**Requires admin.** (Server console can always run this.)
+
+---
+
+## /reason
+
+```
+/reason <UID>
+```
+
+Displays the ban reason stored for a given compound UID. Useful when reviewing
+a `/banlist` entry to recall why a player was banned.
+
+**Requires admin.**
+
+```
+/reason EOS:00020aed06f0a6958c3c067fb4b73d51
+/reason IP:1.2.3.4
+```
+
+---
+
+## /history
+
+```
+/history
+```
+
+Shows the calling player's own past session records and any warnings they have
+received. No admin required — any connected player can run this.
+
+**No role required.**
+
+---
+
+## /mute
+
+```
+/mute <player|UID> [minutes] [reason...]
+```
+
+Silences a player's in-game chat messages. Mutes are held in the in-memory
+`UMuteRegistry` subsystem and are **not** persisted — they are cleared when the
+server restarts.
+
+- `minutes`: Optional duration in minutes. `0` or omitted = mute until manually
+  unmuted or server restart.
+
+**Requires moderator or admin.**
+
+```
+/mute SpamBot 30 Spamming chat
+/mute 00020aed06f0a6958c3c067fb4b73d51 Harassment
+/mute SomePlayer          ; permanent (until unmuted or restart)
+```
+
+---
+
+## /unmute
+
+```
+/unmute <player|UID>
+```
+
+Removes an in-memory mute immediately.
+
+**Requires moderator or admin.**
+
+```
+/unmute SpamBot
+/unmute 00020aed06f0a6958c3c067fb4b73d51
 ```
