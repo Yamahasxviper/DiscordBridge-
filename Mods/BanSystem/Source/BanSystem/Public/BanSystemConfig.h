@@ -63,6 +63,40 @@ public:
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
     int32 MaxBackups = 5;
 
+    /**
+     * Optional API key for authenticating mutating REST API requests (POST, DELETE, PATCH).
+     * When non-empty, all mutating endpoints require the header: X-Api-Key: <value>
+     * Read-only endpoints (GET) are never gated.
+     * Leave empty to disable API key authentication (default; only safe on a firewalled server).
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    FString RestApiKey;
+
+    /**
+     * Optional Discord webhook URL for ban/unban/warn/kick notifications.
+     * When set, BanDiscordNotifier posts an embed to this URL whenever a ban is
+     * created or removed, a warning is issued, or a player is kicked.
+     * Leave empty to disable Discord notifications (default).
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    FString DiscordWebhookUrl;
+
+    /**
+     * Number of warnings before an automatic permanent ban is issued (default: 0 = disabled).
+     * When a player reaches this many warnings via /warn, they are automatically permanently
+     * banned with reason "Auto-banned: reached warning threshold".
+     * Set to 0 to disable auto-banning on warnings.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    int32 AutoBanWarnCount = 0;
+
+    /**
+     * Duration in minutes for the auto-ban issued when AutoBanWarnCount is reached (default: 0 = permanent).
+     * Set to 0 for a permanent auto-ban.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    int32 AutoBanWarnMinutes = 0;
+
     /** Returns the singleton config instance. */
     static const UBanSystemConfig* Get();
 };
