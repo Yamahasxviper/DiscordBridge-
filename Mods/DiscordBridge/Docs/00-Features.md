@@ -18,6 +18,9 @@ is configured through a single INI file with no external service or dashboard re
   messages to Discord.
 - Messages from other Discord bots can be silently dropped (`IgnoreBotMessages=True`)
   to prevent echo loops when another bot shares the channel.
+- **Find-and-replace blocklist** (`ChatRelayBlocklistReplacements`): substitute matched
+  patterns with a replacement string (default `***`) before relaying to Discord —
+  separate from the hard-drop blocklist (`ChatRelayBlocklist`).
 
 → See [Chat Bridge](03-ChatBridge.md)
 
@@ -60,6 +63,10 @@ is configured through a single INI file with no external service or dashboard re
 - Each message is independently configurable (`PlayerJoinMessage`,
   `PlayerLeaveMessage`, `PlayerTimeoutMessage`).
 - Join messages support additional placeholders: `%SteamId%` and `%EOSProductUserId%`.
+- **Rich embed mode** (`bUseEmbedsForPlayerEvents=True`): post events as Discord embeds
+  instead of plain text — required for reaction voting.
+- **Admin join log** (`PlayerJoinAdminChannelId`): a private channel receives full join
+  details including EOS PUID and IP address, keeping sensitive data off the public feed.
 - Disabled by default — set `PlayerEventsEnabled=True` to opt in.
 
 → See [Player Notifications](04-PlayerNotifications.md)
@@ -92,6 +99,75 @@ is configured through a single INI file with no external service or dashboard re
 | `!whitelist role remove <discord_id>` | Revoke the whitelist role *(Discord only)* |
 
 → See [Whitelist](05-Whitelist.md)
+
+---
+
+## Game phase and schematic unlock announcements
+
+- Posts a Discord message whenever the server's **game phase** advances (e.g. Pioneer
+  → Ficsit Pioneer Candidate).
+- Posts a Discord message whenever a **schematic (milestone)** is purchased on the server.
+- Both event types can be routed to a dedicated channel (`PhaseEventsChannelId`,
+  `SchematicEventsChannelId`) or left to fall back to `ChannelId`.
+
+→ See [Game Events](10-GameEvents.md)
+
+---
+
+## Discord stats commands
+
+- **`!stats`** — any Discord user can type this in the bridged channel to get a live
+  server summary (player count, uptime, and aggregate session counters).
+- **`!playerstats <PlayerName>`** — retrieves per-player session counters (time online,
+  messages sent, etc.) for any player who has been seen on the server.
+- Both command prefixes are configurable and can be disabled by clearing the value.
+
+→ See [Stats Commands](11-StatsCommands.md)
+
+---
+
+## `!players` command
+
+- Typing `!players` in the bridged channel returns the current online player list.
+- The response can be routed to a dedicated channel (`PlayersCommandChannelId`) or
+  sent to the originating channel.
+
+---
+
+## Reaction-based vote-kick
+
+- When enabled, a rich embed is posted for each joining player.
+- Discord members react with 👎 to vote against the player.
+- Once the configurable threshold (`VoteKickThreshold`) is reached within the vote
+  window (`VoteWindowMinutes`), the player is automatically kicked.
+- Requires `bUseEmbedsForPlayerEvents=True`.
+
+→ See [Reaction Voting](12-ReactionVoting.md)
+
+---
+
+## AFK auto-kick
+
+- Players who are idle for longer than `AfkKickMinutes` minutes are automatically
+  kicked with a configurable reason (`AfkKickReason`).
+- Disabled by default — set `AfkKickMinutes` to a positive value to enable.
+
+→ See [AFK Kick](13-AfkKick.md)
+
+---
+
+## Ban events channel
+
+- When used alongside **BanSystem**, ban and unban actions can be posted to a
+  dedicated Discord channel (`BanEventsChannelId`).
+- Falls back to `ChannelId` when the setting is empty.
+
+---
+
+## Discord invite URL broadcast
+
+- Set `DiscordInviteUrl` to automatically announce the server's Discord invite link
+  to players in-game.
 
 ---
 

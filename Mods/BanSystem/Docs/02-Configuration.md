@@ -97,6 +97,128 @@ RestApiPort=3000
 
 ; How many backup files to keep
 MaxBackups=5
+
+; API key for REST mutating requests (leave empty to disable auth)
+RestApiKey=
+
+; Discord webhook for ban/warn/kick notifications (leave empty to disable)
+DiscordWebhookUrl=
+
+; Auto-ban after N warnings (0 = disabled)
+AutoBanWarnCount=0
+AutoBanWarnMinutes=0
+```
+
+---
+
+## `RestApiKey`
+
+Optional API key that gates all mutating REST endpoints (`POST`, `DELETE`, `PATCH`).
+When non-empty, requests to those endpoints must include the header:
+
+```
+X-Api-Key: <value>
+```
+
+Read-only `GET` endpoints are never gated.
+
+Leave **empty** to disable API key authentication (safe only on a firewalled server).
+
+**Default:** *(empty — no authentication)*
+
+```ini
+RestApiKey=mysecretkey
+```
+
+---
+
+## `DiscordWebhookUrl`
+
+Optional Discord webhook URL. When set, `BanDiscordNotifier` posts an embed to
+this URL whenever a ban is created or removed, a warning is issued, or a player
+is kicked.
+
+Leave **empty** to disable Discord notifications (default).
+
+```ini
+DiscordWebhookUrl=https://discord.com/api/webhooks/...
+```
+
+---
+
+## `AutoBanWarnCount`
+
+The number of warnings that trigger an **automatic ban** (default: `0` = disabled).
+When a player reaches this many warnings via `/warn`, BanSystem bans them
+automatically with reason `"Auto-banned: reached warning threshold"`.
+
+```ini
+AutoBanWarnCount=3
+```
+
+---
+
+## `AutoBanWarnMinutes`
+
+Duration in minutes for the automatic ban issued when `AutoBanWarnCount` is
+reached. Set to `0` for a permanent auto-ban.
+
+```ini
+AutoBanWarnMinutes=1440   ; 24-hour auto-ban
+```
+
+---
+
+## `WarnEscalationTiers`
+
+Warning-escalation tiers for fine-grained automatic bans based on warning count.
+Each tier specifies a `WarnCount` threshold and a `DurationMinutes` (0 = permanent).
+Tiers are evaluated in ascending order; the highest matching tier wins.
+
+`AutoBanWarnCount` / `AutoBanWarnMinutes` act as a simple single-tier fallback when
+this array is empty.
+
+```ini
++WarnEscalationTiers=(WarnCount=2,DurationMinutes=30)
++WarnEscalationTiers=(WarnCount=3,DurationMinutes=1440)
++WarnEscalationTiers=(WarnCount=5,DurationMinutes=0)
+```
+
+---
+
+## `SessionRetentionDays`
+
+Number of days to keep player session records in `player_sessions.json`.
+Records older than this value are pruned when `POST /players/prune` is called.
+Set to `0` to keep records forever (default).
+
+```ini
+SessionRetentionDays=90
+```
+
+---
+
+## `BackupIntervalHours`
+
+Interval in hours between automatic database backups. When non-zero, BanSystem
+schedules a recurring timer that calls `UBanDatabase::Backup()` on this interval.
+Set to `0` to rely solely on the manual `POST /bans/backup` endpoint (default).
+
+```ini
+BackupIntervalHours=24
+```
+
+---
+
+## `bNotifyBanExpired`
+
+When `True` and `DiscordWebhookUrl` is set, BanSystem posts a Discord notification
+whenever a temporary ban expires and the player is allowed to reconnect.
+
+**Default:** `False`
+
+```ini
+bNotifyBanExpired=True
 ```
 
 ---
