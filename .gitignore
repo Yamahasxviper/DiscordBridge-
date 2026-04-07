@@ -33,6 +33,8 @@ Mods/**/Metadata/Crypto.json
 !Mods/DiscordBridge/
 !Mods/SMLWebSocket/
 !Mods/TicketSystem/
+!Mods/BanSystem/
+!Mods/BanChatCommands/
 
 # Mods binaries
 Mods/**/Binaries/*
