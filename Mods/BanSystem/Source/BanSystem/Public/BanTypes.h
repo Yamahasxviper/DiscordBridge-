@@ -109,3 +109,93 @@ struct BANSYSTEM_API FBanEntry
             *Reason);
     }
 };
+
+/**
+ * A single warning record issued to a player by an admin.
+ */
+USTRUCT(BlueprintType)
+struct BANSYSTEM_API FWarningEntry
+{
+    GENERATED_BODY()
+
+    /** Auto-incremented integer primary key (0 when not yet persisted). */
+    UPROPERTY(BlueprintReadOnly, Category = "Ban System")
+    int64 Id = 0;
+
+    /** Compound UID of the warned player: "EOS:xxx". */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString Uid;
+
+    /** Display name at time of warning (informational, may be stale). */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString PlayerName;
+
+    /** Reason for the warning. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString Reason;
+
+    /** Admin username or "console" who issued the warning. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString WarnedBy;
+
+    /** UTC timestamp when the warning was issued. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FDateTime WarnDate;
+
+    FWarningEntry()
+        : Id(0)
+        , WarnDate(FDateTime::UtcNow())
+    {}
+
+    /** Warnings do not expire; always returns false. */
+    bool IsExpired() const { return false; }
+};
+
+/**
+ * A single audit log entry recording an admin action.
+ */
+USTRUCT(BlueprintType)
+struct BANSYSTEM_API FAuditEntry
+{
+    GENERATED_BODY()
+
+    /** Auto-incremented integer primary key (0 when not yet persisted). */
+    UPROPERTY(BlueprintReadOnly, Category = "Ban System")
+    int64 Id = 0;
+
+    /**
+     * Action type: "ban", "tempban", "unban", "kick", "warn", "clearwarns",
+     * "whitelist_add", "whitelist_remove".
+     */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString Action;
+
+    /** Compound UID of the affected player: "EOS:xxx". */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString TargetUid;
+
+    /** Display name of the affected player at time of action (may be empty). */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString TargetName;
+
+    /** Compound UID of the admin who performed the action, or "console". */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString AdminUid;
+
+    /** Display name of the admin (may be empty for console actions). */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString AdminName;
+
+    /** Optional extra details, e.g. reason or duration string. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString Details;
+
+    /** UTC timestamp when the action was performed. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FDateTime Timestamp;
+
+    FAuditEntry()
+        : Id(0)
+        , Timestamp(FDateTime::UtcNow())
+    {}
+};

@@ -23,3 +23,21 @@ bool UBanChatCommandsConfig::IsAdminUid(const FString& Uid) const
     }
     return false;
 }
+
+bool UBanChatCommandsConfig::IsModeratorUid(const FString& Uid) const
+{
+    // Admins are always moderators.
+    if (IsAdminUid(Uid)) return true;
+
+    if (Uid.IsEmpty()) return false;
+
+    FString Platform, RawId;
+    UBanDatabase::ParseUid(Uid, Platform, RawId);
+
+    if (Platform == TEXT("EOS"))
+    {
+        for (const FString& Id : ModeratorEosPUIDs)
+            if (Id.Equals(RawId, ESearchCase::IgnoreCase)) return true;
+    }
+    return false;
+}

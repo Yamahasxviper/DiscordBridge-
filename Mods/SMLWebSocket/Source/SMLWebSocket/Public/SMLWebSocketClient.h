@@ -4,9 +4,27 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
+#include <atomic>
 #include "SMLWebSocketClient.generated.h"
 
 class FSMLWebSocketRunnable;
+
+/**
+ * Connection state of the WebSocket client.
+ * Query via GetConnectionState() — safe to call from any thread.
+ */
+UENUM(BlueprintType)
+enum class EWebSocketState : uint8
+{
+	/** Not connected and not attempting to connect. */
+	Disconnected    UMETA(DisplayName="Disconnected"),
+	/** TCP/TLS handshake and HTTP upgrade in progress. */
+	Connecting      UMETA(DisplayName="Connecting"),
+	/** WebSocket handshake succeeded; messages can be sent and received. */
+	Connected       UMETA(DisplayName="Connected"),
+	/** Close frame sent; waiting for the server's close frame. */
+	Closing         UMETA(DisplayName="Closing"),
+};
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FSMLWebSocketOnConnectedDelegate);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FSMLWebSocketOnMessageDelegate, const FString&, Message);
@@ -14,6 +32,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FSMLWebSocketOnBinaryMessageDelegat
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FSMLWebSocketOnClosedDelegate, int32, StatusCode, const FString&, Reason);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FSMLWebSocketOnErrorDelegate, const FString&, ErrorMessage);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FSMLWebSocketOnReconnectingDelegate, int32, AttemptNumber, float, DelaySeconds);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FSMLWebSocketOnReconnectedDelegate);
 
 /**
  * Custom WebSocket client with SSL/OpenSSL support and automatic reconnect.
@@ -81,6 +100,15 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="SML|WebSocket")
 	FSMLWebSocketOnReconnectingDelegate OnReconnecting;
 
+	/**
+	 * Called on the game thread when a reconnect attempt succeeds (distinct from
+	 * OnConnected, which fires on both the initial connection and reconnects).
+	 * Use this to re-send authentication payloads (e.g. Discord IDENTIFY) after
+	 * a reconnect without sending them on the very first connection.
+	 */
+	UPROPERTY(BlueprintAssignable, Category="SML|WebSocket")
+	FSMLWebSocketOnReconnectedDelegate OnReconnected;
+
 	// ── Reconnect configuration ───────────────────────────────────────────────
 
 	/**
@@ -109,6 +137,14 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket", meta=(ClampMin="0", UIMin="0"))
 	int32 MaxReconnectAttempts{0};
+
+	/**
+	 * When true, text messages sent while disconnected are queued and flushed
+	 * automatically when the connection (re)connects. Default: false.
+	 * Only text messages are queued; binary messages sent while disconnected are dropped.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket")
+	bool bQueueMessagesWhileDisconnected{false};
 
 	// ── Factory ───────────────────────────────────────────────────────────────
 
@@ -182,6 +218,13 @@ public:
 	UFUNCTION(BlueprintPure, Category="SML|WebSocket")
 	bool IsConnected() const;
 
+	/**
+	 * Returns the current connection state.
+	 * Safe to call from any thread (uses atomic reads internally).
+	 */
+	UFUNCTION(BlueprintPure, Category="SML|WebSocket")
+	EWebSocketState GetConnectionState() const;
+
 private:
 	friend class FSMLWebSocketRunnable;
 
@@ -199,6 +242,19 @@ private:
 	FRunnableThread* RunnableThread{nullptr};
 
 	FThreadSafeBool bIsConnected{false};
+
+	/** Tracks the fine-grained connection state; 0=Disconnected 1=Connecting 2=Connected 3=Closing. */
+	std::atomic<uint8> ConnectionState{0u};
+
+	/** True once the first successful connection has been made; used to distinguish reconnects. */
+	bool bHasConnectedOnce{false};
+
+	/**
+	 * Outgoing messages queued while disconnected. Flushed on successful connect/reconnect.
+	 * Thread-safe via QueueMutex.
+	 */
+	TArray<FString> PendingSendQueue;
+	mutable FCriticalSection QueueMutex;
 
 	/**
 	 * Monotonically-increasing counter that is incremented each time

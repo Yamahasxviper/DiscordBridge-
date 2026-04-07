@@ -961,6 +961,47 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 		return; // Do not relay whitelist commands to in-game chat.
 	}
 
+	// Feature 2: !players command – reply with the list of online players.
+	if (!Config.PlayersCommandPrefix.IsEmpty() &&
+	    Content.Equals(Config.PlayersCommandPrefix, ESearchCase::IgnoreCase))
+	{
+		FString PlayersReply;
+		if (UWorld* World = GetWorld())
+		{
+			if (AGameStateBase* GS = World->GetGameState<AGameStateBase>())
+			{
+				TArray<FString> Names;
+				for (APlayerState* PS : GS->PlayerArray)
+				{
+					if (PS)
+					{
+						Names.Add(PS->GetPlayerName());
+					}
+				}
+				if (Names.Num() == 0)
+				{
+					PlayersReply = TEXT("No players currently online.");
+				}
+				else
+				{
+					PlayersReply = FString::Printf(
+						TEXT("**Online players (%d):** %s"),
+						Names.Num(), *FString::Join(Names, TEXT(", ")));
+				}
+			}
+		}
+		if (PlayersReply.IsEmpty())
+		{
+			PlayersReply = TEXT("No players currently online.");
+		}
+
+		const FString& PlayersChannel = Config.PlayersCommandChannelId.IsEmpty()
+			? Config.ChannelId
+			: Config.PlayersCommandChannelId;
+		SendMessageToChannel(PlayersChannel, PlayersReply);
+		return; // Do not relay the command itself to in-game chat.
+	}
+
 	OnDiscordMessageReceived.Broadcast(Username, Content);
 }
 
@@ -1724,6 +1765,35 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 		return; // Do not forward commands to Discord.
 	}
 
+	// Feature 3: /discord in-game command – reply with the invite link.
+	if (MessageText.Equals(TEXT("/discord"), ESearchCase::IgnoreCase) ||
+	    MessageText.Equals(TEXT("!discord"), ESearchCase::IgnoreCase))
+	{
+		if (!Config.DiscordInviteUrl.IsEmpty())
+		{
+			SendGameChatStatusMessage(
+				FString::Printf(TEXT("[DiscordBridge] Join our Discord: %s"), *Config.DiscordInviteUrl));
+		}
+		return; // Do not relay this command to Discord.
+	}
+
+	// Feature 1: Chat relay blocklist – silently drop messages that contain a
+	// blocked keyword before forwarding them to Discord.
+	if (Config.ChatRelayBlocklist.Num() > 0)
+	{
+		for (const FString& Keyword : Config.ChatRelayBlocklist)
+		{
+			if (!Keyword.IsEmpty() &&
+			    MessageText.Contains(Keyword, ESearchCase::IgnoreCase))
+			{
+				UE_LOG(LogTemp, Verbose,
+				       TEXT("DiscordBridge: Chat message from '%s' blocked by ChatRelayBlocklist (keyword: '%s')."),
+				       *PlayerName, *Keyword);
+				return;
+			}
+		}
+	}
+
 	SendGameMessageToDiscord(PlayerName, MessageText);
 }
 
@@ -2081,19 +2151,25 @@ void UDiscordBridgeSubsystem::SendPlayerJoinNotification(const FString& PlayerNa
 	}
 
 	// ── Public join message (name only, no sensitive data) ───────────────────
-	if (!Config.PlayerJoinMessage.IsEmpty())
+	if (!Config.PlayerJoinMessage.IsEmpty() || Config.bUseEmbedsForPlayerEvents)
 	{
 		const FString& EffectiveChannelId = Config.PlayerEventsChannelId.IsEmpty()
 			? Config.ChannelId
 			: Config.PlayerEventsChannelId;
 
-		FString Message = Config.PlayerJoinMessage;
-		Message = Message.Replace(TEXT("%PlayerName%"), *PlayerName);
-
 		UE_LOG(LogTemp, Log,
 		       TEXT("DiscordBridge: Player join notification for '%s'"), *PlayerName);
 
-		SendMessageToChannel(EffectiveChannelId, Message);
+		if (Config.bUseEmbedsForPlayerEvents)
+		{
+			SendPlayerEventEmbed(EffectiveChannelId, TEXT("Player Joined"), 3066993, PlayerName);
+		}
+		else if (!Config.PlayerJoinMessage.IsEmpty())
+		{
+			FString Message = Config.PlayerJoinMessage;
+			Message = Message.Replace(TEXT("%PlayerName%"), *PlayerName);
+			SendMessageToChannel(EffectiveChannelId, Message);
+		}
 	}
 
 	// ── Private admin message (EOS PUID + IP, admin channel only) ────────────
@@ -2143,6 +2219,20 @@ void UDiscordBridgeSubsystem::OnLogout(AGameModeBase* /*GameMode*/, AController*
 	// PlayerTimeoutMessage is empty so a single leave message covers all cases.
 	const bool bIsTimeout = (PC->GetNetConnection() == nullptr);
 
+	UE_LOG(LogTemp, Log,
+	       TEXT("DiscordBridge: Player %s notification for '%s'"),
+	       bIsTimeout ? TEXT("timeout") : TEXT("leave"),
+	       *PlayerName);
+
+	if (Config.bUseEmbedsForPlayerEvents)
+	{
+		if (bIsTimeout)
+			SendPlayerEventEmbed(EffectiveChannelId, TEXT("Player Timed Out"), 16776960, PlayerName);
+		else
+			SendPlayerEventEmbed(EffectiveChannelId, TEXT("Player Left"), 15158332, PlayerName);
+		return;
+	}
+
 	FString Message;
 	if (bIsTimeout && !Config.PlayerTimeoutMessage.IsEmpty())
 	{
@@ -2159,12 +2249,6 @@ void UDiscordBridgeSubsystem::OnLogout(AGameModeBase* /*GameMode*/, AController*
 	}
 
 	Message = Message.Replace(TEXT("%PlayerName%"), *PlayerName);
-
-	UE_LOG(LogTemp, Log,
-	       TEXT("DiscordBridge: Player %s notification for '%s'"),
-	       bIsTimeout ? TEXT("timeout") : TEXT("leave"),
-	       *PlayerName);
-
 	SendMessageToChannel(EffectiveChannelId, Message);
 }
 
@@ -2578,6 +2662,34 @@ void UDiscordBridgeSubsystem::FetchWhitelistRoleMembersPage(const FString& After
 // ─────────────────────────────────────────────────────────────────────────────
 // In-game chat command helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::SendPlayerEventEmbed(const FString& TargetChannelId,
+                                                   const FString& Title,
+                                                   int32 Color,
+                                                   const FString& PlayerName)
+{
+	TSharedPtr<FJsonObject> Field = MakeShared<FJsonObject>();
+	Field->SetStringField(TEXT("name"),   TEXT("Player"));
+	Field->SetStringField(TEXT("value"),  PlayerName);
+	Field->SetBoolField  (TEXT("inline"), true);
+
+	TArray<TSharedPtr<FJsonValue>> Fields;
+	Fields.Add(MakeShared<FJsonValueObject>(Field));
+
+	TSharedPtr<FJsonObject> Embed = MakeShared<FJsonObject>();
+	Embed->SetStringField(TEXT("title"),     Title);
+	Embed->SetNumberField(TEXT("color"),     Color);
+	Embed->SetArrayField (TEXT("fields"),    Fields);
+	Embed->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+
+	TArray<TSharedPtr<FJsonValue>> Embeds;
+	Embeds.Add(MakeShared<FJsonValueObject>(Embed));
+
+	TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetArrayField(TEXT("embeds"), Embeds);
+
+	SendMessageBodyToChannel(TargetChannelId, Body);
+}
 
 void UDiscordBridgeSubsystem::SendGameChatStatusMessage(const FString& Message)
 {

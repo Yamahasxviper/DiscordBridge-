@@ -70,9 +70,14 @@ void FBanChatCommandsModule::StartupModule()
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AWhoAmIChatCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), ABanNameChatCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AReloadConfigChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AKickChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AModBanChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AWarnChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AWarningsChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AClearWarnsChatCommand::StaticClass());
 
             UE_LOG(LogBanChatCommands, Log,
-                TEXT("BanChatCommands: Registered 12 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig)."));;
+                TEXT("BanChatCommands: Registered 17 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns)."));;
         }
     );
 
@@ -137,12 +142,16 @@ void FBanChatCommandsModule::BackupConfigIfNeeded()
     FString Content =
         FString(TEXT("; BanChatCommands admin configuration.\n"))
         + TEXT(";\n")
-        + TEXT("; Edit this file to configure the admin list persistently.\n")
+        + TEXT("; Edit this file to configure the admin and moderator lists persistently.\n")
         + TEXT("; It is never overwritten by mod updates.\n")
         + TEXT(";\n")
         + TEXT("; EOS Product User IDs -- Each +AdminEosPUIDs= entry grants that player\n")
         + TEXT("; permission to run /ban, /tempban, /unban, /bancheck, /banlist,\n")
-        + TEXT("; /linkbans, /unlinkbans, and /playerhistory from in-game chat.\n")
+        + TEXT("; /linkbans, /unlinkbans, /playerhistory, /warn, /warnings, and /clearwarns\n")
+        + TEXT("; from in-game chat.\n")
+        + TEXT(";\n")
+        + TEXT("; Each +ModeratorEosPUIDs= entry grants permission to run /kick and /modban only.\n")
+        + TEXT("; Admins automatically have moderator permissions too.\n")
         + TEXT(";\n")
         + TEXT("; EOS PUIDs are 32-character hex strings.  Players can find their own\n")
         + TEXT("; PUID by running /whoami in-game.\n")
@@ -150,7 +159,7 @@ void FBanChatCommandsModule::BackupConfigIfNeeded()
         + TEXT("; Note: On CSS Dedicated Server, all players are identified by their EOS\n")
         + TEXT("; Product User ID regardless of their launch platform (Steam, Epic, etc.).\n")
         + TEXT(";\n")
-        + TEXT("; If the list is empty, those commands are only usable from the server\n")
+        + TEXT("; If the admin list is empty, those commands are only usable from the server\n")
         + TEXT("; console.  /whoami is always available to all players.\n")
         + TEXT("\n")
         + TEXT("[/Script/BanChatCommands.BanChatCommandsConfig]\n");
@@ -164,6 +173,20 @@ void FBanChatCommandsModule::BackupConfigIfNeeded()
     {
         Content += TEXT("; +AdminEosPUIDs=YOUR_EOS_PUID_HERE\n");
     }
+
+    Content += TEXT("\n");
+
+    for (const FString& Puid : Cfg->ModeratorEosPUIDs)
+    {
+        Content += TEXT("+ModeratorEosPUIDs=") + Puid + TEXT("\n");
+    }
+
+    if (Cfg->ModeratorEosPUIDs.IsEmpty())
+    {
+        Content += TEXT("; +ModeratorEosPUIDs=MODERATOR_EOS_PUID_HERE\n");
+    }
+
+    Content += FString::Printf(TEXT("BanListPageSize=%d\n"), Cfg->BanListPageSize);
 
     IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
     PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
@@ -205,15 +228,20 @@ void FBanChatCommandsModule::RestoreDefaultConfigIfNeeded()
     const FString Content =
         FString(TEXT("; BanChatCommands admin configuration.\n"))
         + TEXT(";\n")
-        + TEXT("; RECOMMENDED: place your admin list in\n")
+        + TEXT("; RECOMMENDED: place your admin and moderator lists in\n")
         + TEXT(";   Saved/BanChatCommands/BanChatCommands.ini\n")
         + TEXT("; using the section header below.  That file is never overwritten by mod\n")
-        + TEXT("; updates.  BanChatCommands writes your current admin list there on every\n")
-        + TEXT("; server start so it survives any wipe of the mod directory.\n")
+        + TEXT("; updates.  BanChatCommands writes your current lists there on every\n")
+        + TEXT("; server start so they survive any wipe of the mod directory.\n")
         + TEXT(";\n")
         + TEXT("; EOS Product User IDs -- Each +AdminEosPUIDs= entry grants that player permission to run\n")
-        + TEXT("; /ban, /tempban, /unban, /bancheck, /banlist, /linkbans, /unlinkbans, and /playerhistory\n")
-        + TEXT("; from in-game chat.\n")
+        + TEXT("; /ban, /tempban, /unban, /bancheck, /banlist, /linkbans, /unlinkbans, /playerhistory,\n")
+        + TEXT("; /warn, /warnings, and /clearwarns from in-game chat.\n")
+        + TEXT(";\n")
+        + TEXT("; Each +ModeratorEosPUIDs= entry grants permission to run /kick and /modban only.\n")
+        + TEXT("; Admins automatically have moderator permissions too.\n")
+        + TEXT(";\n")
+        + TEXT("; BanListPageSize controls how many bans are shown per page in /banlist (default: 10, max: 50).\n")
         + TEXT(";\n")
         + TEXT("; EOS PUIDs are 32-character hex strings.  Players can find their own PUID by running\n")
         + TEXT("; /whoami in-game.\n")
@@ -221,15 +249,19 @@ void FBanChatCommandsModule::RestoreDefaultConfigIfNeeded()
         + TEXT("; Note: On CSS Dedicated Server, all players are identified by their EOS Product User ID\n")
         + TEXT("; regardless of their launch platform (Steam, Epic, etc.).\n")
         + TEXT(";\n")
-        + TEXT("; If the list is empty, those commands are only usable from the server console.\n")
+        + TEXT("; If the admin list is empty, those commands are only usable from the server console.\n")
         + TEXT("; /whoami is always available to all players regardless of this setting.\n")
         + TEXT(";\n")
         + TEXT("; Example:\n")
         + TEXT(";   [/Script/BanChatCommands.BanChatCommandsConfig]\n")
         + TEXT(";   +AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d51\n")
+        + TEXT(";   +ModeratorEosPUIDs=aabbccdd11223344aabbccdd11223344\n")
+        + TEXT(";   BanListPageSize=10\n")
         + TEXT("\n")
         + TEXT("[/Script/BanChatCommands.BanChatCommandsConfig]\n")
-        + TEXT("; +AdminEosPUIDs=YOUR_EOS_PUID_HERE\n");
+        + TEXT("; +AdminEosPUIDs=YOUR_EOS_PUID_HERE\n")
+        + TEXT("; +ModeratorEosPUIDs=MODERATOR_EOS_PUID_HERE\n")
+        + TEXT("BanListPageSize=10\n");
 
     PlatformFile.CreateDirectoryTree(*FPaths::GetPath(DefaultIniPath));
 

@@ -612,6 +612,24 @@ private:
 	void SendGameChatStatusMessage(const FString& Message);
 
 	/**
+	 * Posts a colour-coded Discord embed to TargetChannelId for a player event.
+	 * Called by SendPlayerJoinNotification and OnLogout when bUseEmbedsForPlayerEvents
+	 * is true.
+	 *
+	 * @param TargetChannelId  Snowflake ID of the destination channel.
+	 * @param Title            Embed title, e.g. "Player Joined".
+	 * @param Color            Discord sidebar colour as decimal integer.
+	 *                           3066993  = green  (join)
+	 *                           15158332 = red    (leave)
+	 *                           16776960 = orange (timeout)
+	 * @param PlayerName       Player name shown in the embed "Player" field.
+	 */
+	void SendPlayerEventEmbed(const FString& TargetChannelId,
+	                          const FString& Title,
+	                          int32 Color,
+	                          const FString& PlayerName);
+
+	/**
 	 * Assign or revoke a Discord role from a guild member via the REST API.
 	 * No-op when RoleId, GuildId, or BotToken is empty.
 	 *

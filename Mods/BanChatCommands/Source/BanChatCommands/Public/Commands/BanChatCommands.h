@@ -149,9 +149,6 @@ public:
         UCommandSender* Sender,
         const TArray<FString>& Arguments,
         const FString& Label) override;
-
-private:
-    static constexpr int32 PageSize = 10;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -362,6 +359,149 @@ class BANCHATCOMMANDS_API AReloadConfigChatCommand : public AChatCommandInstance
     GENERATED_BODY()
 public:
     AReloadConfigChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /kick  — disconnect a player without banning them
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /kick <player|PUID> [reason...]
+ *
+ * Kicks a connected player without banning them.
+ * Player resolution follows the same rules as /ban.
+ *
+ * Requires admin OR moderator (AdminEosPUIDs or ModeratorEosPUIDs).
+ *
+ * Examples:
+ *   /kick BadPlayer Stop griefing
+ *   /kick 00020aed06f0a6958c3c067fb4b73d51 AFK too long
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AKickChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AKickChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /modban  — 30-minute temporary ban usable by moderators
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /modban <player|PUID> [reason...]
+ *
+ * Temporarily bans a player for 30 minutes.  Designed for moderators who do
+ * not have access to /tempban or /ban.  Player resolution follows the same
+ * rules as /ban.
+ *
+ * Requires admin OR moderator (AdminEosPUIDs or ModeratorEosPUIDs).
+ *
+ * Examples:
+ *   /modban BadPlayer Spamming chat
+ *   /modban 00020aed06f0a6958c3c067fb4b73d51 Harassment
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AModBanChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AModBanChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /warn  — issue a formal warning to a player
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /warn <player|PUID> <reason...>
+ *
+ * Issues a formal warning to a player.  Warnings are stored persistently in
+ * the PlayerWarningRegistry.  If the player's total warning count reaches
+ * AutoBanWarnCount (BanSystem config), they are automatically banned for
+ * AutoBanWarnMinutes minutes (0 = permanent).
+ *
+ * Requires admin.
+ *
+ * Examples:
+ *   /warn BadPlayer Please stop griefing other players
+ *   /warn 00020aed06f0a6958c3c067fb4b73d51 Toxic chat behaviour
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AWarnChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AWarnChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /warnings  — list all warnings for a player
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /warnings <player|PUID>
+ *
+ * Lists all recorded warnings for a player, showing the warning number,
+ * reason, issuing admin, and date.
+ *
+ * Requires admin.
+ *
+ * Examples:
+ *   /warnings BadPlayer
+ *   /warnings 00020aed06f0a6958c3c067fb4b73d51
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AWarningsChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AWarningsChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /clearwarns  — remove all warnings for a player
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /clearwarns <player|PUID>
+ *
+ * Clears all warnings for a player from the PlayerWarningRegistry and
+ * reports how many warnings were removed.
+ *
+ * Requires admin.
+ *
+ * Examples:
+ *   /clearwarns BadPlayer
+ *   /clearwarns 00020aed06f0a6958c3c067fb4b73d51
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AClearWarnsChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AClearWarnsChatCommand();
     virtual EExecutionStatus ExecuteCommand_Implementation(
         UCommandSender* Sender,
         const TArray<FString>& Arguments,
