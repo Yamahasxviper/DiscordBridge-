@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Command/ChatCommandInstance.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "BanChatCommands.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogBanChatCommands, Log, All);
@@ -846,8 +847,6 @@ public:
 // ─────────────────────────────────────────────────────────────────────────────
 //  UPlayerNoteRegistry  — per-player private admin notes
 // ─────────────────────────────────────────────────────────────────────────────
-
-#include "Subsystems/GameInstanceSubsystem.h"
 
 USTRUCT(BlueprintType)
 struct BANCHATCOMMANDS_API FPlayerNoteEntry
