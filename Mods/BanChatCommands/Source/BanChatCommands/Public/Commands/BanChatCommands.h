@@ -507,3 +507,168 @@ public:
         const TArray<FString>& Arguments,
         const FString& Label) override;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /announce  — server-wide broadcast
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /announce <message...>
+ *
+ * Sends a server-wide system message to all connected players.
+ * Also mirrors the announcement to Discord via the existing bridge.
+ *
+ * Requires admin.
+ *
+ * Examples:
+ *   /announce Server restarting in 5 minutes!
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AAnnounceChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AAnnounceChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /stafflist  — list currently-online admins and moderators
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /stafflist
+ *
+ * Shows the calling player a formatted list of currently-online admins and
+ * moderators.  Useful for players to know who is on duty.
+ *
+ * Available to all players.
+ *
+ * Examples:
+ *   /stafflist
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AStaffListChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AStaffListChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /reason  — show ban reason for a UID
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /reason <UID>
+ *
+ * Shows the ban reason for the given compound UID.  Any player or admin may
+ * call this to look up the public ban reason without needing REST/API access.
+ *
+ * Available to all players and console.
+ *
+ * Examples:
+ *   /reason EOS:00020aed06f0a6958c3c067fb4b73d51
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AReasonChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AReasonChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /history  — self session and warning history
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /history
+ *
+ * Lets any player see their own session info and warning history without
+ * requiring admin.  Shows last-seen timestamp and all warning entries
+ * (up to 5, summarised if more exist).
+ *
+ * Requires the sender to be an in-game player (not console).
+ *
+ * Examples:
+ *   /history
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AHistoryChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AHistoryChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /mute  — mute a player
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /mute <player|PUID> [minutes] [reason...]
+ *
+ * Mutes a player — their chat messages will not be relayed to Discord and
+ * other players will not see them until the mute expires or is lifted with
+ * /unmute.  Mutes are in-memory only and do not persist across server restarts.
+ *
+ * Requires admin.
+ *
+ * Examples:
+ *   /mute SpamBot 30 Spamming chat
+ *   /mute 00020aed06f0a6958c3c067fb4b73d51 Harassment
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AMuteChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AMuteChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /unmute  — unmute a player
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /unmute <player|PUID>
+ *
+ * Lifts an active mute from a player.
+ *
+ * Requires admin.
+ *
+ * Examples:
+ *   /unmute SpamBot
+ *   /unmute 00020aed06f0a6958c3c067fb4b73d51
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AUnmuteChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AUnmuteChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};

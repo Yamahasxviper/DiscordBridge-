@@ -7,6 +7,25 @@
 #include "BanSystemConfig.generated.h"
 
 /**
+ * A single warning-escalation tier.
+ * When a player accumulates WarnCount or more warnings, they are automatically
+ * banned for DurationMinutes minutes (0 = permanent).
+ */
+USTRUCT(BlueprintType)
+struct BANSYSTEM_API FWarnEscalationTier
+{
+    GENERATED_BODY()
+
+    /** Warning count threshold that triggers this tier. */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    int32 WarnCount = 0;
+
+    /** Ban duration in minutes (0 = permanent). */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    int32 DurationMinutes = 0;
+};
+
+/**
  * UBanSystemConfig
  *
  * Per-server configuration for BanSystem.
@@ -96,6 +115,53 @@ public:
      */
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
     int32 AutoBanWarnMinutes = 0;
+
+    /**
+     * Warning escalation tiers for automatic bans based on warning count.
+     *
+     * Each tier specifies a warning count threshold and the ban duration in minutes
+     * (0 = permanent ban). When a player's total warning count reaches a tier's
+     * threshold, they are automatically banned for the corresponding duration.
+     *
+     * Tiers are evaluated in ascending order; the highest matching tier wins.
+     * AutoBanWarnCount / AutoBanWarnMinutes act as a simple single-tier fallback
+     * when this array is empty.
+     *
+     * Example (DefaultBanSystem.ini):
+     *   +WarnEscalationTiers=(WarnCount=2,DurationMinutes=30)
+     *   +WarnEscalationTiers=(WarnCount=3,DurationMinutes=1440)
+     *   +WarnEscalationTiers=(WarnCount=5,DurationMinutes=0)
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    TArray<FWarnEscalationTier> WarnEscalationTiers;
+
+    /**
+     * Number of days to retain player session records (default: 0 = keep forever).
+     * Records older than this value are pruned by POST /players/prune.
+     * Set to 0 to disable automatic pruning by age (records are only removed by the
+     * explicit prune endpoint).
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    int32 SessionRetentionDays = 0;
+
+    /**
+     * Interval in hours between automatic database backups (default: 0 = disabled).
+     * When non-zero, BanSystem schedules a recurring timer that calls
+     * UBanDatabase::Backup() every BackupIntervalHours.
+     * Set to 0 to rely solely on the manual POST /bans/backup endpoint and the
+     * one-time startup backup written by BanSystemModule.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    float BackupIntervalHours = 0.0f;
+
+    /**
+     * When true, BanSystem posts a Discord webhook notification whenever a
+     * temporary ban expires and the player is allowed to reconnect.
+     * Only has an effect when DiscordWebhookUrl is set.
+     * Default: false.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    bool bNotifyBanExpired = false;
 
     /** Returns the singleton config instance. */
     static const UBanSystemConfig* Get();

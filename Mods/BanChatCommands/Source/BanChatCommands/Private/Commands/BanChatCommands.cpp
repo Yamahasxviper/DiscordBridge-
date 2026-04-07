@@ -7,6 +7,7 @@
 #include "BanDatabase.h"
 #include "BanEnforcer.h"
 #include "BanTypes.h"
+#include "MuteRegistry.h"
 #include "PlayerSessionRegistry.h"
 #include "PlayerWarningRegistry.h"
 #include "BanSystemConfig.h"
@@ -18,6 +19,8 @@
 // Full definition required for Cast<> between AFGPlayerController and APlayerController
 // (UE Cast<> rejects incomplete types via static_assert in Casts.h).
 #include "FGPlayerController.h"
+#include "HttpModule.h"
+#include "Interfaces/IHttpRequest.h"
 
 DEFINE_LOG_CATEGORY(LogBanChatCommands);
 
@@ -1398,7 +1401,8 @@ EExecutionStatus AReloadConfigChatCommand::ExecuteCommand_Implementation(
     // Update the persistent backup so it reflects the freshly-loaded values.
     FBanChatCommandsModule::BackupConfigIfNeeded();
 
-    const int32 AdminCount = UBanChatCommandsConfig::Get()->AdminEosPUIDs.Num();
+    const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
+    const int32 AdminCount = Cfg ? Cfg->AdminEosPUIDs.Num() : 0;
     UE_LOG(LogBanChatCommands, Log,
         TEXT("BanChatCommands: config reloaded by %s — %d admin(s) now active."),
         Sender->IsPlayerSender() ? *AdminId : TEXT("console"), AdminCount);
@@ -1406,6 +1410,26 @@ EExecutionStatus AReloadConfigChatCommand::ExecuteCommand_Implementation(
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] Config reloaded — %d admin(s) active."), AdminCount),
         FLinearColor::Green);
+
+    // Optionally notify an external dashboard via HTTP POST.
+    if (Cfg && !Cfg->ReloadConfigWebhookUrl.IsEmpty() &&
+        FModuleManager::Get().IsModuleLoaded(TEXT("HTTP")))
+    {
+        const FString Payload = FString::Printf(
+            TEXT("{\"event\":\"config_reloaded\",\"adminCount\":%d,\"timestamp\":\"%s\"}"),
+            AdminCount, *FDateTime::UtcNow().ToIso8601());
+
+        TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
+            FHttpModule::Get().CreateRequest();
+        Request->SetURL(Cfg->ReloadConfigWebhookUrl);
+        Request->SetVerb(TEXT("POST"));
+        Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+        Request->SetContentAsString(Payload);
+        Request->ProcessRequest();
+
+        UE_LOG(LogBanChatCommands, Log,
+            TEXT("BanChatCommands: config-reload notification posted to webhook."));
+    }
 
     return EExecutionStatus::COMPLETED;
 }
@@ -1446,6 +1470,26 @@ EExecutionStatus AKickChatCommand::ExecuteCommand_Implementation(
         FLinearColor::Green);
 
     FBanDiscordNotifier::NotifyPlayerKicked(DisplayName, Reason, KickedBy);
+
+    // Optionally create a warning so kick reasons are preserved in history.
+    const UBanChatCommandsConfig* CmdCfg = UBanChatCommandsConfig::Get();
+    if (CmdCfg && CmdCfg->bCreateWarnOnKick)
+    {
+        if (UWorld* W = GetWorld())
+        {
+            if (UGameInstance* GI = W->GetGameInstance())
+            {
+                if (UPlayerWarningRegistry* WarnReg = GI->GetSubsystem<UPlayerWarningRegistry>())
+                {
+                    WarnReg->AddWarning(Uid, DisplayName,
+                        FString::Printf(TEXT("[Kick] %s"), *Reason), KickedBy);
+                    const int32 WarnCount = WarnReg->GetWarningCount(Uid);
+                    FBanDiscordNotifier::NotifyWarningIssued(Uid, DisplayName,
+                        FString::Printf(TEXT("[Kick] %s"), *Reason), KickedBy, WarnCount);
+                }
+            }
+        }
+    }
 
     return EExecutionStatus::COMPLETED;
 }
@@ -1532,15 +1576,34 @@ EExecutionStatus AWarnChatCommand::ExecuteCommand_Implementation(
     FBanDiscordNotifier::NotifyWarningIssued(Uid, DisplayName, Reason, WarnedBy, WarnCount);
 
     // Auto-ban the player when they reach the configured warning threshold.
+    // Check escalation tiers first; fall back to AutoBanWarnCount if no tiers are configured.
     const UBanSystemConfig* SysCfg = UBanSystemConfig::Get();
-    if (SysCfg && SysCfg->AutoBanWarnCount > 0 && WarnCount >= SysCfg->AutoBanWarnCount)
+    if (SysCfg)
     {
-        Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] '%s' has reached the auto-ban threshold (%d warnings) — banning."),
-                *DisplayName, SysCfg->AutoBanWarnCount),
-            FLinearColor::Red);
-        BanChat::DoBan(this, Sender, Uid, DisplayName, SysCfg->AutoBanWarnMinutes,
-            TEXT("Auto-banned: reached warning threshold"), TEXT("system"));
+        int32 BanDurationMinutes = -1;
+
+        if (SysCfg->WarnEscalationTiers.Num() > 0)
+        {
+            for (const FWarnEscalationTier& Tier : SysCfg->WarnEscalationTiers)
+            {
+                if (WarnCount >= Tier.WarnCount)
+                    BanDurationMinutes = Tier.DurationMinutes;
+            }
+        }
+        else if (SysCfg->AutoBanWarnCount > 0 && WarnCount >= SysCfg->AutoBanWarnCount)
+        {
+            BanDurationMinutes = SysCfg->AutoBanWarnMinutes;
+        }
+
+        if (BanDurationMinutes >= 0)
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] '%s' reached the auto-ban threshold (%d warnings) — banning."),
+                    *DisplayName, WarnCount),
+                FLinearColor::Red);
+            BanChat::DoBan(this, Sender, Uid, DisplayName, BanDurationMinutes,
+                TEXT("Auto-banned: reached warning threshold"), TEXT("system"));
+        }
     }
 
     return EExecutionStatus::COMPLETED;
@@ -1570,6 +1633,13 @@ EExecutionStatus AWarningsChatCommand::ExecuteCommand_Implementation(
     if (!BanChat::ResolveTarget(this, Sender, Arguments[0], Uid, DisplayName))
         return EExecutionStatus::BAD_ARGUMENTS;
 
+    // Optional page argument: /warnings <target> [page]
+    int32 Page = 1;
+    if (Arguments.Num() >= 2 && Arguments[1].IsNumeric())
+    {
+        Page = FMath::Max(1, FCString::Atoi(*Arguments[1]));
+    }
+
     UWorld* World = GetWorld();
     if (!World) return EExecutionStatus::UNCOMPLETED;
     UGameInstance* GI = World->GetGameInstance();
@@ -1591,18 +1661,32 @@ EExecutionStatus AWarningsChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::COMPLETED;
     }
 
+    const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
+    const int32 PageSize   = Cfg ? Cfg->BanListPageSize : 10;
+    const int32 TotalPages = (Warnings.Num() + PageSize - 1) / FMath::Max(PageSize, 1);
+    Page = FMath::Clamp(Page, 1, TotalPages);
+    const int32 StartIdx   = (Page - 1) * PageSize;
+    const int32 EndIdx     = FMath::Min(StartIdx + PageSize, Warnings.Num());
+
     Sender->SendChatMessage(
-        FString::Printf(TEXT("[BanChatCommands] %d warning(s) for '%s' (%s):"),
-            Warnings.Num(), *DisplayName, *Uid),
+        FString::Printf(TEXT("[BanChatCommands] %d warning(s) for '%s' (%s) — page %d/%d:"),
+            Warnings.Num(), *DisplayName, *Uid, Page, TotalPages),
         FLinearColor::Yellow);
 
-    for (int32 i = 0; i < Warnings.Num(); ++i)
+    for (int32 i = StartIdx; i < EndIdx; ++i)
     {
         const FWarningEntry& W = Warnings[i];
         Sender->SendChatMessage(
             FString::Printf(TEXT("  #%d | %s | By: %s | %s"),
                 i + 1, *W.Reason, *W.WarnedBy,
                 *W.WarnDate.ToString(TEXT("%Y-%m-%d %H:%M:%S"))),
+            FLinearColor::White);
+    }
+
+    if (TotalPages > 1 && Page < TotalPages)
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("  Use /warnings %s %d to see more."), *Arguments[0], Page + 1),
             FLinearColor::White);
     }
 
@@ -1657,6 +1741,395 @@ EExecutionStatus AClearWarnsChatCommand::ExecuteCommand_Implementation(
     {
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] No warnings on record for '%s'."), *DisplayName),
+            FLinearColor::Yellow);
+    }
+
+    return EExecutionStatus::COMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AAnnounceChatCommand  — /announce
+// ─────────────────────────────────────────────────────────────────────────────
+
+AAnnounceChatCommand::AAnnounceChatCommand()
+{
+    CommandName          = TEXT("announce");
+    MinNumberOfArguments = 1;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "AnnounceUsage",
+        "/announce <message...>");
+}
+
+EExecutionStatus AAnnounceChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString AdminUid;
+    if (!BanChat::IsAdminSender(Sender, AdminUid))
+        return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    const FString Message    = BanChat::JoinArgs(Arguments, 0);
+    const FString SenderName = Sender->GetSenderName();
+
+    UWorld* World = GetWorld();
+    if (!World) return EExecutionStatus::UNCOMPLETED;
+
+    // Broadcast to all connected players.
+    const FString Announcement = FString::Printf(TEXT("[Server Announcement] %s"), *Message);
+    for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+    {
+        APlayerController* PC = It->Get();
+        if (!PC) continue;
+        PC->ClientMessage(Announcement);
+    }
+
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("[BanChatCommands] Announcement sent: %s"), *Message),
+        FLinearColor::Green);
+
+    UE_LOG(LogBanChatCommands, Log, TEXT("Announce [%s]: %s"), *SenderName, *Message);
+    return EExecutionStatus::COMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AStaffListChatCommand  — /stafflist
+// ─────────────────────────────────────────────────────────────────────────────
+
+AStaffListChatCommand::AStaffListChatCommand()
+{
+    CommandName          = TEXT("stafflist");
+    MinNumberOfArguments = 0;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "StaffListUsage",
+        "/stafflist");
+}
+
+EExecutionStatus AStaffListChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
+    if (!Cfg)
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] Config unavailable."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World) return EExecutionStatus::UNCOMPLETED;
+
+    TArray<FString> OnlineAdmins;
+    TArray<FString> OnlineModerators;
+
+    for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+    {
+        APlayerController* PC = It->Get();
+        if (!PC || !PC->PlayerState) continue;
+
+        FString PlayerUid;
+        const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+        if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
+            PlayerUid = UBanDatabase::MakeUid(TEXT("EOS"), NetId.ToString().ToLower());
+        else
+        {
+            const FString EosPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+            if (!EosPuid.IsEmpty())
+                PlayerUid = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
+        }
+        if (PlayerUid.IsEmpty()) continue;
+
+        const FString Name = PC->PlayerState->GetPlayerName();
+        if (Cfg->IsAdminUid(PlayerUid))
+            OnlineAdmins.Add(Name);
+        else if (Cfg->IsModeratorUid(PlayerUid))
+            OnlineModerators.Add(Name);
+    }
+
+    if (OnlineAdmins.IsEmpty() && OnlineModerators.IsEmpty())
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] No staff online at this time."), FLinearColor::White);
+    }
+    else
+    {
+        if (!OnlineAdmins.IsEmpty())
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] Admins online: %s"),
+                    *FString::Join(OnlineAdmins, TEXT(", "))),
+                FLinearColor::Cyan);
+        }
+        if (!OnlineModerators.IsEmpty())
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] Moderators online: %s"),
+                    *FString::Join(OnlineModerators, TEXT(", "))),
+                FLinearColor(0.0f, 0.8f, 1.0f));
+        }
+    }
+
+    return EExecutionStatus::COMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AReasonChatCommand  — /reason
+// ─────────────────────────────────────────────────────────────────────────────
+
+AReasonChatCommand::AReasonChatCommand()
+{
+    CommandName          = TEXT("reason");
+    MinNumberOfArguments = 1;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "ReasonUsage",
+        "/reason <UID>");
+}
+
+EExecutionStatus AReasonChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString Uid;
+    if (!BanChat::ParseAndNormaliseUidArg(Sender, Arguments[0], Uid))
+        return EExecutionStatus::BAD_ARGUMENTS;
+
+    UBanDatabase* DB = BanChat::GetDB(this);
+    if (!DB)
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] UBanDatabase unavailable."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
+
+    FBanEntry Entry;
+    if (!DB->GetBanByUid(Uid, Entry))
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] No ban record found for '%s'."), *Uid),
+            FLinearColor::Yellow);
+        return EExecutionStatus::COMPLETED;
+    }
+
+    if (Entry.bIsPermanent)
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Ban reason for %s: %s (permanent, by %s, %s)"),
+                *Uid, *Entry.Reason, *Entry.BannedBy,
+                *Entry.BanDate.ToString(TEXT("%Y-%m-%d"))),
+            FLinearColor::White);
+    }
+    else
+    {
+        const FTimespan Remaining = Entry.ExpireDate - FDateTime::UtcNow();
+        const FString RemainingStr = Remaining.GetTicks() > 0
+            ? FString::Printf(TEXT("%.0f min remaining"), Remaining.GetTotalMinutes())
+            : TEXT("expired");
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Ban reason for %s: %s (temp — %s, by %s)"),
+                *Uid, *Entry.Reason, *RemainingStr, *Entry.BannedBy),
+            FLinearColor::White);
+    }
+
+    return EExecutionStatus::COMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AHistoryChatCommand  — /history (self)
+// ─────────────────────────────────────────────────────────────────────────────
+
+AHistoryChatCommand::AHistoryChatCommand()
+{
+    CommandName          = TEXT("history");
+    MinNumberOfArguments = 0;
+    bOnlyUsableByPlayer  = true;
+    Usage = NSLOCTEXT("BanChatCommands", "HistoryUsage",
+        "/history");
+}
+
+EExecutionStatus AHistoryChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    APlayerController* PC = Cast<APlayerController>(Sender->GetPlayer());
+    if (!PC || !PC->PlayerState)
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] Could not resolve your identity."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
+
+    FString Uid;
+    const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+    if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
+        Uid = UBanDatabase::MakeUid(TEXT("EOS"), NetId.ToString().ToLower());
+    else
+    {
+        const FString EosPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+        if (!EosPuid.IsEmpty())
+            Uid = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
+    }
+
+    if (Uid.IsEmpty())
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] Could not resolve your platform identity."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
+
+    UWorld* World = GetWorld();
+    if (!World) return EExecutionStatus::UNCOMPLETED;
+    UGameInstance* GI = World->GetGameInstance();
+    if (!GI) return EExecutionStatus::UNCOMPLETED;
+
+    // Session info.
+    UPlayerSessionRegistry* SessionReg = GI->GetSubsystem<UPlayerSessionRegistry>();
+    if (SessionReg)
+    {
+        for (const FPlayerSessionRecord& R : SessionReg->GetAllRecords())
+        {
+            if (R.Uid.Equals(Uid, ESearchCase::IgnoreCase))
+            {
+                Sender->SendChatMessage(
+                    FString::Printf(TEXT("[BanChatCommands] Your last session: %s"), *R.LastSeen),
+                    FLinearColor::White);
+                break;
+            }
+        }
+    }
+
+    // Warning history.
+    UPlayerWarningRegistry* WarnReg = GI->GetSubsystem<UPlayerWarningRegistry>();
+    if (WarnReg)
+    {
+        const TArray<FWarningEntry> Warnings = WarnReg->GetWarningsForUid(Uid);
+        if (Warnings.IsEmpty())
+        {
+            Sender->SendChatMessage(TEXT("[BanChatCommands] You have no warnings on record."), FLinearColor::Green);
+        }
+        else
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] You have %d warning(s) on record."), Warnings.Num()),
+                FLinearColor::Yellow);
+            const int32 MaxShow = FMath::Min(Warnings.Num(), 5);
+            for (int32 i = 0; i < MaxShow; ++i)
+            {
+                const FWarningEntry& W = Warnings[i];
+                Sender->SendChatMessage(
+                    FString::Printf(TEXT("  #%d %s — %s"),
+                        i + 1, *W.WarnDate.ToString(TEXT("%Y-%m-%d")), *W.Reason),
+                    FLinearColor::White);
+            }
+            if (Warnings.Num() > MaxShow)
+            {
+                Sender->SendChatMessage(
+                    FString::Printf(TEXT("  … and %d more."), Warnings.Num() - MaxShow),
+                    FLinearColor::White);
+            }
+        }
+    }
+
+    return EExecutionStatus::COMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AMuteChatCommand  — /mute
+// ─────────────────────────────────────────────────────────────────────────────
+
+AMuteChatCommand::AMuteChatCommand()
+{
+    CommandName          = TEXT("mute");
+    MinNumberOfArguments = 1;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "MuteUsage",
+        "/mute <player|PUID> [minutes] [reason...]");
+}
+
+EExecutionStatus AMuteChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString AdminUid;
+    if (!BanChat::IsAdminSender(Sender, AdminUid))
+        return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    FString Uid, DisplayName;
+    if (!BanChat::ResolveTarget(this, Sender, Arguments[0], Uid, DisplayName))
+        return EExecutionStatus::BAD_ARGUMENTS;
+
+    int32 Minutes     = 0;
+    int32 ReasonStart = 1;
+    if (Arguments.Num() >= 2 && Arguments[1].IsNumeric())
+    {
+        Minutes      = FMath::Max(0, FCString::Atoi(*Arguments[1]));
+        ReasonStart  = 2;
+    }
+
+    const FString Reason   = Arguments.Num() > ReasonStart
+        ? BanChat::JoinArgs(Arguments, ReasonStart)
+        : TEXT("Muted by admin");
+    const FString MutedBy = Sender->GetSenderName();
+
+    UWorld* World = GetWorld();
+    if (!World) return EExecutionStatus::UNCOMPLETED;
+    UGameInstance* GI = World->GetGameInstance();
+    if (!GI) return EExecutionStatus::UNCOMPLETED;
+
+    UMuteRegistry* MuteReg = GI->GetSubsystem<UMuteRegistry>();
+    if (!MuteReg)
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] MuteRegistry unavailable."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
+
+    MuteReg->MutePlayer(Uid, DisplayName, Reason, MutedBy, Minutes);
+
+    const FString DurStr = Minutes > 0
+        ? FString::Printf(TEXT(" for %d minute(s)"), Minutes)
+        : TEXT(" indefinitely");
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("[BanChatCommands] Muted '%s'%s — %s"), *DisplayName, *DurStr, *Reason),
+        FLinearColor::Green);
+
+    return EExecutionStatus::COMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AUnmuteChatCommand  — /unmute
+// ─────────────────────────────────────────────────────────────────────────────
+
+AUnmuteChatCommand::AUnmuteChatCommand()
+{
+    CommandName          = TEXT("unmute");
+    MinNumberOfArguments = 1;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "UnmuteUsage",
+        "/unmute <player|PUID>");
+}
+
+EExecutionStatus AUnmuteChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString AdminUid;
+    if (!BanChat::IsAdminSender(Sender, AdminUid))
+        return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    FString Uid, DisplayName;
+    if (!BanChat::ResolveTarget(this, Sender, Arguments[0], Uid, DisplayName))
+        return EExecutionStatus::BAD_ARGUMENTS;
+
+    UWorld* World = GetWorld();
+    if (!World) return EExecutionStatus::UNCOMPLETED;
+    UGameInstance* GI = World->GetGameInstance();
+    if (!GI) return EExecutionStatus::UNCOMPLETED;
+
+    UMuteRegistry* MuteReg = GI->GetSubsystem<UMuteRegistry>();
+    if (!MuteReg)
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] MuteRegistry unavailable."), FLinearColor::Red);
+        return EExecutionStatus::UNCOMPLETED;
+    }
+
+    if (MuteReg->UnmutePlayer(Uid))
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Unmuted '%s'."), *DisplayName),
+            FLinearColor::Green);
+    }
+    else
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] '%s' is not currently muted."), *DisplayName),
             FLinearColor::Yellow);
     }
 

@@ -351,12 +351,64 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			FString RawPrimary;
 			FFileHelper::LoadFileToString(RawPrimary, *ModFilePath);
 			Config.ChatRelayBlocklist = ParseRawIniArray(RawPrimary, TEXT("DiscordBridge"), TEXT("ChatRelayBlocklist"));
+
+			// Parse ChatRelayBlocklistReplacements array entries.
+			// Format per entry: Pattern="word",Replacement="***"
+			TArray<FString> RawRepl = ParseRawIniArray(RawPrimary, TEXT("DiscordBridge"), TEXT("ChatRelayBlocklistReplacements"));
+			for (const FString& Line : RawRepl)
+			{
+				// Strip outer parentheses if present.
+				FString Cleaned = Line.TrimStartAndEnd();
+				if (Cleaned.StartsWith(TEXT("("))) Cleaned = Cleaned.Mid(1);
+				if (Cleaned.EndsWith(TEXT(")")))   Cleaned = Cleaned.LeftChop(1);
+
+				FString PatStr, ReplStr;
+				// Try to extract Pattern="…" and Replacement="…"
+				auto ExtractQuoted = [&](const FString& Key, FString& Out) -> bool
+				{
+					const FString Search = Key + TEXT("=\"");
+					const int32   Idx    = Cleaned.Find(Search, ESearchCase::IgnoreCase);
+					if (Idx == INDEX_NONE) return false;
+					const int32 Start = Idx + Search.Len();
+					const int32 End   = Cleaned.Find(TEXT("\""), ESearchCase::IgnoreCase, ESearchDir::FromStart, Start);
+					if (End == INDEX_NONE) return false;
+					Out = Cleaned.Mid(Start, End - Start);
+					return true;
+				};
+
+				if (ExtractQuoted(TEXT("Pattern"),     PatStr) &&
+				    ExtractQuoted(TEXT("Replacement"), ReplStr))
+				{
+					FChatRelayReplacement R;
+					R.Pattern     = PatStr;
+					R.Replacement = ReplStr;
+					Config.ChatRelayBlocklistReplacements.Add(R);
+				}
+			}
 		}
 
 		// Bot commands
 		Config.PlayersCommandPrefix    = GetIniStringOrFallback(ConfigFile, TEXT("PlayersCommandPrefix"),    Config.PlayersCommandPrefix);
 		Config.PlayersCommandChannelId = GetIniStringOrDefault (ConfigFile, TEXT("PlayersCommandChannelId"), Config.PlayersCommandChannelId);
 		Config.DiscordInviteUrl        = GetIniStringOrDefault (ConfigFile, TEXT("DiscordInviteUrl"),        Config.DiscordInviteUrl);
+
+		// New commands
+		Config.StatsCommandPrefix       = GetIniStringOrFallback(ConfigFile, TEXT("StatsCommandPrefix"),       Config.StatsCommandPrefix);
+		Config.PlayerStatsCommandPrefix = GetIniStringOrFallback(ConfigFile, TEXT("PlayerStatsCommandPrefix"), Config.PlayerStatsCommandPrefix);
+
+		// Per-event channel routing
+		Config.PhaseEventsChannelId    = GetIniStringOrDefault(ConfigFile, TEXT("PhaseEventsChannelId"),    Config.PhaseEventsChannelId);
+		Config.SchematicEventsChannelId = GetIniStringOrDefault(ConfigFile, TEXT("SchematicEventsChannelId"), Config.SchematicEventsChannelId);
+		Config.BanEventsChannelId       = GetIniStringOrDefault(ConfigFile, TEXT("BanEventsChannelId"),       Config.BanEventsChannelId);
+
+		// Reaction voting
+		Config.bEnableJoinReactionVoting = GetIniBoolOrDefault(ConfigFile, TEXT("EnableJoinReactionVoting"), Config.bEnableJoinReactionVoting);
+		Config.VoteKickThreshold         = GetIniIntOrDefault (ConfigFile, TEXT("VoteKickThreshold"),         Config.VoteKickThreshold);
+		Config.VoteWindowMinutes         = GetIniIntOrDefault (ConfigFile, TEXT("VoteWindowMinutes"),         Config.VoteWindowMinutes);
+
+		// AFK kick
+		Config.AfkKickMinutes = GetIniIntOrDefault   (ConfigFile, TEXT("AfkKickMinutes"), Config.AfkKickMinutes);
+		Config.AfkKickReason  = GetIniStringOrDefault(ConfigFile, TEXT("AfkKickReason"),  Config.AfkKickReason);
 
 		// Trim leading/trailing whitespace from credential fields to prevent
 		// subtle mismatches when operators accidentally include spaces.

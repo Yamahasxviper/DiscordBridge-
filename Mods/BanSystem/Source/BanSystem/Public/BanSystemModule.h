@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
+#include "Ticker.h"
 
 class BANSYSTEM_API FBanSystemModule : public IModuleInterface
 {
@@ -22,4 +23,11 @@ private:
      *  template if the file is missing or has been stripped of comment lines by
      *  Alpakit's staging step. */
     static void RestoreDefaultConfigIfNeeded();
+
+    /** Ticker callback that fires at BackupIntervalHours to trigger a scheduled backup. */
+    bool OnBackupTick(float DeltaTime);
+
+    FTSTicker::FDelegateHandle BackupTickHandle;
+    /** Accumulated time since the last scheduled backup (seconds). */
+    float BackupAccumulatedSeconds = 0.0f;
 };

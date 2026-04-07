@@ -281,6 +281,9 @@ uint32 FSMLWebSocketRunnable::Run()
 
 		State.store(ESMLWebSocketRunnableState::Connected);
 		bConnected = true;
+		LastReceivedFrameTime = FPlatformTime::Seconds();
+		PingSentTime = 0.0;
+		bWaitingForPong = false;
 		NotifyConnected();
 
 		// The inner loop uses an unconditional for(;;) so that a pending close
@@ -318,6 +321,31 @@ uint32 FSMLWebSocketRunnable::Run()
 			// EnqueueClose sets bUserInitiatedClose before queuing the request.
 			// If the connection was lost before we dequeued it, honour the flag here.
 			if (bUserInitiatedClose) break;
+
+			// ── Ping/Pong keep-alive ──────────────────────────────────────────
+			if (ReconnectCfg.PingInterval > 0.0f)
+			{
+				const double Now = FPlatformTime::Seconds();
+
+				if (bWaitingForPong)
+				{
+					// Check if the pong timeout has elapsed.
+					if (Now - PingSentTime >= static_cast<double>(ReconnectCfg.PingTimeout))
+					{
+						NotifyError(TEXT("SMLWebSocket: Ping timeout — no Pong received; closing connection"));
+						bConnected = false;
+						break;
+					}
+				}
+				else
+				{
+					// Send a Ping if the idle threshold has been reached.
+					if (Now - LastReceivedFrameTime >= static_cast<double>(ReconnectCfg.PingInterval))
+					{
+						SendPing();
+					}
+				}
+			}
 
 			// Poll for incoming data (short timeout keeps the loop responsive).
 			bool bDataAvailable = false;
@@ -463,6 +491,10 @@ bool FSMLWebSocketRunnable::IsConnected() const
 
 bool FSMLWebSocketRunnable::ResolveAndConnect(const FString& Host, int32 Port)
 {
+	// If a proxy is configured, connect to the proxy first and tunnel through it.
+	const FString& ActualHost = ReconnectCfg.ProxyHost.IsEmpty() ? Host : ReconnectCfg.ProxyHost;
+	const int32    ActualPort = ReconnectCfg.ProxyHost.IsEmpty() ? Port : ReconnectCfg.ProxyPort;
+
 	ISocketSubsystem* SocketSS = ISocketSubsystem::Get(NAME_None);
 	if (!SocketSS)
 	{
@@ -471,17 +503,17 @@ bool FSMLWebSocketRunnable::ResolveAndConnect(const FString& Host, int32 Port)
 	}
 
 	// Resolve hostname (no service name, accept any address type)
-	FAddressInfoResult Result = SocketSS->GetAddressInfo(*Host, nullptr,
+	FAddressInfoResult Result = SocketSS->GetAddressInfo(*ActualHost, nullptr,
 	                                                       EAddressInfoFlags::Default,
 	                                                       NAME_None);
 	if (Result.ReturnCode != SE_NO_ERROR || Result.Results.IsEmpty())
 	{
-		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: Failed to resolve '%s'"), *Host);
+		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: Failed to resolve '%s'"), *ActualHost);
 		return false;
 	}
 
 	TSharedRef<FInternetAddr> Addr = Result.Results[0].Address;
-	Addr->SetPort(Port);
+	Addr->SetPort(ActualPort);
 
 	// Create blocking TCP socket using the same protocol as the resolved address (IPv4 or IPv6)
 	Socket = SocketSS->CreateSocket(NAME_Stream, TEXT("SMLWebSocket"), Addr->GetProtocolType());
@@ -498,10 +530,69 @@ bool FSMLWebSocketRunnable::ResolveAndConnect(const FString& Host, int32 Port)
 
 	if (!Socket->Connect(*Addr))
 	{
-		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: Connect() failed to %s:%d"), *Host, Port);
+		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: Connect() failed to %s:%d"), *ActualHost, ActualPort);
 		return false;
 	}
 
+	// If a proxy was used, send the HTTP CONNECT tunnel request now.
+	if (!ReconnectCfg.ProxyHost.IsEmpty())
+	{
+		if (!ConnectThroughProxy())
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool FSMLWebSocketRunnable::ConnectThroughProxy()
+{
+	// Send HTTP CONNECT to the proxy to tunnel to the real destination.
+	// https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/CONNECT
+	FString Request = FString::Printf(TEXT("CONNECT %s:%d HTTP/1.1\r\n"), *ParsedHost, ParsedPort);
+	Request += FString::Printf(TEXT("Host: %s:%d\r\n"), *ParsedHost, ParsedPort);
+
+	if (!ReconnectCfg.ProxyUser.IsEmpty())
+	{
+		// Basic proxy authentication
+		const FString Credentials = ReconnectCfg.ProxyUser + TEXT(":") + ReconnectCfg.ProxyPassword;
+		const FTCHARToUTF8 Utf8Creds(*Credentials);
+		const FString Encoded = FBase64::Encode(
+			reinterpret_cast<const uint8*>(Utf8Creds.Get()),
+			static_cast<uint32>(Utf8Creds.Length()));
+		Request += FString::Printf(TEXT("Proxy-Authorization: Basic %s\r\n"), *Encoded);
+	}
+
+	Request += TEXT("Proxy-Connection: keep-alive\r\n\r\n");
+
+	const FTCHARToUTF8 Utf8Req(*Request);
+	if (!RawSend(reinterpret_cast<const uint8*>(Utf8Req.Get()), Utf8Req.Length()))
+	{
+		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: Failed to send HTTP CONNECT to proxy"));
+		return false;
+	}
+
+	// Read the proxy response line — look for "HTTP/1.x 200 Connection established".
+	FString ResponseLine;
+	uint8 Buf[1];
+	static constexpr int32 MaxLineBytes = 4096;
+	while (!bStopRequested && ResponseLine.Len() < MaxLineBytes)
+	{
+		if (!RawRecvExact(Buf, 1)) return false;
+		ResponseLine.AppendChar(static_cast<TCHAR>(Buf[0]));
+		if (ResponseLine.EndsWith(TEXT("\r\n\r\n"))) break;
+	}
+
+	if (!ResponseLine.Contains(TEXT("200")))
+	{
+		UE_LOG(LogSMLWebSocket, Error,
+		       TEXT("SMLWebSocket: Proxy CONNECT failed: %s"), *ResponseLine.Left(200));
+		return false;
+	}
+
+	UE_LOG(LogSMLWebSocket, Log,
+	       TEXT("SMLWebSocket: Proxy tunnel established to %s:%d"), *ParsedHost, ParsedPort);
 	return true;
 }
 
@@ -1145,7 +1236,10 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 	// Guard against absurdly large payloads that could cause OOM.
 	// Discord messages are at most a few KB; 64 MB is a very generous ceiling.
 	static constexpr uint64 MaxPayloadBytes = 64u * 1024u * 1024u;
-	if (PayloadLen > MaxPayloadBytes)
+	const uint64 EffectiveMax = (ReconnectCfg.MaxMessageSizeBytes > 0)
+		? static_cast<uint64>(ReconnectCfg.MaxMessageSizeBytes)
+		: MaxPayloadBytes;
+	if (PayloadLen > EffectiveMax)
 	{
 		UE_LOG(LogSMLWebSocket, Error,
 		       TEXT("SMLWebSocket: Incoming frame payload too large (%llu bytes) – closing connection"),
@@ -1170,6 +1264,9 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 	}
 
 	// Dispatch by opcode
+	// Record that we received a frame so the ping-idle timer resets.
+	LastReceivedFrameTime = FPlatformTime::Seconds();
+
 	switch (Opcode)
 	{
 	case WsOpcode::Text:
@@ -1242,7 +1339,9 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 		break;
 
 	case WsOpcode::Pong:
-		// Unsolicited pong or response – no action required.
+		// Solicited or unsolicited Pong — mark our outstanding ping as answered.
+		bWaitingForPong = false;
+		PingSentTime    = 0.0;
 		break;
 
 	case WsOpcode::Close:
@@ -1282,6 +1381,22 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 void FSMLWebSocketRunnable::SendPong(const TArray<uint8>& Payload)
 {
 	SendWsFrame(WsOpcode::Pong, Payload.GetData(), Payload.Num());
+}
+
+void FSMLWebSocketRunnable::SendPing()
+{
+	// Payload: current timestamp as 8-byte big-endian milliseconds (for round-trip measurement).
+	const uint64 NowMs = static_cast<uint64>(FPlatformTime::Seconds() * 1000.0);
+	uint8 PingPayload[8];
+	for (int32 i = 7; i >= 0; --i)
+	{
+		PingPayload[i] = static_cast<uint8>(NowMs >> ((7 - i) * 8));
+	}
+	if (SendWsFrame(WsOpcode::Ping, PingPayload, 8))
+	{
+		PingSentTime    = FPlatformTime::Seconds();
+		bWaitingForPong = true;
+	}
 }
 
 void FSMLWebSocketRunnable::FlushOutboundQueue()

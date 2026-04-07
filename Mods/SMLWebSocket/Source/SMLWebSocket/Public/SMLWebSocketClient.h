@@ -33,6 +33,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FSMLWebSocketOnClosedDelegate, int3
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FSMLWebSocketOnErrorDelegate, const FString&, ErrorMessage);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FSMLWebSocketOnReconnectingDelegate, int32, AttemptNumber, float, DelaySeconds);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FSMLWebSocketOnReconnectedDelegate);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FSMLWebSocketOnStateChangedDelegate, EWebSocketState, OldState, EWebSocketState, NewState);
 
 /**
  * Custom WebSocket client with SSL/OpenSSL support and automatic reconnect.
@@ -109,6 +110,16 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="SML|WebSocket")
 	FSMLWebSocketOnReconnectedDelegate OnReconnected;
 
+	/**
+	 * Called on the game thread whenever the connection state transitions.
+	 * Fires for every state change: Disconnected ↔ Connecting ↔ Connected ↔ Closing.
+	 * This is a convenience alternative to binding all four individual delegates
+	 * (OnConnected, OnClosed, OnError, OnReconnecting) when you just want to react
+	 * to any state change in one place.
+	 */
+	UPROPERTY(BlueprintAssignable, Category="SML|WebSocket")
+	FSMLWebSocketOnStateChangedDelegate OnStateChanged;
+
 	// ── Reconnect configuration ───────────────────────────────────────────────
 
 	/**
@@ -145,6 +156,72 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket")
 	bool bQueueMessagesWhileDisconnected{false};
+
+	// ── Ping / pong keep-alive ────────────────────────────────────────────────
+
+	/**
+	 * Interval in seconds between unsolicited Ping frames sent to the server.
+	 * A Ping is sent after the connection has been idle (no frame received) for
+	 * this many seconds.  Set to 0 to disable the keep-alive mechanism entirely.
+	 * Default: 30 seconds.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket", meta=(ClampMin="0.0", UIMin="0.0"))
+	float PingIntervalSeconds{30.0f};
+
+	/**
+	 * Seconds to wait for a Pong after sending a Ping before treating the
+	 * connection as stalled and triggering a reconnect.
+	 * Only used when PingIntervalSeconds > 0.
+	 * Default: 10 seconds.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket", meta=(ClampMin="1.0", UIMin="1.0"))
+	float PingTimeoutSeconds{10.0f};
+
+	// ── Payload size guard ────────────────────────────────────────────────────
+
+	/**
+	 * Maximum allowed incoming WebSocket frame payload size in bytes.
+	 * When an incoming frame's payload exceeds this value it is dropped,
+	 * OnError is fired, and the connection is closed (triggering a reconnect
+	 * if bAutoReconnect is true).
+	 * Set to 0 to use the built-in hard ceiling (64 MB).
+	 * Default: 0 (unlimited — uses internal 64 MB hard ceiling).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket", meta=(ClampMin="0", UIMin="0"))
+	int32 MaxMessageSizeBytes{0};
+
+	// ── Proxy support ─────────────────────────────────────────────────────────
+
+	/**
+	 * Hostname or IP address of an HTTP/CONNECT proxy server.
+	 * Leave empty to connect directly (default).
+	 * When set, the client first connects to ProxyHost:ProxyPort and sends an
+	 * HTTP CONNECT tunnel request to reach ParsedHost:ParsedPort, then performs
+	 * the TLS handshake (for wss://) through the tunnel.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket")
+	FString ProxyHost;
+
+	/**
+	 * Port of the HTTP/CONNECT proxy server (default: 3128).
+	 * Only used when ProxyHost is non-empty.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket", meta=(ClampMin="1", UIMin="1", ClampMax="65535"))
+	int32 ProxyPort{3128};
+
+	/**
+	 * Optional username for HTTP CONNECT proxy authentication (Basic auth).
+	 * Leave empty when the proxy does not require authentication.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket")
+	FString ProxyUser;
+
+	/**
+	 * Optional password for HTTP CONNECT proxy authentication (Basic auth).
+	 * Leave empty when the proxy does not require authentication.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket")
+	FString ProxyPassword;
 
 	// ── Factory ───────────────────────────────────────────────────────────────
 
@@ -225,6 +302,35 @@ public:
 	UFUNCTION(BlueprintPure, Category="SML|WebSocket")
 	EWebSocketState GetConnectionState() const;
 
+	// ── Queued message helpers ────────────────────────────────────────────────
+
+	/**
+	 * Returns the number of text messages currently queued for delivery
+	 * (only non-zero when bQueueMessagesWhileDisconnected is true and the client
+	 * is not currently connected).
+	 * Thread-safe.
+	 */
+	UFUNCTION(BlueprintPure, Category="SML|WebSocket")
+	int32 GetQueuedMessageCount() const;
+
+	/**
+	 * Discards all messages currently in the pending-send queue without sending them.
+	 * Safe to call at any time; has no effect when the queue is empty.
+	 * Thread-safe.
+	 */
+	UFUNCTION(BlueprintCallable, Category="SML|WebSocket")
+	void ClearQueue();
+
+	/**
+	 * Immediately flushes all queued messages to the connected server.
+	 * Has no effect when the client is not currently connected.
+	 * Calls SendText() for each message in the queue; the queue is cleared
+	 * after all messages have been dispatched.
+	 * Thread-safe.
+	 */
+	UFUNCTION(BlueprintCallable, Category="SML|WebSocket")
+	void FlushQueue();
+
 private:
 	friend class FSMLWebSocketRunnable;
 
@@ -235,6 +341,9 @@ private:
 	void Internal_OnClosed(int32 StatusCode, const FString& Reason);
 	void Internal_OnError(const FString& ErrorMessage);
 	void Internal_OnReconnecting(int32 AttemptNumber, float DelaySeconds);
+
+	/** Helper to fire OnStateChanged when the atomic ConnectionState changes. */
+	void SetConnectionState(EWebSocketState NewState);
 
 	void StopRunnable();
 

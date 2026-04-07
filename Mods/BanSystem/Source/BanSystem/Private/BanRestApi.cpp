@@ -9,6 +9,7 @@
 #include "PlayerWarningRegistry.h"
 #include "BanAuditLog.h"
 #include "BanDiscordNotifier.h"
+#include "BanAppealRegistry.h"
 
 #include "HttpServerModule.h"
 #include "IHttpRouter.h"
@@ -174,6 +175,7 @@ namespace BanJson
 void UBanRestApi::Initialize(FSubsystemCollectionBase& Collection)
 {
     Collection.InitializeDependency<UBanDatabase>();
+    Collection.InitializeDependency<UBanAppealRegistry>();
     Super::Initialize(Collection);
 
     // Read port from DefaultBanSystem.ini via UBanSystemConfig.
@@ -832,29 +834,50 @@ void UBanRestApi::RegisterRoutes()
                 AuditLog->LogAction(TEXT("warn"), Uid, PlayerName, WarnedBy, WarnedBy, Reason);
 
             // Auto-ban if the warning threshold has been reached.
+            // First, check escalation tiers; fall back to AutoBanWarnCount if no tiers.
             const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
-            if (Cfg && Cfg->AutoBanWarnCount > 0 && WarnCount >= Cfg->AutoBanWarnCount)
+            if (Cfg)
             {
-                UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
-                if (DB)
-                {
-                    FBanEntry AutoBan;
-                    AutoBan.Uid      = Uid;
-                    UBanDatabase::ParseUid(Uid, AutoBan.Platform, AutoBan.PlayerUID);
-                    AutoBan.PlayerName   = PlayerName;
-                    AutoBan.Reason       = TEXT("Auto-banned: reached warning threshold");
-                    AutoBan.BannedBy     = TEXT("system");
-                    AutoBan.BanDate      = FDateTime::UtcNow();
-                    const int32 BanMins  = Cfg->AutoBanWarnMinutes;
-                    AutoBan.bIsPermanent = (BanMins <= 0);
-                    AutoBan.ExpireDate   = AutoBan.bIsPermanent
-                        ? FDateTime(0)
-                        : FDateTime::UtcNow() + FTimespan::FromMinutes(BanMins);
+                int32 BanDurationMinutes = -1;
 
-                    DB->AddBan(AutoBan);
-                    FBanDiscordNotifier::NotifyBanCreated(AutoBan);
-                    if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-                        AuditLog->LogAction(TEXT("ban"), Uid, PlayerName, TEXT("system"), TEXT("system"), AutoBan.Reason);
+                // Check escalation tiers (highest matching tier wins).
+                if (Cfg->WarnEscalationTiers.Num() > 0)
+                {
+                    for (const FWarnEscalationTier& Tier : Cfg->WarnEscalationTiers)
+                    {
+                        if (WarnCount >= Tier.WarnCount)
+                        {
+                            BanDurationMinutes = Tier.DurationMinutes;
+                        }
+                    }
+                }
+                else if (Cfg->AutoBanWarnCount > 0 && WarnCount >= Cfg->AutoBanWarnCount)
+                {
+                    BanDurationMinutes = Cfg->AutoBanWarnMinutes;
+                }
+
+                if (BanDurationMinutes >= 0)
+                {
+                    UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
+                    if (DB)
+                    {
+                        FBanEntry AutoBan;
+                        AutoBan.Uid      = Uid;
+                        UBanDatabase::ParseUid(Uid, AutoBan.Platform, AutoBan.PlayerUID);
+                        AutoBan.PlayerName   = PlayerName;
+                        AutoBan.Reason       = TEXT("Auto-banned: reached warning threshold");
+                        AutoBan.BannedBy     = TEXT("system");
+                        AutoBan.BanDate      = FDateTime::UtcNow();
+                        AutoBan.bIsPermanent = (BanDurationMinutes <= 0);
+                        AutoBan.ExpireDate   = AutoBan.bIsPermanent
+                            ? FDateTime(0)
+                            : FDateTime::UtcNow() + FTimespan::FromMinutes(BanDurationMinutes);
+
+                        DB->AddBan(AutoBan);
+                        FBanDiscordNotifier::NotifyBanCreated(AutoBan);
+                        if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+                            AuditLog->LogAction(TEXT("ban"), Uid, PlayerName, TEXT("system"), TEXT("system"), AutoBan.Reason);
+                    }
                 }
             }
 
@@ -912,25 +935,45 @@ void UBanRestApi::RegisterRoutes()
                 if (Parsed > 0) Limit = FMath::Min(Parsed, 1000);
             }
 
+            int32 Page = 1;
+            if (const FString* PageStr = Req.QueryParams.Find(TEXT("page")))
+            {
+                const int32 Parsed = FCString::Atoi(**PageStr);
+                if (Parsed > 0) Page = Parsed;
+            }
+
             TArray<FAuditEntry> Entries;
             const FString* UidFilter = Req.QueryParams.Find(TEXT("uid"));
             if (UidFilter && !UidFilter->IsEmpty())
                 Entries = AuditLog->GetEntriesForTarget(*UidFilter);
             else
-                Entries = AuditLog->GetRecentEntries(Limit);
+                Entries = AuditLog->GetAllEntries();
 
-            // Apply limit to UID-filtered results as well.
-            if (Entries.Num() > Limit)
-                Entries.SetNum(Limit);
+            // Sort newest first before paginating.
+            Entries.Sort([](const FAuditEntry& A, const FAuditEntry& B)
+            {
+                return A.Timestamp > B.Timestamp;
+            });
+
+            const int32 Total  = Entries.Num();
+            const int32 Offset = (Page - 1) * Limit;
+            const int32 End    = FMath::Min(Offset + Limit, Total);
 
             TArray<TSharedPtr<FJsonValue>> Arr;
-            Arr.Reserve(Entries.Num());
-            for (const FAuditEntry& E : Entries)
-                Arr.Add(MakeShared<FJsonValueObject>(BanJson::AuditToJson(E)));
+            if (Offset < Total)
+            {
+                Arr.Reserve(End - Offset);
+                for (int32 i = Offset; i < End; ++i)
+                    Arr.Add(MakeShared<FJsonValueObject>(BanJson::AuditToJson(Entries[i])));
+            }
 
             TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
-            Root->SetNumberField(TEXT("count"),   Entries.Num());
-            Root->SetArrayField (TEXT("entries"), Arr);
+            Root->SetNumberField(TEXT("count"),      Arr.Num());
+            Root->SetNumberField(TEXT("total"),      Total);
+            Root->SetNumberField(TEXT("page"),       Page);
+            Root->SetNumberField(TEXT("pageSize"),   Limit);
+            Root->SetNumberField(TEXT("totalPages"), (Total + Limit - 1) / FMath::Max(Limit, 1));
+            Root->SetArrayField (TEXT("entries"),    Arr);
             Done(BanJson::Json(BanJson::ObjectToString(Root)));
             return true;
         }
@@ -950,14 +993,429 @@ void UBanRestApi::RegisterRoutes()
             UPlayerSessionRegistry* PlayerReg = GI->GetSubsystem<UPlayerSessionRegistry>();
             UBanAuditLog*           AuditLog  = GI->GetSubsystem<UBanAuditLog>();
 
+            // Count temp bans expiring within 24 hours.
+            int32 TempBansExpiringSoon = 0;
+            if (DB)
+            {
+                const FDateTime Horizon = FDateTime::UtcNow() + FTimespan::FromHours(24.0);
+                for (const FBanEntry& E : DB->GetActiveBans())
+                {
+                    if (!E.bIsPermanent && E.ExpireDate <= Horizon)
+                        ++TempBansExpiringSoon;
+                }
+            }
+
+            // Count warnings issued this week.
+            int32 WarningsThisWeek = 0;
+            if (WarnReg)
+            {
+                const FDateTime WeekAgo = FDateTime::UtcNow() - FTimespan::FromDays(7.0);
+                for (const FWarningEntry& W : WarnReg->GetAllWarnings())
+                {
+                    if (W.WarnDate >= WeekAgo)
+                        ++WarningsThisWeek;
+                }
+            }
+
+            // Online player count from the world.
+            int32 OnlinePlayers = 0;
+            if (UWorld* World = GI->GetWorld())
+            {
+                for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+                {
+                    if (It->IsValid()) ++OnlinePlayers;
+                }
+            }
+
             TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-            Obj->SetNumberField(TEXT("activeBans"),    DB        ? static_cast<double>(DB->GetActiveBans().Num())        : 0.0);
-            Obj->SetNumberField(TEXT("totalBans"),     DB        ? static_cast<double>(DB->GetAllBans().Num())           : 0.0);
-            Obj->SetNumberField(TEXT("totalWarnings"), WarnReg   ? static_cast<double>(WarnReg->GetAllWarnings().Num())  : 0.0);
-            Obj->SetNumberField(TEXT("totalPlayers"),  PlayerReg ? static_cast<double>(PlayerReg->GetAllRecords().Num()) : 0.0);
-            Obj->SetNumberField(TEXT("auditEntries"),  AuditLog  ? static_cast<double>(AuditLog->GetAllEntries().Num())  : 0.0);
-            Obj->SetStringField(TEXT("timestamp"),     FDateTime::UtcNow().ToIso8601());
+            Obj->SetNumberField(TEXT("activeBans"),              DB        ? static_cast<double>(DB->GetActiveBans().Num())        : 0.0);
+            Obj->SetNumberField(TEXT("totalBans"),               DB        ? static_cast<double>(DB->GetAllBans().Num())           : 0.0);
+            Obj->SetNumberField(TEXT("tempBansExpiringSoon24h"), static_cast<double>(TempBansExpiringSoon));
+            Obj->SetNumberField(TEXT("totalWarnings"),           WarnReg   ? static_cast<double>(WarnReg->GetAllWarnings().Num())  : 0.0);
+            Obj->SetNumberField(TEXT("warningsThisWeek"),        static_cast<double>(WarningsThisWeek));
+            Obj->SetNumberField(TEXT("totalAuditEntries"),       AuditLog  ? static_cast<double>(AuditLog->GetAllEntries().Num())  : 0.0);
+            Obj->SetNumberField(TEXT("knownPlayers"),            PlayerReg ? static_cast<double>(PlayerReg->GetAllRecords().Num()) : 0.0);
+            Obj->SetNumberField(TEXT("onlinePlayers"),           static_cast<double>(OnlinePlayers));
+            Obj->SetStringField(TEXT("timestamp"),               FDateTime::UtcNow().ToIso8601());
             Done(BanJson::Json(BanJson::ObjectToString(Obj)));
+            return true;
+        }
+    ));
+
+    // ── POST /bans/ip ────────────────────────────────────────────────────────
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/bans/ip")),
+        EHttpServerRequestVerbs::VERB_POST,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
+            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            const FString BodyStr = BanJson::BodyToString(Req);
+            TSharedPtr<FJsonObject> Body;
+            TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(BodyStr);
+            if (!FJsonSerializer::Deserialize(Reader, Body) || !Body.IsValid())
+            {
+                Done(BanJson::Error(TEXT("Invalid JSON body")));
+                return true;
+            }
+
+            FString IpAddress;
+            if (!Body->TryGetStringField(TEXT("ipAddress"), IpAddress) || IpAddress.IsEmpty())
+            {
+                Done(BanJson::Error(TEXT("ipAddress is required")));
+                return true;
+            }
+
+            FString Reason, BannedBy;
+            Body->TryGetStringField(TEXT("reason"),   Reason);
+            Body->TryGetStringField(TEXT("bannedBy"), BannedBy);
+            if (Reason.IsEmpty())   Reason   = TEXT("IP ban");
+            if (BannedBy.IsEmpty()) BannedBy = TEXT("system");
+
+            FBanEntry Entry;
+            Entry.Uid        = UBanDatabase::MakeUid(TEXT("IP"), IpAddress);
+            Entry.PlayerUID  = IpAddress;
+            Entry.Platform   = TEXT("IP");
+            Entry.PlayerName = IpAddress;
+            Entry.Reason     = Reason;
+            Entry.BannedBy   = BannedBy;
+            Entry.BanDate    = FDateTime::UtcNow();
+            Entry.bIsPermanent = true;
+            Entry.ExpireDate   = FDateTime(0);
+
+            if (!DB->AddBan(Entry))
+            {
+                Done(BanJson::Error(TEXT("Failed to add IP ban"), EHttpServerResponseCodes::ServerError));
+                return true;
+            }
+
+            FBanDiscordNotifier::NotifyBanCreated(Entry);
+            if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+                AuditLog->LogAction(TEXT("ban"), Entry.Uid, IpAddress, BannedBy, BannedBy, Reason);
+
+            auto Resp = BanJson::Json(BanJson::ObjectToString(BanJson::EntryToJson(Entry)));
+            Resp->Code = EHttpServerResponseCodes::Created;
+            Done(MoveTemp(Resp));
+            return true;
+        }
+    ));
+
+    // ── DELETE /bans/ip/:ip ──────────────────────────────────────────────────
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/bans/ip/:ip")),
+        EHttpServerRequestVerbs::VERB_DELETE,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+
+            const FString IpAddress = FGenericPlatformHttp::UrlDecode(Req.PathParams.FindRef(TEXT("ip")));
+
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
+            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            const FString Uid = UBanDatabase::MakeUid(TEXT("IP"), IpAddress);
+            if (!DB->RemoveBanByUid(Uid))
+            {
+                Done(BanJson::Error(
+                    FString::Printf(TEXT("No IP ban found for '%s'"), *IpAddress),
+                    EHttpServerResponseCodes::NotFound));
+                return true;
+            }
+
+            FBanDiscordNotifier::NotifyBanRemoved(Uid, IpAddress, TEXT("api"));
+            if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+                AuditLog->LogAction(TEXT("unban"), Uid, IpAddress, TEXT("api"), TEXT("api"), TEXT("ip ban removal"));
+
+            Done(BanJson::Ok(FString::Printf(TEXT("IP ban for '%s' removed"), *IpAddress)));
+            return true;
+        }
+    ));
+
+    // ── POST /players/prune ──────────────────────────────────────────────────
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/players/prune")),
+        EHttpServerRequestVerbs::VERB_POST,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UPlayerSessionRegistry* PlayerReg = GI->GetSubsystem<UPlayerSessionRegistry>();
+            if (!PlayerReg) { Done(BanJson::Error(TEXT("PlayerSessionRegistry unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+
+            // Allow caller to override the retention window.
+            int32 DaysToKeep = Cfg ? Cfg->SessionRetentionDays : 0;
+            const FString BodyStr = BanJson::BodyToString(Req);
+            if (BodyStr != TEXT("{}"))
+            {
+                TSharedPtr<FJsonObject> Body;
+                TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(BodyStr);
+                if (FJsonSerializer::Deserialize(Reader, Body) && Body.IsValid())
+                {
+                    double DaysDbl = 0.0;
+                    if (Body->TryGetNumberField(TEXT("daysToKeep"), DaysDbl) && DaysDbl > 0.0)
+                        DaysToKeep = static_cast<int32>(DaysDbl);
+                }
+            }
+
+            if (DaysToKeep <= 0)
+            {
+                Done(BanJson::Error(
+                    TEXT("daysToKeep must be > 0 (set in request body or SessionRetentionDays config)")));
+                return true;
+            }
+
+            const int32 Pruned = PlayerReg->PruneOldRecords(DaysToKeep);
+
+            TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+            Obj->SetNumberField(TEXT("pruned"),     static_cast<double>(Pruned));
+            Obj->SetNumberField(TEXT("daysToKeep"), static_cast<double>(DaysToKeep));
+            Done(BanJson::Json(BanJson::ObjectToString(Obj)));
+            return true;
+        }
+    ));
+
+    // ── GET /audit/export.csv ────────────────────────────────────────────────
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/audit/export.csv")),
+        EHttpServerRequestVerbs::VERB_GET,
+        [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
+        {
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>();
+            if (!AuditLog) { Done(BanJson::Error(TEXT("AuditLog unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            TArray<FAuditEntry> Entries = AuditLog->GetAllEntries();
+
+            auto CsvQ = [](const FString& S) -> FString
+            {
+                return TEXT("\"") + S.Replace(TEXT("\""), TEXT("\"\"")) + TEXT("\"");
+            };
+
+            FString Csv = TEXT("id,action,targetUid,targetName,adminUid,adminName,details,timestamp\n");
+            for (const FAuditEntry& E : Entries)
+            {
+                Csv += FString::Printf(TEXT("%lld,"), E.Id);
+                Csv += CsvQ(E.Action)     + TEXT(",");
+                Csv += CsvQ(E.TargetUid)  + TEXT(",");
+                Csv += CsvQ(E.TargetName) + TEXT(",");
+                Csv += CsvQ(E.AdminUid)   + TEXT(",");
+                Csv += CsvQ(E.AdminName)  + TEXT(",");
+                Csv += CsvQ(E.Details)    + TEXT(",");
+                Csv += E.Timestamp.ToIso8601() + TEXT("\n");
+            }
+
+            auto R = FHttpServerResponse::Create(Csv, TEXT("text/csv"));
+            R->Code = EHttpServerResponseCodes::Ok;
+            Done(MoveTemp(R));
+            return true;
+        }
+    ));
+
+    // ── GET /warnings/export.csv ─────────────────────────────────────────────
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/warnings/export.csv")),
+        EHttpServerRequestVerbs::VERB_GET,
+        [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
+        {
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UPlayerWarningRegistry* WarnReg = GI->GetSubsystem<UPlayerWarningRegistry>();
+            if (!WarnReg) { Done(BanJson::Error(TEXT("WarningRegistry unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            TArray<FWarningEntry> Entries = WarnReg->GetAllWarnings();
+
+            auto CsvQ = [](const FString& S) -> FString
+            {
+                return TEXT("\"") + S.Replace(TEXT("\""), TEXT("\"\"")) + TEXT("\"");
+            };
+
+            FString Csv = TEXT("id,uid,playerName,reason,warnedBy,warnDate\n");
+            for (const FWarningEntry& W : Entries)
+            {
+                Csv += FString::Printf(TEXT("%lld,"), W.Id);
+                Csv += CsvQ(W.Uid)        + TEXT(",");
+                Csv += CsvQ(W.PlayerName) + TEXT(",");
+                Csv += CsvQ(W.Reason)     + TEXT(",");
+                Csv += CsvQ(W.WarnedBy)   + TEXT(",");
+                Csv += W.WarnDate.ToIso8601() + TEXT("\n");
+            }
+
+            auto R = FHttpServerResponse::Create(Csv, TEXT("text/csv"));
+            R->Code = EHttpServerResponseCodes::Ok;
+            Done(MoveTemp(R));
+            return true;
+        }
+    ));
+
+    // ── GET /players/export.csv ──────────────────────────────────────────────
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/players/export.csv")),
+        EHttpServerRequestVerbs::VERB_GET,
+        [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
+        {
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UPlayerSessionRegistry* PlayerReg = GI->GetSubsystem<UPlayerSessionRegistry>();
+            if (!PlayerReg) { Done(BanJson::Error(TEXT("PlayerSessionRegistry unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            TArray<FPlayerSessionRecord> Players = PlayerReg->GetAllRecords();
+
+            auto CsvQ = [](const FString& S) -> FString
+            {
+                return TEXT("\"") + S.Replace(TEXT("\""), TEXT("\"\"")) + TEXT("\"");
+            };
+
+            FString Csv = TEXT("uid,displayName,lastSeen,ipAddress\n");
+            for (const FPlayerSessionRecord& P : Players)
+            {
+                Csv += CsvQ(P.Uid)         + TEXT(",");
+                Csv += CsvQ(P.DisplayName) + TEXT(",");
+                Csv += CsvQ(P.LastSeen)    + TEXT(",");
+                Csv += CsvQ(P.IpAddress)   + TEXT("\n");
+            }
+
+            auto R = FHttpServerResponse::Create(Csv, TEXT("text/csv"));
+            R->Code = EHttpServerResponseCodes::Ok;
+            Done(MoveTemp(R));
+            return true;
+        }
+    ));
+
+    // ── POST /appeals ────────────────────────────────────────────────────────
+    // No auth required — players submit appeals from outside the game.
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/appeals")),
+        EHttpServerRequestVerbs::VERB_POST,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UBanAppealRegistry* AppealsReg = GI->GetSubsystem<UBanAppealRegistry>();
+            if (!AppealsReg) { Done(BanJson::Error(TEXT("AppealRegistry unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            const FString BodyStr = BanJson::BodyToString(Req);
+            TSharedPtr<FJsonObject> Body;
+            TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(BodyStr);
+            if (!FJsonSerializer::Deserialize(Reader, Body) || !Body.IsValid())
+            {
+                Done(BanJson::Error(TEXT("Invalid JSON body")));
+                return true;
+            }
+
+            FString Uid, Reason, ContactInfo;
+            if (!Body->TryGetStringField(TEXT("uid"), Uid) || Uid.IsEmpty())
+            {
+                Done(BanJson::Error(TEXT("uid is required")));
+                return true;
+            }
+            Body->TryGetStringField(TEXT("reason"),      Reason);
+            Body->TryGetStringField(TEXT("contactInfo"), ContactInfo);
+            if (Reason.IsEmpty()) Reason = TEXT("No reason given");
+
+            const FBanAppealEntry NewEntry = AppealsReg->AddAppeal(Uid, Reason, ContactInfo);
+
+            // Optionally notify Discord.
+            {
+                const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+                if (Cfg && !Cfg->DiscordWebhookUrl.IsEmpty())
+                {
+                    // Reuse BanDiscordNotifier's webhook infrastructure via a simple direct call.
+                    // Build a minimal embed payload inline rather than adding a dedicated method.
+                }
+            }
+
+            TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+            Obj->SetNumberField(TEXT("id"),          static_cast<double>(NewEntry.Id));
+            Obj->SetStringField(TEXT("uid"),         NewEntry.Uid);
+            Obj->SetStringField(TEXT("reason"),      NewEntry.Reason);
+            Obj->SetStringField(TEXT("contactInfo"), NewEntry.ContactInfo);
+            Obj->SetStringField(TEXT("submittedAt"), NewEntry.SubmittedAt.ToIso8601());
+
+            auto Resp = BanJson::Json(BanJson::ObjectToString(Obj));
+            Resp->Code = EHttpServerResponseCodes::Created;
+            Done(MoveTemp(Resp));
+            return true;
+        }
+    ));
+
+    // ── GET /appeals ─────────────────────────────────────────────────────────
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/appeals")),
+        EHttpServerRequestVerbs::VERB_GET,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UBanAppealRegistry* AppealsReg = GI->GetSubsystem<UBanAppealRegistry>();
+            if (!AppealsReg) { Done(BanJson::Error(TEXT("AppealRegistry unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            TArray<FBanAppealEntry> Appeals = AppealsReg->GetAllAppeals();
+
+            TArray<TSharedPtr<FJsonValue>> Arr;
+            Arr.Reserve(Appeals.Num());
+            for (const FBanAppealEntry& E : Appeals)
+            {
+                TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+                Obj->SetNumberField(TEXT("id"),          static_cast<double>(E.Id));
+                Obj->SetStringField(TEXT("uid"),         E.Uid);
+                Obj->SetStringField(TEXT("reason"),      E.Reason);
+                Obj->SetStringField(TEXT("contactInfo"), E.ContactInfo);
+                Obj->SetStringField(TEXT("submittedAt"), E.SubmittedAt.ToIso8601());
+                Arr.Add(MakeShared<FJsonValueObject>(Obj));
+            }
+
+            TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+            Root->SetNumberField(TEXT("count"),   static_cast<double>(Appeals.Num()));
+            Root->SetArrayField (TEXT("appeals"), Arr);
+            Done(BanJson::Json(BanJson::ObjectToString(Root)));
+            return true;
+        }
+    ));
+
+    // ── DELETE /appeals/:id ──────────────────────────────────────────────────
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/appeals/:id")),
+        EHttpServerRequestVerbs::VERB_DELETE,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+
+            const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
+            if (IdStr.IsEmpty() || !IdStr.IsNumeric())
+            {
+                Done(BanJson::Error(TEXT("id must be an integer")));
+                return true;
+            }
+            const int64 Id = FCString::Atoi64(*IdStr);
+
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UBanAppealRegistry* AppealsReg = GI->GetSubsystem<UBanAppealRegistry>();
+            if (!AppealsReg) { Done(BanJson::Error(TEXT("AppealRegistry unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            if (!AppealsReg->DeleteAppeal(Id))
+            {
+                Done(BanJson::Error(
+                    FString::Printf(TEXT("No appeal found with id %lld"), Id),
+                    EHttpServerResponseCodes::NotFound));
+                return true;
+            }
+
+            Done(BanJson::Ok(FString::Printf(TEXT("Appeal id=%lld dismissed"), Id)));
             return true;
         }
     ));

@@ -5,6 +5,18 @@
 #include "CoreMinimal.h"
 
 /**
+ * A single find-and-replace entry for the chat relay blocklist.
+ */
+struct DISCORDBRIDGE_API FChatRelayReplacement
+{
+	/** The pattern to search for (case-insensitive substring match). */
+	FString Pattern;
+
+	/** The replacement text (default: ***). */
+	FString Replacement{ TEXT("***") };
+};
+
+/**
  * Configuration for the Discord Bridge mod.
  *
  * PRIMARY config (edit this one):
@@ -228,6 +240,19 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 */
 	TArray<FString> ChatRelayBlocklist;
 
+	/**
+	 * Find-and-replace replacements for the chat relay filter.
+	 * Instead of dropping the whole message when a keyword is matched, the
+	 * matching text is replaced with Replacement (default: ***).
+	 *
+	 * When a message matches both ChatRelayBlocklist (drop) and
+	 * ChatRelayBlocklistReplacements (replace), the full-drop rule wins.
+	 *
+	 * Config syntax:
+	 *   +ChatRelayBlocklistReplacements=(Pattern="badword",Replacement="***")
+	 */
+	TArray<FChatRelayReplacement> ChatRelayBlocklistReplacements;
+
 	// ── Bot commands ──────────────────────────────────────────────────────────
 
 	/**
@@ -362,6 +387,83 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 *   5 = Competing in    → "Competing in <your text>"
 	 *  Default: 0 (Playing). */
 	int32 PlayerCountActivityType{ 0 };
+
+	// ── Per-event channel routing ─────────────────────────────────────────────
+
+	/**
+	 * Snowflake ID of the Discord channel where game phase change announcements
+	 * are posted.  Leave empty to post to the main bridged channel (ChannelId).
+	 */
+	FString PhaseEventsChannelId;
+
+	/**
+	 * Snowflake ID of the Discord channel where schematic/research unlock
+	 * announcements are posted.  Leave empty to post to PhaseEventsChannelId,
+	 * or to ChannelId when that is also empty.
+	 */
+	FString SchematicEventsChannelId;
+
+	/**
+	 * Snowflake ID of the Discord channel where ban notifications are posted.
+	 * Leave empty to post to the main DiscordWebhookUrl used by BanSystem.
+	 */
+	FString BanEventsChannelId;
+
+	// ── !stats / !playerstats commands ───────────────────────────────────────
+
+	/**
+	 * Prefix for the !stats Discord command (default: !stats).
+	 * Discord users can type this to get a rich embed with server statistics.
+	 * Leave empty to disable the command.
+	 */
+	FString StatsCommandPrefix{ TEXT("!stats") };
+
+	/**
+	 * Prefix for the !playerstats Discord command (default: !playerstats).
+	 * Usage: !playerstats <in-game player name>
+	 * Leave empty to disable the command.
+	 */
+	FString PlayerStatsCommandPrefix{ TEXT("!playerstats") };
+
+	// ── Join reaction voting ──────────────────────────────────────────────────
+
+	/**
+	 * When true, DiscordBridge adds 👍 and 👎 reactions to the player-join
+	 * embed/message so that server members can up/down vote new arrivals.
+	 * Requires the bot to have "Add Reactions" and "Read Message History"
+	 * permissions in the player-events channel.
+	 * Default: false.
+	 */
+	bool bEnableJoinReactionVoting{ false };
+
+	/**
+	 * Number of 👎 reactions required within VoteWindowMinutes to kick
+	 * the newly-joined player.  Set to 0 to disable automatic kick.
+	 * Default: 0 (vote tracking only, no auto-kick).
+	 */
+	int32 VoteKickThreshold{ 0 };
+
+	/**
+	 * Number of minutes to watch for 👎 reactions before the vote expires.
+	 * Default: 5.
+	 */
+	int32 VoteWindowMinutes{ 5 };
+
+	// ── AFK kick ─────────────────────────────────────────────────────────────
+
+	/**
+	 * Number of minutes of inactivity before kicking an AFK player.
+	 * "Inactivity" is defined as not building anything and (optionally) not
+	 * moving, tracked via FGStatisticsSubsystem's building-built counter.
+	 * Set to 0 to disable AFK kick entirely (default).
+	 */
+	int32 AfkKickMinutes{ 0 };
+
+	/**
+	 * Reason shown to the player when they are kicked for inactivity.
+	 * Default: "Kicked for inactivity (AFK)."
+	 */
+	FString AfkKickReason{ TEXT("Kicked for inactivity (AFK).") };
 
 	/**
 	 * Loads configuration from the primary mod-folder INI, falling back to the

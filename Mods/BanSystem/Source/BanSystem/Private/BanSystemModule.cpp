@@ -7,6 +7,8 @@
 #include "HAL/PlatformFileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Engine/World.h"
+#include "Engine/GameInstance.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogBanSystem, Log, All);
 
@@ -27,6 +29,19 @@ void FBanSystemModule::StartupModule()
     // That folder is never touched by mod updates so settings survive any wipe
     // of the mod directory.
     BackupConfigIfNeeded();
+
+    // Start the scheduled backup ticker if BackupIntervalHours > 0.
+    const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+    if (Cfg && Cfg->BackupIntervalHours > 0.0f)
+    {
+        BackupAccumulatedSeconds = 0.0f;
+        BackupTickHandle = FTSTicker::GetCoreTicker().AddTicker(
+            FTickerDelegate::CreateRaw(this, &FBanSystemModule::OnBackupTick),
+            1.0f);
+        UE_LOG(LogBanSystem, Log,
+            TEXT("BanSystem: scheduled backup enabled — every %.1f hour(s)."),
+            Cfg->BackupIntervalHours);
+    }
 
     UE_LOG(LogBanSystem, Log, TEXT("BanSystem module started."));
 }
@@ -110,7 +125,31 @@ void FBanSystemModule::BackupConfigIfNeeded()
         + TEXT(";\n")
         + TEXT("; Duration in minutes for the auto-ban issued when AutoBanWarnCount is reached (default: 0 = permanent).\n")
         + TEXT("; Set to 0 for a permanent auto-ban.\n")
-        + TEXT("AutoBanWarnMinutes=") + FString::FromInt(Cfg->AutoBanWarnMinutes) + TEXT("\n");
+        + TEXT("AutoBanWarnMinutes=") + FString::FromInt(Cfg->AutoBanWarnMinutes) + TEXT("\n")
+        + TEXT("\n")
+        + TEXT("; -- Warning Escalation Tiers -------------------------------------------------\n")
+        + TEXT(";\n")
+        + TEXT("; Multi-tier automatic bans based on warning count.\n")
+        + TEXT("; Each tier: WarnCount=<N>,DurationMinutes=<M>  (0 = permanent ban)\n")
+        + TEXT("; Example:\n")
+        + TEXT(";   +WarnEscalationTiers=(WarnCount=2,DurationMinutes=30)\n")
+        + TEXT(";   +WarnEscalationTiers=(WarnCount=3,DurationMinutes=1440)\n")
+        + TEXT(";   +WarnEscalationTiers=(WarnCount=5,DurationMinutes=0)\n")
+        + TEXT("\n")
+        + TEXT("; -- Session Retention -------------------------------------------------------\n")
+        + TEXT(";\n")
+        + TEXT("; Number of days to retain player session records (default: 0 = keep forever).\n")
+        + TEXT("SessionRetentionDays=") + FString::FromInt(Cfg->SessionRetentionDays) + TEXT("\n")
+        + TEXT("\n")
+        + TEXT("; -- Scheduled Backup --------------------------------------------------------\n")
+        + TEXT(";\n")
+        + TEXT("; Interval in hours between automatic database backups (default: 0 = disabled).\n")
+        + TEXT("BackupIntervalHours=") + FString::SanitizeFloat(Cfg->BackupIntervalHours) + TEXT("\n")
+        + TEXT("\n")
+        + TEXT("; -- Ban Expiry Notifications ------------------------------------------------\n")
+        + TEXT(";\n")
+        + TEXT("; When true, post a Discord notification when a temporary ban expires (default: false).\n")
+        + TEXT("bNotifyBanExpired=") + (Cfg->bNotifyBanExpired ? TEXT("true") : TEXT("false")) + TEXT("\n");
 
     IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
     PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
@@ -239,7 +278,54 @@ void FBanSystemModule::RestoreDefaultConfigIfNeeded()
 
 void FBanSystemModule::ShutdownModule()
 {
+    if (BackupTickHandle.IsValid())
+    {
+        FTSTicker::GetCoreTicker().RemoveTicker(BackupTickHandle);
+        BackupTickHandle.Reset();
+    }
     UE_LOG(LogBanSystem, Log, TEXT("BanSystem module shut down."));
+}
+
+bool FBanSystemModule::OnBackupTick(float DeltaTime)
+{
+    const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+    if (!Cfg || Cfg->BackupIntervalHours <= 0.0f) return true;
+
+    BackupAccumulatedSeconds += DeltaTime;
+    const float IntervalSeconds = Cfg->BackupIntervalHours * 3600.0f;
+    if (BackupAccumulatedSeconds < IntervalSeconds) return true;
+
+    BackupAccumulatedSeconds = 0.0f;
+
+    // Find the game instance to get the UBanDatabase subsystem.
+    // We walk the GEngine world list to find the first server world.
+    if (GEngine)
+    {
+        for (const FWorldContext& Ctx : GEngine->GetWorldContexts())
+        {
+            UWorld* World = Ctx.World();
+            if (!World) continue;
+            if (World->GetNetMode() != NM_DedicatedServer && World->GetNetMode() != NM_ListenServer) continue;
+            UGameInstance* GI = World->GetGameInstance();
+            if (!GI) continue;
+            UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
+            if (!DB) continue;
+
+            const FString BackupDir = FPaths::GetPath(DB->GetDatabasePath()) / TEXT("backups");
+            const FString Dest = DB->Backup(BackupDir, Cfg ? Cfg->MaxBackups : 5);
+            if (!Dest.IsEmpty())
+            {
+                UE_LOG(LogBanSystem, Log, TEXT("BanSystem: scheduled backup written to '%s'"), *Dest);
+            }
+            else
+            {
+                UE_LOG(LogBanSystem, Warning, TEXT("BanSystem: scheduled backup failed"));
+            }
+            break;
+        }
+    }
+
+    return true; // keep ticking
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -144,3 +144,23 @@ void FBanDiscordNotifier::NotifyPlayerKicked(const FString& PlayerName, const FS
     // Orange: 15105570
     PostWebhook(BuildEmbed(15105570, TEXT("👢 Player Kicked"), Fields));
 }
+
+void FBanDiscordNotifier::NotifyBanExpired(const FBanEntry& Entry)
+{
+    const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+    if (!Cfg || !Cfg->bNotifyBanExpired) return;
+
+    const FString PlayerValue = Entry.PlayerName.IsEmpty()
+        ? Entry.Uid
+        : Entry.PlayerName + TEXT(" (") + Entry.Uid + TEXT(")");
+
+    const FString ExpireStr = Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")) + TEXT(" UTC");
+
+    const FString Fields =
+        Field(TEXT("Player"),     PlayerValue)   + TEXT(",") +
+        Field(TEXT("Reason"),     Entry.Reason)  + TEXT(",") +
+        Field(TEXT("Expired At"), ExpireStr);
+
+    // Grey-blue: 8421504
+    PostWebhook(BuildEmbed(8421504, TEXT("⏱️ Temp-Ban Expired"), Fields));
+}

@@ -44,7 +44,7 @@ void USMLWebSocketClient::Connect(const FString& Url,
 
 	bIsConnected = false;
 	bHasConnectedOnce = false;
-	ConnectionState.store(static_cast<uint8>(EWebSocketState::Connecting));
+	SetConnectionState(EWebSocketState::Connecting);
 
 	// Build the reconnect configuration from our current property values.
 	FSMLWebSocketReconnectConfig ReconnectCfg;
@@ -52,6 +52,13 @@ void USMLWebSocketClient::Connect(const FString& Url,
 	ReconnectCfg.ReconnectInitialDelay     = ReconnectInitialDelaySeconds;
 	ReconnectCfg.MaxReconnectDelay         = MaxReconnectDelaySeconds;
 	ReconnectCfg.MaxReconnectAttempts      = MaxReconnectAttempts;
+	ReconnectCfg.PingInterval              = PingIntervalSeconds;
+	ReconnectCfg.PingTimeout               = PingTimeoutSeconds;
+	ReconnectCfg.MaxMessageSizeBytes       = MaxMessageSizeBytes;
+	ReconnectCfg.ProxyHost                 = ProxyHost;
+	ReconnectCfg.ProxyPort                 = ProxyPort;
+	ReconnectCfg.ProxyUser                 = ProxyUser;
+	ReconnectCfg.ProxyPassword             = ProxyPassword;
 
 	Runnable = MakeShared<FSMLWebSocketRunnable>(this, Url, Protocols, ExtraHeaders, ReconnectCfg,
 	                                             ConnectionGeneration);
@@ -94,7 +101,7 @@ void USMLWebSocketClient::Close(int32 Code, const FString& Reason)
 {
 	if (Runnable.IsValid())
 	{
-		ConnectionState.store(static_cast<uint8>(EWebSocketState::Closing));
+		SetConnectionState(EWebSocketState::Closing);
 		Runnable->EnqueueClose(Code, Reason);
 	}
 }
@@ -131,7 +138,18 @@ void USMLWebSocketClient::StopRunnable()
 	}
 	Runnable.Reset();
 	bIsConnected = false;
-	ConnectionState.store(static_cast<uint8>(EWebSocketState::Disconnected));
+	SetConnectionState(EWebSocketState::Disconnected);
+}
+
+void USMLWebSocketClient::SetConnectionState(EWebSocketState NewState)
+{
+	const EWebSocketState OldState = static_cast<EWebSocketState>(ConnectionState.load());
+	if (OldState == NewState) return;
+	ConnectionState.store(static_cast<uint8>(NewState));
+	if (OnStateChanged.IsBound())
+	{
+		OnStateChanged.Broadcast(OldState, NewState);
+	}
 }
 
 // ── Internal callbacks (called on the game thread) ────────────────────────────
@@ -139,7 +157,7 @@ void USMLWebSocketClient::StopRunnable()
 void USMLWebSocketClient::Internal_OnConnected()
 {
 	bIsConnected = true;
-	ConnectionState.store(static_cast<uint8>(EWebSocketState::Connected));
+	SetConnectionState(EWebSocketState::Connected);
 
 	// Flush messages that were queued while the connection was down.
 	{
@@ -176,16 +194,14 @@ void USMLWebSocketClient::Internal_OnBinaryMessage(const TArray<uint8>& Data, bo
 void USMLWebSocketClient::Internal_OnClosed(int32 StatusCode, const FString& Reason)
 {
 	bIsConnected = false;
-	ConnectionState.store(static_cast<uint8>(
-		bAutoReconnect ? EWebSocketState::Connecting : EWebSocketState::Disconnected));
+	SetConnectionState(bAutoReconnect ? EWebSocketState::Connecting : EWebSocketState::Disconnected);
 	OnClosed.Broadcast(StatusCode, Reason);
 }
 
 void USMLWebSocketClient::Internal_OnError(const FString& ErrorMessage)
 {
 	bIsConnected = false;
-	ConnectionState.store(static_cast<uint8>(
-		bAutoReconnect ? EWebSocketState::Connecting : EWebSocketState::Disconnected));
+	SetConnectionState(bAutoReconnect ? EWebSocketState::Connecting : EWebSocketState::Disconnected);
 	OnError.Broadcast(ErrorMessage);
 }
 
@@ -193,4 +209,30 @@ void USMLWebSocketClient::Internal_OnReconnecting(int32 AttemptNumber, float Del
 {
 	bIsConnected = false;
 	OnReconnecting.Broadcast(AttemptNumber, DelaySeconds);
+}
+
+// ── Queued message helpers ────────────────────────────────────────────────────
+
+int32 USMLWebSocketClient::GetQueuedMessageCount() const
+{
+	FScopeLock Lock(&QueueMutex);
+	return PendingSendQueue.Num();
+}
+
+void USMLWebSocketClient::ClearQueue()
+{
+	FScopeLock Lock(&QueueMutex);
+	PendingSendQueue.Empty();
+}
+
+void USMLWebSocketClient::FlushQueue()
+{
+	if (!bIsConnected || !Runnable.IsValid()) return;
+
+	FScopeLock Lock(&QueueMutex);
+	for (const FString& Msg : PendingSendQueue)
+	{
+		Runnable->EnqueueText(Msg);
+	}
+	PendingSendQueue.Empty();
 }
