@@ -8,6 +8,7 @@
 #include "SMLWebSocketClient.h"
 #include "DiscordBridgeConfig.h"
 #include "FGChatManager.h"
+#include "FGGamePhase.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerController.h"
 #include "Dom/JsonObject.h"
@@ -19,6 +20,9 @@ class UTicketSubsystem;
 
 // Forward-declared so the header does not pull in BanSystem's full header chain.
 class UBanDiscordSubsystem;
+
+class UFGGamePhase;
+class UFGSchematic;
 
 // ── Delegate declarations ─────────────────────────────────────────────────────
 
@@ -750,4 +754,28 @@ private:
 
 	/** Ticker callback — checks each player's idle time and kicks AFKers. */
 	bool AfkKickTick(float DeltaTime);
+
+	// ── Game phase & schematic unlock announcements ───────────────────────────
+
+	/** Try to bind to AFGGamePhaseManager and AFGSchematicManager delegates.
+	 *  Returns true when both are bound (ticker stops); false to keep retrying. */
+	bool TryBindToGameSubsystems();
+
+	/** Fired when the server reaches a new game phase. */
+	UFUNCTION()
+	void OnGamePhaseUpdated(UFGGamePhase* NewPhase, bool bSuppressNarrative);
+
+	/** Fired when the game completion condition is met. */
+	UFUNCTION()
+	void OnGameCompleted(bool bSuppressNarrative);
+
+	/** Fired when a schematic is purchased/unlocked. */
+	UFUNCTION()
+	void OnSchematicPurchased(TSubclassOf<UFGSchematic> SchematicClass);
+
+	/** True once AFGGamePhaseManager delegates have been successfully bound. */
+	bool bBoundGamePhase = false;
+
+	/** True once AFGSchematicManager delegate has been successfully bound. */
+	bool bBoundSchematic = false;
 };

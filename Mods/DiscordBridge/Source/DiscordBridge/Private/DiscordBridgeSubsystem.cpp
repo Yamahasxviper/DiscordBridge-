@@ -16,6 +16,10 @@
 #include "GameFramework/GameSession.h"
 #include "GameFramework/PlayerState.h"
 #include "FGChatManager.h"
+#include "FGGamePhaseManager.h"
+#include "FGGamePhase.h"
+#include "FGSchematicManager.h"
+#include "FGSchematic.h"
 #include "TimerManager.h"
 #include "WhitelistManager.h"
 #include "Patching/NativeHookManager.h"
@@ -108,6 +112,18 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	       TEXT("DiscordBridge: DiscordToGameFormat  = \"%s\""), *Config.DiscordToGameFormat);
 
 	Connect();
+
+	// Start a 5-second deferred ticker to bind to AFGGamePhaseManager and
+	// AFGSchematicManager delegates once the world and GameState are ready.
+	// The ticker cancels itself after the first successful bind.
+	{
+		FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
+			{
+				return !TryBindToGameSubsystems(); // false = stop ticking
+			}),
+			5.0f);
+	}
 
 	// Wire ourselves as the Discord provider into UTicketSubsystem (always
 	// present now that TicketSystem is merged into this module).
@@ -3235,4 +3251,174 @@ bool UDiscordBridgeSubsystem::AfkKickTick(float /*DeltaTime*/)
 	}
 
 	return true; // keep ticking
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Game-world subsystem bindings (game phase + schematic unlock announcements)
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool UDiscordBridgeSubsystem::TryBindToGameSubsystems()
+{
+UWorld* World = GetWorld();
+if (!World) return false;
+
+bool bAllBound = true;
+
+// Bind to AFGGamePhaseManager::mOnCurrentGamePhaseUpdated.
+if (!bBoundGamePhase)
+{
+AFGGamePhaseManager* PhaseMgr = AFGGamePhaseManager::Get(World);
+if (PhaseMgr)
+{
+PhaseMgr->mOnCurrentGamePhaseUpdated.AddDynamic(
+this, &UDiscordBridgeSubsystem::OnGamePhaseUpdated);
+PhaseMgr->mOnGameCompleted.AddDynamic(
+this, &UDiscordBridgeSubsystem::OnGameCompleted);
+bBoundGamePhase = true;
+UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Bound to AFGGamePhaseManager delegates."));
+}
+else
+{
+bAllBound = false;
+}
+}
+
+// Bind to AFGSchematicManager::PurchasedSchematicDelegate.
+if (!bBoundSchematic)
+{
+AFGSchematicManager* SchMgr = AFGSchematicManager::Get(World);
+if (SchMgr)
+{
+SchMgr->PurchasedSchematicDelegate.AddDynamic(
+this, &UDiscordBridgeSubsystem::OnSchematicPurchased);
+bBoundSchematic = true;
+UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Bound to AFGSchematicManager::PurchasedSchematicDelegate."));
+}
+else
+{
+bAllBound = false;
+}
+}
+
+return bAllBound; // return true → stop ticker
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Game phase announcement
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::OnGamePhaseUpdated(UFGGamePhase* NewPhase, bool bSuppressNarrative)
+{
+if (!bGatewayReady || !NewPhase) return;
+
+const FString PhaseName = NewPhase->mDisplayName.ToString();
+
+UE_LOG(LogTemp, Log,
+       TEXT("DiscordBridge: Game phase updated → %s"), *PhaseName);
+
+const FString& TargetChannel = Config.PhaseEventsChannelId.IsEmpty()
+? Config.ChannelId
+: Config.PhaseEventsChannelId;
+
+if (TargetChannel.IsEmpty()) return;
+
+TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
+EmbedObj->SetStringField(TEXT("title"), TEXT("🏭 New Game Phase Reached!"));
+EmbedObj->SetNumberField(TEXT("color"), 16766720); // gold
+EmbedObj->SetStringField(TEXT("description"), FString::Printf(TEXT("**%s**"), *PhaseName));
+EmbedObj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+
+TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+Body->SetArrayField(TEXT("embeds"),
+TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(EmbedObj) });
+SendMessageBodyToChannel(TargetChannel, Body);
+}
+
+void UDiscordBridgeSubsystem::OnGameCompleted(bool /*bSuppressNarrative*/)
+{
+if (!bGatewayReady) return;
+
+UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Game completed — posting victory announcement."));
+
+const FString& TargetChannel = Config.PhaseEventsChannelId.IsEmpty()
+? Config.ChannelId
+: Config.PhaseEventsChannelId;
+
+if (TargetChannel.IsEmpty()) return;
+
+TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
+EmbedObj->SetStringField(TEXT("title"), TEXT("🎉 Factory Complete!"));
+EmbedObj->SetNumberField(TEXT("color"), 16766720);
+EmbedObj->SetStringField(TEXT("description"),
+TEXT("The factory has reached the final phase! Congratulations!"));
+EmbedObj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+
+TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+Body->SetArrayField(TEXT("embeds"),
+TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(EmbedObj) });
+SendMessageBodyToChannel(TargetChannel, Body);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Schematic unlock announcement
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::OnSchematicPurchased(TSubclassOf<UFGSchematic> SchematicClass)
+{
+if (!bGatewayReady || !SchematicClass) return;
+
+const UFGSchematic* CDO = GetDefault<UFGSchematic>(SchematicClass);
+if (!CDO) return;
+
+const FString SchematicName = CDO->mDisplayName.ToString();
+const ESchematicType Type   = CDO->mType;
+
+// Map schematic type to a human-readable label.
+FString TypeLabel;
+switch (Type)
+{
+case ESchematicType::EST_Milestone:         TypeLabel = TEXT("Milestone");            break;
+case ESchematicType::EST_Alternate:         TypeLabel = TEXT("Alternate Recipe");     break;
+case ESchematicType::EST_MAM:               TypeLabel = TEXT("MAM Research");         break;
+case ESchematicType::EST_HardDrive:         TypeLabel = TEXT("Hard Drive");           break;
+case ESchematicType::EST_ResourceSink:      TypeLabel = TEXT("AWESOME Shop");         break;
+case ESchematicType::EST_Tutorial:          TypeLabel = TEXT("Tutorial");             break;
+case ESchematicType::EST_CustomBuilderRule: TypeLabel = TEXT("Customizer");           break;
+default:                                    TypeLabel = TEXT("Research");             break;
+}
+
+UE_LOG(LogTemp, Log,
+       TEXT("DiscordBridge: Schematic purchased → %s (%s)"), *SchematicName, *TypeLabel);
+
+const FString& TargetChannel = Config.SchematicEventsChannelId.IsEmpty()
+? (Config.PhaseEventsChannelId.IsEmpty() ? Config.ChannelId : Config.PhaseEventsChannelId)
+: Config.SchematicEventsChannelId;
+
+if (TargetChannel.IsEmpty()) return;
+
+TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
+EmbedObj->SetStringField(TEXT("title"), TEXT("🔬 Unlock Achieved!"));
+EmbedObj->SetNumberField(TEXT("color"), 3066993); // green
+
+TArray<TSharedPtr<FJsonValue>> Fields;
+
+auto AddField = [&](const FString& Name, const FString& Value)
+{
+TSharedPtr<FJsonObject> F = MakeShared<FJsonObject>();
+F->SetStringField(TEXT("name"),   Name);
+F->SetStringField(TEXT("value"),  Value.IsEmpty() ? TEXT("—") : Value);
+F->SetBoolField  (TEXT("inline"), true);
+Fields.Add(MakeShared<FJsonValueObject>(F));
+};
+
+AddField(TEXT("Name"), SchematicName);
+AddField(TEXT("Type"), TypeLabel);
+
+EmbedObj->SetArrayField(TEXT("fields"), Fields);
+EmbedObj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+
+TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+Body->SetArrayField(TEXT("embeds"),
+TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(EmbedObj) });
+SendMessageBodyToChannel(TargetChannel, Body);
 }
