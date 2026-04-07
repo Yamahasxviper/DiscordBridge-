@@ -43,6 +43,8 @@ void USMLWebSocketClient::Connect(const FString& Url,
 	StopRunnable();
 
 	bIsConnected = false;
+	bHasConnectedOnce = false;
+	ConnectionState.store(static_cast<uint8>(EWebSocketState::Connecting));
 
 	// Build the reconnect configuration from our current property values.
 	FSMLWebSocketReconnectConfig ReconnectCfg;
@@ -63,9 +65,18 @@ void USMLWebSocketClient::Connect(const FString& Url,
 
 void USMLWebSocketClient::SendText(const FString& Message)
 {
-	if (Runnable.IsValid())
+	if (bIsConnected && Runnable.IsValid())
 	{
 		Runnable->EnqueueText(Message);
+		return;
+	}
+	if (bQueueMessagesWhileDisconnected)
+	{
+		FScopeLock Lock(&QueueMutex);
+		if (PendingSendQueue.Num() < 100)
+		{
+			PendingSendQueue.Add(Message);
+		}
 	}
 }
 
@@ -83,6 +94,7 @@ void USMLWebSocketClient::Close(int32 Code, const FString& Reason)
 {
 	if (Runnable.IsValid())
 	{
+		ConnectionState.store(static_cast<uint8>(EWebSocketState::Closing));
 		Runnable->EnqueueClose(Code, Reason);
 	}
 }
@@ -90,6 +102,11 @@ void USMLWebSocketClient::Close(int32 Code, const FString& Reason)
 bool USMLWebSocketClient::IsConnected() const
 {
 	return bIsConnected;
+}
+
+EWebSocketState USMLWebSocketClient::GetConnectionState() const
+{
+	return static_cast<EWebSocketState>(ConnectionState.load());
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
@@ -114,6 +131,7 @@ void USMLWebSocketClient::StopRunnable()
 	}
 	Runnable.Reset();
 	bIsConnected = false;
+	ConnectionState.store(static_cast<uint8>(EWebSocketState::Disconnected));
 }
 
 // ── Internal callbacks (called on the game thread) ────────────────────────────
@@ -121,6 +139,27 @@ void USMLWebSocketClient::StopRunnable()
 void USMLWebSocketClient::Internal_OnConnected()
 {
 	bIsConnected = true;
+	ConnectionState.store(static_cast<uint8>(EWebSocketState::Connected));
+
+	// Flush messages that were queued while the connection was down.
+	{
+		FScopeLock Lock(&QueueMutex);
+		for (const FString& Msg : PendingSendQueue)
+		{
+			if (Runnable.IsValid())
+			{
+				Runnable->EnqueueText(Msg);
+			}
+		}
+		PendingSendQueue.Empty();
+	}
+
+	if (bHasConnectedOnce)
+	{
+		OnReconnected.Broadcast();
+	}
+	bHasConnectedOnce = true;
+
 	OnConnected.Broadcast();
 }
 
@@ -137,12 +176,16 @@ void USMLWebSocketClient::Internal_OnBinaryMessage(const TArray<uint8>& Data, bo
 void USMLWebSocketClient::Internal_OnClosed(int32 StatusCode, const FString& Reason)
 {
 	bIsConnected = false;
+	ConnectionState.store(static_cast<uint8>(
+		bAutoReconnect ? EWebSocketState::Connecting : EWebSocketState::Disconnected));
 	OnClosed.Broadcast(StatusCode, Reason);
 }
 
 void USMLWebSocketClient::Internal_OnError(const FString& ErrorMessage)
 {
 	bIsConnected = false;
+	ConnectionState.store(static_cast<uint8>(
+		bAutoReconnect ? EWebSocketState::Connecting : EWebSocketState::Disconnected));
 	OnError.Broadcast(ErrorMessage);
 }
 
