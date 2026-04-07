@@ -75,9 +75,15 @@ void FBanChatCommandsModule::StartupModule()
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AWarnChatCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AWarningsChatCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AClearWarnsChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AAnnounceChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AStaffListChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AReasonChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AHistoryChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AMuteChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AUnmuteChatCommand::StaticClass());
 
             UE_LOG(LogBanChatCommands, Log,
-                TEXT("BanChatCommands: Registered 17 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns)."));;
+                TEXT("BanChatCommands: Registered 24 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns, announce, stafflist, reason, history, mute, unmute)."));
         }
     );
 

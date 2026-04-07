@@ -123,6 +123,30 @@ TArray<FPlayerSessionRecord> UPlayerSessionRegistry::GetAllRecords() const
     return Records;
 }
 
+int32 UPlayerSessionRegistry::PruneOldRecords(int32 DaysToKeep)
+{
+    if (DaysToKeep <= 0) return 0;
+
+    const FDateTime Cutoff = FDateTime::UtcNow() - FTimespan::FromDays(static_cast<double>(DaysToKeep));
+    FScopeLock Lock(&Mutex);
+
+    const int32 Before = Records.Num();
+    Records.RemoveAll([&Cutoff](const FPlayerSessionRecord& R) -> bool
+    {
+        FDateTime LastSeenDt;
+        return FDateTime::ParseIso8601(*R.LastSeen, LastSeenDt) && LastSeenDt < Cutoff;
+    });
+    const int32 Pruned = Before - Records.Num();
+    if (Pruned > 0)
+    {
+        SaveToFile();
+        UE_LOG(LogPlayerSessionRegistry, Log,
+            TEXT("PlayerSessionRegistry: pruned %d record(s) older than %d day(s)"),
+            Pruned, DaysToKeep);
+    }
+    return Pruned;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  File I/O
 // ─────────────────────────────────────────────────────────────────────────────

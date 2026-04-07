@@ -3,6 +3,7 @@
 
 #include "BanEnforcer.h"
 #include "BanDatabase.h"
+#include "BanDiscordNotifier.h"
 #include "PlayerSessionRegistry.h"
 
 // Pull in the full FUniqueNetIdRepl definition that was forward-declared in the header.
@@ -435,6 +436,16 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
     FBanEntry Entry;
     if (!DB->IsCurrentlyBannedByAnyId(Uid, Entry))
     {
+        // Check whether the player had a temporary ban that just expired and,
+        // if configured, post a Discord notification so admins are aware.
+        {
+            FBanEntry ExpiredEntry;
+            if (DB->GetBanByUid(Uid, ExpiredEntry) && !ExpiredEntry.bIsPermanent && ExpiredEntry.IsExpired())
+            {
+                FBanDiscordNotifier::NotifyBanExpired(ExpiredEntry);
+            }
+        }
+
         // EOS identity is not banned — also check the player's IP address.
         // This catches players who evade an existing /banname ban by reconnecting
         // under a new EOS PUID while their IP ban record is still active.
@@ -651,6 +662,15 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
     FBanEntry Entry;
     if (!DB->IsCurrentlyBannedByAnyId(Uid, Entry))
     {
+        // Notify Discord if a temporary ban just expired.
+        {
+            FBanEntry ExpiredEntry;
+            if (DB->GetBanByUid(Uid, ExpiredEntry) && !ExpiredEntry.bIsPermanent && ExpiredEntry.IsExpired())
+            {
+                FBanDiscordNotifier::NotifyBanExpired(ExpiredEntry);
+            }
+        }
+
         // Also check the player's IP address — catches evasion via new EOS PUID.
         const FString CachedIp = GetCachedIpForPlayer(PC);
         if (!CachedIp.IsEmpty())

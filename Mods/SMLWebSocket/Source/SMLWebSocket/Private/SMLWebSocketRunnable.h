@@ -40,6 +40,14 @@ struct FSMLWebSocketReconnectConfig
 	float ReconnectInitialDelay{2.0f}; // seconds
 	float MaxReconnectDelay{30.0f};    // seconds
 	int32 MaxReconnectAttempts{0};     // 0 = infinite
+	float PingInterval{30.0f};         // seconds; 0 = disabled
+	float PingTimeout{10.0f};          // seconds
+	int32 MaxMessageSizeBytes{0};      // 0 = use internal hard ceiling (64 MB)
+	// Proxy settings
+	FString ProxyHost;
+	int32   ProxyPort{3128};
+	FString ProxyUser;
+	FString ProxyPassword;
 };
 
 // ── State machine ─────────────────────────────────────────────────────────────
@@ -105,6 +113,9 @@ public:
 	/** True once the WebSocket handshake has been completed. */
 	bool IsConnected() const;
 
+	/** Attempt an HTTP CONNECT tunnel through the configured proxy. */
+	bool ConnectThroughProxy();
+
 private:
 	// ── Connection setup ──────────────────────────────────────────────────────
 
@@ -168,6 +179,9 @@ private:
 
 	/** Send a Pong frame in response to a Ping. */
 	void SendPong(const TArray<uint8>& Payload);
+
+	/** Send an unsolicited Ping frame to measure connection liveness. */
+	void SendPing();
 
 	/** Drain the outbound message queue and send all pending frames. */
 	void FlushOutboundQueue();
@@ -241,4 +255,17 @@ private:
 	// Reassembly buffer for fragmented WebSocket messages
 	TArray<uint8> FragmentBuffer;
 	bool          bFragmentIsBinary{false};
+
+	// ── Ping / pong keep-alive ────────────────────────────────────────────────
+
+	/** Wall-clock time (FPlatformTime::Seconds) of the last received frame from the server.
+	 *  Used to detect when the idle period exceeds PingInterval. */
+	double LastReceivedFrameTime{0.0};
+
+	/** Wall-clock time when the most recent Ping was sent.
+	 *  0.0 means no Ping is currently outstanding. */
+	double PingSentTime{0.0};
+
+	/** true while we are waiting for a Pong in response to our last Ping. */
+	bool bWaitingForPong{false};
 };

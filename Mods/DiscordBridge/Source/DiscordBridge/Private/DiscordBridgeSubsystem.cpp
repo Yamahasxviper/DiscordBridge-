@@ -11,10 +11,15 @@
 #include "HttpModule.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
+#include "GenericPlatform/GenericPlatformHttp.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/GameSession.h"
 #include "GameFramework/PlayerState.h"
 #include "FGChatManager.h"
+#include "FGGamePhaseManager.h"
+#include "FGGamePhase.h"
+#include "FGSchematicManager.h"
+#include "FGSchematic.h"
 #include "TimerManager.h"
 #include "WhitelistManager.h"
 #include "Patching/NativeHookManager.h"
@@ -108,6 +113,18 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	Connect();
 
+	// Start a 5-second deferred ticker to bind to AFGGamePhaseManager and
+	// AFGSchematicManager delegates once the world and GameState are ready.
+	// The ticker cancels itself after the first successful bind.
+	{
+		FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
+			{
+				return !TryBindToGameSubsystems(); // false = stop ticking
+			}),
+			5.0f);
+	}
+
 	// Wire ourselves as the Discord provider into UTicketSubsystem (always
 	// present now that TicketSystem is merged into this module).
 	Collection.InitializeDependency<UTicketSubsystem>();
@@ -133,6 +150,9 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 			BanDiscord->SetProvider(this);
 		}
 	}
+
+	// Start AFK kick ticker when configured.
+	StartAfkKickTicker();
 
 }
 
@@ -172,6 +192,10 @@ void UDiscordBridgeSubsystem::Deinitialize()
 			this, &UDiscordBridgeSubsystem::OnGameChatMessageAdded);
 		BoundChatManager.Reset();
 	}
+
+	// Stop the AFK kick ticker.
+	FTSTicker::GetCoreTicker().RemoveTicker(AfkKickTickerHandle);
+	AfkKickTickerHandle.Reset();
 
 	Disconnect();
 	Super::Deinitialize();
@@ -1002,6 +1026,23 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 		return; // Do not relay the command itself to in-game chat.
 	}
 
+	// Feature 3: !stats command – reply with server statistics embed.
+	if (!Config.StatsCommandPrefix.IsEmpty() &&
+	    Content.Equals(Config.StatsCommandPrefix, ESearchCase::IgnoreCase))
+	{
+		HandleStatsCommand(MsgChannelId);
+		return;
+	}
+
+	// Feature 4: !playerstats <name> command – reply with per-player stats.
+	if (!Config.PlayerStatsCommandPrefix.IsEmpty() &&
+	    Content.StartsWith(Config.PlayerStatsCommandPrefix + TEXT(" "), ESearchCase::IgnoreCase))
+	{
+		const FString TargetName = Content.Mid(Config.PlayerStatsCommandPrefix.Len()).TrimStartAndEnd();
+		HandlePlayerStatsCommand(MsgChannelId, TargetName);
+		return;
+	}
+
 	OnDiscordMessageReceived.Broadcast(Username, Content);
 }
 
@@ -1777,24 +1818,54 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 		return; // Do not relay this command to Discord.
 	}
 
-	// Feature 1: Chat relay blocklist – silently drop messages that contain a
-	// blocked keyword before forwarding them to Discord.
-	if (Config.ChatRelayBlocklist.Num() > 0)
+	// Feature 1a: Chat relay find/replace — replace matched patterns with *** before forwarding.
+	// Feature 1b: Chat relay blocklist — silently drop messages that contain a blocked keyword.
+	FString FilteredMessage = MessageText;
+	bool    bDropMessage    = false;
+
+	if (Config.ChatRelayBlocklistReplacements.Num() > 0)
 	{
-		for (const FString& Keyword : Config.ChatRelayBlocklist)
+		for (const FChatRelayReplacement& R : Config.ChatRelayBlocklistReplacements)
 		{
-			if (!Keyword.IsEmpty() &&
-			    MessageText.Contains(Keyword, ESearchCase::IgnoreCase))
+			if (R.Pattern.IsEmpty()) continue;
+			// Simple case-insensitive substring replace.
+			FString Temp = FilteredMessage;
+			FString Replaced;
+			int32   SearchStart = 0;
+			while (true)
 			{
-				UE_LOG(LogTemp, Verbose,
-				       TEXT("DiscordBridge: Chat message from '%s' blocked by ChatRelayBlocklist (keyword: '%s')."),
-				       *PlayerName, *Keyword);
-				return;
+				const int32 Idx = Temp.Find(R.Pattern, ESearchCase::IgnoreCase, ESearchDir::FromStart, SearchStart);
+				if (Idx == INDEX_NONE) break;
+				Replaced    += Temp.Mid(SearchStart, Idx - SearchStart) + R.Replacement;
+				SearchStart  = Idx + R.Pattern.Len();
+			}
+			if (SearchStart > 0)
+			{
+				Replaced       += Temp.Mid(SearchStart);
+				FilteredMessage = Replaced;
 			}
 		}
 	}
 
-	SendGameMessageToDiscord(PlayerName, MessageText);
+	if (!bDropMessage && Config.ChatRelayBlocklist.Num() > 0)
+	{
+		for (const FString& Keyword : Config.ChatRelayBlocklist)
+		{
+			if (!Keyword.IsEmpty() &&
+			    FilteredMessage.Contains(Keyword, ESearchCase::IgnoreCase))
+			{
+				UE_LOG(LogTemp, Verbose,
+				       TEXT("DiscordBridge: Chat message from '%s' blocked by ChatRelayBlocklist (keyword: '%s')."),
+				       *PlayerName, *Keyword);
+				bDropMessage = true;
+				break;
+			}
+		}
+	}
+
+	if (bDropMessage) return;
+
+	SendGameMessageToDiscord(PlayerName, FilteredMessage);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2153,7 +2224,7 @@ void UDiscordBridgeSubsystem::SendPlayerJoinNotification(const FString& PlayerNa
 	// ── Public join message (name only, no sensitive data) ───────────────────
 	if (!Config.PlayerJoinMessage.IsEmpty() || Config.bUseEmbedsForPlayerEvents)
 	{
-		const FString& EffectiveChannelId = Config.PlayerEventsChannelId.IsEmpty()
+		const FString EffectiveChannelId = Config.PlayerEventsChannelId.IsEmpty()
 			? Config.ChannelId
 			: Config.PlayerEventsChannelId;
 
@@ -2162,7 +2233,59 @@ void UDiscordBridgeSubsystem::SendPlayerJoinNotification(const FString& PlayerNa
 
 		if (Config.bUseEmbedsForPlayerEvents)
 		{
-			SendPlayerEventEmbed(EffectiveChannelId, TEXT("Player Joined"), 3066993, PlayerName);
+			if (Config.bEnableJoinReactionVoting)
+			{
+				// Build embed, post it, capture the message ID for reactions.
+				TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
+				EmbedObj->SetStringField(TEXT("title"), TEXT("Player Joined"));
+				EmbedObj->SetNumberField(TEXT("color"), 3066993);
+				TSharedPtr<FJsonObject> Field = MakeShared<FJsonObject>();
+				Field->SetStringField(TEXT("name"),   TEXT("Player"));
+				Field->SetStringField(TEXT("value"),  PlayerName);
+				Field->SetBoolField  (TEXT("inline"), true);
+				EmbedObj->SetArrayField(TEXT("fields"),
+					TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(Field) });
+				EmbedObj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+
+				TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+				Body->SetArrayField(TEXT("embeds"),
+					TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(EmbedObj) });
+
+				FString BodyStr;
+				TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyStr);
+				FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+
+				const FString Url = FString::Printf(
+					TEXT("%s/channels/%s/messages"), *DiscordApiBase, *EffectiveChannelId);
+				TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req = FHttpModule::Get().CreateRequest();
+				Req->SetURL(Url);
+				Req->SetVerb(TEXT("POST"));
+				Req->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
+				Req->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+				Req->SetContentAsString(BodyStr);
+
+				Req->OnProcessRequestComplete().BindWeakLambda(
+					this,
+					[this, EffectiveChannelId, PlayerName]
+					(FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bOk) mutable
+					{
+						if (!bOk || !Resp.IsValid() ||
+						    Resp->GetResponseCode() < 200 || Resp->GetResponseCode() >= 300) return;
+
+						TSharedPtr<FJsonObject> MsgObj;
+						TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(Resp->GetContentAsString());
+						FString MsgId;
+						if (FJsonSerializer::Deserialize(R, MsgObj) && MsgObj.IsValid())
+							MsgObj->TryGetStringField(TEXT("id"), MsgId);
+						if (!MsgId.IsEmpty())
+							AddJoinReactions(MsgId, EffectiveChannelId, PlayerName);
+					});
+				Req->ProcessRequest();
+			}
+			else
+			{
+				SendPlayerEventEmbed(EffectiveChannelId, TEXT("Player Joined"), 3066993, PlayerName);
+			}
 		}
 		else if (!Config.PlayerJoinMessage.IsEmpty())
 		{
@@ -2826,4 +2949,476 @@ return OnDiscordRawMessageReceived.AddLambda(MoveTemp(Callback));
 void UDiscordBridgeSubsystem::UnsubscribeRawMessage(FDelegateHandle Handle)
 {
 OnDiscordRawMessageReceived.Remove(Handle);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !stats command handler
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::HandleStatsCommand(const FString& ResponseChannelId)
+{
+	if (Config.BotToken.IsEmpty()) return;
+
+	UWorld* World = GetWorld();
+	if (!World) { SendMessageToChannel(ResponseChannelId, TEXT("Stats unavailable (no world).")); return; }
+
+	AGameStateBase* GS = World->GetGameState<AGameStateBase>();
+	const int32  PlayerCount = GS ? GS->PlayerArray.Num() : 0;
+
+	// Build a plain-text stats block (embeds require a slightly different build path).
+	FString Stats = FString::Printf(
+		TEXT("**📊 Server Statistics — %s**\n"), *Config.ServerName);
+	Stats += FString::Printf(TEXT("Players: %d\n"), PlayerCount);
+
+	TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
+	EmbedObj->SetStringField(TEXT("title"), FString::Printf(TEXT("📊 Server Stats – %s"), *Config.ServerName));
+	EmbedObj->SetNumberField(TEXT("color"), 3447003); // blue
+
+	TArray<TSharedPtr<FJsonValue>> Fields;
+	auto AddField = [&](const FString& Name, const FString& Value, bool bInline = true)
+	{
+		TSharedPtr<FJsonObject> F = MakeShared<FJsonObject>();
+		F->SetStringField(TEXT("name"),   Name);
+		F->SetStringField(TEXT("value"),  Value.IsEmpty() ? TEXT("—") : Value);
+		F->SetBoolField  (TEXT("inline"), bInline);
+		Fields.Add(MakeShared<FJsonValueObject>(F));
+	};
+
+	AddField(TEXT("Players Online"), FString::FromInt(PlayerCount));
+	AddField(TEXT("Server"),        Config.ServerName.IsEmpty() ? TEXT("(unnamed)") : Config.ServerName);
+	AddField(TEXT("Timestamp"),     FDateTime::UtcNow().ToString(TEXT("%Y-%m-%d %H:%M:%S UTC")), false);
+
+	EmbedObj->SetArrayField(TEXT("fields"), Fields);
+	EmbedObj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+
+	TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetArrayField(TEXT("embeds"),
+		TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(EmbedObj) });
+
+	const FString& TargetChannel = ResponseChannelId.IsEmpty() ? Config.ChannelId : ResponseChannelId;
+	SendMessageBodyToChannel(TargetChannel, Body);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !playerstats command handler
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::HandlePlayerStatsCommand(const FString& ResponseChannelId,
+                                                        const FString& TargetPlayerName)
+{
+	if (Config.BotToken.IsEmpty()) return;
+
+	const FString& TargetChannel = ResponseChannelId.IsEmpty() ? Config.ChannelId : ResponseChannelId;
+
+	if (TargetPlayerName.IsEmpty())
+	{
+		SendMessageToChannel(TargetChannel, TEXT("Usage: !playerstats <player name>"));
+		return;
+	}
+
+	// Look up per-player stats from the in-memory counters collected by OnPlayerAction.
+	TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
+	EmbedObj->SetStringField(TEXT("title"),
+		FString::Printf(TEXT("📈 Player Stats – %s"), *TargetPlayerName));
+	EmbedObj->SetNumberField(TEXT("color"), 10181046); // purple
+
+	TArray<TSharedPtr<FJsonValue>> Fields;
+	auto AddField = [&](const FString& Name, const FString& Value, bool bInline = true)
+	{
+		TSharedPtr<FJsonObject> F = MakeShared<FJsonObject>();
+		F->SetStringField(TEXT("name"),   Name);
+		F->SetStringField(TEXT("value"),  Value.IsEmpty() ? TEXT("0") : Value);
+		F->SetBoolField  (TEXT("inline"), bInline);
+		Fields.Add(MakeShared<FJsonValueObject>(F));
+	};
+
+	// Retrieve from the in-memory counters populated by event hooks.
+	const FPlayerStatCounters* Counters = PlayerStats.Find(TargetPlayerName);
+	if (Counters)
+	{
+		AddField(TEXT("Buildings Built"),     FString::FromInt(Counters->BuildingsBuilt));
+		AddField(TEXT("Items Picked Up"),     FString::FromInt(Counters->ItemsPickedUp));
+		AddField(TEXT("Buildings Dismantled"),FString::FromInt(Counters->BuildingsDismantled));
+	}
+	else
+	{
+		EmbedObj->SetStringField(TEXT("description"),
+			FString::Printf(TEXT("No statistics on record for **%s**."), *TargetPlayerName));
+	}
+
+	EmbedObj->SetArrayField(TEXT("fields"), Fields);
+	EmbedObj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+
+	TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetArrayField(TEXT("embeds"),
+		TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(EmbedObj) });
+	SendMessageBodyToChannel(TargetChannel, Body);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reaction voting helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::AddJoinReactions(const FString& MessageId,
+                                                const FString& ChannelId,
+                                                const FString& PlayerName)
+{
+	if (!Config.bEnableJoinReactionVoting) return;
+	if (Config.BotToken.IsEmpty() || ChannelId.IsEmpty() || MessageId.IsEmpty()) return;
+
+	auto AddReaction = [this, MessageId, ChannelId](const FString& Emoji)
+	{
+		const FString Url = FString::Printf(
+			TEXT("%s/channels/%s/messages/%s/reactions/%s/@me"),
+			*DiscordApiBase, *ChannelId, *MessageId,
+			*FGenericPlatformHttp::UrlEncode(Emoji));
+
+		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req = FHttpModule::Get().CreateRequest();
+		Req->SetURL(Url);
+		Req->SetVerb(TEXT("PUT"));
+		Req->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+		Req->ProcessRequest();
+	};
+
+	AddReaction(TEXT("👍"));
+	AddReaction(TEXT("👎"));
+
+	// Track the vote for automatic kick if threshold is configured.
+	if (Config.VoteKickThreshold > 0)
+	{
+		FPendingVote Vote;
+		Vote.MessageId   = MessageId;
+		Vote.ChannelId   = ChannelId;
+		Vote.PlayerName  = PlayerName;
+		Vote.ExpiresAt   = FDateTime::UtcNow() + FTimespan::FromMinutes(Config.VoteWindowMinutes);
+		PendingVotes.Add(MessageId, Vote);
+
+		// Schedule a check when the vote window expires.
+		const float DelaySeconds = static_cast<float>(Config.VoteWindowMinutes * 60);
+		FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateWeakLambda(this, [this, MessageId](float) -> bool
+			{
+				CheckVoteResult(MessageId);
+				return false; // one-shot
+			}),
+			DelaySeconds);
+	}
+}
+
+void UDiscordBridgeSubsystem::CheckVoteResult(const FString& MessageId)
+{
+	if (Config.VoteKickThreshold <= 0) return;
+	const FPendingVote* Vote = PendingVotes.Find(MessageId);
+	if (!Vote) return;
+
+	const FString VoteCopy   = Vote->PlayerName;
+	const FString ChannelCopy = Vote->ChannelId;
+	PendingVotes.Remove(MessageId);
+
+	// Fetch reactions from the Discord REST API to count 👎.
+	const FString Url = FString::Printf(
+		TEXT("%s/channels/%s/messages/%s/reactions/%s"),
+		*DiscordApiBase, *ChannelCopy, *MessageId,
+		*FGenericPlatformHttp::UrlEncode(TEXT("👎")));
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req = FHttpModule::Get().CreateRequest();
+	Req->SetURL(Url);
+	Req->SetVerb(TEXT("GET"));
+	Req->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+
+	Req->OnProcessRequestComplete().BindWeakLambda(
+		this,
+		[this, VoteCopy, Threshold = Config.VoteKickThreshold]
+		(FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bOk)
+		{
+			if (!bOk || !Resp.IsValid()) return;
+
+			TArray<TSharedPtr<FJsonValue>> Reactors;
+			TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Resp->GetContentAsString());
+			if (FJsonSerializer::Deserialize(Reader, Reactors) &&
+			    Reactors.Num() >= Threshold)
+			{
+				// Exclude the bot's own reaction.
+				int32 VoteCount = 0;
+				for (const TSharedPtr<FJsonValue>& V : Reactors)
+				{
+					const TSharedPtr<FJsonObject>* UserObj;
+					if (!V->TryGetObject(UserObj)) continue;
+					FString UserId;
+					(*UserObj)->TryGetStringField(TEXT("id"), UserId);
+					if (UserId != BotUserId) ++VoteCount;
+				}
+
+				if (VoteCount >= Threshold)
+				{
+					UE_LOG(LogTemp, Log,
+					       TEXT("DiscordBridge: VoteKick threshold (%d 👎) reached for '%s' — kicking."),
+					       Threshold, *VoteCopy);
+
+					if (UWorld* World = GetWorld())
+					{
+						for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+						{
+							APlayerController* PC = It->Get();
+							if (!PC || !PC->PlayerState) continue;
+							if (PC->PlayerState->GetPlayerName().Equals(VoteCopy, ESearchCase::IgnoreCase))
+							{
+								PC->ClientWasKicked(FText::FromString(TEXT("Removed by community vote.")));
+								if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
+									Conn->Close();
+								break;
+							}
+						}
+					}
+				}
+			}
+		});
+	Req->ProcessRequest();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AFK kick ticker
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::StartAfkKickTicker()
+{
+	if (Config.AfkKickMinutes <= 0) return;
+	if (AfkKickTickerHandle.IsValid()) return;
+
+	const float Interval = 30.0f; // check every 30 seconds
+	AfkKickTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateUObject(this, &UDiscordBridgeSubsystem::AfkKickTick),
+		Interval);
+	UE_LOG(LogTemp, Log, TEXT("DiscordBridge: AFK kick enabled — threshold %d minutes."), Config.AfkKickMinutes);
+}
+
+bool UDiscordBridgeSubsystem::AfkKickTick(float /*DeltaTime*/)
+{
+	if (Config.AfkKickMinutes <= 0) return true;
+
+	UWorld* World = GetWorld();
+	if (!World) return true;
+
+	const FDateTime Now        = FDateTime::UtcNow();
+	const FTimespan Threshold  = FTimespan::FromMinutes(Config.AfkKickMinutes);
+
+	TArray<APlayerController*> ToKick;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PC = It->Get();
+		if (!PC || !PC->PlayerState || PC->IsLocalController()) continue;
+
+		const FString Name = PC->PlayerState->GetPlayerName();
+		FPlayerAfkState& State = AfkStates.FindOrAdd(Name);
+
+		// Use the building-built counter as the activity indicator.
+		const FPlayerStatCounters* Stats = PlayerStats.Find(Name);
+		const int32 CurrentBuilt = Stats ? Stats->BuildingsBuilt : 0;
+
+		if (State.LastBuildCount != CurrentBuilt)
+		{
+			State.LastBuildCount   = CurrentBuilt;
+			State.LastActivityTime = Now;
+		}
+
+		if (State.LastActivityTime == FDateTime(0))
+			State.LastActivityTime = Now;
+
+		const FTimespan Idle = Now - State.LastActivityTime;
+		if (Idle >= Threshold)
+		{
+			UE_LOG(LogTemp, Log,
+			       TEXT("DiscordBridge: AFK kicking '%s' (idle %.0f minutes)."),
+			       *Name, Idle.GetTotalMinutes());
+			ToKick.Add(PC);
+		}
+	}
+
+	for (APlayerController* PC : ToKick)
+	{
+		const FString Name = PC->PlayerState ? PC->PlayerState->GetPlayerName() : TEXT("(unknown)");
+		PC->ClientWasKicked(FText::FromString(Config.AfkKickReason));
+		if (UNetConnection* Conn = Cast<UNetConnection>(PC->Player))
+			Conn->Close();
+
+		AfkStates.Remove(Name);
+
+		// Notify Discord.
+		const FString& NotifChannel = Config.PlayerEventsChannelId.IsEmpty()
+			? Config.ChannelId : Config.PlayerEventsChannelId;
+		SendMessageToChannel(NotifChannel,
+			FString::Printf(TEXT(":zzz: **%s** was kicked for inactivity (AFK)."), *Name));
+	}
+
+	return true; // keep ticking
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Game-world subsystem bindings (game phase + schematic unlock announcements)
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool UDiscordBridgeSubsystem::TryBindToGameSubsystems()
+{
+UWorld* World = GetWorld();
+if (!World) return false;
+
+bool bAllBound = true;
+
+// Bind to AFGGamePhaseManager::mOnCurrentGamePhaseUpdated.
+if (!bBoundGamePhase)
+{
+AFGGamePhaseManager* PhaseMgr = AFGGamePhaseManager::Get(World);
+if (PhaseMgr)
+{
+PhaseMgr->mOnCurrentGamePhaseUpdated.AddDynamic(
+this, &UDiscordBridgeSubsystem::OnGamePhaseUpdated);
+PhaseMgr->mOnGameCompleted.AddDynamic(
+this, &UDiscordBridgeSubsystem::OnGameCompleted);
+bBoundGamePhase = true;
+UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Bound to AFGGamePhaseManager delegates."));
+}
+else
+{
+bAllBound = false;
+}
+}
+
+// Bind to AFGSchematicManager::PurchasedSchematicDelegate.
+if (!bBoundSchematic)
+{
+AFGSchematicManager* SchMgr = AFGSchematicManager::Get(World);
+if (SchMgr)
+{
+SchMgr->PurchasedSchematicDelegate.AddDynamic(
+this, &UDiscordBridgeSubsystem::OnSchematicPurchased);
+bBoundSchematic = true;
+UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Bound to AFGSchematicManager::PurchasedSchematicDelegate."));
+}
+else
+{
+bAllBound = false;
+}
+}
+
+return bAllBound; // return true → stop ticker
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Game phase announcement
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::OnGamePhaseUpdated(UFGGamePhase* NewPhase, bool bSuppressNarrative)
+{
+if (!bGatewayReady || !NewPhase) return;
+
+const FString PhaseName = NewPhase->mDisplayName.ToString();
+
+UE_LOG(LogTemp, Log,
+       TEXT("DiscordBridge: Game phase updated → %s"), *PhaseName);
+
+const FString& TargetChannel = Config.PhaseEventsChannelId.IsEmpty()
+? Config.ChannelId
+: Config.PhaseEventsChannelId;
+
+if (TargetChannel.IsEmpty()) return;
+
+TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
+EmbedObj->SetStringField(TEXT("title"), TEXT("🏭 New Game Phase Reached!"));
+EmbedObj->SetNumberField(TEXT("color"), 16766720); // gold
+EmbedObj->SetStringField(TEXT("description"), FString::Printf(TEXT("**%s**"), *PhaseName));
+EmbedObj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+
+TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+Body->SetArrayField(TEXT("embeds"),
+TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(EmbedObj) });
+SendMessageBodyToChannel(TargetChannel, Body);
+}
+
+void UDiscordBridgeSubsystem::OnGameCompleted(bool /*bSuppressNarrative*/)
+{
+if (!bGatewayReady) return;
+
+UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Game completed — posting victory announcement."));
+
+const FString& TargetChannel = Config.PhaseEventsChannelId.IsEmpty()
+? Config.ChannelId
+: Config.PhaseEventsChannelId;
+
+if (TargetChannel.IsEmpty()) return;
+
+TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
+EmbedObj->SetStringField(TEXT("title"), TEXT("🎉 Factory Complete!"));
+EmbedObj->SetNumberField(TEXT("color"), 16766720);
+EmbedObj->SetStringField(TEXT("description"),
+TEXT("The factory has reached the final phase! Congratulations!"));
+EmbedObj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+
+TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+Body->SetArrayField(TEXT("embeds"),
+TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(EmbedObj) });
+SendMessageBodyToChannel(TargetChannel, Body);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Schematic unlock announcement
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::OnSchematicPurchased(TSubclassOf<UFGSchematic> SchematicClass)
+{
+if (!bGatewayReady || !SchematicClass) return;
+
+const UFGSchematic* CDO = GetDefault<UFGSchematic>(SchematicClass);
+if (!CDO) return;
+
+const FString SchematicName = CDO->mDisplayName.ToString();
+const ESchematicType Type   = CDO->mType;
+
+// Map schematic type to a human-readable label.
+FString TypeLabel;
+switch (Type)
+{
+case ESchematicType::EST_Milestone:         TypeLabel = TEXT("Milestone");            break;
+case ESchematicType::EST_Alternate:         TypeLabel = TEXT("Alternate Recipe");     break;
+case ESchematicType::EST_MAM:               TypeLabel = TEXT("MAM Research");         break;
+case ESchematicType::EST_HardDrive:         TypeLabel = TEXT("Hard Drive");           break;
+case ESchematicType::EST_ResourceSink:      TypeLabel = TEXT("AWESOME Shop");         break;
+case ESchematicType::EST_Tutorial:          TypeLabel = TEXT("Tutorial");             break;
+case ESchematicType::EST_CustomBuilderRule: TypeLabel = TEXT("Customizer");           break;
+default:                                    TypeLabel = TEXT("Research");             break;
+}
+
+UE_LOG(LogTemp, Log,
+       TEXT("DiscordBridge: Schematic purchased → %s (%s)"), *SchematicName, *TypeLabel);
+
+const FString& TargetChannel = Config.SchematicEventsChannelId.IsEmpty()
+? (Config.PhaseEventsChannelId.IsEmpty() ? Config.ChannelId : Config.PhaseEventsChannelId)
+: Config.SchematicEventsChannelId;
+
+if (TargetChannel.IsEmpty()) return;
+
+TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
+EmbedObj->SetStringField(TEXT("title"), TEXT("🔬 Unlock Achieved!"));
+EmbedObj->SetNumberField(TEXT("color"), 3066993); // green
+
+TArray<TSharedPtr<FJsonValue>> Fields;
+
+auto AddField = [&](const FString& Name, const FString& Value)
+{
+TSharedPtr<FJsonObject> F = MakeShared<FJsonObject>();
+F->SetStringField(TEXT("name"),   Name);
+F->SetStringField(TEXT("value"),  Value.IsEmpty() ? TEXT("—") : Value);
+F->SetBoolField  (TEXT("inline"), true);
+Fields.Add(MakeShared<FJsonValueObject>(F));
+};
+
+AddField(TEXT("Name"), SchematicName);
+AddField(TEXT("Type"), TypeLabel);
+
+EmbedObj->SetArrayField(TEXT("fields"), Fields);
+EmbedObj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+
+TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+Body->SetArrayField(TEXT("embeds"),
+TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(EmbedObj) });
+SendMessageBodyToChannel(TargetChannel, Body);
 }

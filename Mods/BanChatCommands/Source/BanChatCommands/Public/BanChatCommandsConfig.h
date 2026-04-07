@@ -62,6 +62,23 @@ public:
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
     int32 BanListPageSize = 10;
 
+    /**
+     * When true, /kick automatically creates a warning entry for the kicked player
+     * so that kick reasons are preserved in the warning history.
+     * Default: false.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
+    bool bCreateWarnOnKick = false;
+
+    /**
+     * Optional URL that /reloadconfig POSTs a notification to after reloading the
+     * configuration.  Useful for notifying an external dashboard that the mod list
+     * has changed without polling.  Leave empty to disable.
+     * Example: https://dashboard.example.com/api/bans/config-changed
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
+    FString ReloadConfigWebhookUrl;
+
     /** Returns the singleton config instance. */
     static const UBanChatCommandsConfig* Get();
 

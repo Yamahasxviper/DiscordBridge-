@@ -152,6 +152,40 @@ struct BANSYSTEM_API FWarningEntry
 };
 
 /**
+ * A ban appeal submitted by a player via the REST API.
+ */
+USTRUCT(BlueprintType)
+struct BANSYSTEM_API FBanAppealEntry
+{
+    GENERATED_BODY()
+
+    /** Auto-incremented integer primary key (0 when not yet persisted). */
+    UPROPERTY(BlueprintReadOnly, Category = "Ban System")
+    int64 Id = 0;
+
+    /** Compound UID of the appealing player: "EOS:xxx". */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString Uid;
+
+    /** Player-supplied reason for the appeal. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString Reason;
+
+    /** Optional contact information (Discord handle, email, etc.). */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString ContactInfo;
+
+    /** UTC timestamp when the appeal was submitted. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FDateTime SubmittedAt;
+
+    FBanAppealEntry()
+        : Id(0)
+        , SubmittedAt(FDateTime::UtcNow())
+    {}
+};
+
+/**
  * A single audit log entry recording an admin action.
  */
 USTRUCT(BlueprintType)

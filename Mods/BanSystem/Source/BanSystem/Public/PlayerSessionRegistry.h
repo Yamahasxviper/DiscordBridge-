@@ -93,6 +93,13 @@ public:
      */
     TArray<FPlayerSessionRecord> GetAllRecords() const;
 
+    /**
+     * Removes all session records whose LastSeen timestamp is older than
+     * DaysToKeep days.  Returns the number of records that were removed.
+     * Thread-safe.
+     */
+    int32 PruneOldRecords(int32 DaysToKeep);
+
 private:
     void LoadFromFile();
     bool SaveToFile() const;

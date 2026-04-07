@@ -32,6 +32,9 @@ public:
     static void NotifyPlayerKicked(const FString& PlayerName, const FString& Reason,
                                    const FString& KickedBy);
 
+    /** Called when a temporary ban expires and the player is allowed to reconnect. */
+    static void NotifyBanExpired(const FBanEntry& Entry);
+
 private:
     /**
      * Posts JsonPayload to the configured DiscordWebhookUrl via HTTP POST.
