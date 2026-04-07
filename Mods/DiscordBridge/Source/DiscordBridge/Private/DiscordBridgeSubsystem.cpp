@@ -2177,9 +2177,9 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 
 	// ── Resolve remote IP address ─────────────────────────────────────────────
 	FString ResolvedIpAddress;
-	if (const UNetConnection* Conn = Controller->GetNetConnection())
+	if (UNetConnection* Conn = Controller->GetNetConnection())
 	{
-		ResolvedIpAddress = const_cast<UNetConnection*>(Conn)->LowLevelGetRemoteAddress(/*bAppendPort=*/false);
+		ResolvedIpAddress = Conn->LowLevelGetRemoteAddress(/*bAppendPort=*/false);
 	}
 
 	// Always log the available platform IDs so server operators can see them in
