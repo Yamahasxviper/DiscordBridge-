@@ -1855,7 +1855,7 @@ EExecutionStatus AStaffListChatCommand::ExecuteCommand_Implementation(
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] Admins online: %s"),
                     *FString::Join(OnlineAdmins, TEXT(", "))),
-                FLinearColor::Cyan);
+                FLinearColor(0.0f, 1.0f, 1.0f));
         }
         if (!OnlineModerators.IsEmpty())
         {

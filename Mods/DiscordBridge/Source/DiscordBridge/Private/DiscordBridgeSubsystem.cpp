@@ -2177,7 +2177,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 
 	// ── Resolve remote IP address ─────────────────────────────────────────────
 	FString ResolvedIpAddress;
-	if (const UNetConnection* Conn = Controller->GetNetConnection())
+	if (UNetConnection* Conn = Controller->GetNetConnection())
 	{
 		ResolvedIpAddress = Conn->LowLevelGetRemoteAddress(/*bAppendPort=*/false);
 	}
@@ -3436,11 +3436,8 @@ void UDiscordBridgeSubsystem::OnSchematicPurchased(TSubclassOf<UFGSchematic> Sch
 {
 if (!bGatewayReady || !SchematicClass) return;
 
-const UFGSchematic* CDO = GetDefault<UFGSchematic>(SchematicClass);
-if (!CDO) return;
-
-const FString SchematicName = CDO->mDisplayName.ToString();
-const ESchematicType Type   = CDO->mType;
+const FString SchematicName = UFGSchematic::GetSchematicDisplayName(SchematicClass).ToString();
+const ESchematicType Type   = UFGSchematic::GetType(SchematicClass);
 
 // Map schematic type to a human-readable label.
 FString TypeLabel;
@@ -3452,7 +3449,7 @@ case ESchematicType::EST_MAM:               TypeLabel = TEXT("MAM Research");   
 case ESchematicType::EST_HardDrive:         TypeLabel = TEXT("Hard Drive");           break;
 case ESchematicType::EST_ResourceSink:      TypeLabel = TEXT("AWESOME Shop");         break;
 case ESchematicType::EST_Tutorial:          TypeLabel = TEXT("Tutorial");             break;
-case ESchematicType::EST_CustomBuilderRule: TypeLabel = TEXT("Customizer");           break;
+case ESchematicType::EST_Customization:     TypeLabel = TEXT("Customizer");           break;
 default:                                    TypeLabel = TEXT("Research");             break;
 }
 

@@ -5,7 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
-#include "Ticker.h"
+#include "Containers/Ticker.h"
 
 class BANSYSTEM_API FBanSystemModule : public IModuleInterface
 {
