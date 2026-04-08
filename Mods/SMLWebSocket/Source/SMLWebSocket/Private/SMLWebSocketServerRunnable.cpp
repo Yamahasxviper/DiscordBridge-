@@ -19,9 +19,11 @@ std::atomic<uint64> FSMLWebSocketServerRunnable::NextClientId{1};
 //  Construction / destruction
 // ─────────────────────────────────────────────────────────────────────────────
 
-FSMLWebSocketServerRunnable::FSMLWebSocketServerRunnable(USMLWebSocketServer* InOwner, int32 InPort)
+FSMLWebSocketServerRunnable::FSMLWebSocketServerRunnable(USMLWebSocketServer* InOwner, int32 InPort,
+                                                          const FString& InApiToken)
     : Owner(InOwner)
     , ListenPort(InPort)
+    , ApiToken(InApiToken)
 {}
 
 FSMLWebSocketServerRunnable::~FSMLWebSocketServerRunnable()
@@ -244,6 +246,38 @@ bool FSMLWebSocketServerRunnable::PerformHandshake(FClientState& Client)
     uint8 Hash[20];
     Sha.GetHash(Hash);
     const FString Accept = FBase64::Encode(Hash, 20);
+
+    // ── API token check ──────────────────────────────────────────────────────
+    if (!ApiToken.IsEmpty())
+    {
+        FString AuthValue;
+        const FString AuthPrefix = TEXT("Authorization:");
+        int32 AuthIdx = INDEX_NONE;
+        Headers.FindSubstring(AuthPrefix, AuthIdx, ESearchCase::IgnoreCase);
+        if (AuthIdx != INDEX_NONE)
+        {
+            const int32 ValueStart = AuthIdx + AuthPrefix.Len();
+            int32 LineEnd = Headers.Find(TEXT("\r\n"), ESearchCase::CaseSensitive, ESearchDir::FromStart, ValueStart);
+            if (LineEnd == INDEX_NONE) LineEnd = Headers.Len();
+            AuthValue = Headers.Mid(ValueStart, LineEnd - ValueStart).TrimStartAndEnd();
+        }
+
+        const FString Expected = FString(TEXT("Bearer ")) + ApiToken;
+        if (AuthValue != Expected)
+        {
+            const FString Response401 =
+                TEXT("HTTP/1.1 401 Unauthorized\r\n")
+                TEXT("Content-Length: 0\r\n")
+                TEXT("Connection: close\r\n\r\n");
+            FTCHARToUTF8 R401Utf8(*Response401);
+            int32 Sent401 = 0;
+            Client.Socket->Send(
+                reinterpret_cast<const uint8*>(R401Utf8.Get()),
+                R401Utf8.Length(), Sent401);
+            UE_LOG(LogWSServer, Warning, TEXT("WSServer: Rejected client — invalid or missing API token."));
+            return false;
+        }
+    }
 
     // Send HTTP 101 response.
     FString Response = FString(TEXT("HTTP/1.1 101 Switching Protocols\r\n")
