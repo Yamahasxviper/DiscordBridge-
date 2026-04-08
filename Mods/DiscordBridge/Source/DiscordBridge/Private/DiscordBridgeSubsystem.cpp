@@ -25,6 +25,8 @@
 #include "Patching/NativeHookManager.h"
 #include "MuteRegistry.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogDiscordBridge, Log, All);
+
 // Discord Gateway endpoint (v10, JSON encoding)
 static const FString DiscordGatewayUrl = TEXT("wss://gateway.discord.gg/?v=10&encoding=json");
 // Discord REST API base URL
@@ -91,25 +93,25 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	// survives restarts, so runtime !whitelist on / !whitelist off changes persist.
 	// To force-reset to this config value: delete ServerWhitelist.json and restart.
 	FWhitelistManager::Load(Config.bWhitelistEnabled);
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Whitelist active = %s (WhitelistEnabled config = %s)"),
 	       FWhitelistManager::IsEnabled() ? TEXT("True") : TEXT("False"),
 	       Config.bWhitelistEnabled ? TEXT("True") : TEXT("False"));
 
 	if (Config.BotToken.IsEmpty() || Config.ChannelId.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning,
+		UE_LOG(LogDiscordBridge, Warning,
 		       TEXT("DiscordBridge: BotToken or ChannelId is not configured. "
 		            "Edit Mods/DiscordBridge/Config/DefaultDiscordBridge.ini to enable the bridge."));
 		return;
 	}
 
 	// Log active format strings so operators can verify they were loaded correctly.
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: ServerName           = \"%s\""), *Config.ServerName);
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: GameToDiscordFormat  = \"%s\""), *Config.GameToDiscordFormat);
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: DiscordToGameFormat  = \"%s\""), *Config.DiscordToGameFormat);
 
 	Connect();
@@ -237,7 +239,7 @@ void UDiscordBridgeSubsystem::Connect()
 	WebSocketClient->OnError.AddDynamic(this,      &UDiscordBridgeSubsystem::OnWebSocketError);
 	WebSocketClient->OnReconnecting.AddDynamic(this, &UDiscordBridgeSubsystem::OnWebSocketReconnecting);
 
-	UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Connecting to Discord Gateway…"));
+	UE_LOG(LogDiscordBridge, Log, TEXT("DiscordBridge: Connecting to Discord Gateway…"));
 	WebSocketClient->Connect(DiscordGatewayUrl, {}, {});
 }
 
@@ -304,7 +306,7 @@ void UDiscordBridgeSubsystem::Disconnect()
 
 void UDiscordBridgeSubsystem::OnWebSocketConnected()
 {
-	UE_LOG(LogTemp, Log, TEXT("DiscordBridge: WebSocket connection established. Awaiting Hello…"));
+	UE_LOG(LogDiscordBridge, Log, TEXT("DiscordBridge: WebSocket connection established. Awaiting Hello…"));
 	// Discord will send op=10 (Hello) next; we send Identify in response.
 }
 
@@ -315,7 +317,7 @@ void UDiscordBridgeSubsystem::OnWebSocketMessage(const FString& RawJson)
 
 void UDiscordBridgeSubsystem::OnWebSocketClosed(int32 StatusCode, const FString& Reason)
 {
-	UE_LOG(LogTemp, Warning,
+	UE_LOG(LogDiscordBridge, Warning,
 	       TEXT("DiscordBridge: Gateway connection closed (code=%d, reason='%s')."),
 	       StatusCode, *Reason);
 
@@ -326,30 +328,30 @@ void UDiscordBridgeSubsystem::OnWebSocketClosed(int32 StatusCode, const FString&
 	switch (StatusCode)
 	{
 	case 4004:
-		UE_LOG(LogTemp, Error,
+		UE_LOG(LogDiscordBridge, Error,
 		       TEXT("DiscordBridge: Authentication failed (4004). "
 		            "Verify BotToken in Mods/DiscordBridge/Config/DefaultDiscordBridge.ini. "
 		            "Auto-reconnect disabled."));
 		bTerminal = true;
 		break;
 	case 4010:
-		UE_LOG(LogTemp, Error, TEXT("DiscordBridge: Invalid shard sent (4010). Auto-reconnect disabled."));
+		UE_LOG(LogDiscordBridge, Error, TEXT("DiscordBridge: Invalid shard sent (4010). Auto-reconnect disabled."));
 		bTerminal = true;
 		break;
 	case 4011:
-		UE_LOG(LogTemp, Error, TEXT("DiscordBridge: Sharding required (4011). Auto-reconnect disabled."));
+		UE_LOG(LogDiscordBridge, Error, TEXT("DiscordBridge: Sharding required (4011). Auto-reconnect disabled."));
 		bTerminal = true;
 		break;
 	case 4012:
-		UE_LOG(LogTemp, Error, TEXT("DiscordBridge: Invalid Gateway API version (4012). Auto-reconnect disabled."));
+		UE_LOG(LogDiscordBridge, Error, TEXT("DiscordBridge: Invalid Gateway API version (4012). Auto-reconnect disabled."));
 		bTerminal = true;
 		break;
 	case 4013:
-		UE_LOG(LogTemp, Error, TEXT("DiscordBridge: Invalid intent(s) (4013). Auto-reconnect disabled."));
+		UE_LOG(LogDiscordBridge, Error, TEXT("DiscordBridge: Invalid intent(s) (4013). Auto-reconnect disabled."));
 		bTerminal = true;
 		break;
 	case 4014:
-		UE_LOG(LogTemp, Error,
+		UE_LOG(LogDiscordBridge, Error,
 		       TEXT("DiscordBridge: Disallowed intent(s) (4014). "
 		            "Enable Server Members Intent and Message Content Intent "
 		            "in the Discord Developer Portal. Auto-reconnect disabled."));
@@ -383,7 +385,7 @@ void UDiscordBridgeSubsystem::OnWebSocketClosed(int32 StatusCode, const FString&
 
 void UDiscordBridgeSubsystem::OnWebSocketError(const FString& ErrorMessage)
 {
-	UE_LOG(LogTemp, Error, TEXT("DiscordBridge: WebSocket error: %s"), *ErrorMessage);
+	UE_LOG(LogDiscordBridge, Error, TEXT("DiscordBridge: WebSocket error: %s"), *ErrorMessage);
 
 	FTSTicker::GetCoreTicker().RemoveTicker(HeartbeatTickerHandle);
 	HeartbeatTickerHandle.Reset();
@@ -398,7 +400,7 @@ void UDiscordBridgeSubsystem::OnWebSocketError(const FString& ErrorMessage)
 
 void UDiscordBridgeSubsystem::OnWebSocketReconnecting(int32 AttemptNumber, float DelaySeconds)
 {
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Reconnecting to Discord Gateway (attempt %d, delay %.1fs)…"),
 	       AttemptNumber, DelaySeconds);
 
@@ -419,14 +421,14 @@ void UDiscordBridgeSubsystem::HandleGatewayPayload(const FString& RawJson)
 	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(RawJson);
 	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("DiscordBridge: Failed to parse Gateway JSON: %s"), *RawJson);
+		UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: Failed to parse Gateway JSON: %s"), *RawJson);
 		return;
 	}
 
 	double OpCodeD = -1.0;
 	if (!Root->TryGetNumberField(TEXT("op"), OpCodeD))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("DiscordBridge: Gateway payload missing 'op' field: %s"), *RawJson);
+		UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: Gateway payload missing 'op' field: %s"), *RawJson);
 		return;
 	}
 	const int32 OpCode = static_cast<int32>(OpCodeD);
@@ -483,7 +485,7 @@ void UDiscordBridgeSubsystem::HandleGatewayPayload(const FString& RawJson)
 		break;
 	}
 	default:
-		UE_LOG(LogTemp, VeryVerbose,
+		UE_LOG(LogDiscordBridge, VeryVerbose,
 		       TEXT("DiscordBridge: Unhandled opcode %d"), OpCode);
 		break;
 	}
@@ -496,7 +498,7 @@ void UDiscordBridgeSubsystem::HandleHello(const TSharedPtr<FJsonObject>& DataObj
 	DataObj->TryGetNumberField(TEXT("heartbeat_interval"), HeartbeatMs);
 	HeartbeatIntervalSeconds = static_cast<float>(HeartbeatMs) / 1000.0f;
 
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Hello received. Heartbeat interval: %.2f s"),
 	       HeartbeatIntervalSeconds);
 
@@ -538,7 +540,7 @@ void UDiscordBridgeSubsystem::HandleHello(const TSharedPtr<FJsonObject>& DataObj
 	// success, or send op=9 (Invalid Session, d=false) if the session expired.
 	if (!SessionId.IsEmpty())
 	{
-		UE_LOG(LogTemp, Log,
+		UE_LOG(LogDiscordBridge, Log,
 		       TEXT("DiscordBridge: Hello received (resume path). Sending Resume for session %s."),
 		       *SessionId);
 		SendResume();
@@ -580,7 +582,7 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 				// multiple guilds the first GUILD_CREATE wins (same policy as
 				// the READY handler which picks the first entry in the array).
 				GuildId = IncomingGuildId;
-				UE_LOG(LogTemp, Log,
+				UE_LOG(LogDiscordBridge, Log,
 				       TEXT("DiscordBridge: Guild ID set from GUILD_CREATE: %s"), *GuildId);
 			}
 		}
@@ -618,13 +620,13 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 
 void UDiscordBridgeSubsystem::HandleHeartbeatAck()
 {
-	UE_LOG(LogTemp, VeryVerbose, TEXT("DiscordBridge: Heartbeat acknowledged."));
+	UE_LOG(LogDiscordBridge, VeryVerbose, TEXT("DiscordBridge: Heartbeat acknowledged."));
 	bPendingHeartbeatAck = false;
 }
 
 void UDiscordBridgeSubsystem::HandleReconnect()
 {
-	UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Server requested reconnect."));
+	UE_LOG(LogDiscordBridge, Log, TEXT("DiscordBridge: Server requested reconnect."));
 
 	// Reset per-connection Gateway state but KEEP SessionId and ResumeGatewayUrl
 	// so HandleHello can attempt op=6 Resume instead of a full Identify.
@@ -659,7 +661,7 @@ void UDiscordBridgeSubsystem::HandleReconnect()
 
 void UDiscordBridgeSubsystem::HandleInvalidSession(bool bResumable)
 {
-	UE_LOG(LogTemp, Warning,
+	UE_LOG(LogDiscordBridge, Warning,
 	       TEXT("DiscordBridge: Invalid session (resumable=%s)."),
 	       bResumable ? TEXT("true") : TEXT("false"));
 
@@ -685,7 +687,7 @@ void UDiscordBridgeSubsystem::HandleInvalidSession(bool bResumable)
 	if (bResumable && !SessionId.IsEmpty())
 	{
 		// Session can be resumed — schedule a Resume attempt in 2 seconds.
-		UE_LOG(LogTemp, Log,
+		UE_LOG(LogDiscordBridge, Log,
 		       TEXT("DiscordBridge: Scheduling Resume attempt for session %s in 2s."),
 		       *SessionId);
 		PendingReidentifyHandle = FTSTicker::GetCoreTicker().AddTicker(
@@ -705,7 +707,7 @@ void UDiscordBridgeSubsystem::HandleInvalidSession(bool bResumable)
 		ResumeGatewayUrl.Empty();
 		LastSequenceNumber = -1;
 
-		UE_LOG(LogTemp, Log,
+		UE_LOG(LogDiscordBridge, Log,
 		       TEXT("DiscordBridge: Session expired — scheduling fresh Identify in 2s."));
 		PendingReidentifyHandle = FTSTicker::GetCoreTicker().AddTicker(
 			FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
@@ -746,7 +748,7 @@ void UDiscordBridgeSubsystem::HandleReady(const TSharedPtr<FJsonObject>& DataObj
 
 	bGatewayReady = true;
 
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Gateway ready. Bot user ID: %s, Guild ID: %s"),
 	       *BotUserId, *GuildId);
 
@@ -799,7 +801,7 @@ void UDiscordBridgeSubsystem::HandleReady(const TSharedPtr<FJsonObject>& DataObj
 
 void UDiscordBridgeSubsystem::HandleResumed()
 {
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Session resumed successfully. Missed events replayed by Discord."));
 
 	bGatewayReady = true;
@@ -897,7 +899,7 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 	// unexpected API responses that omit all name fields.
 	if (Username.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning,
+		UE_LOG(LogDiscordBridge, Warning,
 		       TEXT("DiscordBridge: Could not extract display name from Discord message author; using 'Discord User'."));
 		Username = TEXT("Discord User");
 	}
@@ -925,7 +927,7 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 		}
 		if (!bHasRole)
 		{
-			UE_LOG(LogTemp, Log,
+			UE_LOG(LogDiscordBridge, Log,
 			       TEXT("DiscordBridge: Ignoring whitelist-channel message from '%s' – sender lacks whitelist role."),
 			       *Username);
 			return;
@@ -941,7 +943,7 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 		return; // Embeds-only, sticker-only, or whitespace-only messages; skip.
 	}
 
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Discord message received from '%s' (channel %s): %s"),
 	       *Username, *MsgChannelId, *Content);
 
@@ -985,7 +987,7 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 	{
 		if (!HasRequiredRole(Config.WhitelistCommandRoleId))
 		{
-			UE_LOG(LogTemp, Log,
+			UE_LOG(LogDiscordBridge, Log,
 			       TEXT("DiscordBridge: Ignoring whitelist command from '%s' – sender lacks WhitelistCommandRoleId."),
 			       *Username);
 			SendMessageToChannel(MsgChannelId, TEXT(":no_entry: You do not have permission to use whitelist commands."));
@@ -1080,7 +1082,7 @@ void UDiscordBridgeSubsystem::SendResume()
 {
 	if (SessionId.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning,
+		UE_LOG(LogDiscordBridge, Warning,
 		       TEXT("DiscordBridge: SendResume called with empty SessionId — falling back to Identify."));
 		SendIdentify();
 		return;
@@ -1097,7 +1099,7 @@ void UDiscordBridgeSubsystem::SendResume()
 
 	SendGatewayPayload(Payload);
 
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Resume sent (session_id=%s, seq=%d)."),
 	       *SessionId, LastSequenceNumber);
 }
@@ -1142,7 +1144,7 @@ void UDiscordBridgeSubsystem::SendIdentify()
 
 	SendGatewayPayload(Payload);
 
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Identify sent (intents=%d)."),
 	       EDiscordGatewayIntent::All);
 }
@@ -1156,7 +1158,7 @@ void UDiscordBridgeSubsystem::SendHeartbeat()
 	// by calling Connect() so USMLWebSocketClient's auto-reconnect remains enabled.
 	if (bPendingHeartbeatAck)
 	{
-		UE_LOG(LogTemp, Warning,
+		UE_LOG(LogDiscordBridge, Warning,
 		       TEXT("DiscordBridge: Heartbeat not acknowledged – zombie connection detected. "
 		            "Reconnecting."));
 
@@ -1221,7 +1223,7 @@ void UDiscordBridgeSubsystem::SendUpdatePresence(const FString& Status)
 
 	SendGatewayPayload(Payload);
 
-	UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Presence updated to '%s'."), *Status);
+	UE_LOG(LogDiscordBridge, Log, TEXT("DiscordBridge: Presence updated to '%s'."), *Status);
 }
 
 void UDiscordBridgeSubsystem::SendStatusMessageToDiscord(const FString& Message)
@@ -1272,14 +1274,14 @@ void UDiscordBridgeSubsystem::SendMessageToChannel(const FString& TargetChannelI
 		{
 			if (!bConnected || !Resp.IsValid())
 			{
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: HTTP request failed for status message '%s'."),
 				       *Message);
 				return;
 			}
 			if (Resp->GetResponseCode() < 200 || Resp->GetResponseCode() >= 300)
 			{
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: Discord REST API returned %d: %s"),
 				       Resp->GetResponseCode(), *Resp->GetContentAsString());
 			}
@@ -1365,14 +1367,14 @@ void UDiscordBridgeSubsystem::RespondToInteraction(const FString& InteractionId,
 		{
 			if (!bConnected || !Resp.IsValid())
 			{
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: Interaction callback request failed (id=%s)."),
 				       *InteractionId);
 				return;
 			}
 			if (Resp->GetResponseCode() != 200 && Resp->GetResponseCode() != 204)
 			{
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: Interaction callback returned HTTP %d: %s"),
 				       Resp->GetResponseCode(), *Resp->GetContentAsString());
 			}
@@ -1441,14 +1443,14 @@ void UDiscordBridgeSubsystem::RespondWithModal(const FString& InteractionId,
 		{
 			if (!bConnected || !Resp.IsValid())
 			{
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: RespondWithModal request failed (id=%s)."),
 				       *InteractionId);
 				return;
 			}
 			if (Resp->GetResponseCode() != 200 && Resp->GetResponseCode() != 204)
 			{
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: RespondWithModal returned HTTP %d: %s"),
 				       Resp->GetResponseCode(), *Resp->GetContentAsString());
 			}
@@ -1488,7 +1490,7 @@ void UDiscordBridgeSubsystem::SendMessageBodyToChannel(const FString& TargetChan
 			if (!bConnected || !Resp.IsValid() ||
 			    Resp->GetResponseCode() < 200 || Resp->GetResponseCode() >= 300)
 			{
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: SendMessageBodyToChannel failed (channel=%s, HTTP=%d). Trying fallback."),
 				       *TargetChannelId,
 				       Resp.IsValid() ? Resp->GetResponseCode() : 0);
@@ -1517,7 +1519,7 @@ void UDiscordBridgeSubsystem::DeleteDiscordChannel(const FString& ChannelId)
 		return;
 	}
 
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Deleting channel %s."), *ChannelId);
 
 	const FString Url = FString::Printf(
@@ -1536,20 +1538,20 @@ void UDiscordBridgeSubsystem::DeleteDiscordChannel(const FString& ChannelId)
 		{
 			if (!bConnected || !Resp.IsValid())
 			{
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: DeleteDiscordChannel request failed (channel=%s)."),
 				       *ChannelId);
 				return;
 			}
 			if (Resp->GetResponseCode() < 200 || Resp->GetResponseCode() >= 300)
 			{
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: DeleteDiscordChannel returned HTTP %d (channel=%s): %s"),
 				       Resp->GetResponseCode(), *ChannelId, *Resp->GetContentAsString());
 			}
 			else
 			{
-				UE_LOG(LogTemp, Log,
+				UE_LOG(LogDiscordBridge, Log,
 				       TEXT("DiscordBridge: Channel %s deleted successfully."), *ChannelId);
 			}
 		});
@@ -1565,7 +1567,7 @@ void UDiscordBridgeSubsystem::CreateDiscordGuildTextChannel(
 {
 	if (Config.BotToken.IsEmpty() || GuildId.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning,
+		UE_LOG(LogDiscordBridge, Warning,
 		       TEXT("DiscordBridge: CreateDiscordGuildTextChannel – BotToken or GuildId empty."));
 		if (OnCreated)
 		{
@@ -1608,7 +1610,7 @@ void UDiscordBridgeSubsystem::CreateDiscordGuildTextChannel(
 			if (!bConnected || !Resp.IsValid() ||
 			    (Resp->GetResponseCode() != 200 && Resp->GetResponseCode() != 201))
 			{
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: CreateDiscordGuildTextChannel failed for '%s'. HTTP %d."),
 				       *ChannelName,
 				       (Resp.IsValid() ? Resp->GetResponseCode() : 0));
@@ -1723,7 +1725,7 @@ void UDiscordBridgeSubsystem::UpdatePlayerCountPresence()
 
 	SendGatewayPayload(Payload);
 
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Player count presence updated (%d players) – activity: \"%s\""),
 	       PlayerCount, *ActivityText);
 }
@@ -1752,7 +1754,7 @@ bool UDiscordBridgeSubsystem::TryBindToChatManager()
 	// Snapshot the current messages so we only forward NEW ones going forward.
 	ChatMgr->GetReceivedChatMessages(LastKnownMessages);
 
-	UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Bound to AFGChatManager::OnChatMessageAdded."));
+	UE_LOG(LogDiscordBridge, Log, TEXT("DiscordBridge: Bound to AFGChatManager::OnChatMessageAdded."));
 	return true;
 }
 
@@ -1819,13 +1821,13 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 
 	if (MessageText.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning,
+		UE_LOG(LogDiscordBridge, Warning,
 		       TEXT("DiscordBridge: Skipping player message with empty text from '%s'."),
 		       *PlayerName);
 		return;
 	}
 
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Player message detected. Sender: '%s', Text: '%s'"),
 	       *PlayerName, *MessageText);
 
@@ -1886,7 +1888,7 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 			if (!Keyword.IsEmpty() &&
 			    FilteredMessage.Contains(Keyword, ESearchCase::IgnoreCase))
 			{
-				UE_LOG(LogTemp, Verbose,
+				UE_LOG(LogDiscordBridge, Verbose,
 				       TEXT("DiscordBridge: Chat message from '%s' blocked by ChatRelayBlocklist (keyword: '%s')."),
 				       *PlayerName, *Keyword);
 				bDropMessage = true;
@@ -1907,7 +1909,7 @@ void UDiscordBridgeSubsystem::SendGameMessageToDiscord(const FString& PlayerName
 {
 	if (Config.BotToken.IsEmpty() || Config.ChannelId.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning,
+		UE_LOG(LogDiscordBridge, Warning,
 		       TEXT("DiscordBridge: Cannot send message – BotToken or ChannelId not configured."));
 		return;
 	}
@@ -1924,14 +1926,14 @@ void UDiscordBridgeSubsystem::SendGameMessageToDiscord(const FString& PlayerName
 
 	if (FormattedContent.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning,
+		UE_LOG(LogDiscordBridge, Warning,
 		       TEXT("DiscordBridge: GameToDiscordFormat produced an empty string for player '%s'. "
 		            "Check the GameToDiscordFormat setting in DefaultDiscordBridge.ini."),
 		       *EffectivePlayerName);
 		return;
 	}
 
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Sending to Discord: %s"), *FormattedContent);
 
 	// Build the JSON body: {"content": "…"}
@@ -1964,14 +1966,14 @@ void UDiscordBridgeSubsystem::SendGameMessageToDiscord(const FString& PlayerName
 			{
 				if (!bConnected || !Resp.IsValid())
 				{
-					UE_LOG(LogTemp, Warning,
+					UE_LOG(LogDiscordBridge, Warning,
 					       TEXT("DiscordBridge: HTTP request failed for player '%s'."),
 					       *EffectivePlayerName);
 					return;
 				}
 				if (Resp->GetResponseCode() < 200 || Resp->GetResponseCode() >= 300)
 				{
-					UE_LOG(LogTemp, Warning,
+					UE_LOG(LogDiscordBridge, Warning,
 					       TEXT("DiscordBridge: Discord REST API returned %d: %s"),
 					       Resp->GetResponseCode(), *Resp->GetContentAsString());
 				}
@@ -2004,7 +2006,7 @@ void UDiscordBridgeSubsystem::RelayDiscordMessageToGame(const FString& Username,
 	UWorld* World = GetWorld();
 	if (!World)
 	{
-		UE_LOG(LogTemp, Warning,
+		UE_LOG(LogDiscordBridge, Warning,
 		       TEXT("DiscordBridge: No world available – cannot relay Discord message to game chat."));
 		return;
 	}
@@ -2012,7 +2014,7 @@ void UDiscordBridgeSubsystem::RelayDiscordMessageToGame(const FString& Username,
 	AFGChatManager* ChatManager = AFGChatManager::Get(World);
 	if (!ChatManager)
 	{
-		UE_LOG(LogTemp, Warning,
+		UE_LOG(LogDiscordBridge, Warning,
 		       TEXT("DiscordBridge: ChatManager not found – cannot relay Discord message to game chat."));
 		return;
 	}
@@ -2046,7 +2048,7 @@ void UDiscordBridgeSubsystem::RelayDiscordMessageToGame(const FString& Username,
 
 	ChatManager->BroadcastChatMessage(ChatMsg);
 
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Relayed to game chat – text: '%s'"),
 	       *FormattedMessage);
 }
@@ -2076,7 +2078,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 		const bool bNeedsDeferred     = bEnforcementActive || Config.bPlayerEventsEnabled;
 		if (bNeedsDeferred)
 		{
-			UE_LOG(LogTemp, Warning,
+			UE_LOG(LogDiscordBridge, Warning,
 			       TEXT("DiscordBridge: player joined with an empty name – scheduling deferred check."));
 
 			if (UWorld* World = GetWorld())
@@ -2126,7 +2128,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 						if (bEnforcementActive)
 						{
 							// Kick to enforce whitelist integrity (fail-closed).
-							UE_LOG(LogTemp, Warning,
+							UE_LOG(LogDiscordBridge, Warning,
 							       TEXT("DiscordBridge: player name still empty after deferred check – kicking to enforce whitelist."));
 
 							AGameModeBase* FallbackGM = WeakGM.IsValid() ? WeakGM.Get() : nullptr;
@@ -2144,7 +2146,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 						}
 						else
 						{
-							UE_LOG(LogTemp, Warning,
+							UE_LOG(LogDiscordBridge, Warning,
 							       TEXT("DiscordBridge: player name still empty after deferred check – skipping (enforcement disabled)."));
 						}
 					}),
@@ -2153,7 +2155,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 		}
 		else
 		{
-			UE_LOG(LogTemp, Warning,
+			UE_LOG(LogDiscordBridge, Warning,
 			       TEXT("DiscordBridge: player joined with an empty name – skipping check (enforcement disabled)."));
 		}
 		return;
@@ -2184,7 +2186,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 
 	// Always log the available platform IDs so server operators can see them in
 	// the server log regardless of whether player-event notifications are enabled.
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: player '%s' joined — EOS PUID: %s | IP: %s"),
 	       *PlayerName,
 	       ResolvedEOSProductUserId.IsEmpty() ? TEXT("(none)") : *ResolvedEOSProductUserId,
@@ -2211,14 +2213,14 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 	if (!Config.WhitelistRoleId.IsEmpty() &&
 	    WhitelistRoleMemberNames.Contains(PlayerName.ToLower()))
 	{
-		UE_LOG(LogTemp, Log,
+		UE_LOG(LogDiscordBridge, Log,
 		       TEXT("DiscordBridge Whitelist: allowing '%s' – matches a Discord member with WhitelistRoleId."),
 		       *PlayerName);
 		SendPlayerJoinNotification(PlayerName, ResolvedEOSProductUserId, ResolvedIpAddress);
 		return;
 	}
 
-	UE_LOG(LogTemp, Warning,
+	UE_LOG(LogDiscordBridge, Warning,
 	       TEXT("DiscordBridge Whitelist: kicking non-whitelisted player '%s'"), *PlayerName);
 
 	if (EffectiveGameMode && EffectiveGameMode->GameSession)
@@ -2260,7 +2262,7 @@ void UDiscordBridgeSubsystem::SendPlayerJoinNotification(const FString& PlayerNa
 			? Config.ChannelId
 			: Config.PlayerEventsChannelId;
 
-		UE_LOG(LogTemp, Log,
+		UE_LOG(LogDiscordBridge, Log,
 		       TEXT("DiscordBridge: Player join notification for '%s'"), *PlayerName);
 
 		if (Config.bUseEmbedsForPlayerEvents)
@@ -2335,7 +2337,7 @@ void UDiscordBridgeSubsystem::SendPlayerJoinNotification(const FString& PlayerNa
 		AdminMessage = AdminMessage.Replace(TEXT("%EOSProductUserId%"),  EOSProductUserId.IsEmpty() ? TEXT("") : *EOSProductUserId);
 		AdminMessage = AdminMessage.Replace(TEXT("%IpAddress%"),         IpAddress.IsEmpty()        ? TEXT("") : *IpAddress);
 
-		UE_LOG(LogTemp, Log,
+		UE_LOG(LogDiscordBridge, Log,
 		       TEXT("DiscordBridge: Player admin-info notification for '%s'"), *PlayerName);
 
 		SendMessageToChannel(Config.PlayerJoinAdminChannelId, AdminMessage);
@@ -2374,7 +2376,7 @@ void UDiscordBridgeSubsystem::OnLogout(AGameModeBase* /*GameMode*/, AController*
 	// PlayerTimeoutMessage is empty so a single leave message covers all cases.
 	const bool bIsTimeout = (PC->GetNetConnection() == nullptr);
 
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Player %s notification for '%s'"),
 	       bIsTimeout ? TEXT("timeout") : TEXT("leave"),
 	       *PlayerName);
@@ -2411,7 +2413,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
                                                       const FString& DiscordUsername,
                                                       const FString& ResponseChannelId)
 {
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Whitelist command from '%s': '%s'"), *DiscordUsername, *SubCommand);
 
 	FString Response;
@@ -2548,7 +2550,7 @@ void UDiscordBridgeSubsystem::ModifyDiscordRole(const FString& UserId, const FSt
 {
 	if (RoleId.IsEmpty() || GuildId.IsEmpty() || Config.BotToken.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning,
+		UE_LOG(LogDiscordBridge, Warning,
 		       TEXT("DiscordBridge: ModifyDiscordRole: missing RoleId, GuildId, or BotToken."));
 		return;
 	}
@@ -2579,7 +2581,7 @@ void UDiscordBridgeSubsystem::ModifyDiscordRole(const FString& UserId, const FSt
 		{
 			if (!bConnected || !Resp.IsValid())
 			{
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: Role %s request failed for user '%s'."),
 				       bGrantCopy ? TEXT("grant") : TEXT("revoke"), *UserIdCopy);
 				return;
@@ -2587,14 +2589,14 @@ void UDiscordBridgeSubsystem::ModifyDiscordRole(const FString& UserId, const FSt
 			// 204 No Content is the success response for both PUT and DELETE role endpoints.
 			if (Resp->GetResponseCode() != 204)
 			{
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: Role %s for user '%s' returned HTTP %d: %s"),
 				       bGrantCopy ? TEXT("grant") : TEXT("revoke"), *UserIdCopy,
 				       Resp->GetResponseCode(), *Resp->GetContentAsString());
 			}
 			else
 			{
-				UE_LOG(LogTemp, Log,
+				UE_LOG(LogDiscordBridge, Log,
 				       TEXT("DiscordBridge: Role %s succeeded for user '%s'."),
 				       bGrantCopy ? TEXT("grant") : TEXT("revoke"), *UserIdCopy);
 			}
@@ -2701,7 +2703,7 @@ void UDiscordBridgeSubsystem::UpdateWhitelistRoleMemberEntry(
 	RoleMemberIdToNames.FindOrAdd(UserId) = Names;
 	RebuildWhitelistRoleNameSet();
 
-	UE_LOG(LogTemp, Verbose,
+	UE_LOG(LogDiscordBridge, Verbose,
 	       TEXT("DiscordBridge: Whitelist role cache updated for user '%s' (%s)."),
 	       *UserId, *FString::Join(Names, TEXT(", ")));
 }
@@ -2751,13 +2753,13 @@ void UDiscordBridgeSubsystem::FetchWhitelistRoleMembersPage(const FString& After
 		{
 			if (!bConnected || !Resp.IsValid())
 			{
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: FetchWhitelistRoleMembersPage request failed."));
 				return;
 			}
 			if (Resp->GetResponseCode() != 200)
 			{
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: FetchWhitelistRoleMembersPage returned HTTP %d: %s"),
 				       Resp->GetResponseCode(), *Resp->GetContentAsString());
 				return;
@@ -2769,7 +2771,7 @@ void UDiscordBridgeSubsystem::FetchWhitelistRoleMembersPage(const FString& After
 				TJsonReaderFactory<>::Create(Resp->GetContentAsString());
 			if (!FJsonSerializer::Deserialize(Reader, Members))
 			{
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: FetchWhitelistRoleMembersPage – failed to parse JSON."));
 				return;
 			}
@@ -2796,7 +2798,7 @@ void UDiscordBridgeSubsystem::FetchWhitelistRoleMembersPage(const FString& After
 			if (Members.Num() == 1000 && !LastUserId.IsEmpty())
 			{
 				// Full page received – there may be more members; fetch the next page.
-				UE_LOG(LogTemp, Log,
+				UE_LOG(LogDiscordBridge, Log,
 				       TEXT("DiscordBridge: Whitelist role cache page complete (%d members). "
 				            "Fetching next page after user %s…"),
 				       Members.Num(), *LastUserId);
@@ -2805,7 +2807,7 @@ void UDiscordBridgeSubsystem::FetchWhitelistRoleMembersPage(const FString& After
 			else
 			{
 				// Final page – log the completed cache size.
-				UE_LOG(LogTemp, Log,
+				UE_LOG(LogDiscordBridge, Log,
 				       TEXT("DiscordBridge: Whitelist role cache built – %d member(s) hold WhitelistRoleId (%d name(s) cached)."),
 				       RoleMemberIdToNames.Num(), WhitelistRoleMemberNames.Num());
 			}
@@ -2870,7 +2872,7 @@ void UDiscordBridgeSubsystem::SendGameChatStatusMessage(const FString& Message)
 
 void UDiscordBridgeSubsystem::HandleInGameWhitelistCommand(const FString& SubCommand)
 {
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: In-game whitelist command: '%s'"), *SubCommand);
 
 	FString Response;
@@ -3183,7 +3185,7 @@ void UDiscordBridgeSubsystem::CheckVoteResult(const FString& MessageId)
 
 				if (VoteCount >= Threshold)
 				{
-					UE_LOG(LogTemp, Log,
+					UE_LOG(LogDiscordBridge, Log,
 					       TEXT("DiscordBridge: VoteKick threshold (%d 👎) reached for '%s' — kicking."),
 					       Threshold, *VoteCopy);
 
@@ -3221,7 +3223,7 @@ void UDiscordBridgeSubsystem::StartAfkKickTicker()
 	AfkKickTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
 		FTickerDelegate::CreateUObject(this, &UDiscordBridgeSubsystem::AfkKickTick),
 		Interval);
-	UE_LOG(LogTemp, Log, TEXT("DiscordBridge: AFK kick enabled — threshold %d minutes."), Config.AfkKickMinutes);
+	UE_LOG(LogDiscordBridge, Log, TEXT("DiscordBridge: AFK kick enabled — threshold %d minutes."), Config.AfkKickMinutes);
 }
 
 bool UDiscordBridgeSubsystem::AfkKickTick(float /*DeltaTime*/)
@@ -3259,7 +3261,7 @@ bool UDiscordBridgeSubsystem::AfkKickTick(float /*DeltaTime*/)
 		const FTimespan Idle = Now - State.LastActivityTime;
 		if (Idle >= Threshold)
 		{
-			UE_LOG(LogTemp, Log,
+			UE_LOG(LogDiscordBridge, Log,
 			       TEXT("DiscordBridge: AFK kicking '%s' (idle %.0f minutes)."),
 			       *Name, Idle.GetTotalMinutes());
 			ToKick.Add(PC);
@@ -3307,7 +3309,7 @@ this, &UDiscordBridgeSubsystem::OnGamePhaseUpdated);
 PhaseMgr->mOnGameCompleted.AddDynamic(
 this, &UDiscordBridgeSubsystem::OnGameCompleted);
 bBoundGamePhase = true;
-UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Bound to AFGGamePhaseManager delegates."));
+UE_LOG(LogDiscordBridge, Log, TEXT("DiscordBridge: Bound to AFGGamePhaseManager delegates."));
 }
 else
 {
@@ -3324,7 +3326,7 @@ if (SchMgr)
 SchMgr->PurchasedSchematicDelegate.AddDynamic(
 this, &UDiscordBridgeSubsystem::OnSchematicPurchased);
 bBoundSchematic = true;
-UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Bound to AFGSchematicManager::PurchasedSchematicDelegate."));
+UE_LOG(LogDiscordBridge, Log, TEXT("DiscordBridge: Bound to AFGSchematicManager::PurchasedSchematicDelegate."));
 }
 else
 {
@@ -3351,7 +3353,7 @@ MuteReg->OnPlayerUnmuted.AddLambda(
 NotifyMuteEvent(Uid, Uid, false, TEXT(""));
 });
 bBoundMuteEvents = true;
-UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Bound to UMuteRegistry mute-event delegates."));
+UE_LOG(LogDiscordBridge, Log, TEXT("DiscordBridge: Bound to UMuteRegistry mute-event delegates."));
 }
 else
 {
@@ -3372,7 +3374,7 @@ if (!bGatewayReady || !NewPhase) return;
 
 const FString PhaseName = NewPhase->mDisplayName.ToString();
 
-UE_LOG(LogTemp, Log,
+UE_LOG(LogDiscordBridge, Log,
        TEXT("DiscordBridge: Game phase updated → %s"), *PhaseName);
 
 const FString& TargetChannel = Config.PhaseEventsChannelId.IsEmpty()
@@ -3407,7 +3409,7 @@ void UDiscordBridgeSubsystem::OnGameCompleted(bool /*bSuppressNarrative*/)
 {
 if (!bGatewayReady) return;
 
-UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Game completed — posting victory announcement."));
+UE_LOG(LogDiscordBridge, Log, TEXT("DiscordBridge: Game completed — posting victory announcement."));
 
 const FString& TargetChannel = Config.PhaseEventsChannelId.IsEmpty()
 ? Config.ChannelId
@@ -3453,7 +3455,7 @@ case ESchematicType::EST_Customization:     TypeLabel = TEXT("Customizer");     
 default:                                    TypeLabel = TEXT("Research");             break;
 }
 
-UE_LOG(LogTemp, Log,
+UE_LOG(LogDiscordBridge, Log,
        TEXT("DiscordBridge: Schematic purchased → %s (%s)"), *SchematicName, *TypeLabel);
 
 const FString& TargetChannel = Config.SchematicEventsChannelId.IsEmpty()
@@ -3513,7 +3515,7 @@ AnnouncementTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
 FTickerDelegate::CreateUObject(this, &UDiscordBridgeSubsystem::AnnouncementTick),
 1.0f);
 
-UE_LOG(LogTemp, Log,
+UE_LOG(LogDiscordBridge, Log,
 TEXT("DiscordBridge: Scheduled announcements enabled — every %d minute(s)."),
 Config.AnnouncementIntervalMinutes);
 }
@@ -3706,12 +3708,12 @@ Request->OnProcessRequestComplete().BindLambda(
 if (bSuccess && Resp.IsValid() &&
 (Resp->GetResponseCode() == 200 || Resp->GetResponseCode() == 201))
 {
-UE_LOG(LogTemp, Log,
+UE_LOG(LogDiscordBridge, Log,
 TEXT("DiscordBridge: Slash commands registered successfully."));
 }
 else
 {
-UE_LOG(LogTemp, Warning,
+UE_LOG(LogDiscordBridge, Warning,
 TEXT("DiscordBridge: Slash command registration failed (HTTP %d)."),
 Resp.IsValid() ? Resp->GetResponseCode() : 0);
 }
