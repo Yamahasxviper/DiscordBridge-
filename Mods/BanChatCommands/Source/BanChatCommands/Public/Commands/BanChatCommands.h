@@ -923,3 +923,55 @@ private:
     mutable FCriticalSection Mutex;
     FString FilePath;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /mutelist
+// ─────────────────────────────────────────────────────────────────────────────
+UCLASS()
+class BANCHATCOMMANDS_API AMuteListChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AMuteListChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /clearwarn <id>
+// ─────────────────────────────────────────────────────────────────────────────
+UCLASS()
+class BANCHATCOMMANDS_API AClearWarnByIdChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AClearWarnByIdChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /extend <player|PUID> <minutes>
+// ─────────────────────────────────────────────────────────────────────────────
+UCLASS()
+class BANCHATCOMMANDS_API AExtendBanChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AExtendBanChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /appeal <reason...>
+// ─────────────────────────────────────────────────────────────────────────────
+UCLASS()
+class BANCHATCOMMANDS_API AAppealChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AAppealChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label) override;
+};

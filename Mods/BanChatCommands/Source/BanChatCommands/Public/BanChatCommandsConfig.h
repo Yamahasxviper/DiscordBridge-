@@ -79,6 +79,13 @@ public:
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
     FString ReloadConfigWebhookUrl;
 
+    /**
+     * Duration in minutes used by the /modban command.
+     * Moderators can issue a temporary ban of this length. Default: 30.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
+    int32 ModBanDurationMinutes = 30;
+
     /** Returns the singleton config instance. */
     static const UBanChatCommandsConfig* Get();
 

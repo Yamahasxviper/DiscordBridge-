@@ -94,9 +94,13 @@ void FBanChatCommandsModule::StartupModule()
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AMuteCheckChatCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), ABanReasonChatCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AStaffChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AMuteListChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AClearWarnByIdChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AExtendBanChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AAppealChatCommand::StaticClass());
 
             UE_LOG(LogBanChatCommands, Log,
-                TEXT("BanChatCommands: Registered 31 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns, announce, stafflist, reason, history, mute, unmute, note, notes, duration, tempunmute, mutecheck, banreason, staffchat)."));
+                TEXT("BanChatCommands: Registered 35 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns, announce, stafflist, reason, history, mute, unmute, note, notes, duration, tempunmute, mutecheck, banreason, staffchat, mutelist, clearwarn, extend, appeal)."));
         }
     );
 
@@ -206,6 +210,7 @@ void FBanChatCommandsModule::BackupConfigIfNeeded()
     }
 
     Content += FString::Printf(TEXT("BanListPageSize=%d\n"), Cfg->BanListPageSize);
+    Content += FString::Printf(TEXT("ModBanDurationMinutes=%d\n"), Cfg->ModBanDurationMinutes);
 
     IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
     PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
@@ -280,7 +285,8 @@ void FBanChatCommandsModule::RestoreDefaultConfigIfNeeded()
         + TEXT("[/Script/BanChatCommands.BanChatCommandsConfig]\n")
         + TEXT("; +AdminEosPUIDs=YOUR_EOS_PUID_HERE\n")
         + TEXT("; +ModeratorEosPUIDs=MODERATOR_EOS_PUID_HERE\n")
-        + TEXT("BanListPageSize=10\n");
+        + TEXT("BanListPageSize=10\n")
+        + TEXT("ModBanDurationMinutes=30\n");
 
     PlatformFile.CreateDirectoryTree(*FPaths::GetPath(DefaultIniPath));
 
