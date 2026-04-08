@@ -111,10 +111,53 @@ int32 UPlayerWarningRegistry::GetWarningCount(const FString& Uid) const
     int32 Count = 0;
     for (const FWarningEntry& W : Warnings)
     {
-        if (W.Uid.Equals(Uid, ESearchCase::IgnoreCase))
+        if (W.Uid.Equals(Uid, ESearchCase::IgnoreCase) && !W.IsExpired())
             ++Count;
     }
     return Count;
+}
+
+void UPlayerWarningRegistry::AddWarning(const FString& Uid, const FString& PlayerName,
+                                         const FString& Reason, const FString& WarnedBy,
+                                         int32 ExpiryMinutes)
+{
+    if (Uid.IsEmpty()) return;
+
+    FScopeLock Lock(&Mutex);
+
+    int64 NextId = 1;
+    for (const FWarningEntry& W : Warnings)
+        if (W.Id >= NextId) NextId = W.Id + 1;
+
+    FWarningEntry Entry;
+    Entry.Id         = NextId;
+    Entry.Uid        = Uid;
+    Entry.PlayerName = PlayerName;
+    Entry.Reason     = Reason;
+    Entry.WarnedBy   = WarnedBy;
+    Entry.WarnDate   = FDateTime::UtcNow();
+    if (ExpiryMinutes > 0)
+    {
+        Entry.bHasExpiry  = true;
+        Entry.ExpireDate  = FDateTime::UtcNow() + FTimespan::FromMinutes(ExpiryMinutes);
+    }
+
+    Warnings.Add(Entry);
+    SaveToFile();
+}
+
+bool UPlayerWarningRegistry::DeleteWarningById(int64 Id)
+{
+    FScopeLock Lock(&Mutex);
+
+    const int32 Before = Warnings.Num();
+    Warnings.RemoveAll([Id](const FWarningEntry& W) { return W.Id == Id; });
+    const bool bRemoved = Warnings.Num() < Before;
+
+    if (bRemoved)
+        SaveToFile();
+
+    return bRemoved;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -159,6 +202,11 @@ void UPlayerWarningRegistry::LoadFromFile()
             if ((*ObjPtr)->TryGetStringField(TEXT("warnDate"), WarnDateStr))
                 FDateTime::ParseIso8601(*WarnDateStr, Entry.WarnDate);
 
+            (*ObjPtr)->TryGetBoolField(TEXT("hasExpiry"), Entry.bHasExpiry);
+            FString ExpireDateStr;
+            if ((*ObjPtr)->TryGetStringField(TEXT("expireDate"), ExpireDateStr) && !ExpireDateStr.IsEmpty())
+                FDateTime::ParseIso8601(*ExpireDateStr, Entry.ExpireDate);
+
             if (!Entry.Uid.IsEmpty())
                 Warnings.Add(Entry);
         }
@@ -179,6 +227,8 @@ bool UPlayerWarningRegistry::SaveToFile() const
         Obj->SetStringField(TEXT("reason"),     W.Reason);
         Obj->SetStringField(TEXT("warnedBy"),   W.WarnedBy);
         Obj->SetStringField(TEXT("warnDate"),   W.WarnDate.ToIso8601());
+        Obj->SetBoolField  (TEXT("hasExpiry"),  W.bHasExpiry);
+        Obj->SetStringField(TEXT("expireDate"), W.bHasExpiry ? W.ExpireDate.ToIso8601() : TEXT(""));
         WarningArr.Add(MakeShared<FJsonValueObject>(Obj));
     }
 

@@ -40,6 +40,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBanRestApi, Log, All);
  *   GET    /warnings           – list all warnings (?uid=UID to filter)
  *   POST   /warnings           – issue a warning (requires API key if configured)
  *   DELETE /warnings/:uid      – clear all warnings for a UID (requires API key if configured)
+ *   DELETE /warnings/id/:id    – remove a single warning by integer ID (requires API key if configured)
  *   GET    /audit              – audit log entries, newest first (?limit=N, ?uid=UID)
  *   GET    /metrics            – server statistics
  *

@@ -142,13 +142,27 @@ struct BANSYSTEM_API FWarningEntry
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     FDateTime WarnDate;
 
+    /** UTC timestamp when the warning expires. Only used when bHasExpiry is true. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FDateTime ExpireDate;
+
+    /** When true, this warning has an expiry time and will be ignored after ExpireDate. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    bool bHasExpiry = false;
+
     FWarningEntry()
         : Id(0)
         , WarnDate(FDateTime::UtcNow())
+        , ExpireDate(FDateTime(0))
+        , bHasExpiry(false)
     {}
 
-    /** Warnings do not expire; always returns false. */
-    bool IsExpired() const { return false; }
+    /** Returns true when this is a timed warning that has passed its expiry date. */
+    bool IsExpired() const
+    {
+        if (!bHasExpiry) return false;
+        return FDateTime::UtcNow() > ExpireDate;
+    }
 };
 
 /**

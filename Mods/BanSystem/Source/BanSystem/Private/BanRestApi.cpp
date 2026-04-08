@@ -988,9 +988,81 @@ void UBanRestApi::RegisterRoutes()
         }
     ));
 
+    // ── DELETE /warnings/id/:id ──────────────────────────────────────────────
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/warnings/id/:id")),
+        EHttpServerRequestVerbs::VERB_DELETE,
+        [WeakGI](const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete) -> bool
+        {
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { OnComplete(FHttpServerResponse::Error(503, TEXT(""), TEXT("{}"))); return true; }
+
+            // Auth check
+            const UBanSystemConfig* SysCfg = UBanSystemConfig::Get();
+            if (SysCfg && !SysCfg->RestApiKey.IsEmpty())
+            {
+                const FString* Key = Request.Headers.Find(TEXT("X-Api-Key"));
+                if (!Key || *Key != SysCfg->RestApiKey)
+                {
+                    TSharedPtr<FJsonObject> Err = MakeShared<FJsonObject>();
+                    Err->SetStringField(TEXT("error"), TEXT("Unauthorized"));
+                    auto R = FHttpServerResponse::Create(BanJson::ObjectToString(Err), TEXT("application/json"));
+                    R->Code = 401;
+                    OnComplete(MoveTemp(R));
+                    return true;
+                }
+            }
+
+            const FString* IdParam = Request.PathParams.Find(TEXT("id"));
+            const int64 Id = IdParam ? FCString::Atoi64(**IdParam) : 0;
+            if (Id <= 0)
+            {
+                TSharedPtr<FJsonObject> Err = MakeShared<FJsonObject>();
+                Err->SetStringField(TEXT("error"), TEXT("Invalid warning ID"));
+                auto R = FHttpServerResponse::Create(BanJson::ObjectToString(Err), TEXT("application/json"));
+                R->Code = 400;
+                OnComplete(MoveTemp(R));
+                return true;
+            }
+
+            UPlayerWarningRegistry* WarnReg = GI->GetSubsystem<UPlayerWarningRegistry>();
+            if (!WarnReg)
+            {
+                TSharedPtr<FJsonObject> Err = MakeShared<FJsonObject>();
+                Err->SetStringField(TEXT("error"), TEXT("PlayerWarningRegistry unavailable"));
+                auto R = FHttpServerResponse::Create(BanJson::ObjectToString(Err), TEXT("application/json"));
+                R->Code = 503;
+                OnComplete(MoveTemp(R));
+                return true;
+            }
+
+            if (!WarnReg->DeleteWarningById(Id))
+            {
+                TSharedPtr<FJsonObject> Err = MakeShared<FJsonObject>();
+                Err->SetStringField(TEXT("error"), FString::Printf(TEXT("No warning found with id %lld"), Id));
+                auto R = FHttpServerResponse::Create(BanJson::ObjectToString(Err), TEXT("application/json"));
+                R->Code = 404;
+                OnComplete(MoveTemp(R));
+                return true;
+            }
+
+            UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>();
+            if (AuditLog)
+                AuditLog->LogAction(TEXT("deletewarn_id"),
+                    FString::Printf(TEXT("warning#%lld"), Id), TEXT(""),
+                    TEXT(""), TEXT("api"),
+                    FString::Printf(TEXT("Deleted warning id %lld via REST"), Id));
+
+            TSharedPtr<FJsonObject> Ok = MakeShared<FJsonObject>();
+            Ok->SetBoolField(TEXT("success"), true);
+            Ok->SetNumberField(TEXT("id"), static_cast<double>(Id));
+            auto Resp = FHttpServerResponse::Create(BanJson::ObjectToString(Ok), TEXT("application/json"));
+            OnComplete(MoveTemp(Resp));
+            return true;
+        }));
+
     // ── GET /audit ───────────────────────────────────────────────────────────
     Routes->Handles.Add(Router->BindRoute(
-        FHttpPath(TEXT("/audit")),
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
