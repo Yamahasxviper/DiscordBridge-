@@ -21,7 +21,9 @@ class UTicketSubsystem;
 // Forward-declared so the header does not pull in BanSystem's full header chain.
 class UBanDiscordSubsystem;
 
-class UFGGamePhase;
+// UFGGamePhase is fully defined by #include "FGGamePhase.h" above; no forward decl needed.
+// UFGSchematic is only used as TSubclassOf<UFGSchematic> in method signatures, so a
+// forward declaration is sufficient and avoids pulling in the full schematic header.
 class UFGSchematic;
 
 // ── Delegate declarations ─────────────────────────────────────────────────────
