@@ -18,6 +18,9 @@ public class SMLWebSocket : ModuleRules
 			"Engine",
 			// SML runtime dependency – ensures correct module load ordering
 			"SML",
+			// Json types (FJsonObject, FJsonValue, FJsonSerializer) are used in
+			// public headers and private implementation files.
+			"Json",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
