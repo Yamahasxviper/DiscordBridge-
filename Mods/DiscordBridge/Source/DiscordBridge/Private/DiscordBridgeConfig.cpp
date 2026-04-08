@@ -429,6 +429,62 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.bNotifyMuteEvents  = GetIniBoolOrDefault  (ConfigFile, TEXT("NotifyMuteEvents"),  Config.bNotifyMuteEvents);
 		Config.ModeratorChannelId = GetIniStringOrDefault(ConfigFile, TEXT("ModeratorChannelId"), Config.ModeratorChannelId);
 
+		// Moderation log channel
+		Config.ModerationLogChannelId = GetIniStringOrDefault(ConfigFile, TEXT("ModerationLogChannelId"), Config.ModerationLogChannelId);
+
+		// Multi-slot scheduled announcements (array field)
+		{
+			FString PrimaryRaw;
+			FFileHelper::LoadFileToString(PrimaryRaw, *ModFilePath);
+			const TArray<FString> SALines = ParseRawIniArray(PrimaryRaw, TEXT("DiscordBridge"), TEXT("ScheduledAnnouncements"));
+			for (const FString& Line : SALines)
+			{
+				FString Cleaned = Line.TrimStartAndEnd();
+				if (Cleaned.StartsWith(TEXT("("))) Cleaned = Cleaned.Mid(1);
+				if (Cleaned.EndsWith(TEXT(")")))   Cleaned = Cleaned.LeftChop(1);
+
+				FScheduledAnnouncement SA;
+				// Extract IntervalMinutes
+				{
+					const FString Search = TEXT("IntervalMinutes=");
+					const int32 Idx = Cleaned.Find(Search, ESearchCase::IgnoreCase);
+					if (Idx != INDEX_NONE)
+					{
+						const FString Rest = Cleaned.Mid(Idx + Search.Len());
+						int32 Comma = INDEX_NONE;
+						if (Rest.FindChar(TEXT(','), Comma))
+							SA.IntervalMinutes = FCString::Atoi(*Rest.Left(Comma).TrimStartAndEnd());
+						else
+							SA.IntervalMinutes = FCString::Atoi(*Rest.TrimStartAndEnd());
+					}
+				}
+				// Extract Message
+				{
+					const FString Search = TEXT("Message=\"");
+					const int32 Idx = Cleaned.Find(Search, ESearchCase::IgnoreCase);
+					if (Idx != INDEX_NONE)
+					{
+						const int32 Start = Idx + Search.Len();
+						const int32 End   = Cleaned.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, Start);
+						if (End != INDEX_NONE) SA.Message = Cleaned.Mid(Start, End - Start);
+					}
+				}
+				// Extract ChannelId
+				{
+					const FString Search = TEXT("ChannelId=\"");
+					const int32 Idx = Cleaned.Find(Search, ESearchCase::IgnoreCase);
+					if (Idx != INDEX_NONE)
+					{
+						const int32 Start = Idx + Search.Len();
+						const int32 End   = Cleaned.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, Start);
+						if (End != INDEX_NONE) SA.ChannelId = Cleaned.Mid(Start, End - Start);
+					}
+				}
+				if (SA.IntervalMinutes > 0 && !SA.Message.IsEmpty())
+					Config.ScheduledAnnouncements.Add(SA);
+			}
+		}
+
 		// Trim leading/trailing whitespace from credential fields to prevent
 		// subtle mismatches when operators accidentally include spaces.
 		Config.BotToken  = Config.BotToken.TrimStartAndEnd();
@@ -1000,6 +1056,9 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.bNotifyMuteEvents  = GetRawBoolOrDefault  (BackupValues, TEXT("NotifyMuteEvents"),  Config.bNotifyMuteEvents);
 		Config.ModeratorChannelId = GetRawStringOrDefault(BackupValues, TEXT("ModeratorChannelId"), Config.ModeratorChannelId);
 
+		Config.ModerationLogChannelId = GetRawStringOrDefault(BackupValues, TEXT("ModerationLogChannelId"), Config.ModerationLogChannelId);
+		// ScheduledAnnouncements: NOT restored from backup — they remain in primary config only.
+
 		// Only log the "restored from backup" message when credentials were
 		// actually recovered (i.e. previously blank in primary but now non-empty
 		// from the backup). Avoid a misleading message when the backup also has
@@ -1115,6 +1174,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("EnableSlashCommands"),           Config.bEnableSlashCommands ? TEXT("True") : TEXT("False"));
 				PatchLine(TEXT("NotifyMuteEvents"),              Config.bNotifyMuteEvents  ? TEXT("True") : TEXT("False"));
 				PatchLine(TEXT("ModeratorChannelId"),            Config.ModeratorChannelId);
+				PatchLine(TEXT("ModerationLogChannelId"),        Config.ModerationLogChannelId);
 
 				// ChatRelayBlocklist is a multi-value array field.  Remove all
 				// existing Key= / +Key= lines then append the restored values.
@@ -1259,9 +1319,21 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			+ TEXT("\n")
 			+ TEXT("; -- Mute Notifications -----------------------------------------------------\n")
 			+ TEXT("NotifyMuteEvents=")  + (Config.bNotifyMuteEvents  ? TEXT("True") : TEXT("False")) + TEXT("\n")
-			+ TEXT("ModeratorChannelId=") + Config.ModeratorChannelId + TEXT("\n");
+			+ TEXT("ModeratorChannelId=") + Config.ModeratorChannelId + TEXT("\n")
+			+ TEXT("ModerationLogChannelId=") + Config.ModerationLogChannelId + TEXT("\n");
 
-		const FString FullBackupContent = BackupContent + BackupBlocklistLines + BackupReplLines + NewFieldLines;
+		// ScheduledAnnouncements array backup lines
+		FString BackupSALines;
+		for (const FScheduledAnnouncement& SA : Config.ScheduledAnnouncements)
+		{
+			BackupSALines += TEXT("+ScheduledAnnouncements=(IntervalMinutes=")
+				+ FString::FromInt(SA.IntervalMinutes)
+				+ TEXT(",Message=\"") + SA.Message
+				+ TEXT("\",ChannelId=\"") + SA.ChannelId
+				+ TEXT("\")\n");
+		}
+
+		const FString FullBackupContent = BackupContent + BackupBlocklistLines + BackupReplLines + NewFieldLines + BackupSALines;
 
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupFilePath));
 

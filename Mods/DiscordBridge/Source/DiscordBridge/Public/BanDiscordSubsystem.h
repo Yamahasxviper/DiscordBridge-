@@ -23,6 +23,11 @@
  *  !bancheck <PUID|name>                 – Check a player's ban status.
  *  !banlist [page]                       – List all active bans (10 per page).
  *  !playerhistory <name|PUID>            – Show known session records for a player.
+ *  !kick <PUID|name> [reason]            – Kick a connected player.
+ *  !mute <PUID|name> [minutes] [reason]  – Mute a player (requires BanChatCommands).
+ *  !unmute <PUID|name>                   – Unmute a player (requires BanChatCommands).
+ *  !warn <PUID|name> <reason...>         – Issue a warning (requires BanSystem).
+ *  !announce <message...>                – Broadcast a message to all in-game players.
  *
  * Authorisation
  * ─────────────
@@ -153,6 +158,11 @@ private:
 	 * Usage: !playerhistory <name|PUID>
 	 */
 	void HandlePlayerHistoryCommand(const TArray<FString>& Args, const FString& ChannelId);
+
+	void HandleKickCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
+	void HandleMuteCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName, bool bMute);
+	void HandleWarnCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
+	void HandleAnnounceCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
 
 	// ── State ─────────────────────────────────────────────────────────────────
 

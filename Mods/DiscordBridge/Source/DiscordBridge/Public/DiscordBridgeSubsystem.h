@@ -792,8 +792,14 @@ private:
 	/** Ticker handle for periodic server announcements. */
 	FTSTicker::FDelegateHandle AnnouncementTickerHandle;
 
+	/** Handles for the multi-slot scheduled announcement tickers. */
+	TArray<FTSTicker::FDelegateHandle> ScheduledAnnouncementHandles;
+
 	/** Start the announcement ticker when AnnouncementIntervalMinutes > 0. */
 	void StartAnnouncementTicker();
+
+	/** Start one ticker per ScheduledAnnouncements entry. */
+	void StartScheduledAnnouncementTickers();
 
 	/** Ticker callback — posts the announcement message at the configured interval. */
 	bool AnnouncementTick(float DeltaTime);

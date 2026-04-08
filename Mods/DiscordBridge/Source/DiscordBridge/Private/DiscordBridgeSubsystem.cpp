@@ -159,6 +159,7 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	// Start scheduled announcement ticker when configured.
 	StartAnnouncementTicker();
+	StartScheduledAnnouncementTickers();
 
 }
 
@@ -204,6 +205,10 @@ void UDiscordBridgeSubsystem::Deinitialize()
 	AfkKickTickerHandle.Reset();
 	FTSTicker::GetCoreTicker().RemoveTicker(AnnouncementTickerHandle);
 	AnnouncementTickerHandle.Reset();
+
+	for (FTSTicker::FDelegateHandle& H : ScheduledAnnouncementHandles)
+		FTSTicker::GetCoreTicker().RemoveTicker(H);
+	ScheduledAnnouncementHandles.Empty();
 
 	Disconnect();
 	Super::Deinitialize();
@@ -3518,6 +3523,32 @@ FTickerDelegate::CreateUObject(this, &UDiscordBridgeSubsystem::AnnouncementTick)
 UE_LOG(LogDiscordBridge, Log,
 TEXT("DiscordBridge: Scheduled announcements enabled — every %d minute(s)."),
 Config.AnnouncementIntervalMinutes);
+}
+
+void UDiscordBridgeSubsystem::StartScheduledAnnouncementTickers()
+{
+	for (const FScheduledAnnouncement& SA : Config.ScheduledAnnouncements)
+	{
+		if (SA.IntervalMinutes <= 0 || SA.Message.IsEmpty()) continue;
+
+		const FString TargetChannel = SA.ChannelId.IsEmpty() ? Config.ChannelId : SA.ChannelId;
+		const FString Msg           = SA.Message;
+		const float   Interval      = static_cast<float>(SA.IntervalMinutes) * 60.0f;
+
+		TWeakObjectPtr<UDiscordBridgeSubsystem> WeakThis(this);
+		FTSTicker::FDelegateHandle Handle = FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateLambda([WeakThis, TargetChannel, Msg](float) -> bool
+			{
+				UDiscordBridgeSubsystem* Self = WeakThis.Get();
+				if (!Self || !Self->bGatewayReady) return true;
+				TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+				Body->SetStringField(TEXT("content"), Msg);
+				Self->SendMessageBodyToChannel(TargetChannel, Body);
+				return true;
+			}),
+			Interval);
+		ScheduledAnnouncementHandles.Add(Handle);
+	}
 }
 
 bool UDiscordBridgeSubsystem::AnnouncementTick(float DeltaTime)
