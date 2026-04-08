@@ -49,6 +49,11 @@ public class DiscordBridge : ModuleRules
 			// DiscordBridgeSubsystem can bind to UMuteRegistry::OnPlayerMuted when
 			// bNotifyMuteEvents=true.  Falls back gracefully when not installed.
 			"BanChatCommands",
+			// NetCore provides ENetCloseResult (and its StaticEnum<>/LexToString exports)
+			// which UNetConnection::Close() references in UE5.  Without this the linker
+			// cannot resolve __imp_StaticEnum<ENetCloseResult> and __imp_LexToString
+			// (ENetCloseResult) that are called from AfkKickTick.
+			"NetCore",
 		});
 	}
 }
