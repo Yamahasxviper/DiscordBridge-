@@ -146,8 +146,28 @@ void UPlayerWarningRegistry::AddWarning(const FString& Uid, const FString& Playe
     SaveToFile();
 }
 
-bool UPlayerWarningRegistry::DeleteWarningById(int64 Id)
+int32 UPlayerWarningRegistry::PruneExpiredWarnings()
 {
+    FScopeLock Lock(&Mutex);
+
+    const int32 Before = Warnings.Num();
+    Warnings.RemoveAll([](const FWarningEntry& W) -> bool
+    {
+        return W.bHasExpiry && W.IsExpired();
+    });
+    const int32 Removed = Before - Warnings.Num();
+
+    if (Removed > 0)
+    {
+        SaveToFile();
+        UE_LOG(LogPlayerWarningRegistry, Log,
+            TEXT("PlayerWarningRegistry: pruned %d expired warning(s)."), Removed);
+    }
+
+    return Removed;
+}
+
+bool UPlayerWarningRegistry::DeleteWarningById(int64 Id){
     FScopeLock Lock(&Mutex);
 
     const int32 Before = Warnings.Num();

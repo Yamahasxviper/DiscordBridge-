@@ -65,6 +65,29 @@ namespace BanDiscordHelpers
 		return Str.Left(MaxLen - 3) + TEXT("...");
 	}
 
+	/**
+	 * Escape characters that have special meaning in Discord markdown so that
+	 * player names with *, _, `, ~, |, > or \ are rendered literally.
+	 */
+	static FString EscapeMarkdown(const FString& Text)
+	{
+		static const TCHAR SpecialChars[] = { TEXT('*'), TEXT('_'), TEXT('`'), TEXT('~'),
+		                                       TEXT('|'), TEXT('>'), TEXT('\\'), TEXT('\0') };
+		FString Out;
+		Out.Reserve(Text.Len() + 8);
+		for (TCHAR C : Text)
+		{
+			bool bSpecial = false;
+			for (int32 i = 0; SpecialChars[i] != TEXT('\0'); ++i)
+			{
+				if (C == SpecialChars[i]) { bSpecial = true; break; }
+			}
+			if (bSpecial) Out += TEXT('\\');
+			Out += C;
+		}
+		return Out;
+	}
+
 	// Number of bans shown per !banlist page.
 	static constexpr int32 BanListPageSize = 10;
 }
@@ -496,6 +519,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 	       *SenderName, *DisplayName, *Uid, *Entry.Reason);
 
 	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	PostModerationLog(Msg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -551,6 +575,7 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 	       *SenderName, *DisplayName, *Uid);
 
 	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	PostModerationLog(Msg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -861,14 +886,17 @@ void UBanDiscordSubsystem::HandleKickCommand(const TArray<FString>& Args,
 	if (bKicked)
 	{
 		FBanDiscordNotifier::NotifyPlayerKicked(DisplayName, Reason, SenderName);
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
-			FString::Printf(TEXT("✅ Kicked **%s** (`%s`).\nReason: %s\nKicked by: %s"),
-				*DisplayName, *Uid, *Reason, *SenderName));
+		const FString KickMsg = FString::Printf(
+			TEXT("✅ Kicked **%s** (`%s`).\nReason: %s\nKicked by: %s"),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *Reason, *SenderName);
+		CachedProvider->SendDiscordChannelMessage(ChannelId, KickMsg);
+		PostModerationLog(KickMsg);
 	}
 	else
 	{
 		CachedProvider->SendDiscordChannelMessage(ChannelId,
-			FString::Printf(TEXT("⚠️ Player **%s** (`%s`) is not currently connected."), *DisplayName, *Uid));
+			FString::Printf(TEXT("⚠️ Player **%s** (`%s`) is not currently connected."),
+				*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
 	}
 }
 
@@ -1028,4 +1056,17 @@ void UBanDiscordSubsystem::HandleAnnounceCommand(const TArray<FString>& Args,
 	CachedProvider->SendDiscordChannelMessage(ChannelId,
 		FString::Printf(TEXT("📢 Announcement sent to all in-game players:\n> %s\nSent by: %s"),
 			*Message, *SenderName));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Moderation log
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::PostModerationLog(const FString& Message) const
+{
+if (!CachedProvider) return;
+if (Config.ModerationLogChannelId.IsEmpty()) return;
+if (Config.ModerationLogChannelId == TEXT("0")) return;
+
+CachedProvider->SendDiscordChannelMessage(Config.ModerationLogChannelId, Message);
 }

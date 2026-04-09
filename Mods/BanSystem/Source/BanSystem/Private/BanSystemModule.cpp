@@ -4,6 +4,8 @@
 #include "BanSystemModule.h"
 #include "BanDatabase.h"
 #include "BanSystemConfig.h"
+#include "PlayerWarningRegistry.h"
+#include "PlayerSessionRegistry.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -53,6 +55,19 @@ void FBanSystemModule::StartupModule()
         UE_LOG(LogBanSystem, Log,
             TEXT("BanSystem: scheduled prune enabled — every %.1f hour(s)."),
             Cfg->PruneIntervalHours);
+    }
+
+    // Start the session retention ticker if SessionRetentionDays > 0.
+    // Runs independently from the ban-prune ticker: once every 24 hours.
+    if (Cfg && Cfg->SessionRetentionDays > 0)
+    {
+        SessionPruneAccumulatedSeconds = 0.0f;
+        SessionPruneTickHandle = FTSTicker::GetCoreTicker().AddTicker(
+            FTickerDelegate::CreateRaw(this, &FBanSystemModule::OnSessionPruneTick),
+            1.0f);
+        UE_LOG(LogBanSystem, Log,
+            TEXT("BanSystem: session retention enabled — keeping records for %d day(s)."),
+            Cfg->SessionRetentionDays);
     }
 
     UE_LOG(LogBanSystem, Log, TEXT("BanSystem module started."));
@@ -311,6 +326,11 @@ void FBanSystemModule::ShutdownModule()
         FTSTicker::GetCoreTicker().RemoveTicker(PruneTickHandle);
         PruneTickHandle.Reset();
     }
+    if (SessionPruneTickHandle.IsValid())
+    {
+        FTSTicker::GetCoreTicker().RemoveTicker(SessionPruneTickHandle);
+        SessionPruneTickHandle.Reset();
+    }
     UE_LOG(LogBanSystem, Log, TEXT("BanSystem module shut down."));
 }
 
@@ -384,6 +404,49 @@ bool FBanSystemModule::OnPruneTick(float DeltaTime)
             {
                 UE_LOG(LogBanSystem, Log,
                     TEXT("BanSystem: auto-prune removed %d expired ban(s)."), Pruned);
+            }
+
+            // Also prune expired timed warnings.
+            if (UPlayerWarningRegistry* WarnReg = GI->GetSubsystem<UPlayerWarningRegistry>())
+                WarnReg->PruneExpiredWarnings();
+
+            break;
+        }
+    }
+
+    return true; // keep ticking
+}
+
+bool FBanSystemModule::OnSessionPruneTick(float DeltaTime)
+{
+    const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+    if (!Cfg || Cfg->SessionRetentionDays <= 0) return true;
+
+    // Run once per 24 hours.
+    static constexpr float SessionPruneIntervalSeconds = 24.0f * 3600.0f;
+    SessionPruneAccumulatedSeconds += DeltaTime;
+    if (SessionPruneAccumulatedSeconds < SessionPruneIntervalSeconds) return true;
+
+    SessionPruneAccumulatedSeconds = 0.0f;
+
+    if (GEngine)
+    {
+        for (const FWorldContext& Ctx : GEngine->GetWorldContexts())
+        {
+            UWorld* World = Ctx.World();
+            if (!World) continue;
+            if (World->GetNetMode() != NM_DedicatedServer && World->GetNetMode() != NM_ListenServer) continue;
+            UGameInstance* GI = World->GetGameInstance();
+            if (!GI) continue;
+            UPlayerSessionRegistry* Reg = GI->GetSubsystem<UPlayerSessionRegistry>();
+            if (!Reg) continue;
+
+            const int32 Pruned = Reg->PruneOldRecords(Cfg->SessionRetentionDays);
+            if (Pruned > 0)
+            {
+                UE_LOG(LogBanSystem, Log,
+                    TEXT("BanSystem: session-retention pruned %d record(s) older than %d day(s)."),
+                    Pruned, Cfg->SessionRetentionDays);
             }
             break;
         }

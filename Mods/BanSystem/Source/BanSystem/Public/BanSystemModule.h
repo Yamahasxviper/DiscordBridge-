@@ -30,10 +30,17 @@ private:
     /** Ticker callback that fires at PruneIntervalHours to prune expired bans. */
     bool OnPruneTick(float DeltaTime);
 
+    /** Ticker callback that fires daily to prune old player session records
+     *  when SessionRetentionDays > 0. */
+    bool OnSessionPruneTick(float DeltaTime);
+
     FTSTicker::FDelegateHandle BackupTickHandle;
     FTSTicker::FDelegateHandle PruneTickHandle;
+    FTSTicker::FDelegateHandle SessionPruneTickHandle;
     /** Accumulated time since the last scheduled backup (seconds). */
     float BackupAccumulatedSeconds = 0.0f;
     /** Accumulated time since the last scheduled prune (seconds). */
     float PruneAccumulatedSeconds = 0.0f;
+    /** Accumulated time since the last session-records prune (seconds). */
+    float SessionPruneAccumulatedSeconds = 0.0f;
 };

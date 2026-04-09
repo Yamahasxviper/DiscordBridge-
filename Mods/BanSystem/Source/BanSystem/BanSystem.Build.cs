@@ -38,6 +38,9 @@ public class BanSystem : ModuleRules
             // Required for ENetCloseResult symbols referenced by UNetConnection::Close(),
             // which is called in BanEnforcer to hard-disconnect banned players.
             "NetCore",
+            // SMLWebSocket — used by UBanWebSocketPusher to push live ban/warn events
+            // to a configured WebSocket endpoint when bPushEventsToWebSocket=true.
+            "SMLWebSocket",
         });
     }
 }

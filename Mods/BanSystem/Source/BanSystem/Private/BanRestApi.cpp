@@ -10,6 +10,7 @@
 #include "BanAuditLog.h"
 #include "BanDiscordNotifier.h"
 #include "BanAppealRegistry.h"
+#include "BanWebSocketPusher.h"
 
 #include "HttpServerModule.h"
 #include "IHttpRouter.h"
@@ -176,6 +177,7 @@ void UBanRestApi::Initialize(FSubsystemCollectionBase& Collection)
 {
     Collection.InitializeDependency<UBanDatabase>();
     Collection.InitializeDependency<UBanAppealRegistry>();
+    Collection.InitializeDependency<UBanWebSocketPusher>();
     Super::Initialize(Collection);
 
     // Read port from DefaultBanSystem.ini via UBanSystemConfig.
@@ -659,6 +661,11 @@ void UBanRestApi::RegisterRoutes()
 
             FBanEntry Updated;
             if (!DB->GetBanByUid(Uid, Updated)) Updated = Entry;
+
+            if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+                AuditLog->LogAction(TEXT("updateban"), Updated.Uid, Updated.PlayerName,
+                    TEXT("api"), TEXT("api"),
+                    FString::Printf(TEXT("reason=%s"), *Updated.Reason));
 
             Done(BanJson::Json(BanJson::ObjectToString(BanJson::EntryToJson(Updated))));
             return true;

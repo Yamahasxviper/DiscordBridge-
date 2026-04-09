@@ -80,8 +80,9 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 		return Out;
 	}
 
-	Out.AdminRoleId         = GetIniBridgeString(Cfg, TEXT("AdminRoleId"));
-	Out.BanCommandChannelId = GetIniBridgeString(Cfg, TEXT("BanCommandChannelId"));
+	Out.AdminRoleId            = GetIniBridgeString(Cfg, TEXT("AdminRoleId"));
+	Out.BanCommandChannelId    = GetIniBridgeString(Cfg, TEXT("BanCommandChannelId"));
+	Out.ModerationLogChannelId = GetIniBridgeString(Cfg, TEXT("ModerationLogChannelId"));
 
 	if (Out.AdminRoleId.IsEmpty())
 	{
@@ -95,6 +96,9 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 		UE_LOG(LogBanDiscord, Log,
 		       TEXT("BanBridge: BanCommandChannelId    = \"%s\""),
 		       Out.BanCommandChannelId.IsEmpty() ? TEXT("(any channel)") : *Out.BanCommandChannelId);
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanBridge: ModerationLogChannelId = \"%s\""),
+		       Out.ModerationLogChannelId.IsEmpty() ? TEXT("(disabled)") : *Out.ModerationLogChannelId);
 	}
 
 	return Out;

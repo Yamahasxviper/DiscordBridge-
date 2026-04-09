@@ -38,6 +38,16 @@ struct DISCORDBRIDGE_API FBanBridgeConfig
 	 */
 	FString BanCommandChannelId;
 
+	/**
+	 * Optional: Discord channel ID to post a moderation log message to after
+	 * every ban/unban/kick/mute/warn action performed through Discord commands.
+	 * Leave empty to disable moderation logging (default).
+	 *
+	 * How to get the channel ID: enable Developer Mode, right-click the channel,
+	 * and choose "Copy Channel ID".
+	 */
+	FString ModerationLogChannelId;
+
 	// ── Static helpers ────────────────────────────────────────────────────────
 
 	/** Load settings from DefaultBanBridge.ini (+ backup) and return a populated config. */
