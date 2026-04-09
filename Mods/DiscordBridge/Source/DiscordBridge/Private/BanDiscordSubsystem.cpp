@@ -497,13 +497,14 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 		UBanEnforcer::KickConnectedPlayer(World, Uid, Entry.GetKickMessage());
 
 	// Format confirmation message.
+	const FString SafeName = BanDiscordHelpers::EscapeMarkdown(DisplayName);
 	FString Msg;
 	if (bTemporary)
 	{
 		Msg = FString::Printf(
 			TEXT("✅ **%s** (`%s`) has been temporarily banned for **%d minute(s)**.\n"
 			     "Expires: %s\nReason: %s\nBanned by: %s"),
-			*DisplayName, *Uid, DurationMinutes,
+			*SafeName, *Uid, DurationMinutes,
 			*BanDiscordHelpers::FormatExpiry(Entry),
 			*Entry.Reason, *SenderName);
 	}
@@ -512,7 +513,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 		Msg = FString::Printf(
 			TEXT("✅ **%s** (`%s`) has been **permanently** banned.\n"
 			     "Reason: %s\nBanned by: %s"),
-			*DisplayName, *Uid, *Entry.Reason, *SenderName);
+			*SafeName, *Uid, *Entry.Reason, *SenderName);
 	}
 
 	UE_LOG(LogBanDiscord, Log, TEXT("BanDiscordSubsystem: %s banned %s (%s). Reason: %s"),
@@ -568,7 +569,7 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 
 	const FString Msg = FString::Printf(
 		TEXT("✅ Ban removed for **%s** (`%s`).\nUnbanned by: %s"),
-		*DisplayName, *Uid, *SenderName);
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
 
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: %s unbanned %s (%s)."),
@@ -941,11 +942,15 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 		if (!MuteReg->UnmutePlayer(Uid))
 		{
 			CachedProvider->SendDiscordChannelMessage(ChannelId,
-				FString::Printf(TEXT("⚠️ **%s** (`%s`) is not currently muted."), *DisplayName, *Uid));
+				FString::Printf(TEXT("⚠️ **%s** (`%s`) is not currently muted."),
+					*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
 			return;
 		}
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
-			FString::Printf(TEXT("✅ Unmuted **%s** (`%s`).\nUnmuted by: %s"), *DisplayName, *Uid, *SenderName));
+		const FString UnmuteMsg = FString::Printf(
+			TEXT("✅ Unmuted **%s** (`%s`).\nUnmuted by: %s"),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
+		CachedProvider->SendDiscordChannelMessage(ChannelId, UnmuteMsg);
+		PostModerationLog(UnmuteMsg);
 		return;
 	}
 
@@ -971,9 +976,11 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 		? FString::Printf(TEXT(" for **%d minute(s)**"), Minutes)
 		: TEXT(" **indefinitely**");
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId,
-		FString::Printf(TEXT("🔇 Muted **%s** (`%s`)%s.\nReason: %s\nMuted by: %s"),
-			*DisplayName, *Uid, *DurStr, *Reason, *SenderName));
+	const FString MuteMsg = FString::Printf(
+		TEXT("🔇 Muted **%s** (`%s`)%s.\nReason: %s\nMuted by: %s"),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *DurStr, *Reason, *SenderName);
+	CachedProvider->SendDiscordChannelMessage(ChannelId, MuteMsg);
+	PostModerationLog(MuteMsg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1015,9 +1022,11 @@ void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
 
 	FBanDiscordNotifier::NotifyWarningIssued(Uid, DisplayName, Reason, SenderName, WarnCount);
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId,
-		FString::Printf(TEXT("⚠️ Warned **%s** (`%s`).\nReason: %s\nTotal warnings: **%d**\nWarned by: %s"),
-			*DisplayName, *Uid, *Reason, WarnCount, *SenderName));
+	const FString WarnMsg = FString::Printf(
+		TEXT("⚠️ Warned **%s** (`%s`).\nReason: %s\nTotal warnings: **%d**\nWarned by: %s"),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *Reason, WarnCount, *SenderName);
+	CachedProvider->SendDiscordChannelMessage(ChannelId, WarnMsg);
+	PostModerationLog(WarnMsg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1053,9 +1062,11 @@ void UBanDiscordSubsystem::HandleAnnounceCommand(const TArray<FString>& Args,
 		if (PC) PC->ClientMessage(FString::Printf(TEXT("[Announcement] %s"), *Message));
 	}
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId,
-		FString::Printf(TEXT("📢 Announcement sent to all in-game players:\n> %s\nSent by: %s"),
-			*Message, *SenderName));
+	const FString AnnounceConfirm = FString::Printf(
+		TEXT("📢 Announcement sent to all in-game players:\n> %s\nSent by: %s"),
+		*Message, *SenderName);
+	CachedProvider->SendDiscordChannelMessage(ChannelId, AnnounceConfirm);
+	PostModerationLog(AnnounceConfirm);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
