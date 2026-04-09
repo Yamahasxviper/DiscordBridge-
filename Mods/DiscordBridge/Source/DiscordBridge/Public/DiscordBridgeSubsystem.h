@@ -812,6 +812,24 @@ private:
 	/** Handle the !online Discord command — post a list of online players with session times. */
 	void HandleOnlineCommand(const FString& ResponseChannelId);
 
+	// ── !help / bot info command ──────────────────────────────────────────────
+
+	/**
+	 * Post a comprehensive feature/command-reference embed to ResponseChannelId.
+	 * Called automatically on the first Gateway READY when BotInfoChannelId is
+	 * configured, and in response to the !help command in the bridged channel.
+	 *
+	 * @param ResponseChannelId  Snowflake ID of the channel to post the embed to.
+	 */
+	void HandleBotInfoCommand(const FString& ResponseChannelId);
+
+	/**
+	 * true after the bot-info embed has been posted for the current server session.
+	 * Prevents re-posting on Gateway reconnects (which trigger a fresh READY event).
+	 * Reset to false in Disconnect() so the embed is re-posted on a true restart.
+	 */
+	bool bBotInfoPosted{false};
+
 	// ── Mute event notifications ──────────────────────────────────────────────
 
 	/** Post a mute/unmute notification to the moderator channel when bNotifyMuteEvents=true. */

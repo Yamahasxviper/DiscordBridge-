@@ -592,6 +592,25 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 */
 	FString ModerationLogChannelId{ TEXT("") };
 
+	// ── Bot info / help channel ────────────────────────────────────────────────
+
+	/**
+	 * Snowflake ID of a dedicated Discord channel where the bot posts a
+	 * comprehensive embed listing every feature and command when the server
+	 * starts for the first time.  Discord users can also type !help in the
+	 * main bridged channel to re-post the embed at any time.
+	 *
+	 * Recommended setup:
+	 *   1. Create a read-only channel in your Discord server named e.g. #bot-commands.
+	 *   2. Copy its channel ID (Developer Mode → right-click → Copy Channel ID).
+	 *   3. Paste it here and restart the server.
+	 *
+	 * Leave empty to disable the automatic info post (you can still use !help
+	 * in the main channel to get a response there).
+	 * Example: BotInfoChannelId=111222333444555666777
+	 */
+	FString BotInfoChannelId{ TEXT("") };
+
 	/**
 	 * Loads configuration from the primary mod-folder INI, falling back to the
 	 * Saved/Config backup when credentials are missing.  If the primary file does
