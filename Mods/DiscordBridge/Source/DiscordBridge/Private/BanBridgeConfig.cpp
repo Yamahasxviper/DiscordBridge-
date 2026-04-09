@@ -81,6 +81,7 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 	}
 
 	Out.AdminRoleId            = GetIniBridgeString(Cfg, TEXT("AdminRoleId"));
+	Out.ModeratorRoleId        = GetIniBridgeString(Cfg, TEXT("ModeratorRoleId"));
 	Out.BanCommandChannelId    = GetIniBridgeString(Cfg, TEXT("BanCommandChannelId"));
 	Out.ModerationLogChannelId = GetIniBridgeString(Cfg, TEXT("ModerationLogChannelId"));
 
@@ -94,6 +95,9 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 		UE_LOG(LogBanDiscord, Log,
 		       TEXT("BanBridge: AdminRoleId            = \"%s\""), *Out.AdminRoleId);
 		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanBridge: ModeratorRoleId        = \"%s\""),
+		       Out.ModeratorRoleId.IsEmpty() ? TEXT("(not set)") : *Out.ModeratorRoleId);
+		UE_LOG(LogBanDiscord, Log,
 		       TEXT("BanBridge: BanCommandChannelId    = \"%s\""),
 		       Out.BanCommandChannelId.IsEmpty() ? TEXT("(any channel)") : *Out.BanCommandChannelId);
 		UE_LOG(LogBanDiscord, Log,
@@ -102,4 +106,20 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 	}
 
 	return Out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Authorisation helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool FBanBridgeConfig::IsAdminRole(const TArray<FString>& Roles) const
+{
+	return !AdminRoleId.IsEmpty() && Roles.Contains(AdminRoleId);
+}
+
+bool FBanBridgeConfig::IsModeratorRole(const TArray<FString>& Roles) const
+{
+	if (IsAdminRole(Roles))
+		return true;
+	return !ModeratorRoleId.IsEmpty() && Roles.Contains(ModeratorRoleId);
 }

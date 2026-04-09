@@ -12,48 +12,66 @@
 /**
  * UBanDiscordSubsystem
  *
- * A GameInstance-level subsystem that exposes the BanSystem ban database to
- * Discord administrators via plain-text commands prefixed with "!".
+ * A GameInstance-level subsystem that exposes the BanSystem ban database and
+ * BanChatCommands features to Discord staff via plain-text commands prefixed with "!".
  *
- * Commands
- * ────────
- *  !ban <PUID|name> [reason]             – Permanently ban a player.
- *  !tempban <PUID|name> <minutes> [reason] – Temporarily ban a player.
- *  !unban <PUID>                         – Remove an active ban.
- *  !bancheck <PUID|name>                 – Check a player's ban status.
- *  !banlist [page]                       – List all active bans (10 per page).
- *  !playerhistory <name|PUID>            – Show known session records for a player.
- *  !kick <PUID|name> [reason]            – Kick a connected player.
- *  !mute <PUID|name> [minutes] [reason]  – Mute a player (requires BanChatCommands).
- *  !unmute <PUID|name>                   – Unmute a player (requires BanChatCommands).
- *  !warn <PUID|name> <reason...>         – Issue a warning (requires BanSystem).
- *  !announce <message...>                – Broadcast a message to all in-game players.
+ * Admin Commands (require AdminRoleId)
+ * ─────────────────────────────────────
+ *  !ban <PUID|name> [reason]               – Permanently ban a player.
+ *  !tempban <PUID|name> <min> [reason]     – Temporarily ban a player.
+ *  !unban <PUID>                           – Remove an active ban by PUID.
+ *  !unbanname <name>                       – Remove a ban by display name.
+ *  !banname <name> [reason]                – Ban by display name (EOS + IP).
+ *  !bancheck <PUID|name>                   – Check a player's ban status.
+ *  !banreason <PUID|name> <new reason...>  – Edit the reason on an active ban.
+ *  !banlist [page]                         – List all active bans (10 per page).
+ *  !linkbans <UID1> <UID2>                 – Link two UIDs so a ban blocks both.
+ *  !unlinkbans <UID1> <UID2>               – Remove a link between two UIDs.
+ *  !extend <PUID|name> <minutes>           – Extend a temporary ban.
+ *  !duration <PUID|name>                   – Show remaining time on a tempban.
+ *  !playerhistory <name|PUID|IP>           – Show known session records.
+ *  !warn <PUID|name> <reason...>           – Issue a formal warning.
+ *  !warnings <PUID|name>                   – List all warnings for a player.
+ *  !clearwarns <PUID|name>                 – Remove all warnings for a player.
+ *  !clearwarn <warning_id>                 – Remove a single warning by ID.
+ *  !note <PUID|name> <text...>             – Add a private admin note.
+ *  !notes <PUID|name>                      – List all admin notes for a player.
+ *  !reason <UID>                           – Show the ban reason for a UID.
+ *  !reloadconfig                           – Reload BanBridge config from disk.
+ *
+ * Moderator Commands (require ModeratorRoleId or AdminRoleId)
+ * ────────────────────────────────────────────────────────────
+ *  !kick <PUID|name> [reason]              – Kick a connected player.
+ *  !modban <PUID|name> [reason]            – Temporary ban (ModBanDurationMinutes).
+ *  !mute <PUID|name> [minutes] [reason]    – Mute a player's in-game chat.
+ *  !unmute <PUID|name>                     – Lift a mute from a player.
+ *  !tempmute <PUID|name> <minutes>         – Apply a timed mute.
+ *  !mutecheck <PUID|name>                  – Check mute status and expiry.
+ *  !mutelist                               – List all currently muted players.
+ *  !announce <message...>                  – Broadcast to all in-game players.
+ *  !stafflist                              – Show online admins/moderators.
+ *  !staffchat <message...>                 – Send a message to online staff only.
  *
  * Authorisation
  * ─────────────
- *  Only Discord members whose role list contains AdminRoleId
- *  (configured in DefaultBanBridge.ini) may run these commands.
+ *  Admin commands require AdminRoleId.  Moderator commands accept AdminRoleId
+ *  or ModeratorRoleId.  Both roles are configured in DefaultBanBridge.ini.
  *  If BanCommandChannelId is set, commands are only accepted from that channel.
  *
  * Player target resolution
  * ────────────────────────
- *  1. 32-character hex string → raw EOS Product User ID → "EOS:<lower>"
+ *  1. 32-character hex string → raw EOS PUID → "EOS:<lower>"
  *  2. "EOS:<32hex>"           → compound UID (normalised to lowercase)
- *  3. Anything else           → substring name lookup in the PlayerSessionRegistry
- *                              (covers both currently-connected players and
- *                               players seen in previous sessions).
+ *  3. Anything else           → substring name lookup in PlayerSessionRegistry.
  *
  * Integration
  * ───────────
  *  DiscordBridgeSubsystem calls SetProvider(this) during its own Initialize()
- *  and SetProvider(nullptr) during Deinitialize(), following the same pattern
- *  as UTicketSubsystem.
+ *  and SetProvider(nullptr) during Deinitialize().
  *
  * Configuration
  * ─────────────
- *  Edit Mods/DiscordBridge/Config/DefaultBanBridge.ini and set AdminRoleId to
- *  your Discord admin role snowflake ID.  Optionally set BanCommandChannelId to
- *  restrict commands to a single channel.
+ *  Edit Mods/DiscordBridge/Config/DefaultBanBridge.ini.
  */
 UCLASS()
 class DISCORDBRIDGE_API UBanDiscordSubsystem : public UGameInstanceSubsystem
@@ -91,6 +109,9 @@ private:
 
 	/** Returns true when the member's role list contains Config.AdminRoleId. */
 	bool IsAdminMember(const TArray<FString>& Roles) const;
+
+	/** Returns true when the member's role list contains AdminRoleId or ModeratorRoleId. */
+	bool IsModeratorMember(const TArray<FString>& Roles) const;
 
 	// ── Target resolution ─────────────────────────────────────────────────────
 
@@ -133,36 +154,113 @@ private:
 	                      const FString& SenderName,
 	                      bool bTemporary);
 
-	/**
-	 * Handle !unban.
-	 * Usage: !unban <PUID>
-	 */
+	/** Handle !unban. Usage: !unban <PUID> */
 	void HandleUnbanCommand(const TArray<FString>& Args,
 	                        const FString& ChannelId,
 	                        const FString& SenderName);
 
-	/**
-	 * Handle !bancheck.
-	 * Usage: !bancheck <PUID|name>
-	 */
+	/** Handle !unbanname. Usage: !unbanname <name_substring> */
+	void HandleUnbanNameCommand(const TArray<FString>& Args,
+	                             const FString& ChannelId,
+	                             const FString& SenderName);
+
+	/** Handle !banname. Usage: !banname <name_substring> [reason] */
+	void HandleBanNameCommand(const TArray<FString>& Args,
+	                           const FString& ChannelId,
+	                           const FString& SenderName);
+
+	/** Handle !bancheck. Usage: !bancheck <PUID|name> */
 	void HandleBanCheckCommand(const TArray<FString>& Args, const FString& ChannelId);
 
-	/**
-	 * Handle !banlist.
-	 * Usage: !banlist [page]
-	 */
+	/** Handle !banreason. Usage: !banreason <PUID|name> <new reason...> */
+	void HandleBanReasonCommand(const TArray<FString>& Args,
+	                             const FString& ChannelId,
+	                             const FString& SenderName);
+
+	/** Handle !banlist. Usage: !banlist [page] */
 	void HandleBanListCommand(const TArray<FString>& Args, const FString& ChannelId);
 
-	/**
-	 * Handle !playerhistory.
-	 * Usage: !playerhistory <name|PUID>
-	 */
+	/** Handle !linkbans / !unlinkbans. Usage: !linkbans <UID1> <UID2> */
+	void HandleLinkBansCommand(const TArray<FString>& Args,
+	                            const FString& ChannelId,
+	                            const FString& SenderName,
+	                            bool bLink);
+
+	/** Handle !extend. Usage: !extend <PUID|name> <minutes> */
+	void HandleExtendBanCommand(const TArray<FString>& Args,
+	                             const FString& ChannelId,
+	                             const FString& SenderName);
+
+	/** Handle !duration. Usage: !duration <PUID|name> */
+	void HandleDurationCommand(const TArray<FString>& Args, const FString& ChannelId);
+
+	/** Handle !playerhistory. Usage: !playerhistory <name|PUID|IP> */
 	void HandlePlayerHistoryCommand(const TArray<FString>& Args, const FString& ChannelId);
 
+	/** Handle !warn. Usage: !warn <PUID|name> <reason...> */
+	void HandleWarnCommand(const TArray<FString>& Args,
+	                       const FString& ChannelId,
+	                       const FString& SenderName);
+
+	/** Handle !warnings. Usage: !warnings <PUID|name> */
+	void HandleWarningsCommand(const TArray<FString>& Args, const FString& ChannelId);
+
+	/** Handle !clearwarns. Usage: !clearwarns <PUID|name> */
+	void HandleClearWarnsCommand(const TArray<FString>& Args,
+	                              const FString& ChannelId,
+	                              const FString& SenderName);
+
+	/** Handle !clearwarn. Usage: !clearwarn <warning_id> */
+	void HandleClearWarnByIdCommand(const TArray<FString>& Args,
+	                                 const FString& ChannelId,
+	                                 const FString& SenderName);
+
+	/** Handle !note. Usage: !note <PUID|name> <text...> */
+	void HandleNoteCommand(const TArray<FString>& Args,
+	                       const FString& ChannelId,
+	                       const FString& SenderName);
+
+	/** Handle !notes. Usage: !notes <PUID|name> */
+	void HandleNotesCommand(const TArray<FString>& Args, const FString& ChannelId);
+
+	/** Handle !reason. Usage: !reason <UID> */
+	void HandleReasonCommand(const TArray<FString>& Args, const FString& ChannelId);
+
+	/** Handle !reloadconfig. Reloads BanBridge config from disk. */
+	void HandleReloadConfigCommand(const FString& ChannelId, const FString& SenderName);
+
+	/** Handle !kick. Usage: !kick <PUID|name> [reason] */
 	void HandleKickCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
+
+	/** Handle !modban. Usage: !modban <PUID|name> [reason] */
+	void HandleModBanCommand(const TArray<FString>& Args,
+	                          const FString& ChannelId,
+	                          const FString& SenderName);
+
+	/** Handle !mute / !unmute. Usage: !mute <PUID|name> [minutes] [reason] */
 	void HandleMuteCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName, bool bMute);
-	void HandleWarnCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
+
+	/** Handle !tempmute. Usage: !tempmute <PUID|name> <minutes> */
+	void HandleTempMuteCommand(const TArray<FString>& Args,
+	                            const FString& ChannelId,
+	                            const FString& SenderName);
+
+	/** Handle !mutecheck. Usage: !mutecheck <PUID|name> */
+	void HandleMuteCheckCommand(const TArray<FString>& Args, const FString& ChannelId);
+
+	/** Handle !mutelist. Lists all currently muted players. */
+	void HandleMuteListCommand(const FString& ChannelId);
+
+	/** Handle !announce. Usage: !announce <message...> */
 	void HandleAnnounceCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
+
+	/** Handle !stafflist. Lists names of online admins/moderators. */
+	void HandleStaffListCommand(const FString& ChannelId);
+
+	/** Handle !staffchat. Usage: !staffchat <message...> */
+	void HandleStaffChatCommand(const TArray<FString>& Args,
+	                             const FString& ChannelId,
+	                             const FString& SenderName);
 
 	/**
 	 * Post a moderation log message to ModerationLogChannelId (if configured).
