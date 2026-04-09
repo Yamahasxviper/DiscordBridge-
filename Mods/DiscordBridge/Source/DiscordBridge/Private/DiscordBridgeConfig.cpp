@@ -432,6 +432,9 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		// Moderation log channel
 		Config.ModerationLogChannelId = GetIniStringOrDefault(ConfigFile, TEXT("ModerationLogChannelId"), Config.ModerationLogChannelId);
 
+		// Bot info / help channel
+		Config.BotInfoChannelId = GetIniStringOrDefault(ConfigFile, TEXT("BotInfoChannelId"), Config.BotInfoChannelId);
+
 		// Multi-slot scheduled announcements (array field)
 		{
 			FString PrimaryRaw;
@@ -925,7 +928,13 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("PlayersCommandChannelId=\n")
 			TEXT("# Discord invite link shown to players who type /discord in-game.\n")
 			TEXT("# Leave empty to disable the /discord in-game command.\n")
-			TEXT("DiscordInviteUrl=\n");
+			TEXT("DiscordInviteUrl=\n")
+			TEXT("\n")
+			TEXT("# -- BOT INFO / HELP CHANNEL -------------------------------------------------\n")
+			TEXT("# Snowflake ID of a Discord channel where the bot posts a full feature/command\n")
+			TEXT("# list on server start. Users can also type !help in the main channel.\n")
+			TEXT("# Leave empty to disable the automatic post (but !help still works in ChannelId).\n")
+			TEXT("BotInfoChannelId=\n");
 
 		// Ensure the Config directory exists before writing.
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(ModFilePath));
@@ -1057,6 +1066,10 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.ModeratorChannelId = GetRawStringOrDefault(BackupValues, TEXT("ModeratorChannelId"), Config.ModeratorChannelId);
 
 		Config.ModerationLogChannelId = GetRawStringOrDefault(BackupValues, TEXT("ModerationLogChannelId"), Config.ModerationLogChannelId);
+
+		// Bot info / help channel
+		Config.BotInfoChannelId = GetRawStringOrDefault(BackupValues, TEXT("BotInfoChannelId"), Config.BotInfoChannelId);
+
 		// ScheduledAnnouncements: NOT restored from backup — they remain in primary config only.
 
 		// Only log the "restored from backup" message when credentials were
@@ -1175,6 +1188,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("NotifyMuteEvents"),              Config.bNotifyMuteEvents  ? TEXT("True") : TEXT("False"));
 				PatchLine(TEXT("ModeratorChannelId"),            Config.ModeratorChannelId);
 				PatchLine(TEXT("ModerationLogChannelId"),        Config.ModerationLogChannelId);
+				PatchLine(TEXT("BotInfoChannelId"),              Config.BotInfoChannelId);
 
 				// ChatRelayBlocklist is a multi-value array field.  Remove all
 				// existing Key= / +Key= lines then append the restored values.
@@ -1320,7 +1334,10 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			+ TEXT("; -- Mute Notifications -----------------------------------------------------\n")
 			+ TEXT("NotifyMuteEvents=")  + (Config.bNotifyMuteEvents  ? TEXT("True") : TEXT("False")) + TEXT("\n")
 			+ TEXT("ModeratorChannelId=") + Config.ModeratorChannelId + TEXT("\n")
-			+ TEXT("ModerationLogChannelId=") + Config.ModerationLogChannelId + TEXT("\n");
+			+ TEXT("ModerationLogChannelId=") + Config.ModerationLogChannelId + TEXT("\n")
+			+ TEXT("\n")
+			+ TEXT("; -- Bot Info / Help Channel ------------------------------------------------\n")
+			+ TEXT("BotInfoChannelId=") + Config.BotInfoChannelId + TEXT("\n");
 
 		// ScheduledAnnouncements array backup lines
 		FString BackupSALines;

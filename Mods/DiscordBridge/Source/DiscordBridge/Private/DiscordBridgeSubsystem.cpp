@@ -281,6 +281,7 @@ void UDiscordBridgeSubsystem::Disconnect()
 	bGatewayReady            = false;
 	bPendingHeartbeatAck     = false;
 	bServerOnlineMessageSent = false;
+	bBotInfoPosted           = false;
 	LastSequenceNumber       = -1;
 	BotUserId.Empty();
 	GuildId.Empty();
@@ -793,6 +794,21 @@ void UDiscordBridgeSubsystem::HandleReady(const TSharedPtr<FJsonObject>& DataObj
 		bServerOnlineMessageSent = true;
 	}
 
+	// Post the bot feature/command reference to the dedicated info channel the
+	// first time the bot connects after a true server restart.  Subsequent
+	// Gateway reconnects (which re-fire READY) are suppressed by bBotInfoPosted.
+	if (!bBotInfoPosted)
+	{
+		const FString& InfoTarget = Config.BotInfoChannelId.IsEmpty()
+			? FString()
+			: Config.BotInfoChannelId;
+		if (!InfoTarget.IsEmpty())
+		{
+			HandleBotInfoCommand(InfoTarget);
+			bBotInfoPosted = true;
+		}
+	}
+
 	// Populate the Discord role member cache so that players who hold
 	// WhitelistRoleId are not kicked by the game-server whitelist even when
 	// they are not listed in ServerWhitelist.json.
@@ -1073,6 +1089,14 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 	if (Content.Equals(TEXT("!online"), ESearchCase::IgnoreCase))
 	{
 		HandleOnlineCommand(MsgChannelId);
+		return;
+	}
+
+	// !help command – post the bot feature/command reference to this channel.
+	if (Content.Equals(TEXT("!help"), ESearchCase::IgnoreCase) ||
+	    Content.Equals(TEXT("!commands"), ESearchCase::IgnoreCase))
+	{
+		HandleBotInfoCommand(MsgChannelId);
 		return;
 	}
 
@@ -3574,6 +3598,166 @@ SendMessageBodyToChannel(Target, Body);
 }
 
 return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !help / bot info command
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::HandleBotInfoCommand(const FString& ResponseChannelId)
+{
+if (Config.BotToken.IsEmpty() || ResponseChannelId.IsEmpty()) return;
+
+// ── Embed 1: General / chat commands ─────────────────────────────────────
+{
+TSharedPtr<FJsonObject> Embed = MakeShared<FJsonObject>();
+Embed->SetStringField(TEXT("title"), TEXT("📖 DiscordBridge — Features & Commands"));
+Embed->SetNumberField(TEXT("color"), 3447003); // Discord blurple
+Embed->SetStringField(TEXT("description"),
+TEXT("This bot bridges **Satisfactory** in-game chat with Discord and provides ")
+TEXT("server management commands.  Type any command in this channel.\n\u200b"));
+
+TArray<TSharedPtr<FJsonValue>> Fields;
+auto AddField = [&](const FString& Name, const FString& Value, bool bInline = false)
+{
+TSharedPtr<FJsonObject> F = MakeShared<FJsonObject>();
+F->SetStringField(TEXT("name"),   Name);
+F->SetStringField(TEXT("value"),  Value.IsEmpty() ? TEXT("\u200b") : Value);
+F->SetBoolField  (TEXT("inline"), bInline);
+Fields.Add(MakeShared<FJsonValueObject>(F));
+};
+
+// Chat bridge
+AddField(TEXT("💬 Chat Bridge"),
+TEXT("In-game player messages are automatically relayed to Discord, and ")
+TEXT("Discord messages sent here are shown in-game.\n\u200b"));
+
+// Player / server commands
+const FString ServerName = Config.ServerName.IsEmpty() ? TEXT("this server") : Config.ServerName;
+AddField(TEXT("🖥️ Server & Player Commands"),
+FString::Printf(
+TEXT("`!server`  — Server info embed (name, player count, uptime)\n")
+TEXT("`!online`  — Online players list as a rich embed\n")
+TEXT("`%s`  — Online player count (plain text)\n")
+TEXT("`!stats`  — Server statistics (phases, schematics, buildings)\n")
+TEXT("`!playerstats <name>`  — Per-player build/item stats\n\u200b"),
+*Config.PlayersCommandPrefix));
+
+// Whitelist
+if (!Config.WhitelistCommandPrefix.IsEmpty())
+{
+AddField(TEXT("🔒 Whitelist Commands"),
+FString::Printf(
+TEXT("`%s on`  — Enable the server whitelist\n")
+TEXT("`%s off`  — Disable the server whitelist\n")
+TEXT("`%s add <name>`  — Add a player to the whitelist\n")
+TEXT("`%s remove <name>`  — Remove a player from the whitelist\n")
+TEXT("`%s list`  — Show all whitelisted players\n")
+TEXT("`%s status`  — Show whether the whitelist is active\n\u200b"),
+*Config.WhitelistCommandPrefix,
+*Config.WhitelistCommandPrefix,
+*Config.WhitelistCommandPrefix,
+*Config.WhitelistCommandPrefix,
+*Config.WhitelistCommandPrefix,
+*Config.WhitelistCommandPrefix));
+}
+
+// Help itself
+AddField(TEXT("ℹ️ Help"),
+TEXT("`!help` or `!commands`  — Show this feature/command reference again\n\u200b"));
+
+Embed->SetArrayField(TEXT("fields"), Fields);
+Embed->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+
+// Build footer separately
+TSharedPtr<FJsonObject> Footer = MakeShared<FJsonObject>();
+Footer->SetStringField(TEXT("text"), FString::Printf(TEXT("DiscordBridge • %s"), *ServerName));
+Embed->SetObjectField(TEXT("footer"), Footer);
+
+TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+Body->SetArrayField(TEXT("embeds"),
+TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(Embed) });
+SendMessageBodyToChannel(ResponseChannelId, Body);
+}
+
+// ── Embed 2: Admin / Moderator commands (only when BanSystem is active) ───
+{
+TSharedPtr<FJsonObject> Embed = MakeShared<FJsonObject>();
+Embed->SetStringField(TEXT("title"), TEXT("🛡️ Moderation Commands (BanSystem)"));
+Embed->SetNumberField(TEXT("color"), 15158332); // red
+Embed->SetStringField(TEXT("description"),
+TEXT("The following commands require the **Admin** or **Moderator** Discord role ")
+TEXT("configured in `DefaultBanBridge.ini`.\n\u200b"));
+
+TArray<TSharedPtr<FJsonValue>> Fields;
+auto AddField = [&](const FString& Name, const FString& Value, bool bInline = false)
+{
+TSharedPtr<FJsonObject> F = MakeShared<FJsonObject>();
+F->SetStringField(TEXT("name"),   Name);
+F->SetStringField(TEXT("value"),  Value.IsEmpty() ? TEXT("\u200b") : Value);
+F->SetBoolField  (TEXT("inline"), bInline);
+Fields.Add(MakeShared<FJsonValueObject>(F));
+};
+
+// Admin — ban management
+AddField(TEXT("⚔️ Admin — Ban Management"),
+TEXT("`!ban <player> [reason]`  — Permanently ban a player\n")
+TEXT("`!tempban <player> <duration> [reason]`  — Temporary ban (e.g. `1d`, `2h`)\n")
+TEXT("`!unban <PUID>`  — Unban by EOS Product User ID\n")
+TEXT("`!unbanname <name>`  — Unban by last-seen in-game name\n")
+TEXT("`!banname <name> [reason]`  — Ban by in-game name\n")
+TEXT("`!bancheck <player>`  — Check if a player is currently banned\n")
+TEXT("`!banreason <PUID> <reason>`  — Update the reason for an active ban\n")
+TEXT("`!banlist [page]`  — List active bans (paginated)\n")
+TEXT("`!extend <PUID> <duration>`  — Extend a temporary ban\n")
+TEXT("`!duration <PUID>`  — Show remaining ban duration\n\u200b"),
+false);
+
+// Admin — server links, history, warns, notes
+AddField(TEXT("📋 Admin — History, Warnings & Notes"),
+TEXT("`!playerhistory <player>`  — Full join/ban history for a player\n")
+TEXT("`!warn <player> [reason]`  — Issue a warning to a player\n")
+TEXT("`!warnings <player>`  — List all warnings for a player\n")
+TEXT("`!clearwarns <player>`  — Clear all warnings for a player\n")
+TEXT("`!clearwarn <id>`  — Remove a single warning by its ID\n")
+TEXT("`!note <player> <text>`  — Add a staff note to a player's record\n")
+TEXT("`!notes <player>`  — Show all staff notes for a player\n")
+TEXT("`!reason <PUID>`  — Show the ban reason for a player\n\u200b"),
+false);
+
+// Admin — server links, config
+AddField(TEXT("⚙️ Admin — Server Links & Config"),
+TEXT("`!linkbans <serverName>`  — Link ban lists with another server\n")
+TEXT("`!unlinkbans <serverName>`  — Remove a ban-list link\n")
+TEXT("`!reloadconfig`  — Hot-reload BanSystem / BanChatCommands config\n\u200b"),
+false);
+
+// Moderator commands
+AddField(TEXT("👮 Moderator Commands"),
+TEXT("`!kick <player> [reason]`  — Kick a player from the server\n")
+TEXT("`!modban <player> [reason]`  — Permanent ban (moderator-level)\n")
+TEXT("`!mute <player> [reason]`  — Mute a player in-game\n")
+TEXT("`!unmute <player>`  — Unmute a player\n")
+TEXT("`!tempmute <player> <duration> [reason]`  — Temporary mute\n")
+TEXT("`!mutecheck <player>`  — Check if a player is muted\n")
+TEXT("`!mutelist`  — List all currently muted players\n")
+TEXT("`!announce <message>`  — Broadcast a message to all in-game players\n")
+TEXT("`!stafflist`  — List configured admins and moderators\n")
+TEXT("`!staffchat <message>`  — Send a message to the staff Discord channel\n\u200b"),
+false);
+
+Embed->SetArrayField(TEXT("fields"), Fields);
+Embed->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+
+TSharedPtr<FJsonObject> Footer = MakeShared<FJsonObject>();
+Footer->SetStringField(TEXT("text"), TEXT("Commands require AdminRoleId / ModeratorRoleId in DefaultBanBridge.ini"));
+Embed->SetObjectField(TEXT("footer"), Footer);
+
+TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+Body->SetArrayField(TEXT("embeds"),
+TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(Embed) });
+SendMessageBodyToChannel(ResponseChannelId, Body);
+}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
