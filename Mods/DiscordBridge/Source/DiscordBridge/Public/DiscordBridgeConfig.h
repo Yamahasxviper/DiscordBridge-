@@ -5,6 +5,25 @@
 #include "CoreMinimal.h"
 
 /**
+ * A single scheduled announcement entry for the ScheduledAnnouncements array.
+ * Each entry fires independently on its own interval.
+ *
+ * Config example (DefaultDiscordBridge.ini):
+ *   +ScheduledAnnouncements=(IntervalMinutes=30,Message="Join our Discord!",ChannelId="")
+ */
+struct DISCORDBRIDGE_API FScheduledAnnouncement
+{
+	/** How often in minutes to post this announcement. 0 = disabled. */
+	int32   IntervalMinutes = 0;
+
+	/** The message text to post. */
+	FString Message;
+
+	/** Channel ID to post to. Falls back to ChannelId when empty. */
+	FString ChannelId;
+};
+
+/**
  * A single find-and-replace entry for the chat relay blocklist.
  */
 struct DISCORDBRIDGE_API FChatRelayReplacement
@@ -494,6 +513,18 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 */
 	FString AnnouncementChannelId{ TEXT("") };
 
+	/**
+	 * Array of additional scheduled announcements, each with an independent
+	 * interval, message, and channel. These run in parallel with the legacy
+	 * AnnouncementIntervalMinutes / AnnouncementMessage / AnnouncementChannelId
+	 * fields (those still work for a single announcement).
+	 *
+	 * Config syntax (DefaultDiscordBridge.ini):
+	 *   +ScheduledAnnouncements=(IntervalMinutes=60,Message="Rules: ...",ChannelId="")
+	 *   +ScheduledAnnouncements=(IntervalMinutes=30,Message="Vote on maps at ...",ChannelId="111222333")
+	 */
+	TArray<FScheduledAnnouncement> ScheduledAnnouncements;
+
 	// ── Embed mode flags ─────────────────────────────────────────────────────
 
 	/**
@@ -550,6 +581,16 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 * Falls back to BanEventsChannelId, then ChannelId, when empty.
 	 */
 	FString ModeratorChannelId{ TEXT("") };
+
+	// ── Moderation log ────────────────────────────────────────────────────────
+
+	/**
+	 * Snowflake ID of a Discord channel where all moderation actions (bans, kicks,
+	 * warns, mutes, unbans, unmutes) are mirrored regardless of source.
+	 * Leave empty to disable the unified moderation log.
+	 * Example: ModerationLogChannelId=111222333444555666
+	 */
+	FString ModerationLogChannelId{ TEXT("") };
 
 	/**
 	 * Loads configuration from the primary mod-folder INI, falling back to the

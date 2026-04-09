@@ -7,10 +7,16 @@
 #include "BanEnforcer.h"
 #include "BanTypes.h"
 #include "PlayerSessionRegistry.h"
+#include "PlayerWarningRegistry.h"
+#include "BanDiscordNotifier.h"
+
+// BanChatCommands public API
+#include "MuteRegistry.h"
 
 #include "Misc/DefaultValueHelper.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal namespace helpers
@@ -159,7 +165,9 @@ void UBanDiscordSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Me
 	// Only handle ban-related commands; let other commands pass through silently.
 	static const TArray<FString> KnownCommands = {
 		TEXT("!ban"), TEXT("!tempban"), TEXT("!unban"),
-		TEXT("!bancheck"), TEXT("!banlist"), TEXT("!playerhistory")
+		TEXT("!bancheck"), TEXT("!banlist"), TEXT("!playerhistory"),
+		TEXT("!kick"), TEXT("!mute"), TEXT("!unmute"),
+		TEXT("!warn"), TEXT("!announce")
 	};
 	if (!KnownCommands.Contains(Command))
 		return;
@@ -196,6 +204,16 @@ void UBanDiscordSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Me
 		HandleBanListCommand(Args, ChannelId);
 	else if (Command == TEXT("!playerhistory"))
 		HandlePlayerHistoryCommand(Args, ChannelId);
+	else if (Command == TEXT("!kick"))
+		HandleKickCommand(Args, ChannelId, SenderName);
+	else if (Command == TEXT("!mute"))
+		HandleMuteCommand(Args, ChannelId, SenderName, /*bMute=*/true);
+	else if (Command == TEXT("!unmute"))
+		HandleMuteCommand(Args, ChannelId, SenderName, /*bMute=*/false);
+	else if (Command == TEXT("!warn"))
+		HandleWarnCommand(Args, ChannelId, SenderName);
+	else if (Command == TEXT("!announce"))
+		HandleAnnounceCommand(Args, ChannelId, SenderName);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -803,4 +821,211 @@ void UBanDiscordSubsystem::HandlePlayerHistoryCommand(const TArray<FString>& Arg
 		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
 
 	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !kick
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleKickCommand(const TArray<FString>& Args,
+                                              const FString& ChannelId,
+                                              const FString& SenderName)
+{
+	if (!CachedProvider) return;
+
+	if (Args.IsEmpty())
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId, TEXT("Usage: `!kick <PUID|name> [reason]`"));
+		return;
+	}
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		return;
+	}
+
+	const FString Reason = (Args.Num() > 1) ? BanDiscordHelpers::JoinArgs(Args, 1) : TEXT("Kicked by Discord admin");
+
+	UGameInstance* GI = GetGameInstance();
+	UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (!World)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT("❌ No active game world found. Is the server running?"));
+		return;
+	}
+
+	const bool bKicked = UBanEnforcer::KickConnectedPlayer(World, Uid, Reason);
+	if (bKicked)
+	{
+		FBanDiscordNotifier::NotifyPlayerKicked(DisplayName, Reason, SenderName);
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			FString::Printf(TEXT("✅ Kicked **%s** (`%s`).\nReason: %s\nKicked by: %s"),
+				*DisplayName, *Uid, *Reason, *SenderName));
+	}
+	else
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			FString::Printf(TEXT("⚠️ Player **%s** (`%s`) is not currently connected."), *DisplayName, *Uid));
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !mute / !unmute
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
+                                              const FString& ChannelId,
+                                              const FString& SenderName,
+                                              bool bMute)
+{
+	if (!CachedProvider) return;
+
+	if (Args.IsEmpty())
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			bMute
+			? TEXT("Usage: `!mute <PUID|name> [minutes] [reason]`")
+			: TEXT("Usage: `!unmute <PUID|name>`"));
+		return;
+	}
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
+	if (!MuteReg)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT("❌ Mute commands require the BanChatCommands mod to be installed."));
+		return;
+	}
+
+	if (!bMute)
+	{
+		if (!MuteReg->UnmutePlayer(Uid))
+		{
+			CachedProvider->SendDiscordChannelMessage(ChannelId,
+				FString::Printf(TEXT("⚠️ **%s** (`%s`) is not currently muted."), *DisplayName, *Uid));
+			return;
+		}
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			FString::Printf(TEXT("✅ Unmuted **%s** (`%s`).\nUnmuted by: %s"), *DisplayName, *Uid, *SenderName));
+		return;
+	}
+
+	// Parse optional [minutes].
+	int32 ReasonStart = 1;
+	int32 Minutes = 0;
+	if (Args.Num() > 1)
+	{
+		int32 Parsed = 0;
+		if (FDefaultValueHelper::ParseInt(Args[1], Parsed) && Parsed > 0)
+		{
+			Minutes = Parsed;
+			ReasonStart = 2;
+		}
+	}
+	const FString Reason = (Args.Num() > ReasonStart)
+		? BanDiscordHelpers::JoinArgs(Args, ReasonStart)
+		: TEXT("Muted by Discord admin");
+
+	MuteReg->MutePlayer(Uid, DisplayName, Reason, SenderName, Minutes);
+
+	const FString DurStr = (Minutes > 0)
+		? FString::Printf(TEXT(" for **%d minute(s)**"), Minutes)
+		: TEXT(" **indefinitely**");
+
+	CachedProvider->SendDiscordChannelMessage(ChannelId,
+		FString::Printf(TEXT("🔇 Muted **%s** (`%s`)%s.\nReason: %s\nMuted by: %s"),
+			*DisplayName, *Uid, *DurStr, *Reason, *SenderName));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !warn
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
+                                              const FString& ChannelId,
+                                              const FString& SenderName)
+{
+	if (!CachedProvider) return;
+
+	if (Args.Num() < 2)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId, TEXT("Usage: `!warn <PUID|name> <reason...>`"));
+		return;
+	}
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		return;
+	}
+
+	const FString Reason = BanDiscordHelpers::JoinArgs(Args, 1);
+
+	UGameInstance* GI = GetGameInstance();
+	UPlayerWarningRegistry* WarnReg = GI ? GI->GetSubsystem<UPlayerWarningRegistry>() : nullptr;
+	if (!WarnReg)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT("❌ The warn command requires the BanSystem mod to be installed."));
+		return;
+	}
+
+	WarnReg->AddWarning(Uid, DisplayName, Reason, SenderName);
+	const int32 WarnCount = WarnReg->GetWarningCount(Uid);
+
+	FBanDiscordNotifier::NotifyWarningIssued(Uid, DisplayName, Reason, SenderName, WarnCount);
+
+	CachedProvider->SendDiscordChannelMessage(ChannelId,
+		FString::Printf(TEXT("⚠️ Warned **%s** (`%s`).\nReason: %s\nTotal warnings: **%d**\nWarned by: %s"),
+			*DisplayName, *Uid, *Reason, WarnCount, *SenderName));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !announce
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleAnnounceCommand(const TArray<FString>& Args,
+                                                  const FString& ChannelId,
+                                                  const FString& SenderName)
+{
+	if (!CachedProvider) return;
+
+	if (Args.IsEmpty())
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId, TEXT("Usage: `!announce <message...>`"));
+		return;
+	}
+
+	const FString Message = BanDiscordHelpers::JoinArgs(Args, 0);
+
+	UGameInstance* GI = GetGameInstance();
+	UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (!World)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT("❌ No active game world found. Is the server running?"));
+		return;
+	}
+
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PC = It->Get();
+		if (PC) PC->ClientMessage(FString::Printf(TEXT("[Announcement] %s"), *Message));
+	}
+
+	CachedProvider->SendDiscordChannelMessage(ChannelId,
+		FString::Printf(TEXT("📢 Announcement sent to all in-game players:\n> %s\nSent by: %s"),
+			*Message, *SenderName));
 }

@@ -29,7 +29,7 @@ bool USMLWebSocketServer::Listen(int32 Port)
 {
     if (bListening) return true;
 
-    ServerRunnable = MakeShared<FSMLWebSocketServerRunnable>(this, Port);
+    ServerRunnable = MakeShared<FSMLWebSocketServerRunnable>(this, Port, ApiToken);
     if (!ServerRunnable->Init())
     {
         ServerRunnable.Reset();

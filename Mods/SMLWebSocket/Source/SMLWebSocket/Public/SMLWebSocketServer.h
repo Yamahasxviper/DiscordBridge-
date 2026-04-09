@@ -80,6 +80,18 @@ public:
     UFUNCTION(BlueprintCallable, Category="SML|WebSocket|Server")
     bool Listen(int32 Port);
 
+	/**
+	 * Optional API token for server-side authentication.
+	 * When non-empty, incoming WebSocket clients must include the HTTP header:
+	 *   Authorization: Bearer <token>
+	 * in their HTTP Upgrade request to be accepted. Clients that do not present
+	 * the correct token receive an HTTP 401 response and the connection is closed.
+	 * Leave empty (default) to accept all connections without authentication.
+	 * Set this before calling Listen().
+	 */
+	UPROPERTY(BlueprintReadWrite, Category="SML|WebSocket|Server")
+	FString ApiToken;
+
     /** Stop accepting new connections and close all active connections. */
     UFUNCTION(BlueprintCallable, Category="SML|WebSocket|Server")
     void StopListening();

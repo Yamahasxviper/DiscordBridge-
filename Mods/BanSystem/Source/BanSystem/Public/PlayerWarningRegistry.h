@@ -62,6 +62,22 @@ public:
      */
     int32 GetWarningCount(const FString& Uid) const;
 
+    /**
+     * Add a new warning with an optional expiry time.
+     * ExpiryMinutes == 0 means no expiry (the warning never expires).
+     * Saves to disk immediately. Thread-safe.
+     */
+    void AddWarning(const FString& Uid, const FString& PlayerName,
+                    const FString& Reason, const FString& WarnedBy,
+                    int32 ExpiryMinutes);
+
+    /**
+     * Removes the single warning with the given integer ID.
+     * Saves immediately. Returns true if a warning was found and removed.
+     * Thread-safe.
+     */
+    bool DeleteWarningById(int64 Id);
+
 private:
     void    LoadFromFile();
     bool    SaveToFile() const;

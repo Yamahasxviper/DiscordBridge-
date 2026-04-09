@@ -29,7 +29,8 @@ class FSMLWebSocketServerRunnable : public FRunnable,
                                      public TSharedFromThis<FSMLWebSocketServerRunnable>
 {
 public:
-    explicit FSMLWebSocketServerRunnable(USMLWebSocketServer* InOwner, int32 InPort);
+    explicit FSMLWebSocketServerRunnable(USMLWebSocketServer* InOwner, int32 InPort,
+                                         const FString& InApiToken = FString());
     virtual ~FSMLWebSocketServerRunnable() override;
 
     // ── FRunnable ──────────────────────────────────────────────────────────
@@ -78,6 +79,7 @@ private:
 
     TWeakObjectPtr<USMLWebSocketServer> Owner;
     int32 ListenPort{0};
+    FString ApiToken;
     std::atomic<bool> bStopping{false};
 
     FSocket* ListenSocket{nullptr};
