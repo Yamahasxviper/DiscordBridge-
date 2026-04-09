@@ -78,6 +78,13 @@ public:
      */
     bool DeleteWarningById(int64 Id);
 
+    /**
+     * Removes all warnings whose expiry time has passed.
+     * Returns the number of warnings that were removed.
+     * Thread-safe.
+     */
+    int32 PruneExpiredWarnings();
+
 private:
     void    LoadFromFile();
     bool    SaveToFile() const;

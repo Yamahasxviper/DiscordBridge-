@@ -164,6 +164,12 @@ private:
 	void HandleWarnCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
 	void HandleAnnounceCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
 
+	/**
+	 * Post a moderation log message to ModerationLogChannelId (if configured).
+	 * Call after every successful ban/unban/kick/mute/unmute/warn action.
+	 */
+	void PostModerationLog(const FString& Message) const;
+
 	// ── State ─────────────────────────────────────────────────────────────────
 
 	/** Loaded config (populated in Initialize()). */
