@@ -85,9 +85,10 @@ void USMLWebSocketClient::SendText(const FString& Message)
 	if (bQueueMessagesWhileDisconnected)
 	{
 		FScopeLock Lock(&QueueMutex);
-		if (PendingSendQueue.Num() < 100)
+		PendingSendQueue.Add(Message);
+		if (MaxQueuedMessages > 0 && PendingSendQueue.Num() > MaxQueuedMessages)
 		{
-			PendingSendQueue.Add(Message);
+			PendingSendQueue.RemoveAt(0);
 		}
 	}
 }
