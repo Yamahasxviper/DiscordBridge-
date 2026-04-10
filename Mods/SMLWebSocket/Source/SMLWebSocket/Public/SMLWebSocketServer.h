@@ -114,6 +114,22 @@ public:
     UFUNCTION(BlueprintCallable, Category="SML|WebSocket|Server")
     void SendTextToClient(const FString& ClientId, const FString& Message);
 
+    /**
+     * Send a typed event message to all clients that have subscribed to the given
+     * event type.  Clients that have not sent a subscription filter receive all
+     * events (backward-compatible behaviour: no filter = receive everything).
+     *
+     * The subscription wire protocol is:
+     *   Client → server:  {"op":"subscribe","events":["ban","chat","session"]}
+     *   Client → server:  {"op":"unsubscribe","events":["chat"]}
+     *   Client → server:  {"op":"subscribe_all"}   (opt back in to all events)
+     *
+     * @param EventType  The event category string (e.g. "ban", "chat", "session").
+     * @param Message    The full JSON string to deliver.
+     */
+    UFUNCTION(BlueprintCallable, Category="SML|WebSocket|Server")
+    void BroadcastEventText(const FString& EventType, const FString& Message);
+
     /** Disconnect a specific client. */
     UFUNCTION(BlueprintCallable, Category="SML|WebSocket|Server")
     void DisconnectClient(const FString& ClientId);
@@ -142,4 +158,12 @@ private:
 
     mutable FCriticalSection ClientMutex;
     TSet<FString> ConnectedClientIds;
+
+    /**
+     * Per-client event subscription sets.
+     * If a client's entry is absent or the set is empty, the client receives
+     * all events (unfiltered / backward-compatible).
+     * Protected by ClientMutex.
+     */
+    TMap<FString, TSet<FString>> ClientSubscriptions;
 };

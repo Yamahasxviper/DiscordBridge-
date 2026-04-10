@@ -999,3 +999,84 @@ public:
         const TArray<FString>& Arguments,
         const FString& Label) override;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /freeze  — temporarily immobilise a player for investigation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /freeze <player|PUID>
+ * /spectator <player|PUID>
+ *
+ * Locks a player in place (disables movement) without kicking them.
+ * Run the same command again to unfreeze the player.
+ * Useful for pausing a suspect during an investigation.
+ *
+ * Requires admin.
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AFreezeChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AFreezeChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+
+    /** UIDs of currently-frozen players. */
+    static TSet<FString> FrozenPlayerUids;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /clearchat  — flush recent chat history and notify Discord
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /clearchat [reason...]
+ *
+ * Flushes the in-game chat by broadcasting blank lines (effectively scrolling
+ * old content off screen), then posts a notification to the configured
+ * DiscordWebhookUrl so staff are aware the chat was cleared.
+ *
+ * Requires admin.
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AClearChatChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AClearChatChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /report  — player-initiated report that creates a Discord alert
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /report <player> [reason...]
+ *
+ * Lets any in-game player flag another player.  Sends a Discord alert to the
+ * configured ReportWebhookUrl (BanChatCommandsConfig) and logs the report.
+ * No admin privileges required — available to all connected players.
+ *
+ * Examples:
+ *   /report BadPlayer Griefing my base
+ *   /report SpamBot Repeated spam in chat
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AReportChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AReportChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};

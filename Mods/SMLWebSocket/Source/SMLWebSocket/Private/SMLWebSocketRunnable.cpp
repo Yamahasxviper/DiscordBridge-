@@ -204,7 +204,12 @@ uint32 FSMLWebSocketRunnable::Run()
 			if (bStopRequested || bUserInitiatedClose) break;
 
 			// Exponential back-off, capped at MaxReconnectDelay.
-			CurrentDelay = FMath::Min(CurrentDelay * 2.0f, ReconnectCfg.MaxReconnectDelay);
+			// Apply ±20 % random jitter to spread reconnects from multiple clients
+			// and avoid thundering-herd pile-up after a server restart.
+			const float BackOff   = FMath::Min(CurrentDelay * 2.0f, ReconnectCfg.MaxReconnectDelay);
+			const float JitterFrac = 0.2f; // ±20 %
+			const float Jitter    = BackOff * JitterFrac * (FMath::FRand() * 2.0f - 1.0f);
+			CurrentDelay = FMath::Max(0.1f, BackOff + Jitter);
 
 			// Clean up any socket/SSL state left over from the previous attempt.
 			CleanupConnection();

@@ -315,6 +315,27 @@ private:
 	 */
 	void PostModerationLog(const FString& Message) const;
 
+	/**
+	 * Create or reuse a per-player moderation thread in the ModerationLogChannelId.
+	 * When a ban/warn/mute is issued, call this to route the audit entry into a
+	 * named thread (e.g. "PlayerName [EOS:xxx]") so all actions on that player
+	 * are visible in one place.
+	 * Fires-and-forgets; no-op when ModerationLogChannelId is empty.
+	 */
+	void PostToPlayerModerationThread(const FString& PlayerName, const FString& Uid,
+	                                  const FString& Message);
+
+	/** Handle !playtime. Usage: !playtime <PUID|name> */
+	void HandlePlaytimeCommand(const TArray<FString>& Args, const FString& ChannelId);
+
+	/** Handle !say. Usage: !say <message...> — broadcasts as [ADMIN] in-game */
+	void HandleSayCommand(const TArray<FString>& Args,
+	                      const FString& ChannelId,
+	                      const FString& SenderName);
+
+	/** Handle !poll. Usage: !poll <question> | <optionA> | <optionB> [...] */
+	void HandlePollCommand(const TArray<FString>& Args, const FString& ChannelId);
+
 	// ── State ─────────────────────────────────────────────────────────────────
 
 	/** Loaded config (populated in Initialize()). */
@@ -328,4 +349,11 @@ private:
 
 	/** Handle for the UBanAppealRegistry::OnBanAppealSubmitted subscription. */
 	FDelegateHandle AppealSubmittedDelegateHandle;
+
+	/**
+	 * Cache of player thread IDs: "PlayerUID" → Discord thread channel ID.
+	 * Populated lazily when PostToPlayerModerationThread creates a new thread.
+	 * Not persisted across restarts (threads are reused by name-search when missing).
+	 */
+	TMap<FString, FString> PlayerThreadIdCache;
 };

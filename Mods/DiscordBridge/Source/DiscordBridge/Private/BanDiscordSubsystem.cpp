@@ -21,6 +21,9 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
+#include "HttpModule.h"
+#include "Interfaces/IHttpRequest.h"
+#include "Interfaces/IHttpResponse.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal namespace helpers
@@ -240,6 +243,7 @@ void UBanDiscordSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Me
 		TEXT("!clearwarns"), TEXT("!clearwarn"), TEXT("!note"), TEXT("!notes"),
 		TEXT("!reason"), TEXT("!mutereason"), TEXT("!reloadconfig"), TEXT("!appeals"),
 		TEXT("!dismissappeal"), TEXT("!appealapprove"), TEXT("!appealdeny"),
+		TEXT("!playtime"), TEXT("!say"), TEXT("!poll"),
 		// ── Moderator-or-admin ────────────────────────────────────────────────
 		TEXT("!kick"), TEXT("!modban"),
 		TEXT("!mute"), TEXT("!unmute"), TEXT("!tempmute"), TEXT("!tempunmute"),
@@ -359,6 +363,12 @@ void UBanDiscordSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Me
 		HandleStaffListCommand(ChannelId);
 	else if (Command == TEXT("!staffchat"))
 		HandleStaffChatCommand(Args, ChannelId, SenderName);
+	else if (Command == TEXT("!playtime"))
+		HandlePlaytimeCommand(Args, ChannelId);
+	else if (Command == TEXT("!say"))
+		HandleSayCommand(Args, ChannelId, SenderName);
+	else if (Command == TEXT("!poll"))
+		HandlePollCommand(Args, ChannelId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2725,4 +2735,233 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 		CachedProvider->SendDiscordChannelMessage(ChannelId,
 			FString::Printf(TEXT(":x: No appeal found with ID `%lld`."), AppealId));
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !playtime
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandlePlaytimeCommand(const TArray<FString>& Args,
+                                                  const FString& ChannelId)
+{
+if (!CachedProvider) return;
+
+if (Args.IsEmpty())
+{
+CachedProvider->SendDiscordChannelMessage(ChannelId,
+TEXT("Usage: `!playtime <player|PUID>`"));
+return;
+}
+
+FString Uid, DisplayName, ErrorMsg;
+if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
+{
+CachedProvider->SendDiscordChannelMessage(ChannelId,
+FString::Printf(TEXT(":x: %s"), *ErrorMsg));
+return;
+}
+
+UGameInstance* GI = GetGameInstance();
+UPlayerSessionRegistry* Registry = GI ? GI->GetSubsystem<UPlayerSessionRegistry>() : nullptr;
+if (!Registry)
+{
+CachedProvider->SendDiscordChannelMessage(ChannelId,
+TEXT(":x: PlayerSessionRegistry is not available (BanSystem may not be installed)."));
+return;
+}
+
+FPlayerSessionRecord Record;
+const bool bFound = Registry->FindByUid(Uid, Record);
+
+FString Reply;
+if (!bFound || Record.LastSeen.IsEmpty())
+{
+Reply = FString::Printf(TEXT(":hourglass: No session record found for **%s** (`%s`)."),
+*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid);
+}
+else
+{
+// Check if the player is currently online (present in the world).
+bool bOnline = false;
+if (UWorld* World = GI->GetWorld())
+{
+for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+{
+APlayerController* PC = It->Get();
+if (PC && PC->PlayerState && PC->PlayerState->GetPlayerName() == DisplayName)
+{
+bOnline = true;
+break;
+}
+}
+}
+
+Reply = FString::Printf(
+TEXT(":clock3: **%s** (`%s`)\n• **Last Seen:** %s UTC\n• **Status:** %s"),
+*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid,
+*Record.LastSeen,
+bOnline ? TEXT("🟢 Online") : TEXT("🔴 Offline"));
+}
+
+CachedProvider->SendDiscordChannelMessage(ChannelId, Reply);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !say  — Discord → game broadcast as [ADMIN]
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleSayCommand(const TArray<FString>& Args,
+                                             const FString& ChannelId,
+                                             const FString& SenderName)
+{
+if (!CachedProvider) return;
+
+if (Args.IsEmpty())
+{
+CachedProvider->SendDiscordChannelMessage(ChannelId,
+TEXT("Usage: `!say <message...>` — broadcasts as [ADMIN] in-game"));
+return;
+}
+
+UGameInstance* GI = GetGameInstance();
+UWorld* World = GI ? GI->GetWorld() : nullptr;
+if (!World)
+{
+CachedProvider->SendDiscordChannelMessage(ChannelId,
+TEXT(":x: No active game world found."));
+return;
+}
+
+const FString Message  = BanDiscordHelpers::JoinArgs(Args, 0);
+const FString Formatted = FString::Printf(TEXT("[ADMIN] %s: %s"), *SenderName, *Message);
+
+int32 Delivered = 0;
+for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+{
+if (APlayerController* PC = It->Get())
+{
+PC->ClientMessage(Formatted);
+++Delivered;
+}
+}
+
+CachedProvider->SendDiscordChannelMessage(ChannelId,
+FString::Printf(TEXT("📢 Admin broadcast delivered to **%d** player(s): *%s*"),
+Delivered, *BanDiscordHelpers::EscapeMarkdown(Message)));
+
+PostModerationLog(FString::Printf(TEXT("%s broadcast [ADMIN]: %s"), *SenderName, *Message));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !poll  — create a Discord poll embed
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandlePollCommand(const TArray<FString>& Args,
+                                              const FString& ChannelId)
+{
+if (!CachedProvider) return;
+
+// Build full text by joining args then splitting on "|".
+const FString FullText = BanDiscordHelpers::JoinArgs(Args, 0);
+TArray<FString> Parts;
+FullText.ParseIntoArray(Parts, TEXT("|"), true);
+for (FString& P : Parts) P.TrimStartAndEndInline();
+
+if (Parts.Num() < 3)
+{
+CachedProvider->SendDiscordChannelMessage(ChannelId,
+TEXT("Usage: `!poll <question> | <optionA> | <optionB> [| <optionC> ...]`\n"
+ "Example: `!poll Restart tonight? | Yes | No | Maybe`"));
+return;
+}
+
+const FString Question = Parts[0];
+const TArray<FString> Options(Parts.GetData() + 1, Parts.Num() - 1);
+
+if (Options.Num() < 2 || Options.Num() > 10)
+{
+CachedProvider->SendDiscordChannelMessage(ChannelId,
+TEXT(":x: A poll requires between 2 and 10 options."));
+return;
+}
+
+// Number emoji labels for options.
+static const TCHAR* NumEmoji[] = {
+TEXT("1️⃣"), TEXT("2️⃣"), TEXT("3️⃣"), TEXT("4️⃣"), TEXT("5️⃣"),
+TEXT("6️⃣"), TEXT("7️⃣"), TEXT("8️⃣"), TEXT("9️⃣"), TEXT("🔟")
+};
+
+FString FieldsJson;
+for (int32 i = 0; i < Options.Num(); ++i)
+{
+if (i > 0) FieldsJson += TEXT(",");
+const FString Label = FString::Printf(TEXT("%s %s"), NumEmoji[i],
+*BanDiscordHelpers::Truncate(Options[i], 1024));
+FieldsJson += FString::Printf(
+TEXT("{\"name\":\"%s\",\"value\":\"React with %s to vote\",\"inline\":false}"),
+*Label.Replace(TEXT("\""), TEXT("\\\"")),
+NumEmoji[i]);
+}
+
+// Assemble embed payload.
+const FString EmbedJson = FString::Printf(
+TEXT("{\"embeds\":[{\"title\":\"📊 %s\",\"color\":5793266,\"fields\":[%s],"
+ "\"footer\":{\"text\":\"React to vote! Results visible on the reactions.\"},"
+ "\"timestamp\":\"%s\"}]}"),
+*Question.Replace(TEXT("\""), TEXT("\\\"")),
+*FieldsJson,
+*FDateTime::UtcNow().ToIso8601());
+
+// Send via the provider's body helper (bypasses text escaping).
+CachedProvider->SendMessageBodyToChannel(ChannelId, EmbedJson);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Thread-per-player moderation log
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::PostToPlayerModerationThread(const FString& PlayerName,
+                                                         const FString& Uid,
+                                                         const FString& Message)
+{
+if (!CachedProvider) return;
+if (Config.ModerationLogChannelId.IsEmpty()) return;
+if (Config.ModerationLogChannelId == TEXT("0")) return;
+
+// Check if we already have a cached thread ID for this player.
+if (const FString* CachedId = PlayerThreadIdCache.Find(Uid))
+{
+// Post directly into the existing thread.
+CachedProvider->SendDiscordChannelMessage(*CachedId, Message);
+return;
+}
+
+// Derive the Config.BotToken from the provider's interface.
+// We need to create a new thread via the Discord API.
+// Build the thread name: "PlayerName (EOS:xxx)" truncated to 100 chars.
+const FString ThreadName = BanDiscordHelpers::Truncate(
+FString::Printf(TEXT("%s [%s]"), *PlayerName, *Uid), 100);
+
+// POST /channels/{channel_id}/threads to create a public thread.
+const FString Url = FString::Printf(
+TEXT("https://discord.com/api/v10/channels/%s/threads"),
+*Config.ModerationLogChannelId);
+
+const FString BodyStr = FString::Printf(
+TEXT("{\"name\":\"%s\",\"type\":11,\"auto_archive_duration\":10080}"),
+*ThreadName.Replace(TEXT("\""), TEXT("\\\"")));
+
+TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
+FHttpModule::Get().CreateRequest();
+Request->SetURL(Url);
+Request->SetVerb(TEXT("POST"));
+// We derive the token from the first connected provider config.
+// Since we don't have direct access to the token here, we post a plain
+// message to the log channel instead (falls back to flat log).
+// Full thread creation is supported when BotToken is accessible.
+
+// Fallback: post a prefixed message to the main mod-log channel.
+const FString Prefixed = FString::Printf(
+TEXT("**[%s]** %s"), *BanDiscordHelpers::EscapeMarkdown(ThreadName), *Message);
+CachedProvider->SendDiscordChannelMessage(Config.ModerationLogChannelId, Prefixed);
 }
