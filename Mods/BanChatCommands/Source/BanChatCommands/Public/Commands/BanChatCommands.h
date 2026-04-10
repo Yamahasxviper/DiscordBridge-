@@ -975,3 +975,27 @@ public:
     virtual EExecutionStatus ExecuteCommand_Implementation(
         UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label) override;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /mutereason  — edit the reason on an active mute
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /mutereason <player|PUID> <new reason...>
+ *
+ * Updates the reason stored on an existing active mute without lifting or
+ * replacing the mute.  Useful to correct a typo or add context after the fact.
+ *
+ * Requires admin.
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AMuteReasonChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AMuteReasonChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};

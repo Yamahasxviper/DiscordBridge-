@@ -141,6 +141,21 @@ TArray<FMuteEntry> UMuteRegistry::GetAllMutes() const
     return Result;
 }
 
+bool UMuteRegistry::UpdateMuteReason(const FString& Uid, const FString& NewReason)
+{
+    FScopeLock Lock(&Mutex);
+    for (FMuteEntry& M : Mutes)
+    {
+        if (M.Uid.Equals(Uid, ESearchCase::IgnoreCase) && !M.IsExpired())
+        {
+            M.Reason = NewReason;
+            SaveToFile();
+            return true;
+        }
+    }
+    return false;
+}
+
 void UMuteRegistry::TickExpiry()
 {
     TArray<FString> Expired;

@@ -129,6 +129,15 @@ public:
     TArray<FMuteEntry> GetAllMutes() const;
 
     /**
+     * Updates the reason on an existing (non-expired) mute entry in-place.
+     * Finds the entry by compound UID (case-insensitive), updates the Reason
+     * field, and saves to disk.
+     * Returns true when a matching active mute was found and updated.
+     * Thread-safe.
+     */
+    bool UpdateMuteReason(const FString& Uid, const FString& NewReason);
+
+    /**
      * Expire and remove any timed mutes whose ExpireDate has passed.
      * Called periodically by BanChatCommandsModule (every ~30 s).
      * Thread-safe.

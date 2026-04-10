@@ -86,6 +86,21 @@ public:
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
     int32 ModBanDurationMinutes = 30;
 
+    /**
+     * Maximum mute duration in minutes that a moderator may pass to /tempmute.
+     * Admins are not subject to this ceiling; they can use any duration.
+     * Default: 0 = no ceiling (moderators can set any duration, same as admins).
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
+    int32 MaxModMuteDurationMinutes = 0;
+
+    /**
+     * When true, moderators (ModeratorEosPUIDs) may use /note and /notes in addition
+     * to admins.  Default: false (only admins can leave notes).
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
+    bool bAllowModNotes = false;
+
     /** Returns the singleton config instance. */
     static const UBanChatCommandsConfig* Get();
 
