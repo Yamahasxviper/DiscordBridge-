@@ -11,6 +11,9 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformFileManager.h"
+#include "HttpModule.h"
+#include "Interfaces/IHttpRequest.h"
+#include "Interfaces/IHttpResponse.h"
 #include "BanAppealRegistry.h"
 
 DEFINE_LOG_CATEGORY(LogTicketSystem);
@@ -51,6 +54,8 @@ void UTicketSubsystem::Deinitialize()
 
 	TicketChannelToOpener.Empty();
 	OpenerToTicketChannel.Empty();
+	TicketChannelToAssignee.Empty();
+	TicketChannelToAssigneeName.Empty();
 
 	Super::Deinitialize();
 }
@@ -372,9 +377,117 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		{
 			OpenerToTicketChannel.Remove(RemovedOpener);
 		}
+		TicketChannelToAssignee.Remove(SourceChannelId);
+		TicketChannelToAssigneeName.Remove(SourceChannelId);
 		// Persist the updated state so this closure survives a server restart.
 		SaveTicketState();
-		Bridge->DeleteDiscordChannel(SourceChannelId);
+
+		// ── Transcript archiving ──────────────────────────────────────────────
+		// Fetch message history and post to TicketLogChannelId before deleting.
+		if (!Config.TicketLogChannelId.IsEmpty() && !Bridge->GetBotToken().IsEmpty())
+		{
+			const FString LogChannelId     = Config.TicketLogChannelId;
+			const FString BotToken         = Bridge->GetBotToken();
+			const FString ClosedChannelId  = SourceChannelId;
+			const FString OpenerIdForLog   = RemovedOpener.IsEmpty() ? OpenerUserId : RemovedOpener;
+			const FString ClosedAt         = FDateTime::UtcNow().ToString(TEXT("%Y-%m-%d"));
+
+			TWeakObjectPtr<UTicketSubsystem> WeakThis(this);
+
+			const FString FetchUrl = FString::Printf(
+				TEXT("https://discord.com/api/v10/channels/%s/messages?limit=100"),
+				*ClosedChannelId);
+
+			TSharedRef<IHttpRequest, ESPMode::ThreadSafe> FetchReq =
+				FHttpModule::Get().CreateRequest();
+			FetchReq->SetURL(FetchUrl);
+			FetchReq->SetVerb(TEXT("GET"));
+			FetchReq->SetHeader(TEXT("Authorization"),
+				FString::Printf(TEXT("Bot %s"), *BotToken));
+
+			FetchReq->OnProcessRequestComplete().BindWeakLambda(
+				WeakThis.Get(),
+				[WeakThis, LogChannelId, BotToken, OpenerIdForLog, ClosedAt, ClosedChannelId]
+				(FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bOk) mutable
+				{
+					UTicketSubsystem* Self = WeakThis.Get();
+					if (!Self) return;
+					IDiscordBridgeProvider* B = Self->GetBridge();
+					if (!B) return;
+
+					FString TranscriptText =
+						FString::Printf(
+							TEXT(":scroll: **Ticket Closed**\n")
+							TEXT("Opener: <@%s>\n")
+							TEXT("Date closed: %s\n\n"),
+							*OpenerIdForLog, *ClosedAt);
+
+					if (bOk && Resp.IsValid() &&
+					    Resp->GetResponseCode() >= 200 && Resp->GetResponseCode() < 300)
+					{
+						TSharedPtr<FJsonObject> Ignored;
+						TArray<TSharedPtr<FJsonValue>> Messages;
+						TSharedRef<TJsonReader<>> Reader =
+							TJsonReaderFactory<>::Create(Resp->GetContentAsString());
+
+						// Messages come newest-first; reverse for chronological order.
+						TSharedPtr<FJsonValue> Root;
+						if (FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid())
+						{
+							const TArray<TSharedPtr<FJsonValue>>* MsgArr = nullptr;
+							if (Root->TryGetArray(MsgArr) && MsgArr)
+							{
+								// Reverse to get chronological order (oldest first).
+								for (int32 Idx = MsgArr->Num() - 1; Idx >= 0; --Idx)
+								{
+									const TSharedPtr<FJsonObject>* MsgObjPtr = nullptr;
+									if (!(*MsgArr)[Idx]->TryGetObject(MsgObjPtr) || !MsgObjPtr)
+										continue;
+
+									FString AuthorName;
+									const TSharedPtr<FJsonObject>* AuthorPtr = nullptr;
+									if ((*MsgObjPtr)->TryGetObjectField(TEXT("author"), AuthorPtr) && AuthorPtr)
+									{
+										if (!(*AuthorPtr)->TryGetStringField(TEXT("global_name"), AuthorName) || AuthorName.IsEmpty())
+											(*AuthorPtr)->TryGetStringField(TEXT("username"), AuthorName);
+									}
+									FString MsgContent;
+									(*MsgObjPtr)->TryGetStringField(TEXT("content"), MsgContent);
+
+									if (!AuthorName.IsEmpty() && !MsgContent.IsEmpty())
+									{
+										TranscriptText += FString::Printf(
+											TEXT("[%s]: %s\n"), *AuthorName, *MsgContent);
+									}
+								}
+							}
+						}
+					}
+					else
+					{
+						TranscriptText += TEXT("*(Could not fetch message history.)*\n");
+					}
+
+					// Discord messages have a 2000-char limit; truncate if necessary.
+					if (TranscriptText.Len() > 1900)
+					{
+						TranscriptText = TranscriptText.Left(1900) + TEXT("\n*(transcript truncated)*");
+					}
+
+					B->SendDiscordChannelMessage(LogChannelId, TranscriptText);
+				});
+
+			FetchReq->ProcessRequest();
+
+			// Delete the channel AFTER queuing the fetch; the HTTP response is
+			// async so we cannot wait for it here.  The fetch finishes quickly
+			// (typically < 1 s) and the log channel post follows independently.
+			Bridge->DeleteDiscordChannel(SourceChannelId);
+		}
+		else
+		{
+			Bridge->DeleteDiscordChannel(SourceChannelId);
+		}
 		return;
 	}
 
@@ -1068,44 +1181,149 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	MessageObj->TryGetStringField(TEXT("content"), Content);
 	Content.TrimStartAndEndInline();
 
+	// ── Verify sender has TicketNotifyRoleId (required for all ticket commands) ─
+	auto SenderHasNotifyRole = [&]() -> bool
+	{
+		if (Config.TicketNotifyRoleId.IsEmpty()) return false;
+		const TSharedPtr<FJsonObject>* MemberPtrLocal = nullptr;
+		if (!MessageObj->TryGetObjectField(TEXT("member"), MemberPtrLocal) || !MemberPtrLocal)
+			return false;
+		const TArray<TSharedPtr<FJsonValue>>* Roles = nullptr;
+		if (!(*MemberPtrLocal)->TryGetArrayField(TEXT("roles"), Roles) || !Roles)
+			return false;
+		for (const TSharedPtr<FJsonValue>& R : *Roles)
+		{
+			FString RId;
+			if (R->TryGetString(RId) && RId == Config.TicketNotifyRoleId)
+				return true;
+		}
+		return false;
+	};
+
+	// Helper to extract sender display name.
+	auto ExtractSenderDisplayName = [&]() -> FString
+	{
+		FString Name;
+		const TSharedPtr<FJsonObject>* MP = nullptr;
+		if (MessageObj->TryGetObjectField(TEXT("member"), MP) && MP)
+			(*MP)->TryGetStringField(TEXT("nick"), Name);
+		if (Name.IsEmpty())
+		{
+			const TSharedPtr<FJsonObject>* AuthorPtrLocal = nullptr;
+			if (MessageObj->TryGetObjectField(TEXT("author"), AuthorPtrLocal) && AuthorPtrLocal)
+			{
+				if (!(*AuthorPtrLocal)->TryGetStringField(TEXT("global_name"), Name) || Name.IsEmpty())
+					(*AuthorPtrLocal)->TryGetStringField(TEXT("username"), Name);
+			}
+		}
+		return Name.IsEmpty() ? TEXT("Staff") : Name;
+	};
+
+	FString SourceChannelId;
+	MessageObj->TryGetStringField(TEXT("channel_id"), SourceChannelId);
+
+	IDiscordBridgeProvider* Bridge = GetBridge();
+
+	// ── !ticket-assign <@userId> ──────────────────────────────────────────────
+	if (Content.StartsWith(TEXT("!ticket-assign"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+
+		// Must be inside an active ticket channel.
+		if (!TicketChannelToOpener.Contains(SourceChannelId))
+			return; // Silently ignore when not in a ticket channel.
+
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can assign tickets."));
+			return;
+		}
+
+		// Extract <@userId> from the content.
+		// Accepts both <@userId> and <@!userId> (legacy nickname mention).
+		FString MentionPart = Content.Mid(FCString::Strlen(TEXT("!ticket-assign"))).TrimStartAndEnd();
+		FString AssigneeId;
+		if (MentionPart.StartsWith(TEXT("<@")))
+		{
+			int32 EndBracket = INDEX_NONE;
+			MentionPart.FindChar(TEXT('>'), EndBracket);
+			if (EndBracket != INDEX_NONE)
+			{
+				AssigneeId = MentionPart.Mid(2, EndBracket - 2);
+				// Strip optional '!' for legacy nickname mentions (<@!id>).
+				if (AssigneeId.StartsWith(TEXT("!")))
+					AssigneeId = AssigneeId.Mid(1);
+			}
+		}
+
+		if (AssigneeId.IsEmpty())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":warning: Usage: `!ticket-assign <@user>`"));
+			return;
+		}
+
+		const FString SenderName = ExtractSenderDisplayName();
+		TicketChannelToAssignee.Add(SourceChannelId, AssigneeId);
+		TicketChannelToAssigneeName.Add(SourceChannelId, SenderName);
+		SaveTicketState();
+
+		Bridge->SendDiscordChannelMessage(SourceChannelId,
+			FString::Printf(
+				TEXT(":pencil: This ticket has been claimed by **%s**."),
+				*SenderName));
+		return;
+	}
+
+	// ── !ticket-list ─────────────────────────────────────────────────────────
+	if (Content.Equals(TEXT("!ticket-list"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can view the ticket list."));
+			return;
+		}
+
+		if (TicketChannelToOpener.Num() == 0)
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":white_check_mark: No open tickets."));
+			return;
+		}
+
+		FString ListMsg = FString::Printf(
+			TEXT(":tickets: **Open tickets (%d):**\n"), TicketChannelToOpener.Num());
+		for (const TPair<FString, FString>& Pair : TicketChannelToOpener)
+		{
+			const FString* AssigneeName = TicketChannelToAssigneeName.Find(Pair.Key);
+			FString AssignedSuffix;
+			if (AssigneeName && !AssigneeName->IsEmpty())
+				AssignedSuffix = FString::Printf(TEXT("  [assigned to %s]"), **AssigneeName);
+
+			ListMsg += FString::Printf(
+				TEXT("• <#%s> — opened by <@%s>%s\n"),
+				*Pair.Key, *Pair.Value, *AssignedSuffix);
+		}
+
+		Bridge->SendDiscordChannelMessage(SourceChannelId, ListMsg.TrimEnd());
+		return;
+	}
+
+	// ── !ticket-panel ─────────────────────────────────────────────────────────
 	if (!Content.Equals(TEXT("!ticket-panel"), ESearchCase::IgnoreCase))
 	{
 		return;
 	}
 
 	// Verify the sender holds TicketNotifyRoleId.
-	if (Config.TicketNotifyRoleId.IsEmpty())
+	if (!SenderHasNotifyRole())
 	{
 		return;
 	}
-
-	const TSharedPtr<FJsonObject>* MemberPtr = nullptr;
-	if (!MessageObj->TryGetObjectField(TEXT("member"), MemberPtr) || !MemberPtr)
-	{
-		return;
-	}
-
-	TArray<FString> MemberRoles;
-	const TArray<TSharedPtr<FJsonValue>>* Roles = nullptr;
-	if ((*MemberPtr)->TryGetArrayField(TEXT("roles"), Roles) && Roles)
-	{
-		for (const TSharedPtr<FJsonValue>& R : *Roles)
-		{
-			FString RoleId;
-			if (R->TryGetString(RoleId))
-			{
-				MemberRoles.Add(RoleId);
-			}
-		}
-	}
-
-	if (!MemberRoles.Contains(Config.TicketNotifyRoleId))
-	{
-		return;
-	}
-
-	FString SourceChannelId;
-	MessageObj->TryGetStringField(TEXT("channel_id"), SourceChannelId);
 
 	const FString PanelChannelId = Config.TicketPanelChannelId.IsEmpty()
 		? SourceChannelId
@@ -1137,6 +1355,11 @@ void UTicketSubsystem::SaveTicketState() const
 		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
 		Entry->SetStringField(TEXT("channel_id"), Pair.Key);
 		Entry->SetStringField(TEXT("opener_id"),  Pair.Value);
+		// Include assignee info if present.
+		const FString* AssigneeId   = TicketChannelToAssignee.Find(Pair.Key);
+		const FString* AssigneeName = TicketChannelToAssigneeName.Find(Pair.Key);
+		if (AssigneeId)   Entry->SetStringField(TEXT("assignee_id"),   *AssigneeId);
+		if (AssigneeName) Entry->SetStringField(TEXT("assignee_name"), *AssigneeName);
 		TicketArray.Add(MakeShared<FJsonValueObject>(Entry));
 	}
 
@@ -1205,6 +1428,18 @@ void UTicketSubsystem::LoadTicketState()
 
 		TicketChannelToOpener.Add(ChannelId, OpenerId);
 		OpenerToTicketChannel.Add(OpenerId,  ChannelId);
+
+		// Restore assignment state if present.
+		FString AssigneeId, AssigneeName;
+		if ((*EntryObj)->TryGetStringField(TEXT("assignee_id"), AssigneeId) && !AssigneeId.IsEmpty())
+		{
+			TicketChannelToAssignee.Add(ChannelId, AssigneeId);
+		}
+		if ((*EntryObj)->TryGetStringField(TEXT("assignee_name"), AssigneeName) && !AssigneeName.IsEmpty())
+		{
+			TicketChannelToAssigneeName.Add(ChannelId, AssigneeName);
+		}
+
 		++Loaded;
 	}
 

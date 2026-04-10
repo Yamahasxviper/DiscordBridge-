@@ -683,6 +683,15 @@ private:
 	TSet<FString> WhitelistRoleMemberNames;
 
 	/**
+	 * Temporarily holds the resolved role label for the Discord message that is
+	 * currently being processed.  Set in HandleMessageCreate before broadcasting
+	 * OnDiscordMessageReceived so that RelayDiscordMessageToGame can substitute
+	 * the %Role% placeholder without changing the delegate signature.
+	 * Cleared immediately after the relay call.
+	 */
+	FString CurrentMessageRoleLabel;
+
+	/**
 	 * Weak reference to the TicketSubsystem; populated during Initialize() if
 	 * TicketSystem is installed.  Using TWeakObjectPtr avoids adding a hard GC
 	 * root while still nulling automatically if the object is ever destroyed.

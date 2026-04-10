@@ -94,6 +94,19 @@ struct DISCORDBRIDGE_API FTicketConfig
 	 */
 	FString TicketCategoryId;
 
+	// ── Ticket log / transcript channel ──────────────────────────────────────
+
+	/**
+	 * Snowflake ID of a Discord channel where a transcript is posted whenever
+	 * a ticket channel is closed.  The transcript lists the ticket type, the
+	 * opener's username, the date opened, and every message exchanged in the
+	 * ticket channel.
+	 * Leave empty (default) to disable transcript archiving.
+	 *
+	 * Example: TicketLogChannelId=111222333444555666
+	 */
+	FString TicketLogChannelId;
+
 	// ── Custom ticket reasons ─────────────────────────────────────────────────
 
 	/**

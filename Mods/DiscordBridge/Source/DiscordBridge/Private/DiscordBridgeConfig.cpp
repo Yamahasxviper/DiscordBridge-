@@ -435,6 +435,16 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		// Bot info / help channel
 		Config.BotInfoChannelId = GetIniStringOrDefault(ConfigFile, TEXT("BotInfoChannelId"), Config.BotInfoChannelId);
 
+		// On-join DM welcome message
+		Config.WelcomeMessageDM = GetIniStringOrDefault(ConfigFile, TEXT("WelcomeMessageDM"), Config.WelcomeMessageDM);
+
+		// DiscordRoleLabels array (used for %Role% placeholder in DiscordToGameFormat)
+		{
+			FString PrimaryRawForRoles;
+			FFileHelper::LoadFileToString(PrimaryRawForRoles, *ModFilePath);
+			Config.DiscordRoleLabels = ParseRawIniArray(PrimaryRawForRoles, TEXT("DiscordBridge"), TEXT("DiscordRoleLabels"));
+		}
+
 		// Multi-slot scheduled announcements (array field)
 		{
 			FString PrimaryRaw;
@@ -934,7 +944,18 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("# Snowflake ID of a Discord channel where the bot posts a full feature/command\n")
 			TEXT("# list on server start. Users can also type !help in the main channel.\n")
 			TEXT("# Leave empty to disable the automatic post (but !help still works in ChannelId).\n")
-			TEXT("BotInfoChannelId=\n");
+			TEXT("BotInfoChannelId=\n")
+			TEXT("\n")
+			TEXT("# -- ON-JOIN DIRECT MESSAGE --------------------------------------------------\n")
+			TEXT("# DM message sent to a player on first join. Leave empty to disable.\n")
+			TEXT("# The bot matches the player's in-game name against WhitelistRoleId members.\n")
+			TEXT("# Placeholder: %PlayerName%\n")
+			TEXT("WelcomeMessageDM=\n")
+			TEXT("\n")
+			TEXT("# -- DISCORD ROLE LABELS (for %Role% placeholder) ----------------------------\n")
+			TEXT("# Each line maps a Discord role snowflake ID to a display label.\n")
+			TEXT("# Format: +DiscordRoleLabels=roleId=Label\n")
+			TEXT("# The first matching entry wins. Leave empty to disable role labels.\n");
 
 		// Ensure the Config directory exists before writing.
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(ModFilePath));
@@ -1070,6 +1091,12 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		// Bot info / help channel
 		Config.BotInfoChannelId = GetRawStringOrDefault(BackupValues, TEXT("BotInfoChannelId"), Config.BotInfoChannelId);
 
+		// On-join DM welcome message
+		Config.WelcomeMessageDM = GetRawStringOrDefault(BackupValues, TEXT("WelcomeMessageDM"), Config.WelcomeMessageDM);
+
+		// DiscordRoleLabels array (restore from raw backup content)
+		Config.DiscordRoleLabels = ParseRawIniArray(BackupFileContent, TEXT("DiscordBridge"), TEXT("DiscordRoleLabels"));
+
 		// ScheduledAnnouncements: NOT restored from backup — they remain in primary config only.
 
 		// Only log the "restored from backup" message when credentials were
@@ -1189,6 +1216,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("ModeratorChannelId"),            Config.ModeratorChannelId);
 				PatchLine(TEXT("ModerationLogChannelId"),        Config.ModerationLogChannelId);
 				PatchLine(TEXT("BotInfoChannelId"),              Config.BotInfoChannelId);
+				PatchLine(TEXT("WelcomeMessageDM"),              Config.WelcomeMessageDM);
 
 				// ChatRelayBlocklist is a multi-value array field.  Remove all
 				// existing Key= / +Key= lines then append the restored values.
@@ -1350,7 +1378,17 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				+ TEXT("\")\n");
 		}
 
-		const FString FullBackupContent = BackupContent + BackupBlocklistLines + BackupReplLines + NewFieldLines + BackupSALines;
+		// DiscordRoleLabels array backup lines
+		FString BackupRoleLabelLines;
+		BackupRoleLabelLines += TEXT("\n")
+			+ TEXT("; -- Discord Role Labels (for %Role% placeholder) --------------------------\n")
+			+ TEXT("WelcomeMessageDM=") + Config.WelcomeMessageDM + TEXT("\n");
+		for (const FString& Entry : Config.DiscordRoleLabels)
+		{
+			BackupRoleLabelLines += TEXT("+DiscordRoleLabels=") + Entry + TEXT("\n");
+		}
+
+		const FString FullBackupContent = BackupContent + BackupBlocklistLines + BackupReplLines + NewFieldLines + BackupSALines + BackupRoleLabelLines;
 
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupFilePath));
 

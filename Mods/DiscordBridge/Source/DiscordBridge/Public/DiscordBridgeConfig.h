@@ -94,8 +94,22 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 *    %Username%   – the Discord display name of the sender
 	 *    %PlayerName% – alias for %Username%
 	 *    %Message%    – the Discord message text
+	 *    %Role%       – the highest-priority role label resolved from DiscordRoleLabels
+	 *                   (empty string when the sender has no matching role)
 	 *  Default: "[Discord] %Username%: %Message%" */
 	FString DiscordToGameFormat{ TEXT("[Discord] %Username%: %Message%") };
+
+	/**
+	 * Role ID → label mappings used to resolve the %Role% placeholder in
+	 * DiscordToGameFormat.  Each entry must be formatted as "roleId=Label".
+	 * The first matching entry (in list order) wins; if the sender holds none of
+	 * the listed roles the placeholder resolves to an empty string.
+	 *
+	 * Example entries in DefaultDiscordBridge.ini:
+	 *   +DiscordRoleLabels=123456789012345678=Admin
+	 *   +DiscordRoleLabels=987654321098765432=Moderator
+	 */
+	TArray<FString> DiscordRoleLabels;
 
 	// ── Behaviour ─────────────────────────────────────────────────────────────
 
@@ -610,6 +624,20 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 * Example: BotInfoChannelId=111222333444555666777
 	 */
 	FString BotInfoChannelId{ TEXT("") };
+
+	/**
+	 * DM message sent to a player the first time they join the server.
+	 * The bot looks up the player's Discord user ID from the whitelist role
+	 * member cache (players whose in-game name matches a Discord display name
+	 * of a member holding WhitelistRoleId).  If no matching Discord user is
+	 * found the DM is silently skipped.
+	 * Leave empty (default) to disable on-join DMs.
+	 *
+	 * Placeholder: %PlayerName% – the in-game name of the joining player.
+	 *
+	 * Example: WelcomeMessageDM=Welcome to the server, %PlayerName%! 🎉
+	 */
+	FString WelcomeMessageDM;
 
 	/**
 	 * Loads configuration from the primary mod-folder INI, falling back to the
