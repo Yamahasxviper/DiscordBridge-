@@ -231,6 +231,12 @@ private:
 	/** Handle !reloadconfig. Reloads BanBridge config from disk. */
 	void HandleReloadConfigCommand(const FString& ChannelId, const FString& SenderName);
 
+	/** Handle !appealapprove <id>. Approves an appeal: unbans the player and deletes the appeal. Requires AdminRoleId. */
+	void HandleAppealApproveCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
+
+	/** Handle !appealdeny <id>. Denies an appeal: deletes it without unbanning. Requires AdminRoleId. */
+	void HandleAppealDenyCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
+
 	/**
 	 * Handle !appeals.
 	 * Lists all pending ban appeals from BanAppealRegistry (at most 10, then "(more)").
@@ -298,4 +304,7 @@ private:
 
 	/** Handle for the raw-message subscription; valid while CachedProvider is set. */
 	FDelegateHandle RawMessageDelegateHandle;
+
+	/** Handle for the UBanAppealRegistry::OnBanAppealSubmitted subscription. */
+	FDelegateHandle AppealSubmittedDelegateHandle;
 };
