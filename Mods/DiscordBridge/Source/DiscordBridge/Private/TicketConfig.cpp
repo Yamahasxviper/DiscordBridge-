@@ -130,6 +130,17 @@ FTicketConfig FTicketConfig::Load()
 		Config.TicketCategoryId         = GetIniString(Cfg, TEXT("TicketCategoryId"));
 		Config.CustomTicketReasons      = ParseRawIniArray(RawContent, TEXT("TicketReason"));
 		Config.InactiveTicketTimeoutHours = GetIniFloat(Cfg, TEXT("InactiveTicketTimeoutHours"), 0.0f);
+		Config.WhitelistCategoryId         = GetIniString(Cfg, TEXT("WhitelistCategoryId"));
+		Config.HelpCategoryId              = GetIniString(Cfg, TEXT("HelpCategoryId"));
+		Config.ReportCategoryId            = GetIniString(Cfg, TEXT("ReportCategoryId"));
+		Config.AppealCategoryId            = GetIniString(Cfg, TEXT("AppealCategoryId"));
+		Config.bTicketFeedbackEnabled      = GetIniBool  (Cfg, TEXT("TicketFeedbackEnabled"),      false);
+		Config.TicketMacros                = ParseRawIniArray(RawContent, TEXT("TicketMacro"));
+		Config.TicketCooldownMinutes       = static_cast<int32>(GetIniFloat(Cfg, TEXT("TicketCooldownMinutes"), 0.0f));
+		Config.TicketReopenGracePeriodMinutes = static_cast<int32>(GetIniFloat(Cfg, TEXT("TicketReopenGracePeriodMinutes"), 0.0f));
+		Config.bAllowMultipleTicketTypes   = GetIniBool  (Cfg, TEXT("AllowMultipleTicketTypes"),   false);
+		Config.bAutoRefreshPanel           = GetIniBool  (Cfg, TEXT("AutoRefreshPanel"),           false);
+		Config.bDmOpenerOnStaffReply       = GetIniBool  (Cfg, TEXT("DmOpenerOnStaffReply"),       false);
 
 		UE_LOG(LogTicketSystem, Log,
 		       TEXT("TicketSystem: Loaded config from %s"), *PrimaryPath);
@@ -158,6 +169,17 @@ FTicketConfig FTicketConfig::Load()
 			Config.TicketCategoryId        = GetIniString(BackupCfg, TEXT("TicketCategoryId"));
 			Config.CustomTicketReasons     = ParseRawIniArray(BackupRaw, TEXT("TicketReason"));
 			Config.InactiveTicketTimeoutHours = GetIniFloat(BackupCfg, TEXT("InactiveTicketTimeoutHours"), 0.0f);
+			Config.WhitelistCategoryId         = GetIniString(BackupCfg, TEXT("WhitelistCategoryId"));
+			Config.HelpCategoryId              = GetIniString(BackupCfg, TEXT("HelpCategoryId"));
+			Config.ReportCategoryId            = GetIniString(BackupCfg, TEXT("ReportCategoryId"));
+			Config.AppealCategoryId            = GetIniString(BackupCfg, TEXT("AppealCategoryId"));
+			Config.bTicketFeedbackEnabled      = GetIniBool  (BackupCfg, TEXT("TicketFeedbackEnabled"),      false);
+			Config.TicketMacros                = ParseRawIniArray(BackupRaw, TEXT("TicketMacro"));
+			Config.TicketCooldownMinutes       = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("TicketCooldownMinutes"), 0.0f));
+			Config.TicketReopenGracePeriodMinutes = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("TicketReopenGracePeriodMinutes"), 0.0f));
+			Config.bAllowMultipleTicketTypes   = GetIniBool  (BackupCfg, TEXT("AllowMultipleTicketTypes"),   false);
+			Config.bAutoRefreshPanel           = GetIniBool  (BackupCfg, TEXT("AutoRefreshPanel"),           false);
+			Config.bDmOpenerOnStaffReply       = GetIniBool  (BackupCfg, TEXT("DmOpenerOnStaffReply"),       false);
 
 			UE_LOG(LogTicketSystem, Log,
 			       TEXT("TicketSystem: Primary config not found at '%s' – restored from backup."),
@@ -195,6 +217,20 @@ FTicketConfig FTicketConfig::Load()
 		}
 		BackupContent += FString::Printf(TEXT("InactiveTicketTimeoutHours=%.2f\n"),
 			Config.InactiveTicketTimeoutHours);
+		BackupContent += FString::Printf(TEXT("WhitelistCategoryId=%s\n"),         *Config.WhitelistCategoryId);
+		BackupContent += FString::Printf(TEXT("HelpCategoryId=%s\n"),              *Config.HelpCategoryId);
+		BackupContent += FString::Printf(TEXT("ReportCategoryId=%s\n"),            *Config.ReportCategoryId);
+		BackupContent += FString::Printf(TEXT("AppealCategoryId=%s\n"),            *Config.AppealCategoryId);
+		BackupContent += FString::Printf(TEXT("TicketFeedbackEnabled=%s\n"),       Config.bTicketFeedbackEnabled      ? TEXT("True") : TEXT("False"));
+		BackupContent += FString::Printf(TEXT("TicketCooldownMinutes=%d\n"),       Config.TicketCooldownMinutes);
+		BackupContent += FString::Printf(TEXT("TicketReopenGracePeriodMinutes=%d\n"), Config.TicketReopenGracePeriodMinutes);
+		BackupContent += FString::Printf(TEXT("AllowMultipleTicketTypes=%s\n"),    Config.bAllowMultipleTicketTypes   ? TEXT("True") : TEXT("False"));
+		BackupContent += FString::Printf(TEXT("AutoRefreshPanel=%s\n"),            Config.bAutoRefreshPanel           ? TEXT("True") : TEXT("False"));
+		BackupContent += FString::Printf(TEXT("DmOpenerOnStaffReply=%s\n"),        Config.bDmOpenerOnStaffReply       ? TEXT("True") : TEXT("False"));
+		for (const FString& Macro : Config.TicketMacros)
+		{
+			BackupContent += FString::Printf(TEXT("TicketMacro=%s\n"), *Macro);
+		}
 
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
 		FFileHelper::SaveStringToFile(BackupContent, *BackupPath);

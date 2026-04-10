@@ -15,6 +15,7 @@
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 #include "BanAppealRegistry.h"
+#include "WhitelistManager.h"
 #include "Containers/Ticker.h"
 
 DEFINE_LOG_CATEGORY(LogTicketSystem);
@@ -43,6 +44,37 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	// Restore any active tickets from the previous session so the duplicate-ticket
 	// check works correctly immediately after a server restart.
 	LoadTicketState();
+
+	// Start the reopen grace period expiry ticker when configured.
+	if (Config.TicketReopenGracePeriodMinutes > 0)
+	{
+		ReopenExpiryTickHandle = FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
+			{
+				const FDateTime Now = FDateTime::UtcNow();
+				TArray<FString> Expired;
+				for (const auto& Pair : PendingReopenExpiry)
+				{
+					if (Now >= Pair.Value)
+					{
+						Expired.Add(Pair.Key);
+					}
+				}
+				for (const FString& ChanId : Expired)
+				{
+					PendingReopenExpiry.Remove(ChanId);
+					FString OpenerId;
+					PendingReopenOpener.RemoveAndCopyValue(ChanId, OpenerId);
+					IDiscordBridgeProvider* B = GetBridge();
+					if (B)
+					{
+						B->DeleteDiscordChannel(ChanId);
+					}
+				}
+				return true;
+			}),
+			30.0f);
+	}
 
 	// Start the inactive-ticket check ticker when enabled.
 	if (Config.InactiveTicketTimeoutHours > 0.0f)
@@ -110,11 +142,25 @@ void UTicketSubsystem::Deinitialize()
 	// Detach from the provider (unsubscribes delegates, clears CachedProvider).
 	SetProvider(nullptr);
 
+	if (ReopenExpiryTickHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(ReopenExpiryTickHandle);
+		ReopenExpiryTickHandle.Reset();
+	}
+
 	TicketChannelToOpener.Empty();
 	OpenerToTicketChannel.Empty();
 	TicketChannelToAssignee.Empty();
 	TicketChannelToAssigneeName.Empty();
 	TicketChannelToLastActivity.Empty();
+	TicketChannelToOpenerName.Empty();
+	TicketChannelToOpenTime.Empty();
+	TicketChannelToType.Empty();
+	TicketChannelToPriority.Empty();
+	UserTicketCooldown.Empty();
+	PendingReopenExpiry.Empty();
+	PendingReopenOpener.Empty();
+	OpenerToTicketsByType.Empty();
 
 	Super::Deinitialize();
 }
@@ -392,6 +438,142 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		return;
 	}
 
+	// ── Reopen-ticket button ──────────────────────────────────────────────────
+	if (CustomId.StartsWith(TEXT("ticket_reopen:")))
+	{
+		const FString ChanId = CustomId.Mid(FCString::Strlen(TEXT("ticket_reopen:")));
+		const FString* PendingOpener = PendingReopenOpener.Find(ChanId);
+		const bool bIsOpenerReopen = PendingOpener && *PendingOpener == DiscordUserId;
+		bool bIsAdminReopen = false;
+		if (!Config.TicketNotifyRoleId.IsEmpty())
+			bIsAdminReopen = MemberRoles.Contains(Config.TicketNotifyRoleId);
+
+		if (!bIsOpenerReopen && !bIsAdminReopen)
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT(":no_entry: Only the ticket opener or admin can reopen this ticket."),
+				true);
+			return;
+		}
+
+		FString RestoredOpener;
+		PendingReopenOpener.RemoveAndCopyValue(ChanId, RestoredOpener);
+		PendingReopenExpiry.Remove(ChanId);
+
+		TicketChannelToOpener.Add(ChanId, RestoredOpener);
+		OpenerToTicketChannel.Add(RestoredOpener, ChanId);
+		SaveTicketState();
+
+		Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
+			TEXT(":white_check_mark: Ticket reopened!"), false);
+		return;
+	}
+
+	// ── Approve & Whitelist button ────────────────────────────────────────────
+	if (CustomId.StartsWith(TEXT("ticket_approve_wl:")))
+	{
+		const FString ApproveOpenerId = CustomId.Mid(FCString::Strlen(TEXT("ticket_approve_wl:")));
+
+		bool bIsAdminApprove = false;
+		if (!Config.TicketNotifyRoleId.IsEmpty())
+			bIsAdminApprove = MemberRoles.Contains(Config.TicketNotifyRoleId);
+		if (!bIsAdminApprove)
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT(":no_entry: Only admins with the support role can approve whitelist requests."),
+				true);
+			return;
+		}
+
+		FString OpenerName;
+		const FString* NamePtr = TicketChannelToOpenerName.Find(SourceChannelId);
+		if (NamePtr)
+		{
+			OpenerName = *NamePtr;
+		}
+
+		FString ApproveResponse;
+		if (!OpenerName.IsEmpty() && FWhitelistManager::AddPlayer(OpenerName, TEXT(""), DiscordUsername))
+		{
+			ApproveResponse = FString::Printf(
+				TEXT(":white_check_mark: **%s** has been added to the whitelist!"), *OpenerName);
+		}
+		else if (!OpenerName.IsEmpty())
+		{
+			ApproveResponse = FString::Printf(
+				TEXT(":yellow_circle: **%s** is already on the whitelist."), *OpenerName);
+		}
+		else
+		{
+			ApproveResponse = TEXT(":white_check_mark: Player has been whitelisted.");
+		}
+
+		Bridge->RespondToInteraction(InteractionId, InteractionToken, 4, ApproveResponse, false);
+
+		// Close the ticket
+		FString RemovedOpenerApprove;
+		TicketChannelToOpener.RemoveAndCopyValue(SourceChannelId, RemovedOpenerApprove);
+		if (!RemovedOpenerApprove.IsEmpty())
+			OpenerToTicketChannel.Remove(RemovedOpenerApprove);
+		TicketChannelToAssignee.Remove(SourceChannelId);
+		TicketChannelToAssigneeName.Remove(SourceChannelId);
+		TicketChannelToLastActivity.Remove(SourceChannelId);
+		TicketChannelToOpenerName.Remove(SourceChannelId);
+		TicketChannelToType.Remove(SourceChannelId);
+		TicketChannelToOpenTime.Remove(SourceChannelId);
+		SaveTicketState();
+
+		Bridge->DeleteDiscordChannel(SourceChannelId);
+		return;
+	}
+
+	// ── Ticket feedback rating ────────────────────────────────────────────────
+	if (CustomId.StartsWith(TEXT("ticket_fb:")))
+	{
+		const int32 Rating = FCString::Atoi(*CustomId.Mid(FCString::Strlen(TEXT("ticket_fb:"))));
+		if (Rating >= 1 && Rating <= 5)
+		{
+			const FString StatsPath = GetStatsFilePath();
+			FString StatsJson;
+			TSharedPtr<FJsonObject> Stats = MakeShared<FJsonObject>();
+			if (FFileHelper::LoadFileToString(StatsJson, *StatsPath))
+			{
+				TSharedRef<TJsonReader<>> SR = TJsonReaderFactory<>::Create(StatsJson);
+				TSharedPtr<FJsonObject> Loaded;
+				if (FJsonSerializer::Deserialize(SR, Loaded) && Loaded.IsValid())
+					Stats = Loaded;
+			}
+			TSharedPtr<FJsonObject>* RatingsPtr = nullptr;
+			TSharedPtr<FJsonObject> Ratings;
+			if (Stats->TryGetObjectField(TEXT("ratings"), RatingsPtr) && RatingsPtr)
+				Ratings = *RatingsPtr;
+			else
+				Ratings = MakeShared<FJsonObject>();
+
+			const FString RatingKey = FString::FromInt(Rating);
+			double OldRating = 0.0;
+			Ratings->TryGetNumberField(RatingKey, OldRating);
+			Ratings->SetNumberField(RatingKey, OldRating + 1.0);
+			Stats->SetObjectField(TEXT("ratings"), Ratings);
+
+			double TotalRatings = 0.0, RatingSum = 0.0;
+			Stats->TryGetNumberField(TEXT("total_ratings"), TotalRatings);
+			Stats->TryGetNumberField(TEXT("rating_sum"), RatingSum);
+			Stats->SetNumberField(TEXT("total_ratings"), TotalRatings + 1.0);
+			Stats->SetNumberField(TEXT("rating_sum"), RatingSum + Rating);
+
+			FString OutStats;
+			TSharedRef<TJsonWriter<>> SW = TJsonWriterFactory<>::Create(&OutStats);
+			FJsonSerializer::Serialize(Stats.ToSharedRef(), SW);
+			FPlatformFileManager::Get().GetPlatformFile().CreateDirectoryTree(*FPaths::GetPath(StatsPath));
+			FFileHelper::SaveStringToFile(OutStats, *StatsPath);
+		}
+
+		Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
+			TEXT(":white_check_mark: Thank you for your feedback!"), true);
+		return;
+	}
+
 	// ── Close-ticket button ───────────────────────────────────────────────────
 	if (CustomId.StartsWith(TEXT("ticket_close:")))
 	{
@@ -439,8 +621,64 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		TicketChannelToAssignee.Remove(SourceChannelId);
 		TicketChannelToAssigneeName.Remove(SourceChannelId);
 		TicketChannelToLastActivity.Remove(SourceChannelId);
+		TicketChannelToOpenerName.Remove(SourceChannelId);
+		FString RemovedType;
+		TicketChannelToType.RemoveAndCopyValue(SourceChannelId, RemovedType);
+		TicketChannelToOpenTime.Remove(SourceChannelId);
+		TicketChannelToPriority.Remove(SourceChannelId);
+		if (Config.bAllowMultipleTicketTypes && !RemovedOpener.IsEmpty() && !RemovedType.IsEmpty())
+		{
+			if (TMap<FString, FString>* TypeMap = OpenerToTicketsByType.Find(RemovedOpener))
+			{
+				TypeMap->Remove(RemovedType);
+			}
+		}
+
+		// Apply cooldown
+		if (Config.TicketCooldownMinutes > 0 && !RemovedOpener.IsEmpty())
+		{
+			UserTicketCooldown.Add(RemovedOpener,
+				FDateTime::UtcNow() + FTimespan::FromMinutes(Config.TicketCooldownMinutes));
+		}
+
 		// Persist the updated state so this closure survives a server restart.
 		SaveTicketState();
+
+		// Reopen grace period: if configured, don't delete immediately
+		if (Config.TicketReopenGracePeriodMinutes > 0)
+		{
+			PendingReopenExpiry.Add(SourceChannelId,
+				FDateTime::UtcNow() + FTimespan::FromMinutes(Config.TicketReopenGracePeriodMinutes));
+			if (!RemovedOpener.IsEmpty())
+			{
+				PendingReopenOpener.Add(SourceChannelId, RemovedOpener);
+			}
+
+			const FString GraceMsg = FString::Printf(
+				TEXT(":hourglass: This ticket will be closed in **%d minutes**. "
+				     "Click Reopen to keep it open."),
+				Config.TicketReopenGracePeriodMinutes);
+
+			TSharedPtr<FJsonObject> ReopenBtn = MakeShared<FJsonObject>();
+			ReopenBtn->SetNumberField(TEXT("type"), 2);
+			ReopenBtn->SetNumberField(TEXT("style"), 3);
+			ReopenBtn->SetStringField(TEXT("label"), TEXT("Reopen"));
+			ReopenBtn->SetStringField(TEXT("custom_id"),
+				FString::Printf(TEXT("ticket_reopen:%s"), *SourceChannelId));
+
+			TSharedPtr<FJsonObject> ReopenRow = MakeShared<FJsonObject>();
+			ReopenRow->SetNumberField(TEXT("type"), 1);
+			ReopenRow->SetArrayField(TEXT("components"),
+				TArray<TSharedPtr<FJsonValue>>{MakeShared<FJsonValueObject>(ReopenBtn)});
+
+			TSharedPtr<FJsonObject> GraceBody = MakeShared<FJsonObject>();
+			GraceBody->SetStringField(TEXT("content"), GraceMsg);
+			GraceBody->SetArrayField(TEXT("components"),
+				TArray<TSharedPtr<FJsonValue>>{MakeShared<FJsonValueObject>(ReopenRow)});
+
+			Bridge->SendMessageBodyToChannel(SourceChannelId, GraceBody);
+			return; // don't delete yet
+		}
 
 		// ── Transcript archiving ──────────────────────────────────────────────
 		// Fetch message history and post to TicketLogChannelId before deleting.
@@ -937,16 +1175,29 @@ void UTicketSubsystem::CreateTicketChannel(
 	const FString DisplayLabelCopy   = DisplayLabel;
 	const FString DisplayDescCopy    = DisplayDesc;
 
+	// Select per-type category
+	FString CategoryIdCopy;
+	if (TicketType == TEXT("whitelist"))
+		CategoryIdCopy = Config.WhitelistCategoryId.IsEmpty() ? Config.TicketCategoryId : Config.WhitelistCategoryId;
+	else if (TicketType == TEXT("help"))
+		CategoryIdCopy = Config.HelpCategoryId.IsEmpty() ? Config.TicketCategoryId : Config.HelpCategoryId;
+	else if (TicketType == TEXT("report"))
+		CategoryIdCopy = Config.ReportCategoryId.IsEmpty() ? Config.TicketCategoryId : Config.ReportCategoryId;
+	else if (TicketType == TEXT("banappeal"))
+		CategoryIdCopy = Config.AppealCategoryId.IsEmpty() ? Config.TicketCategoryId : Config.AppealCategoryId;
+	else
+		CategoryIdCopy = Config.TicketCategoryId;
+
 	// Capture a weak pointer so we never dereference a GC'd subsystem if the
 	// HTTP response arrives after UTicketSubsystem has been destroyed.
 	TWeakObjectPtr<UTicketSubsystem> WeakThis(this);
 	Bridge->CreateDiscordGuildTextChannel(
 		ChannelName,
-		Config.TicketCategoryId,
+		CategoryIdCopy,
 		Overwrites,
 		[WeakThis, NotifyRoleIdCopy, TicketChannelCopy,
 		 OpenerUserIdCopy, OpenerUsernameCopy, TicketTypeCopy,
-		 ExtraInfoCopy, DisplayLabelCopy, DisplayDescCopy]
+		 ExtraInfoCopy, DisplayLabelCopy, DisplayDescCopy, CategoryIdCopy]
 		(const FString& NewChannelId)
 		{
 			UTicketSubsystem* Self = WeakThis.Get();
@@ -972,6 +1223,13 @@ void UTicketSubsystem::CreateTicketChannel(
 			Self->TicketChannelToLastActivity.Add(NewChannelId, FDateTime::UtcNow());
 			// Persist the updated state so this ticket survives a server restart.
 			Self->SaveTicketState();
+			Self->TicketChannelToOpenerName.Add(NewChannelId, OpenerUsernameCopy);
+			Self->TicketChannelToOpenTime.Add(NewChannelId, FDateTime::UtcNow());
+			Self->TicketChannelToType.Add(NewChannelId, TicketTypeCopy);
+			if (Self->Config.bAllowMultipleTicketTypes)
+			{
+				Self->OpenerToTicketsByType.FindOrAdd(OpenerUserIdCopy).Add(TicketTypeCopy, NewChannelId);
+			}
 
 			// ── Build the welcome message ─────────────────────────────────────
 			const FString MentionPrefix = NotifyRoleIdCopy.IsEmpty()
@@ -1054,6 +1312,32 @@ void UTicketSubsystem::CreateTicketChannel(
 				// Post the close-ticket button.
 				B->SendMessageBodyToChannel(NewChannelId,
 					Self->MakeCloseButtonMessage(OpenerUserIdCopy));
+
+				// Approve & Whitelist button for whitelist tickets
+				if (TicketTypeCopy == TEXT("whitelist"))
+				{
+					TSharedPtr<FJsonObject> ApproveBtn = MakeShared<FJsonObject>();
+					ApproveBtn->SetNumberField(TEXT("type"), 2);
+					ApproveBtn->SetNumberField(TEXT("style"), 3); // SUCCESS
+					ApproveBtn->SetStringField(TEXT("label"), TEXT("Approve & Whitelist"));
+					ApproveBtn->SetStringField(TEXT("custom_id"),
+						FString::Printf(TEXT("ticket_approve_wl:%s"), *OpenerUserIdCopy));
+
+					TSharedPtr<FJsonObject> ApproveRow = MakeShared<FJsonObject>();
+					ApproveRow->SetNumberField(TEXT("type"), 1);
+					ApproveRow->SetArrayField(TEXT("components"),
+						TArray<TSharedPtr<FJsonValue>>{MakeShared<FJsonValueObject>(ApproveBtn)});
+
+					TSharedPtr<FJsonObject> ApproveBody = MakeShared<FJsonObject>();
+					ApproveBody->SetStringField(TEXT("content"),
+						TEXT(":shield: **Approve Whitelist Request**\n"
+						     "Click to add the opener to the whitelist and close this ticket."));
+					ApproveBody->SetArrayField(TEXT("components"),
+						TArray<TSharedPtr<FJsonValue>>{MakeShared<FJsonValueObject>(ApproveRow)});
+
+					IDiscordBridgeProvider* B2 = Self->GetBridge();
+					if (B2) B2->SendMessageBodyToChannel(NewChannelId, ApproveBody);
+				}
 
 				// Notify EVERY configured admin/ticket channel (not just the first).
 				const TArray<FString> TicketChans =
@@ -1518,6 +1802,15 @@ void UTicketSubsystem::LoadTicketState()
 		       TEXT("TicketSystem: Restored %d active ticket(s) from previous session."),
 		       Loaded);
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetStatsFilePath
+// ─────────────────────────────────────────────────────────────────────────────
+
+FString UTicketSubsystem::GetStatsFilePath()
+{
+	return FPaths::ProjectSavedDir() / TEXT("Config/TicketSystem/TicketStats.json");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

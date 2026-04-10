@@ -258,6 +258,24 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 */
 	FString InGameWhitelistCommandPrefix{ TEXT("!whitelist") };
 
+	/**
+	 * Snowflake ID of a dedicated Discord channel where whitelist events (add/remove/enable/disable)
+	 * are posted as embeds. Leave empty to disable whitelist event notifications.
+	 */
+	FString WhitelistEventsChannelId;
+
+	/**
+	 * Maximum number of whitelist slots. 0 = unlimited.
+	 * When set, the !whitelist add command will refuse to add more players than this limit.
+	 */
+	int32 MaxWhitelistSlots{ 0 };
+
+	/**
+	 * When true, DiscordBridge automatically syncs the in-game whitelist with the WhitelistRoleId
+	 * Discord role. Members who receive the role are auto-added; members who lose it are auto-removed.
+	 */
+	bool bSyncWhitelistWithRole{ false };
+
 	// ── Chat relay filter ─────────────────────────────────────────────────────
 
 	/**

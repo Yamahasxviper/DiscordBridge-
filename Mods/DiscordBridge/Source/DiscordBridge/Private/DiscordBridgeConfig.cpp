@@ -335,6 +335,9 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.WhitelistKickReason             = GetIniStringOrFallback(ConfigFile, TEXT("WhitelistKickReason"),             Config.WhitelistKickReason);
 		Config.bWhitelistEnabled               = GetIniBoolOrDefault  (ConfigFile, TEXT("WhitelistEnabled"),               Config.bWhitelistEnabled);
 		Config.InGameWhitelistCommandPrefix    = GetIniStringOrDefault(ConfigFile, TEXT("InGameWhitelistCommandPrefix"),    Config.InGameWhitelistCommandPrefix);
+		Config.WhitelistEventsChannelId    = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistEventsChannelId"),    Config.WhitelistEventsChannelId);
+		Config.MaxWhitelistSlots           = GetIniIntOrDefault   (ConfigFile, TEXT("MaxWhitelistSlots"),           Config.MaxWhitelistSlots);
+		Config.bSyncWhitelistWithRole      = GetIniBoolOrDefault  (ConfigFile, TEXT("SyncWhitelistWithRole"),      Config.bSyncWhitelistWithRole);
 
 		// Player event notification settings
 		Config.bPlayerEventsEnabled   = GetIniBoolOrDefault  (ConfigFile, TEXT("PlayerEventsEnabled"),   Config.bPlayerEventsEnabled);
@@ -685,6 +688,37 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("InGameWhitelistCommandPrefix=!whitelist\n");
 				}
 
+				if (bFileHasWhitelist &&
+				    !ConfigFile.GetString(ConfigSection, TEXT("WhitelistEventsChannelId"), TmpVal))
+				{
+					AppendContent2 +=
+						TEXT("\n")
+						TEXT("# WhitelistEventsChannelId (added by mod update) ----------------------\n")
+						TEXT("# Snowflake ID of a Discord channel where whitelist events are posted.\n")
+						TEXT("# Leave empty to disable whitelist event notifications.\n")
+						TEXT("WhitelistEventsChannelId=\n");
+				}
+
+				if (bFileHasWhitelist &&
+				    !ConfigFile.GetString(ConfigSection, TEXT("MaxWhitelistSlots"), TmpVal))
+				{
+					AppendContent2 +=
+						TEXT("\n")
+						TEXT("# MaxWhitelistSlots (added by mod update) ----------------------------\n")
+						TEXT("# Maximum number of whitelist slots. 0 = unlimited.\n")
+						TEXT("MaxWhitelistSlots=0\n");
+				}
+
+				if (bFileHasWhitelist &&
+				    !ConfigFile.GetString(ConfigSection, TEXT("SyncWhitelistWithRole"), TmpVal))
+				{
+					AppendContent2 +=
+						TEXT("\n")
+						TEXT("# SyncWhitelistWithRole (added by mod update) -------------------------\n")
+						TEXT("# When True, auto-add/remove players based on Discord WhitelistRoleId membership.\n")
+						TEXT("SyncWhitelistWithRole=False\n");
+				}
+
 				if (!ConfigFile.GetString(ConfigSection, TEXT("ServerStatusMessagesEnabled"), TmpVal))
 				{
 					AppendContent2 +=
@@ -903,6 +937,12 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("WhitelistKickReason=\n")
 			TEXT("# Prefix for whitelist commands in the in-game chat. Default: !whitelist\n")
 			TEXT("InGameWhitelistCommandPrefix=!whitelist\n")
+			TEXT("# Snowflake ID of a Discord channel where whitelist events are posted. Leave empty to disable.\n")
+			TEXT("WhitelistEventsChannelId=\n")
+			TEXT("# Maximum whitelist slots. 0 = unlimited.\n")
+			TEXT("MaxWhitelistSlots=0\n")
+			TEXT("# When True, auto-add/remove players based on Discord WhitelistRoleId membership.\n")
+			TEXT("SyncWhitelistWithRole=False\n")
 			TEXT("# -- PLAYER NOTIFICATIONS -----------------------------------------------------\n")
 			TEXT("# When True, posts a Discord message whenever a player joins, leaves, or times out.\n")
 			TEXT("# Default: False (disabled). Set to True to enable.\n")
@@ -1035,6 +1075,9 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.WhitelistKickReason              = GetRawStringOrFallback(BackupValues, TEXT("WhitelistKickReason"),              Config.WhitelistKickReason);
 		Config.bWhitelistEnabled                = GetRawBoolOrDefault  (BackupValues, TEXT("WhitelistEnabled"),                Config.bWhitelistEnabled);
 		Config.InGameWhitelistCommandPrefix     = GetRawStringOrDefault(BackupValues, TEXT("InGameWhitelistCommandPrefix"),     Config.InGameWhitelistCommandPrefix);
+		Config.WhitelistEventsChannelId    = GetRawStringOrDefault(BackupValues, TEXT("WhitelistEventsChannelId"),    Config.WhitelistEventsChannelId);
+		Config.MaxWhitelistSlots           = GetRawIntOrDefault   (BackupValues, TEXT("MaxWhitelistSlots"),           Config.MaxWhitelistSlots);
+		Config.bSyncWhitelistWithRole      = GetRawBoolOrDefault  (BackupValues, TEXT("SyncWhitelistWithRole"),      Config.bSyncWhitelistWithRole);
 
 
 		// Player event notification settings
@@ -1184,6 +1227,9 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("WhitelistKickDiscordMessage"),   Config.WhitelistKickDiscordMessage);
 				PatchLine(TEXT("WhitelistKickReason"),           Config.WhitelistKickReason);
 				PatchLine(TEXT("InGameWhitelistCommandPrefix"),  Config.InGameWhitelistCommandPrefix);
+				PatchLine(TEXT("WhitelistEventsChannelId"),      Config.WhitelistEventsChannelId);
+				PatchLine(TEXT("MaxWhitelistSlots"),             *FString::FromInt(Config.MaxWhitelistSlots));
+				PatchLine(TEXT("SyncWhitelistWithRole"),         Config.bSyncWhitelistWithRole ? TEXT("True") : TEXT("False"));
 				PatchLine(TEXT("PlayerEventsEnabled"),           Config.bPlayerEventsEnabled ? TEXT("True") : TEXT("False"));
 				PatchLine(TEXT("PlayerEventsChannelId"),         Config.PlayerEventsChannelId);
 				PatchLine(TEXT("PlayerJoinMessage"),             Config.PlayerJoinMessage);
