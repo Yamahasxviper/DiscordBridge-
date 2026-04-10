@@ -1666,6 +1666,335 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		return;
 	}
 
+	// ── DM opener on staff reply ─────────────────────────────────────────────
+	// If the message is in a ticket channel and is not from the opener, DM opener.
+	if (Config.bDmOpenerOnStaffReply && !SourceChannelId.IsEmpty()
+	    && TicketChannelToOpener.Contains(SourceChannelId))
+	{
+		FString AuthorId;
+		const TSharedPtr<FJsonObject>* AuthorPtr = nullptr;
+		if (MessageObj->TryGetObjectField(TEXT("author"), AuthorPtr) && AuthorPtr)
+		{
+			(*AuthorPtr)->TryGetStringField(TEXT("id"), AuthorId);
+			bool bIsBot = false;
+			(*AuthorPtr)->TryGetBoolField(TEXT("bot"), bIsBot);
+			const FString OpenerId = TicketChannelToOpener[SourceChannelId];
+			if (!bIsBot && !AuthorId.IsEmpty() && AuthorId != OpenerId && Bridge)
+			{
+				const FString BotToken = Bridge->GetBotToken();
+				FString StaffMsg = Content.Left(200);
+				if (Content.Len() > 200) StaffMsg += TEXT("…");
+				const FString DmText = FString::Printf(
+					TEXT(":envelope: **New reply in your ticket** <#%s>:\n**Staff:** %s"),
+					*SourceChannelId, *StaffMsg);
+				const FString OpenDmBody = FString::Printf(
+					TEXT("{\"recipient_id\":\"%s\"}"), *OpenerId);
+				TWeakObjectPtr<UTicketSubsystem> WeakDm(this);
+				TSharedRef<IHttpRequest, ESPMode::ThreadSafe> DmReq =
+					FHttpModule::Get().CreateRequest();
+				DmReq->SetURL(TEXT("https://discord.com/api/v10/users/@me/channels"));
+				DmReq->SetVerb(TEXT("POST"));
+				DmReq->SetHeader(TEXT("Authorization"),
+					FString::Printf(TEXT("Bot %s"), *BotToken));
+				DmReq->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+				DmReq->SetContentAsString(OpenDmBody);
+				DmReq->OnProcessRequestComplete().BindWeakLambda(
+					this,
+					[WeakDm, DmText, BotToken]
+					(FHttpRequestPtr, FHttpResponsePtr R, bool bOk)
+					{
+						if (!bOk || !R.IsValid() || R->GetResponseCode() < 200
+						    || R->GetResponseCode() >= 300) return;
+						TSharedPtr<FJsonObject> DmChan;
+						TSharedRef<TJsonReader<>> DR =
+							TJsonReaderFactory<>::Create(R->GetContentAsString());
+						if (!FJsonSerializer::Deserialize(DR, DmChan) || !DmChan.IsValid()) return;
+						FString DmChanId;
+						DmChan->TryGetStringField(TEXT("id"), DmChanId);
+						if (DmChanId.IsEmpty()) return;
+						TSharedPtr<FJsonObject> Msg = MakeShared<FJsonObject>();
+						Msg->SetStringField(TEXT("content"), DmText);
+						FString MsgBody;
+						TSharedRef<TJsonWriter<>> MW = TJsonWriterFactory<>::Create(&MsgBody);
+						FJsonSerializer::Serialize(Msg.ToSharedRef(), MW);
+						TSharedRef<IHttpRequest, ESPMode::ThreadSafe> SendReq =
+							FHttpModule::Get().CreateRequest();
+						SendReq->SetURL(FString::Printf(
+							TEXT("https://discord.com/api/v10/channels/%s/messages"),
+							*DmChanId));
+						SendReq->SetVerb(TEXT("POST"));
+						SendReq->SetHeader(TEXT("Authorization"),
+							FString::Printf(TEXT("Bot %s"), *BotToken));
+						SendReq->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+						SendReq->SetContentAsString(MsgBody);
+						SendReq->ProcessRequest();
+					});
+				DmReq->ProcessRequest();
+			}
+		}
+	}
+
+	// ── !ticket-claim ─────────────────────────────────────────────────────────
+	if (Content.Equals(TEXT("!ticket-claim"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can claim tickets."));
+			return;
+		}
+		FString SenderId;
+		const TSharedPtr<FJsonObject>* AP = nullptr;
+		if (MessageObj->TryGetObjectField(TEXT("author"), AP) && AP)
+			(*AP)->TryGetStringField(TEXT("id"), SenderId);
+		const FString SenderName = ExtractSenderDisplayName();
+		TicketChannelToAssignee.Add(SourceChannelId, SenderId);
+		TicketChannelToAssigneeName.Add(SourceChannelId, SenderName);
+		SaveTicketState();
+		Bridge->SendDiscordChannelMessage(SourceChannelId,
+			FString::Printf(TEXT(":pencil: This ticket has been claimed by **%s**."), *SenderName));
+		return;
+	}
+
+	// ── !ticket-unclaim ───────────────────────────────────────────────────────
+	if (Content.Equals(TEXT("!ticket-unclaim"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can unclaim tickets."));
+			return;
+		}
+		TicketChannelToAssignee.Remove(SourceChannelId);
+		TicketChannelToAssigneeName.Remove(SourceChannelId);
+		SaveTicketState();
+		Bridge->SendDiscordChannelMessage(SourceChannelId,
+			TEXT(":information_source: This ticket is now unassigned."));
+		return;
+	}
+
+	// ── !ticket-transfer <@userId> ────────────────────────────────────────────
+	if (Content.StartsWith(TEXT("!ticket-transfer"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can transfer tickets."));
+			return;
+		}
+		FString MentionPart = Content.Mid(FCString::Strlen(TEXT("!ticket-transfer"))).TrimStartAndEnd();
+		FString TargetId;
+		if (MentionPart.StartsWith(TEXT("<@")))
+		{
+			int32 End = INDEX_NONE;
+			MentionPart.FindChar(TEXT('>'), End);
+			if (End != INDEX_NONE)
+			{
+				TargetId = MentionPart.Mid(2, End - 2);
+				if (TargetId.StartsWith(TEXT("!"))) TargetId = TargetId.Mid(1);
+			}
+		}
+		if (TargetId.IsEmpty())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":warning: Usage: `!ticket-transfer <@user>`"));
+			return;
+		}
+		TicketChannelToAssignee.Add(SourceChannelId, TargetId);
+		TicketChannelToAssigneeName.Add(SourceChannelId, MentionPart);
+		SaveTicketState();
+		Bridge->SendDiscordChannelMessage(SourceChannelId,
+			FString::Printf(TEXT(":arrows_counterclockwise: Ticket transferred to <@%s>."), *TargetId));
+		return;
+	}
+
+	// ── !ticket-priority <Low|Medium|High|Urgent> ─────────────────────────────
+	if (Content.StartsWith(TEXT("!ticket-priority"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can set ticket priority."));
+			return;
+		}
+		FString PriorityArg = Content.Mid(FCString::Strlen(TEXT("!ticket-priority"))).TrimStartAndEnd();
+		const TArray<FString> ValidPriorities = { TEXT("Low"), TEXT("Medium"), TEXT("High"), TEXT("Urgent") };
+		FString Matched;
+		for (const FString& P : ValidPriorities)
+		{
+			if (PriorityArg.Equals(P, ESearchCase::IgnoreCase))
+			{
+				Matched = P;
+				break;
+			}
+		}
+		if (Matched.IsEmpty())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":warning: Usage: `!ticket-priority <Low|Medium|High|Urgent>`"));
+			return;
+		}
+		TicketChannelToPriority.Add(SourceChannelId, Matched);
+		SaveTicketState();
+		Bridge->SendDiscordChannelMessage(SourceChannelId,
+			FString::Printf(TEXT(":white_check_mark: Ticket priority set to **%s**."), *Matched));
+		// Update channel topic via REST.
+		if (!Bridge->GetBotToken().IsEmpty())
+		{
+			const FString BotToken = Bridge->GetBotToken();
+			const FString OpenerMention = FString::Printf(TEXT("<@%s>"),
+				*TicketChannelToOpener[SourceChannelId]);
+			const FString TopicBody = FString::Printf(
+				TEXT("{\"topic\":\"Priority: %s | Opened by: %s\"}"),
+				*Matched, *OpenerMention);
+			TSharedRef<IHttpRequest, ESPMode::ThreadSafe> TopicReq =
+				FHttpModule::Get().CreateRequest();
+			TopicReq->SetURL(FString::Printf(
+				TEXT("https://discord.com/api/v10/channels/%s"), *SourceChannelId));
+			TopicReq->SetVerb(TEXT("PATCH"));
+			TopicReq->SetHeader(TEXT("Authorization"),
+				FString::Printf(TEXT("Bot %s"), *BotToken));
+			TopicReq->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+			TopicReq->SetContentAsString(TopicBody);
+			TopicReq->ProcessRequest();
+		}
+		return;
+	}
+
+	// ── !ticket-macros ────────────────────────────────────────────────────────
+	if (Content.Equals(TEXT("!ticket-macros"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!SenderHasNotifyRole()) return;
+		if (Config.TicketMacros.Num() == 0)
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":information_source: No macros configured. Add `TicketMacro=name|text` entries to DefaultTickets.ini."));
+			return;
+		}
+		FString MacroList = TEXT(":notepad_spiral: **Available macros:**\n");
+		for (const FString& M : Config.TicketMacros)
+		{
+			FString MName, MText;
+			M.Split(TEXT("|"), &MName, &MText);
+			MacroList += FString::Printf(TEXT("• `%s`\n"), *MName.TrimStartAndEnd());
+		}
+		Bridge->SendDiscordChannelMessage(SourceChannelId, MacroList.TrimEnd());
+		return;
+	}
+
+	// ── !ticket-macro <name> ──────────────────────────────────────────────────
+	if (Content.StartsWith(TEXT("!ticket-macro"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can use macros."));
+			return;
+		}
+		const FString MacroName = Content.Mid(FCString::Strlen(TEXT("!ticket-macro"))).TrimStartAndEnd();
+		if (MacroName.IsEmpty())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":warning: Usage: `!ticket-macro <name>`. Type `!ticket-macros` for a list."));
+			return;
+		}
+		FString FoundText;
+		for (const FString& M : Config.TicketMacros)
+		{
+			FString MName, MText;
+			M.Split(TEXT("|"), &MName, &MText);
+			if (MName.TrimStartAndEnd().Equals(MacroName, ESearchCase::IgnoreCase))
+			{
+				FoundText = MText.TrimStartAndEnd();
+				break;
+			}
+		}
+		if (FoundText.IsEmpty())
+		{
+			FString AvailNames;
+			for (const FString& M : Config.TicketMacros)
+			{
+				FString MN, MT;
+				M.Split(TEXT("|"), &MN, &MT);
+				if (!AvailNames.IsEmpty()) AvailNames += TEXT(", ");
+				AvailNames += MN.TrimStartAndEnd();
+			}
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				FString::Printf(TEXT(":question: No macro named **%s**. Available: %s"),
+					*MacroName, *AvailNames));
+			return;
+		}
+		Bridge->SendDiscordChannelMessage(SourceChannelId, FoundText);
+		return;
+	}
+
+	// ── !ticket-stats ─────────────────────────────────────────────────────────
+	if (Content.Equals(TEXT("!ticket-stats"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can view ticket stats."));
+			return;
+		}
+		const FString StatsPath = GetStatsFilePath();
+		FString StatsJson;
+		TSharedPtr<FJsonObject> Stats = MakeShared<FJsonObject>();
+		if (FFileHelper::LoadFileToString(StatsJson, *StatsPath))
+		{
+			TSharedRef<TJsonReader<>> SR = TJsonReaderFactory<>::Create(StatsJson);
+			TSharedPtr<FJsonObject> Loaded;
+			if (FJsonSerializer::Deserialize(SR, Loaded) && Loaded.IsValid())
+				Stats = Loaded;
+		}
+		double TotalOpened = 0, TotalClosed = 0, AvgTime = 0, TotalRatings = 0, RatingSum = 0;
+		Stats->TryGetNumberField(TEXT("total_opened"), TotalOpened);
+		Stats->TryGetNumberField(TEXT("total_closed"), TotalClosed);
+		Stats->TryGetNumberField(TEXT("avg_close_time_seconds"), AvgTime);
+		Stats->TryGetNumberField(TEXT("total_ratings"), TotalRatings);
+		Stats->TryGetNumberField(TEXT("rating_sum"), RatingSum);
+
+		FString AvgTimeStr;
+		if (AvgTime >= 3600)
+			AvgTimeStr = FString::Printf(TEXT("%.1fh"), AvgTime / 3600.0);
+		else if (AvgTime >= 60)
+			AvgTimeStr = FString::Printf(TEXT("%.0fm"), AvgTime / 60.0);
+		else
+			AvgTimeStr = FString::Printf(TEXT("%.0fs"), AvgTime);
+
+		FString RatingStr = TEXT("N/A");
+		if (TotalRatings > 0)
+			RatingStr = FString::Printf(TEXT("%.1f/5 (%d rating%s)"),
+				RatingSum / TotalRatings,
+				static_cast<int32>(TotalRatings),
+				TotalRatings == 1 ? TEXT("") : TEXT("s"));
+
+		const FString Msg = FString::Printf(
+			TEXT(":bar_chart: **Ticket Statistics**\n")
+			TEXT("Total opened: %d | Total closed: %d | Open now: %d\n")
+			TEXT("Avg close time: %s\n")
+			TEXT("Average rating: %s"),
+			static_cast<int32>(TotalOpened),
+			static_cast<int32>(TotalClosed),
+			TicketChannelToOpener.Num(),
+			*AvgTimeStr,
+			*RatingStr);
+		Bridge->SendDiscordChannelMessage(SourceChannelId, Msg);
+		return;
+	}
+
 	// ── !ticket-panel ─────────────────────────────────────────────────────────
 	if (!Content.Equals(TEXT("!ticket-panel"), ESearchCase::IgnoreCase))
 	{
@@ -1708,16 +2037,55 @@ void UTicketSubsystem::SaveTicketState() const
 		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
 		Entry->SetStringField(TEXT("channel_id"), Pair.Key);
 		Entry->SetStringField(TEXT("opener_id"),  Pair.Value);
-		// Include assignee info if present.
 		const FString* AssigneeId   = TicketChannelToAssignee.Find(Pair.Key);
 		const FString* AssigneeName = TicketChannelToAssigneeName.Find(Pair.Key);
 		if (AssigneeId)   Entry->SetStringField(TEXT("assignee_id"),   *AssigneeId);
 		if (AssigneeName) Entry->SetStringField(TEXT("assignee_name"), *AssigneeName);
+		const FString* TicketType = TicketChannelToType.Find(Pair.Key);
+		if (TicketType)   Entry->SetStringField(TEXT("ticket_type"),   *TicketType);
+		const FString* Priority = TicketChannelToPriority.Find(Pair.Key);
+		if (Priority)     Entry->SetStringField(TEXT("priority"),      *Priority);
+		const FDateTime* OpenTime = TicketChannelToOpenTime.Find(Pair.Key);
+		if (OpenTime && OpenTime->GetTicks() > 0)
+			Entry->SetStringField(TEXT("open_time"), OpenTime->ToIso8601());
+		const FString* OpenerName = TicketChannelToOpenerName.Find(Pair.Key);
+		if (OpenerName)   Entry->SetStringField(TEXT("opener_name"),   *OpenerName);
 		TicketArray.Add(MakeShared<FJsonValueObject>(Entry));
 	}
 
+	// Serialize cooldowns.
+	TArray<TSharedPtr<FJsonValue>> CooldownArray;
+	const FDateTime UtcNow = FDateTime::UtcNow();
+	for (const TPair<FString, FDateTime>& CD : UserTicketCooldown)
+	{
+		if (CD.Value > UtcNow)
+		{
+			TSharedPtr<FJsonObject> CDEntry = MakeShared<FJsonObject>();
+			CDEntry->SetStringField(TEXT("user_id"), CD.Key);
+			CDEntry->SetStringField(TEXT("until"),   CD.Value.ToIso8601());
+			CooldownArray.Add(MakeShared<FJsonValueObject>(CDEntry));
+		}
+	}
+
+	// Serialize multi-ticket map.
+	TArray<TSharedPtr<FJsonValue>> MultiArray;
+	for (const TPair<FString, TMap<FString, FString>>& MT : OpenerToTicketsByType)
+	{
+		TSharedPtr<FJsonObject> MTEntry = MakeShared<FJsonObject>();
+		MTEntry->SetStringField(TEXT("opener_id"), MT.Key);
+		TSharedPtr<FJsonObject> TypeMap = MakeShared<FJsonObject>();
+		for (const TPair<FString, FString>& TP : MT.Value)
+			TypeMap->SetStringField(TP.Key, TP.Value);
+		MTEntry->SetObjectField(TEXT("types"), TypeMap);
+		MultiArray.Add(MakeShared<FJsonValueObject>(MTEntry));
+	}
+
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
-	Root->SetArrayField(TEXT("tickets"), TicketArray);
+	Root->SetArrayField(TEXT("tickets"),   TicketArray);
+	Root->SetArrayField(TEXT("cooldowns"), CooldownArray);
+	Root->SetArrayField(TEXT("multi_tickets"), MultiArray);
+	if (!StoredPanelMessageId.IsEmpty()) Root->SetStringField(TEXT("panel_message_id"), StoredPanelMessageId);
+	if (!StoredPanelChannelId.IsEmpty()) Root->SetStringField(TEXT("panel_channel_id"), StoredPanelChannelId);
 
 	FString JsonContent;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonContent);
@@ -1793,8 +2161,70 @@ void UTicketSubsystem::LoadTicketState()
 			TicketChannelToAssigneeName.Add(ChannelId, AssigneeName);
 		}
 
+		// Restore new fields.
+		FString TicketType, Priority, OpenerName, OpenTimeStr;
+		if ((*EntryObj)->TryGetStringField(TEXT("ticket_type"), TicketType) && !TicketType.IsEmpty())
+			TicketChannelToType.Add(ChannelId, TicketType);
+		if ((*EntryObj)->TryGetStringField(TEXT("priority"), Priority) && !Priority.IsEmpty())
+			TicketChannelToPriority.Add(ChannelId, Priority);
+		if ((*EntryObj)->TryGetStringField(TEXT("opener_name"), OpenerName) && !OpenerName.IsEmpty())
+			TicketChannelToOpenerName.Add(ChannelId, OpenerName);
+		if ((*EntryObj)->TryGetStringField(TEXT("open_time"), OpenTimeStr) && !OpenTimeStr.IsEmpty())
+		{
+			FDateTime OT;
+			if (FDateTime::ParseIso8601(*OpenTimeStr, OT))
+				TicketChannelToOpenTime.Add(ChannelId, OT);
+		}
+
 		++Loaded;
 	}
+
+	// Restore cooldowns.
+	const TArray<TSharedPtr<FJsonValue>>* Cooldowns = nullptr;
+	if (Root->TryGetArrayField(TEXT("cooldowns"), Cooldowns) && Cooldowns)
+	{
+		const FDateTime Now = FDateTime::UtcNow();
+		for (const TSharedPtr<FJsonValue>& CDVal : *Cooldowns)
+		{
+			const TSharedPtr<FJsonObject>* CDObj = nullptr;
+			if (!CDVal->TryGetObject(CDObj) || !CDObj) continue;
+			FString UserId, UntilStr;
+			(*CDObj)->TryGetStringField(TEXT("user_id"), UserId);
+			(*CDObj)->TryGetStringField(TEXT("until"),   UntilStr);
+			if (UserId.IsEmpty() || UntilStr.IsEmpty()) continue;
+			FDateTime Until;
+			if (FDateTime::ParseIso8601(*UntilStr, Until) && Until > Now)
+				UserTicketCooldown.Add(UserId, Until);
+		}
+	}
+
+	// Restore multi-ticket map.
+	const TArray<TSharedPtr<FJsonValue>>* MultiTickets = nullptr;
+	if (Root->TryGetArrayField(TEXT("multi_tickets"), MultiTickets) && MultiTickets)
+	{
+		for (const TSharedPtr<FJsonValue>& MTVal : *MultiTickets)
+		{
+			const TSharedPtr<FJsonObject>* MTObj = nullptr;
+			if (!MTVal->TryGetObject(MTObj) || !MTObj) continue;
+			FString OpenerId;
+			(*MTObj)->TryGetStringField(TEXT("opener_id"), OpenerId);
+			if (OpenerId.IsEmpty()) continue;
+			const TSharedPtr<FJsonObject>* TypeMapObj = nullptr;
+			if ((*MTObj)->TryGetObjectField(TEXT("types"), TypeMapObj) && TypeMapObj)
+			{
+				for (const TPair<FString, TSharedPtr<FJsonValue>>& TP : (*TypeMapObj)->Values)
+				{
+					FString ChanId;
+					if (TP.Value->TryGetString(ChanId))
+						OpenerToTicketsByType.FindOrAdd(OpenerId).Add(TP.Key, ChanId);
+				}
+			}
+		}
+	}
+
+	// Restore panel IDs.
+	Root->TryGetStringField(TEXT("panel_message_id"), StoredPanelMessageId);
+	Root->TryGetStringField(TEXT("panel_channel_id"), StoredPanelChannelId);
 
 	if (Loaded > 0)
 	{
