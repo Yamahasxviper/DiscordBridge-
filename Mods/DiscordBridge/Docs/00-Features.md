@@ -156,6 +156,23 @@ is configured through a single INI file with no external service or dashboard re
 
 ---
 
+## Bot info channel & `!help` command
+
+- On the **first server start** the bot automatically posts a full feature and
+  command reference as rich Discord embeds into a configurable dedicated channel
+  (`BotInfoChannelId`).
+- Discord members can type **`!help`** or **`!commands`** in the main bridged
+  channel at any time to re-post the same reference on demand.
+- The reference is split into two embeds: one for general / server commands
+  (chat bridge, `!server`, `!online`, `!stats`, `!playerstats`, whitelist) and
+  one for admin/moderator BanSystem commands (only shown when BanSystem is active).
+- Command prefixes (e.g. `!players`) in the embed reflect live config values.
+- Leave `BotInfoChannelId` empty to skip the automatic post; `!help` still works.
+
+→ See [Bot Info Channel & !help](14-BotInfoChannel.md)
+
+---
+
 ## Ban events channel
 
 - When used alongside **BanSystem**, ban and unban actions can be posted to a

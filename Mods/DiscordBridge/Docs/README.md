@@ -18,6 +18,7 @@ Welcome to the DiscordBridge documentation. Use the links below to jump straight
 | [Stats Commands](11-StatsCommands.md) | `!stats` and `!playerstats` Discord commands |
 | [Reaction Voting](12-ReactionVoting.md) | Reaction-based vote-kick on player join |
 | [AFK Kick](13-AfkKick.md) | Automatic AFK kick after configurable idle time |
+| [Bot Info Channel & !help](14-BotInfoChannel.md) | Automatic feature/command reference on startup; `!help` / `!commands` on demand |
 
 ---
 
