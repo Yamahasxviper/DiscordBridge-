@@ -67,6 +67,9 @@ struct DISCORDBRIDGE_API FTicketConfig
 	/** When true the Report a Player button appears on the ticket panel. */
 	bool bTicketReportEnabled{ true };
 
+	/** When true the Ban Appeal button appears on the ticket panel. */
+	bool bTicketBanAppealEnabled{ true };
+
 	// ── Admin notifications ───────────────────────────────────────────────────
 
 	/**

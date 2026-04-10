@@ -11,6 +11,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformFileManager.h"
+#include "BanAppealRegistry.h"
 
 DEFINE_LOG_CATEGORY(LogTicketSystem);
 
@@ -434,6 +435,20 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 			TEXT("Report a Player"),
 			TEXT("Describe the incident and the player you are reporting (optional)"));
 	}
+	else if (CustomId == TEXT("ticket_appeal"))
+	{
+		if (!Config.bTicketBanAppealEnabled)
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
+				TEXT(":no_entry: Ban appeal tickets are currently disabled."),
+				/*bEphemeral=*/true);
+			return;
+		}
+		ShowTicketReasonModal(InteractionId, InteractionToken,
+			TEXT("ticket_modal:appeal"),
+			TEXT("Ban Appeal"),
+			TEXT("State your in-game name and explain why your ban should be removed"));
+	}
 	else if (CustomId.StartsWith(TEXT("ticket_cr_")))
 	{
 		const int32 ReasonIndex =
@@ -603,6 +618,41 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 			     "A private channel will appear shortly."),
 			/*bEphemeral=*/true);
 		CreateTicketChannel(DiscordUserId, DiscordUsername, TEXT("report"), Reason,
+		                    TEXT(""), TEXT(""));
+	}
+	else if (ModalCustomId == TEXT("ticket_modal:appeal"))
+	{
+		if (!Config.bTicketBanAppealEnabled)
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
+				TEXT(":no_entry: Ban appeal tickets are currently disabled."),
+				/*bEphemeral=*/true);
+			return;
+		}
+
+		// Save to BanAppealRegistry if BanSystem is installed.
+		// Use "Discord:<userId>" as the appeal UID so the registry can persist
+		// and retrieve the entry.  Admins can resolve the EOS UID from the
+		// in-game name the player provides in the ticket channel.
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UBanAppealRegistry* AppealReg = GI->GetSubsystem<UBanAppealRegistry>())
+			{
+				const FString AppealUid     = FString::Printf(TEXT("Discord:%s"), *DiscordUserId);
+				const FString ContactInfo   = FString::Printf(TEXT("Discord: %s (%s)"), *DiscordUsername, *DiscordUserId);
+				AppealReg->AddAppeal(AppealUid, Reason, ContactInfo);
+
+				UE_LOG(LogTicketSystem, Log,
+				       TEXT("TicketSystem: Ban appeal from Discord user '%s' (%s) saved to BanAppealRegistry."),
+				       *DiscordUsername, *DiscordUserId);
+			}
+		}
+
+		Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
+			TEXT(":white_check_mark: Opening your ban appeal ticket…  "
+			     "A private channel will appear shortly."),
+			/*bEphemeral=*/true);
+		CreateTicketChannel(DiscordUserId, DiscordUsername, TEXT("banappeal"), Reason,
 		                    TEXT(""), TEXT(""));
 	}
 	else if (ModalCustomId.StartsWith(TEXT("ticket_modal:cr_")))
@@ -784,6 +834,19 @@ void UTicketSubsystem::CreateTicketChannel(
 					     ":information_source: An admin will review the report here."),
 					*MentionPrefix, *UserMention);
 			}
+			else if (TicketTypeCopy == TEXT("banappeal"))
+			{
+				WelcomeContent = FString::Printf(
+					TEXT("%s:scales: **Ban Appeal** from %s\n\n"
+					     "To help admins review your case, please provide:\n"
+					     "- Your **in-game name** (as it appeared when you were banned)\n"
+					     "- Your **EOS Player UID** – run `/whoami` in-game if you still have access, "
+					       "or look for it in your ban notice\n"
+					     "- A **reason** why the ban should be lifted\n\n"
+					     ":information_source: An admin will review your appeal here. "
+					       "Please be patient; appeals are handled in the order they are received."),
+					*MentionPrefix, *UserMention);
+			}
 			else
 			{
 				const FString LabelDisplay =
@@ -884,6 +947,10 @@ void UTicketSubsystem::PostTicketPanel(
 	{
 		PanelContent += TEXT(":warning: **Report a Player** – report another player to the admins\n");
 	}
+	if (Config.bTicketBanAppealEnabled)
+	{
+		PanelContent += TEXT(":scales: **Ban Appeal** – appeal a ban issued on this server\n");
+	}
 	for (int32 i = 0; i < Config.CustomTicketReasons.Num(); ++i)
 	{
 		FString Label, Desc;
@@ -923,6 +990,10 @@ void UTicketSubsystem::PostTicketPanel(
 	if (Config.bTicketReportEnabled)
 	{
 		AddButton(TEXT("Report a Player"), TEXT("ticket_report"), 4); // DANGER
+	}
+	if (Config.bTicketBanAppealEnabled)
+	{
+		AddButton(TEXT("Ban Appeal"), TEXT("ticket_appeal"), 2); // SECONDARY
 	}
 	for (int32 i = 0; i < Config.CustomTicketReasons.Num() && AllButtons.Num() < 25; ++i)
 	{
