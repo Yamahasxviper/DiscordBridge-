@@ -3840,6 +3840,7 @@ false);
 AddField(TEXT("⚙️ Admin — Server Links & Config"),
 TEXT("`!linkbans <serverName>`  — Link ban lists with another server\n")
 TEXT("`!unlinkbans <serverName>`  — Remove a ban-list link\n")
+TEXT("`!mutereason <player> <reason>`  — Update the reason on an active mute\n")
 TEXT("`!reloadconfig`  — Hot-reload BanSystem / BanChatCommands config\n\u200b"),
 false);
 
@@ -3848,8 +3849,9 @@ AddField(TEXT("👮 Moderator Commands"),
 TEXT("`!kick <player> [reason]`  — Kick a player from the server\n")
 TEXT("`!modban <player> [reason]`  — Permanent ban (moderator-level)\n")
 TEXT("`!mute <player> [reason]`  — Mute a player in-game\n")
-TEXT("`!unmute <player>`  — Unmute a player\n")
+TEXT("`!unmute <player>`  — Unmute a player (indefinite mute)\n")
 TEXT("`!tempmute <player> <duration> [reason]`  — Temporary mute\n")
+TEXT("`!tempunmute <player>`  — Lift a timed mute early\n")
 TEXT("`!mutecheck <player>`  — Check if a player is muted\n")
 TEXT("`!mutelist`  — List all currently muted players\n")
 TEXT("`!announce <message>`  — Broadcast a message to all in-game players\n")

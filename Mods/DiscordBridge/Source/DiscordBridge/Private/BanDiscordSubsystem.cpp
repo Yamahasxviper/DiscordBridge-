@@ -238,11 +238,11 @@ void UBanDiscordSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Me
 		TEXT("!linkbans"), TEXT("!unlinkbans"), TEXT("!extend"), TEXT("!duration"),
 		TEXT("!playerhistory"), TEXT("!warn"), TEXT("!warnings"),
 		TEXT("!clearwarns"), TEXT("!clearwarn"), TEXT("!note"), TEXT("!notes"),
-		TEXT("!reason"), TEXT("!reloadconfig"), TEXT("!appeals"), TEXT("!dismissappeal"),
-		TEXT("!appealapprove"), TEXT("!appealdeny"),
+		TEXT("!reason"), TEXT("!mutereason"), TEXT("!reloadconfig"), TEXT("!appeals"),
+		TEXT("!dismissappeal"), TEXT("!appealapprove"), TEXT("!appealdeny"),
 		// ── Moderator-or-admin ────────────────────────────────────────────────
 		TEXT("!kick"), TEXT("!modban"),
-		TEXT("!mute"), TEXT("!unmute"), TEXT("!tempmute"),
+		TEXT("!mute"), TEXT("!unmute"), TEXT("!tempmute"), TEXT("!tempunmute"),
 		TEXT("!mutecheck"), TEXT("!mutelist"),
 		TEXT("!announce"), TEXT("!stafflist"), TEXT("!staffchat"),
 	};
@@ -253,7 +253,7 @@ void UBanDiscordSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Me
 	// Moderator-level commands only need ModeratorRoleId; all others require AdminRoleId.
 	static const TArray<FString> ModeratorCommands = {
 		TEXT("!kick"), TEXT("!modban"),
-		TEXT("!mute"), TEXT("!unmute"), TEXT("!tempmute"),
+		TEXT("!mute"), TEXT("!unmute"), TEXT("!tempmute"), TEXT("!tempunmute"),
 		TEXT("!mutecheck"), TEXT("!mutelist"),
 		TEXT("!announce"), TEXT("!stafflist"), TEXT("!staffchat"),
 	};
@@ -325,6 +325,8 @@ void UBanDiscordSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Me
 		HandleNotesCommand(Args, ChannelId);
 	else if (Command == TEXT("!reason"))
 		HandleReasonCommand(Args, ChannelId);
+	else if (Command == TEXT("!mutereason"))
+		HandleMuteReasonCommand(Args, ChannelId, SenderName);
 	else if (Command == TEXT("!reloadconfig"))
 		HandleReloadConfigCommand(ChannelId, SenderName);
 	else if (Command == TEXT("!appeals"))
@@ -345,6 +347,8 @@ void UBanDiscordSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Me
 		HandleMuteCommand(Args, ChannelId, SenderName, /*bMute=*/false);
 	else if (Command == TEXT("!tempmute"))
 		HandleTempMuteCommand(Args, ChannelId, SenderName);
+	else if (Command == TEXT("!tempunmute"))
+		HandleTempUnmuteCommand(Args, ChannelId, SenderName);
 	else if (Command == TEXT("!mutecheck"))
 		HandleMuteCheckCommand(Args, ChannelId);
 	else if (Command == TEXT("!mutelist"))
@@ -2241,6 +2245,116 @@ void UBanDiscordSubsystem::HandleMuteListCommand(const FString& ChannelId)
 	if (Msg.Len() > 1990)
 		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
 	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !tempunmute
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleTempUnmuteCommand(const TArray<FString>& Args,
+                                                    const FString& ChannelId,
+                                                    const FString& SenderName)
+{
+	if (!CachedProvider) return;
+
+	if (Args.IsEmpty())
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT("Usage: `!tempunmute <PUID|name>`"));
+		return;
+	}
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
+	if (!MuteReg)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT("❌ Mute commands require the BanChatCommands mod to be installed."));
+		return;
+	}
+
+	FMuteEntry Entry;
+	if (!MuteReg->GetMuteEntry(Uid, Entry))
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			FString::Printf(TEXT("⚠️ **%s** (`%s`) is not currently muted."),
+				*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
+		return;
+	}
+
+	if (Entry.bIsIndefinite)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			FString::Printf(
+				TEXT("❌ **%s** has an indefinite mute, not a timed one. Use `!unmute` instead."),
+				*BanDiscordHelpers::EscapeMarkdown(DisplayName)));
+		return;
+	}
+
+	MuteReg->UnmutePlayer(Uid);
+
+	const FString UnmuteMsg = FString::Printf(
+		TEXT("🔊 Timed mute lifted from **%s** (`%s`) early.\nUnmuted by: %s"),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
+	CachedProvider->SendDiscordChannelMessage(ChannelId, UnmuteMsg);
+	PostModerationLog(UnmuteMsg);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !mutereason
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleMuteReasonCommand(const TArray<FString>& Args,
+                                                    const FString& ChannelId,
+                                                    const FString& SenderName)
+{
+	if (!CachedProvider) return;
+
+	if (Args.Num() < 2)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT("Usage: `!mutereason <PUID|name> <new reason...>`"));
+		return;
+	}
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
+	if (!MuteReg)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT("❌ Mute commands require the BanChatCommands mod to be installed."));
+		return;
+	}
+
+	const FString NewReason = BanDiscordHelpers::JoinArgs(Args, 1);
+
+	if (!MuteReg->UpdateMuteReason(Uid, NewReason))
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			FString::Printf(TEXT("⚠️ **%s** (`%s`) is not currently muted."),
+				*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
+		return;
+	}
+
+	const FString Msg = FString::Printf(
+		TEXT("✏️ Mute reason updated for **%s** (`%s`).\nNew reason: %s\nUpdated by: %s"),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *NewReason, *SenderName);
+	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	PostModerationLog(Msg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
