@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "BanTypes.h"
+#include "BanAppealRegistry.h"
 
 /**
  * FBanDiscordNotifier
@@ -34,6 +35,16 @@ public:
 
     /** Called when a temporary ban expires and the player is allowed to reconnect. */
     static void NotifyBanExpired(const FBanEntry& Entry);
+
+    /** Called when a player submits a ban appeal via the REST API. */
+    static void NotifyAppealSubmitted(const FBanAppealEntry& Appeal);
+
+    /**
+     * Called when a warn-based auto-escalation triggers an automatic ban.
+     * Posts an embed to Discord so staff can review and override.
+     * Only has an effect when DiscordWebhookUrl is set.
+     */
+    static void NotifyAutoEscalationBan(const FBanEntry& Ban, int32 WarnCount);
 
 private:
     /**

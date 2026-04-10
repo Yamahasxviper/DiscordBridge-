@@ -953,6 +953,7 @@ void UBanRestApi::RegisterRoutes()
 
                         DB->AddBan(AutoBan);
                         FBanDiscordNotifier::NotifyBanCreated(AutoBan);
+                        FBanDiscordNotifier::NotifyAutoEscalationBan(AutoBan, WarnCount);
                         if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
                             AuditLog->LogAction(TEXT("ban"), Uid, PlayerName, TEXT("system"), TEXT("system"), AutoBan.Reason);
                     }
@@ -1177,6 +1178,63 @@ void UBanRestApi::RegisterRoutes()
                 }
             }
 
+            // ── Per-day ban counts for the last 30 days ───────────────────
+            // Produces an array of { date: "YYYY-MM-DD", bans: N } objects.
+            TArray<TSharedPtr<FJsonValue>> DailyBansArr;
+            if (DB)
+            {
+                TMap<FString, int32> DayCounts;
+                const FDateTime CutOff = FDateTime::UtcNow() - FTimespan::FromDays(30.0);
+                for (const FBanEntry& E : DB->GetAllBans())
+                {
+                    if (E.BanDate < CutOff) continue;
+                    const FString Day = E.BanDate.ToString(TEXT("%Y-%m-%d"));
+                    int32& Cnt = DayCounts.FindOrAdd(Day);
+                    ++Cnt;
+                }
+                // Sort by date ascending.
+                TArray<FString> Days;
+                DayCounts.GetKeys(Days);
+                Days.Sort();
+                for (const FString& Day : Days)
+                {
+                    TSharedPtr<FJsonObject> DayObj = MakeShared<FJsonObject>();
+                    DayObj->SetStringField(TEXT("date"), Day);
+                    DayObj->SetNumberField(TEXT("bans"), static_cast<double>(DayCounts[Day]));
+                    DailyBansArr.Add(MakeShared<FJsonValueObject>(DayObj));
+                }
+            }
+
+            // ── Top offenders by total ban count ──────────────────────────
+            // Produces an array of { uid, playerName, banCount } sorted descending.
+            TArray<TSharedPtr<FJsonValue>> TopOffendersArr;
+            if (DB)
+            {
+                TMap<FString, TPair<FString, int32>> OffenderMap; // uid → {name, count}
+                for (const FBanEntry& E : DB->GetAllBans())
+                {
+                    if (E.Platform == TEXT("IP")) continue; // skip IP bans for this list
+                    TPair<FString, int32>& Pair = OffenderMap.FindOrAdd(E.Uid);
+                    Pair.Key = E.PlayerName;
+                    ++Pair.Value;
+                }
+                TArray<TPair<FString, TPair<FString, int32>>> Sorted(OffenderMap.Array());
+                Sorted.Sort([](const TPair<FString, TPair<FString, int32>>& A,
+                               const TPair<FString, TPair<FString, int32>>& B)
+                {
+                    return A.Value.Value > B.Value.Value;
+                });
+                const int32 Limit = FMath::Min(Sorted.Num(), 10);
+                for (int32 i = 0; i < Limit; ++i)
+                {
+                    TSharedPtr<FJsonObject> Off = MakeShared<FJsonObject>();
+                    Off->SetStringField(TEXT("uid"),        Sorted[i].Key);
+                    Off->SetStringField(TEXT("playerName"), Sorted[i].Value.Key);
+                    Off->SetNumberField(TEXT("banCount"),   static_cast<double>(Sorted[i].Value.Value));
+                    TopOffendersArr.Add(MakeShared<FJsonValueObject>(Off));
+                }
+            }
+
             TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
             Obj->SetNumberField(TEXT("activeBans"),              DB        ? static_cast<double>(DB->GetActiveBans().Num())        : 0.0);
             Obj->SetNumberField(TEXT("totalBans"),               DB        ? static_cast<double>(DB->GetAllBans().Num())           : 0.0);
@@ -1186,6 +1244,8 @@ void UBanRestApi::RegisterRoutes()
             Obj->SetNumberField(TEXT("totalAuditEntries"),       AuditLog  ? static_cast<double>(AuditLog->GetAllEntries().Num())  : 0.0);
             Obj->SetNumberField(TEXT("knownPlayers"),            PlayerReg ? static_cast<double>(PlayerReg->GetAllRecords().Num()) : 0.0);
             Obj->SetNumberField(TEXT("onlinePlayers"),           static_cast<double>(OnlinePlayers));
+            Obj->SetArrayField (TEXT("dailyBans30d"),            DailyBansArr);
+            Obj->SetArrayField (TEXT("topOffenders"),            TopOffendersArr);
             Obj->SetStringField(TEXT("timestamp"),               FDateTime::UtcNow().ToIso8601());
             Done(BanJson::Json(BanJson::ObjectToString(Obj)));
             return true;
@@ -1526,15 +1586,8 @@ void UBanRestApi::RegisterRoutes()
 
             const FBanAppealEntry NewEntry = AppealsReg->AddAppeal(Uid, Reason, ContactInfo);
 
-            // Optionally notify Discord.
-            {
-                const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
-                if (Cfg && !Cfg->DiscordWebhookUrl.IsEmpty())
-                {
-                    // Reuse BanDiscordNotifier's webhook infrastructure via a simple direct call.
-                    // Build a minimal embed payload inline rather than adding a dedicated method.
-                }
-            }
+            // Notify Discord via webhook.
+            FBanDiscordNotifier::NotifyAppealSubmitted(NewEntry);
 
             // WebSocket push.
             {
@@ -1638,6 +1691,138 @@ void UBanRestApi::RegisterRoutes()
         }
     ));
 
+    // ── GET /metrics/prometheus ──────────────────────────────────────────────
+    // Prometheus text exposition format (https://prometheus.io/docs/instrumenting/exposition_formats/)
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/metrics/prometheus")),
+        EHttpServerRequestVerbs::VERB_GET,
+        [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
+        {
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+
+            UBanDatabase*           DB        = GI->GetSubsystem<UBanDatabase>();
+            UPlayerWarningRegistry* WarnReg   = GI->GetSubsystem<UPlayerWarningRegistry>();
+            UPlayerSessionRegistry* PlayerReg = GI->GetSubsystem<UPlayerSessionRegistry>();
+            UBanAuditLog*           AuditLog  = GI->GetSubsystem<UBanAuditLog>();
+            UBanAppealRegistry*     AppealReg = GI->GetSubsystem<UBanAppealRegistry>();
+
+            int32 OnlinePlayers = 0;
+            if (UWorld* World = GI->GetWorld())
+                for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+                    if (It->IsValid()) ++OnlinePlayers;
+
+            FString Out;
+            auto Gauge = [&Out](const FString& Name, const FString& Help, double Value)
+            {
+                Out += FString::Printf(TEXT("# HELP %s %s\n# TYPE %s gauge\n%s %.0f\n"),
+                    *Name, *Help, *Name, *Name, Value);
+            };
+
+            Gauge(TEXT("bansystem_active_bans"),     TEXT("Number of currently active bans"),
+                  DB        ? static_cast<double>(DB->GetActiveBans().Num())        : 0.0);
+            Gauge(TEXT("bansystem_total_bans"),      TEXT("Total bans ever recorded"),
+                  DB        ? static_cast<double>(DB->GetAllBans().Num())           : 0.0);
+            Gauge(TEXT("bansystem_total_warnings"),  TEXT("Total warnings ever recorded"),
+                  WarnReg   ? static_cast<double>(WarnReg->GetAllWarnings().Num())  : 0.0);
+            Gauge(TEXT("bansystem_known_players"),   TEXT("Number of distinct player session records"),
+                  PlayerReg ? static_cast<double>(PlayerReg->GetAllRecords().Num()) : 0.0);
+            Gauge(TEXT("bansystem_audit_entries"),   TEXT("Number of audit log entries"),
+                  AuditLog  ? static_cast<double>(AuditLog->GetAllEntries().Num())  : 0.0);
+            Gauge(TEXT("bansystem_pending_appeals"), TEXT("Number of pending ban appeals"),
+                  AppealReg ? static_cast<double>(AppealReg->GetAllAppeals().Num()) : 0.0);
+            Gauge(TEXT("bansystem_online_players"),  TEXT("Number of players currently connected"),
+                  static_cast<double>(OnlinePlayers));
+
+            auto R = FHttpServerResponse::Create(Out, TEXT("text/plain; version=0.0.4; charset=utf-8"));
+            R->Code = EHttpServerResponseCodes::Ok;
+            Done(MoveTemp(R));
+            return true;
+        }
+    ));
+
+    // ── GET /appeals/portal ──────────────────────────────────────────────────
+    // Lightweight HTML form that lets banned players submit an appeal from a browser.
+    // No authentication required — the form POSTs to /appeals.
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/appeals/portal")),
+        EHttpServerRequestVerbs::VERB_GET,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            // Derive the base URL from the Host header so the form action works
+            // regardless of whether the player uses IP or hostname.
+            FString Host;
+            const TArray<FString>* HostHeader = Req.Headers.Find(TEXT("Host"));
+            if (HostHeader && HostHeader->Num() > 0) Host = (*HostHeader)[0];
+            const FString ApiBase = Host.IsEmpty() ? TEXT("") : FString::Printf(TEXT("http://%s"), *Host);
+
+            UGameInstance* GI = WeakGI.Get();
+            const FString ServerName = [GI]() -> FString
+            {
+                if (!GI) return TEXT("this server");
+                const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+                return (Cfg && !Cfg->DatabasePath.IsEmpty())
+                    ? FPaths::GetBaseFilename(Cfg->DatabasePath) : TEXT("this server");
+            }();
+
+            const FString Html = FString::Printf(TEXT(R"HTML(<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Ban Appeal – %s</title>
+  <style>
+    body{font-family:system-ui,sans-serif;max-width:540px;margin:40px auto;padding:0 16px;background:#1a1a2e;color:#e0e0e0}
+    h1{color:#a78bfa}
+    label{display:block;margin-top:16px;font-size:.9rem;color:#9ca3af}
+    input,textarea{width:100%%;box-sizing:border-box;padding:10px;margin-top:4px;background:#16213e;border:1px solid #4b5563;border-radius:6px;color:#e0e0e0;font-size:1rem}
+    textarea{resize:vertical;min-height:100px}
+    button{margin-top:24px;width:100%%;padding:12px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:1rem;cursor:pointer}
+    button:hover{background:#6d28d9}
+    #status{margin-top:16px;padding:12px;border-radius:6px;display:none}
+    .ok{background:#065f46;color:#a7f3d0}.err{background:#7f1d1d;color:#fca5a5}
+  </style>
+</head>
+<body>
+  <h1>⚖️ Ban Appeal</h1>
+  <p>You were banned from <strong>%s</strong>. Fill out this form to request a review.</p>
+  <form id="appealForm">
+    <label for="uid">Your EOS Player UID (32-character hex, from /whoami)</label>
+    <input id="uid" name="uid" placeholder="e.g. 00020aed06f0a6958c3c067fb4b73d51" required pattern="[0-9a-fA-F]{32}">
+    <label for="contact">Contact info (Discord handle, email, etc.)</label>
+    <input id="contact" name="contact" placeholder="Discord: yourname#1234">
+    <label for="reason">Your appeal (explain why the ban should be reconsidered)</label>
+    <textarea id="reason" name="reason" placeholder="I believe I was banned because…" required></textarea>
+    <button type="submit">Submit Appeal</button>
+  </form>
+  <div id="status"></div>
+  <script>
+    document.getElementById('appealForm').addEventListener('submit', async function(e){
+      e.preventDefault();
+      const uid = document.getElementById('uid').value.trim().toLowerCase();
+      const contact = document.getElementById('contact').value.trim();
+      const reason = document.getElementById('reason').value.trim();
+      const st = document.getElementById('status');
+      st.style.display='block'; st.className=''; st.textContent='Submitting…';
+      try{
+        const r = await fetch('%s/appeals',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({playerUID:uid,contactInfo:contact,reason:reason,platform:'EOS'})});
+        const j = await r.json();
+        if(r.ok){st.className='ok';st.textContent='✅ Appeal submitted (ID #'+j.id+'). Staff will review it shortly.';}
+        else{st.className='err';st.textContent='❌ Error: '+(j.error||'Unknown error');}
+      }catch(err){st.className='err';st.textContent='❌ Network error: '+err.message;}
+    });
+  </script>
+</body>
+</html>)HTML"), *ServerName, *ServerName, *ApiBase);
+
+            auto R = FHttpServerResponse::Create(Html, TEXT("text/html; charset=utf-8"));
+            R->Code = EHttpServerResponseCodes::Ok;
+            Done(MoveTemp(R));
+            return true;
+        }
+    ));
+
     // ── DELETE /appeals/:id ──────────────────────────────────────────────────
     Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/appeals/:id")),
@@ -1668,6 +1853,256 @@ void UBanRestApi::RegisterRoutes()
             }
 
             Done(BanJson::Ok(FString::Printf(TEXT("Appeal id=%lld dismissed"), Id)));
+            return true;
+        }
+    ));
+
+    // ── GET /dashboard ───────────────────────────────────────────────────────
+    // Unified single-page HTML dashboard aggregating bans, players, warnings,
+    // mutes, appeals, and audit log.  No authentication required — read-only view.
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/dashboard")),
+        EHttpServerRequestVerbs::VERB_GET,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            FString Host;
+            const TArray<FString>* HostHeader = Req.Headers.Find(TEXT("Host"));
+            if (HostHeader && HostHeader->Num() > 0) Host = (*HostHeader)[0];
+            const FString Api = Host.IsEmpty() ? TEXT("") : FString::Printf(TEXT("http://%s"), *Host);
+
+            const FString Html = FString::Printf(TEXT(R"HTML(<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>BanSystem Dashboard</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:system-ui,sans-serif;background:#0f0f1a;color:#e0e0e0;min-height:100vh}
+    header{background:#1a1a2e;padding:16px 24px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #2d2d4e}
+    header h1{color:#a78bfa;font-size:1.4rem}
+    nav{display:flex;gap:4px;margin-top:10px;flex-wrap:wrap}
+    nav button{padding:6px 14px;border:none;border-radius:6px;background:#2d2d4e;color:#c4b5fd;cursor:pointer;font-size:.85rem}
+    nav button.active{background:#7c3aed;color:#fff}
+    main{padding:20px 24px;max-width:1200px;margin:0 auto}
+    .stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:24px}
+    .stat-card{background:#1a1a2e;border-radius:10px;padding:16px;text-align:center}
+    .stat-card .num{font-size:2rem;font-weight:700;color:#a78bfa}
+    .stat-card .lbl{font-size:.75rem;color:#9ca3af;margin-top:4px}
+    table{width:100%%;border-collapse:collapse;font-size:.85rem}
+    th{background:#2d2d4e;color:#c4b5fd;padding:10px 12px;text-align:left;font-weight:600}
+    td{padding:9px 12px;border-bottom:1px solid #1e1e38}
+    tr:hover td{background:#1a1a2e}
+    .badge{padding:3px 8px;border-radius:12px;font-size:.75rem;font-weight:600}
+    .badge-red{background:#7f1d1d;color:#fca5a5}
+    .badge-yellow{background:#78350f;color:#fde68a}
+    .badge-green{background:#065f46;color:#a7f3d0}
+    .badge-blue{background:#1e3a5f;color:#93c5fd}
+    .tab-content{display:none}
+    .tab-content.active{display:block}
+    input[type=text]{background:#1a1a2e;border:1px solid #4b5563;border-radius:6px;color:#e0e0e0;padding:7px 12px;font-size:.9rem;width:260px}
+    .search-bar{margin-bottom:14px;display:flex;gap:8px;align-items:center}
+    #loadingOverlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;font-size:1.2rem;z-index:999}
+    #loadingOverlay.hidden{display:none}
+    .error-msg{color:#fca5a5;margin-top:12px;font-size:.9rem}
+  </style>
+</head>
+<body>
+<div id="loadingOverlay">Loading…</div>
+<header>
+  <div>
+    <h1>⚖️ BanSystem Dashboard</h1>
+    <nav>
+      <button class="active" onclick="switchTab('bans',this)">🚫 Bans</button>
+      <button onclick="switchTab('players',this)">👥 Players</button>
+      <button onclick="switchTab('warnings',this)">⚠️ Warnings</button>
+      <button onclick="switchTab('appeals',this)">📩 Appeals</button>
+      <button onclick="switchTab('audit',this)">📋 Audit Log</button>
+      <button onclick="switchTab('metrics',this)">📊 Metrics</button>
+    </nav>
+  </div>
+</header>
+<main>
+  <div class="stats" id="statsRow"></div>
+
+  <!-- Bans -->
+  <div id="tab-bans" class="tab-content active">
+    <div class="search-bar">
+      <input type="text" id="banSearch" placeholder="Search by name or UID…" oninput="filterTable('banTable',this.value)">
+    </div>
+    <table><thead><tr><th>UID</th><th>Name</th><th>Reason</th><th>By</th><th>Expires</th><th>Type</th></tr></thead>
+    <tbody id="banTable"></tbody></table>
+  </div>
+
+  <!-- Players -->
+  <div id="tab-players" class="tab-content">
+    <div class="search-bar">
+      <input type="text" id="playerSearch" placeholder="Search by name or IP…" oninput="filterTable('playerTable',this.value)">
+    </div>
+    <table><thead><tr><th>UID</th><th>Display Name</th><th>Last Seen</th><th>IP Address</th></tr></thead>
+    <tbody id="playerTable"></tbody></table>
+  </div>
+
+  <!-- Warnings -->
+  <div id="tab-warnings" class="tab-content">
+    <div class="search-bar">
+      <input type="text" id="warnSearch" placeholder="Search…" oninput="filterTable('warnTable',this.value)">
+    </div>
+    <table><thead><tr><th>ID</th><th>UID</th><th>Name</th><th>Reason</th><th>By</th><th>Date</th></tr></thead>
+    <tbody id="warnTable"></tbody></table>
+  </div>
+
+  <!-- Appeals -->
+  <div id="tab-appeals" class="tab-content">
+    <table><thead><tr><th>ID</th><th>UID</th><th>Contact</th><th>Submitted</th><th>Reason</th></tr></thead>
+    <tbody id="appealTable"></tbody></table>
+  </div>
+
+  <!-- Audit Log -->
+  <div id="tab-audit" class="tab-content">
+    <table><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>By</th><th>Reason</th></tr></thead>
+    <tbody id="auditTable"></tbody></table>
+  </div>
+
+  <!-- Metrics -->
+  <div id="tab-metrics" class="tab-content">
+    <div id="metricsContent"></div>
+  </div>
+
+  <p class="error-msg" id="errorMsg"></p>
+</main>
+<script>
+  const API = '%s';
+  const KEY = new URLSearchParams(location.search).get('key') || '';
+
+  async function apiFetch(path){
+    const hdrs = {};
+    if(KEY) hdrs['X-Api-Key'] = KEY;
+    const r = await fetch(API+path,{headers:hdrs});
+    if(!r.ok) throw new Error('HTTP '+r.status+' for '+path);
+    return r.json();
+  }
+
+  function switchTab(name, btn){
+    document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
+    document.querySelectorAll('nav button').forEach(el=>el.classList.remove('active'));
+    document.getElementById('tab-'+name).classList.add('active');
+    btn.classList.add('active');
+  }
+
+  function filterTable(tbodyId, query){
+    const rows = document.getElementById(tbodyId).querySelectorAll('tr');
+    const q = query.toLowerCase();
+    rows.forEach(r=>{r.style.display = r.textContent.toLowerCase().includes(q)?'':'none';});
+  }
+
+  function esc(s){
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function badge(text, cls){ return `<span class="badge badge-${cls}">${esc(text)}</span>`; }
+
+  async function loadAll(){
+    document.getElementById('loadingOverlay').classList.remove('hidden');
+    try {
+      const [metrics, bans, players, warns, appeals, audit] = await Promise.allSettled([
+        apiFetch('/metrics'),
+        apiFetch('/bans/all'),
+        apiFetch('/players'),
+        apiFetch('/warnings'),
+        apiFetch('/appeals'),
+        apiFetch('/audit'),
+      ]);
+
+      // Stats row
+      if(metrics.status==='fulfilled'){
+        const m = metrics.value;
+        const cards = [
+          ['Active Bans', m.activeBans, 'red'],
+          ['Total Bans', m.totalBans, 'blue'],
+          ['Warnings', m.totalWarnings, 'yellow'],
+          ['Players', m.knownPlayers, 'green'],
+          ['Online', m.onlinePlayers, 'green'],
+          ['Appeals', m.pendingAppeals||0, 'yellow'],
+        ];
+        document.getElementById('statsRow').innerHTML = cards.map(([l,v,c])=>
+          `<div class="stat-card"><div class="num" style="color:${c==='red'?'#fca5a5':c==='yellow'?'#fde68a':'#a7f3d0'}">${v}</div><div class="lbl">${l}</div></div>`
+        ).join('');
+      }
+
+      // Bans
+      if(bans.status==='fulfilled'){
+        const rows = (bans.value.bans||[]).map(b=>
+          `<tr><td>${esc(b.uid)}</td><td>${esc(b.playerName)}</td><td>${esc(b.reason)}</td><td>${esc(b.bannedBy)}</td>
+           <td>${b.isPermanent?badge('Permanent','red'):esc(b.expireDate)}</td>
+           <td>${b.isPermanent?badge('Permanent','red'):badge('Temp','yellow')}</td></tr>`).join('');
+        document.getElementById('banTable').innerHTML = rows || '<tr><td colspan="6" style="text-align:center;color:#9ca3af">No active bans</td></tr>';
+      }
+
+      // Players
+      if(players.status==='fulfilled'){
+        const rows = (players.value.players||[]).map(p=>
+          `<tr><td>${esc(p.uid)}</td><td>${esc(p.displayName)}</td><td>${esc(p.lastSeen)}</td><td>${esc(p.ipAddress||'')}</td></tr>`).join('');
+        document.getElementById('playerTable').innerHTML = rows || '<tr><td colspan="4" style="text-align:center;color:#9ca3af">No players</td></tr>';
+      }
+
+      // Warnings
+      if(warns.status==='fulfilled'){
+        const rows = (warns.value.warnings||[]).map(w=>
+          `<tr><td>${w.id}</td><td>${esc(w.uid)}</td><td>${esc(w.playerName)}</td><td>${esc(w.reason)}</td><td>${esc(w.warnedBy)}</td><td>${esc(w.warnDate)}</td></tr>`).join('');
+        document.getElementById('warnTable').innerHTML = rows || '<tr><td colspan="6" style="text-align:center;color:#9ca3af">No warnings</td></tr>';
+      }
+
+      // Appeals
+      if(appeals.status==='fulfilled'){
+        const rows = (appeals.value.appeals||[]).map(a=>
+          `<tr><td>${a.id}</td><td>${esc(a.uid)}</td><td>${esc(a.contactInfo)}</td><td>${esc(a.submittedAt)}</td><td>${esc(a.reason)}</td></tr>`).join('');
+        document.getElementById('appealTable').innerHTML = rows || '<tr><td colspan="5" style="text-align:center;color:#9ca3af">No pending appeals</td></tr>';
+      }
+
+      // Audit log
+      if(audit.status==='fulfilled'){
+        const rows = (audit.value.entries||[]).slice(0,200).map(e=>
+          `<tr><td>${esc(e.timestamp)}</td><td>${badge(e.action,'blue')}</td><td>${esc(e.targetName||e.targetUid)}</td><td>${esc(e.performedBy)}</td><td>${esc(e.reason)}</td></tr>`).join('');
+        document.getElementById('auditTable').innerHTML = rows || '<tr><td colspan="5" style="text-align:center;color:#9ca3af">No audit entries</td></tr>';
+      }
+
+      // Metrics detail
+      if(metrics.status==='fulfilled'){
+        const m = metrics.value;
+        let html = '<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>';
+        const items = [
+          ['Active Bans', m.activeBans], ['Total Bans', m.totalBans],
+          ['Temp Bans Expiring (24h)', m.tempBansExpiringSoon24h],
+          ['Total Warnings', m.totalWarnings], ['Warnings This Week', m.warningsThisWeek],
+          ['Audit Entries', m.totalAuditEntries], ['Known Players', m.knownPlayers],
+          ['Online Players', m.onlinePlayers], ['Timestamp', m.timestamp],
+        ];
+        items.forEach(([l,v])=>{ html += `<tr><td>${esc(l)}</td><td>${esc(v)}</td></tr>`; });
+        html += '</tbody></table>';
+        if(m.topOffenders&&m.topOffenders.length){
+          html += '<h3 style="margin-top:20px;color:#c4b5fd">Top Offenders</h3><table style="margin-top:8px"><thead><tr><th>Player</th><th>Ban Count</th></tr></thead><tbody>';
+          m.topOffenders.forEach(o=>{ html += `<tr><td>${esc(o.playerName)} <small style="color:#9ca3af">${esc(o.uid)}</small></td><td>${o.banCount}</td></tr>`; });
+          html += '</tbody></table>';
+        }
+        document.getElementById('metricsContent').innerHTML = html;
+      }
+
+    } catch(e){
+      document.getElementById('errorMsg').textContent = 'Error loading data: '+e.message;
+    } finally {
+      document.getElementById('loadingOverlay').classList.add('hidden');
+    }
+  }
+
+  loadAll();
+</script>
+</body>
+</html>)HTML"), *Api);
+
+            auto R = FHttpServerResponse::Create(Html, TEXT("text/html; charset=utf-8"));
+            R->Code = EHttpServerResponseCodes::Ok;
+            Done(MoveTemp(R));
             return true;
         }
     ));

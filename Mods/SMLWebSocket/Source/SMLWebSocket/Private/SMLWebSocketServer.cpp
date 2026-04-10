@@ -3,6 +3,9 @@
 #include "SMLWebSocketServer.h"
 #include "SMLWebSocketServerRunnable.h"
 #include "HAL/RunnableThread.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSMLWebSocketServer, Log, All);
 
@@ -105,6 +108,29 @@ TArray<FString> USMLWebSocketServer::GetConnectedClientIds() const
 
 // ── Internal callbacks ────────────────────────────────────────────────────────
 
+void USMLWebSocketServer::BroadcastEventText(const FString& EventType, const FString& Message)
+{
+    if (!ServerRunnable.IsValid()) return;
+
+    // Collect IDs of clients that should receive this event.
+    // A client receives the event when:
+    //   a) it has no subscription filter (receives everything), OR
+    //   b) its subscription set explicitly contains EventType.
+    TArray<FString> Targets;
+    {
+        FScopeLock L(&ClientMutex);
+        for (const FString& Id : ConnectedClientIds)
+        {
+            const TSet<FString>* Subs = ClientSubscriptions.Find(Id);
+            if (!Subs || Subs->Num() == 0 || Subs->Contains(EventType))
+                Targets.Add(Id);
+        }
+    }
+
+    for (const FString& Id : Targets)
+        ServerRunnable->SendTextToClient(Id, Message);
+}
+
 void USMLWebSocketServer::Internal_OnClientConnected(const FString& ClientId, const FString& RemoteAddress)
 {
     {
@@ -119,13 +145,61 @@ void USMLWebSocketServer::Internal_OnClientDisconnected(const FString& ClientId,
     {
         FScopeLock L(&ClientMutex);
         ConnectedClientIds.Remove(ClientId);
+        ClientSubscriptions.Remove(ClientId); // clean up subscription map
     }
     OnClientDisconnected.Broadcast(ClientId, Reason);
 }
 
 void USMLWebSocketServer::Internal_OnClientMessage(const FString& ClientId, const FString& Message)
 {
-    OnClientMessage.Broadcast(ClientId, Message);
+    // Check for a subscription-control message before forwarding to the delegate.
+    // Format: {"op":"subscribe","events":["ban","chat"]}
+    //         {"op":"unsubscribe","events":["chat"]}
+    //         {"op":"subscribe_all"}
+    bool bIsControlMessage = false;
+
+    TSharedPtr<FJsonObject> Json;
+    TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Message);
+    if (FJsonSerializer::Deserialize(Reader, Json) && Json.IsValid())
+    {
+        FString Op;
+        if (Json->TryGetStringField(TEXT("op"), Op))
+        {
+            if (Op == TEXT("subscribe") || Op == TEXT("unsubscribe"))
+            {
+                const TArray<TSharedPtr<FJsonValue>>* EventsArr = nullptr;
+                Json->TryGetArrayField(TEXT("events"), EventsArr);
+
+                FScopeLock L(&ClientMutex);
+                TSet<FString>& Subs = ClientSubscriptions.FindOrAdd(ClientId);
+
+                if (EventsArr)
+                {
+                    for (const TSharedPtr<FJsonValue>& V : *EventsArr)
+                    {
+                        FString Evt;
+                        if (V.IsValid() && V->TryGetString(Evt) && !Evt.IsEmpty())
+                        {
+                            if (Op == TEXT("subscribe"))
+                                Subs.Add(Evt.ToLower());
+                            else
+                                Subs.Remove(Evt.ToLower());
+                        }
+                    }
+                }
+                bIsControlMessage = true;
+            }
+            else if (Op == TEXT("subscribe_all"))
+            {
+                FScopeLock L(&ClientMutex);
+                ClientSubscriptions.Remove(ClientId); // empty = receive all
+                bIsControlMessage = true;
+            }
+        }
+    }
+
+    if (!bIsControlMessage)
+        OnClientMessage.Broadcast(ClientId, Message);
 }
 
 void USMLWebSocketServer::Internal_OnError(const FString& ErrorMessage)

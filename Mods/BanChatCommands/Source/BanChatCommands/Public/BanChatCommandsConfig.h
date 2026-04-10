@@ -101,6 +101,23 @@ public:
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
     bool bAllowModNotes = false;
 
+    /**
+     * Cooldown in seconds between uses of !warnings and !bancheck for non-admin
+     * player senders.  Set to 0 to disable the cooldown (default).
+     * Admin senders are never subject to this cooldown.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
+    int32 WarningCheckCooldownSeconds = 0;
+
+    /**
+     * Discord webhook URL that !report notifications are sent to.
+     * When empty, !report stores the report internally and acknowledges the sender
+     * but does not post to Discord.
+     * Leave empty to disable Discord delivery.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
+    FString ReportWebhookUrl;
+
     /** Returns the singleton config instance. */
     static const UBanChatCommandsConfig* Get();
 

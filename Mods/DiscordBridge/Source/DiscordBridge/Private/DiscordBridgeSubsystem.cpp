@@ -24,6 +24,8 @@
 #include "WhitelistManager.h"
 #include "Patching/NativeHookManager.h"
 #include "MuteRegistry.h"
+#include "PlayerWarningRegistry.h"
+#include "PlayerSessionRegistry.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDiscordBridge, Log, All);
 
@@ -2965,13 +2967,39 @@ void UDiscordBridgeSubsystem::SendPlayerEventEmbed(const FString& TargetChannelI
                                                    int32 Color,
                                                    const FString& PlayerName)
 {
-	TSharedPtr<FJsonObject> Field = MakeShared<FJsonObject>();
-	Field->SetStringField(TEXT("name"),   TEXT("Player"));
-	Field->SetStringField(TEXT("value"),  PlayerName);
-	Field->SetBoolField  (TEXT("inline"), true);
-
 	TArray<TSharedPtr<FJsonValue>> Fields;
-	Fields.Add(MakeShared<FJsonValueObject>(Field));
+
+	// Primary "Player" field.
+	{
+		TSharedPtr<FJsonObject> Field = MakeShared<FJsonObject>();
+		Field->SetStringField(TEXT("name"),   TEXT("Player"));
+		Field->SetStringField(TEXT("value"),  PlayerName);
+		Field->SetBoolField  (TEXT("inline"), true);
+		Fields.Add(MakeShared<FJsonValueObject>(Field));
+	}
+
+	// Attempt to enrich the embed with warn count from PlayerWarningRegistry.
+	// We look up by display name since we don't have the UID here.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UPlayerWarningRegistry* WarnReg = GI->GetSubsystem<UPlayerWarningRegistry>())
+		{
+			// Try to find the UID for this player via the session registry.
+			if (UPlayerSessionRegistry* SessionReg = GI->GetSubsystem<UPlayerSessionRegistry>())
+			{
+				const TArray<FPlayerSessionRecord> Matches = SessionReg->FindByName(PlayerName);
+				if (Matches.Num() == 1)
+				{
+					const int32 WarnCount = WarnReg->GetWarningCount(Matches[0].Uid);
+					TSharedPtr<FJsonObject> WarnField = MakeShared<FJsonObject>();
+					WarnField->SetStringField(TEXT("name"),   TEXT("Warnings"));
+					WarnField->SetStringField(TEXT("value"),  FString::FromInt(WarnCount));
+					WarnField->SetBoolField  (TEXT("inline"), true);
+					Fields.Add(MakeShared<FJsonValueObject>(WarnField));
+				}
+			}
+		}
+	}
 
 	TSharedPtr<FJsonObject> Embed = MakeShared<FJsonObject>();
 	Embed->SetStringField(TEXT("title"),     Title);

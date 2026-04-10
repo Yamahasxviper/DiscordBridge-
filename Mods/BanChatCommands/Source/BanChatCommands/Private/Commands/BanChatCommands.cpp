@@ -504,7 +504,8 @@ namespace BanChat
             const TCHAR Unit = FChar::ToLower(*p);
             ++p;
 
-            if      (Unit == TEXT('d')) Total += Num * 1440;
+            if      (Unit == TEXT('w')) Total += Num * 10080; // weeks
+            else if (Unit == TEXT('d')) Total += Num * 1440;
             else if (Unit == TEXT('h')) Total += Num * 60;
             else if (Unit == TEXT('m')) Total += Num;
             else return -1;
@@ -516,7 +517,38 @@ namespace BanChat
         return Total;
     }
 
+    /**
+     * Per-player command cooldown tracker.
+     * Maps "commandName:uid" → last-used FDateTime.
+     * Cleaned up lazily; not persisted across restarts (intentional).
+     */
+    static TMap<FString, FDateTime> CommandCooldowns;
+
+    /**
+     * Returns true if the sender is on cooldown for the given command.
+     * Admin senders are never rate-limited.
+     * Updates the cooldown timestamp when returning false (i.e. the command may proceed).
+     */
+    static bool IsOnCooldown(UCommandSender* Sender, const FString& CommandName,
+                             int32 CooldownSeconds, const FString& SenderUid)
+    {
+        if (CooldownSeconds <= 0) return false;
+        if (!Sender->IsPlayerSender()) return false; // console is never throttled
+
+        const FString Key = CommandName + TEXT(":") + SenderUid;
+        const FDateTime Now = FDateTime::UtcNow();
+        if (const FDateTime* Last = CommandCooldowns.Find(Key))
+        {
+            if ((Now - *Last).GetTotalSeconds() < static_cast<double>(CooldownSeconds))
+                return true;
+        }
+        CommandCooldowns.Add(Key, Now);
+        return false;
+    }
+
 } // namespace BanChat
+
+TMap<FString, FDateTime> BanChat::CommandCooldowns;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ALinkBansChatCommand  — /linkbans
@@ -965,6 +997,19 @@ EExecutionStatus ABanCheckChatCommand::ExecuteCommand_Implementation(
     if (!BanChat::IsAdminSender(Sender, AdminId))
         return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
 
+    // Apply per-command cooldown for non-console senders.
+    {
+        const UBanChatCommandsConfig* CoolCfg = UBanChatCommandsConfig::Get();
+        const int32 CoolSecs = CoolCfg ? CoolCfg->WarningCheckCooldownSeconds : 0;
+        if (BanChat::IsOnCooldown(Sender, TEXT("bancheck"), CoolSecs, AdminId))
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] Please wait %d second(s) before using /bancheck again."), CoolSecs),
+                FLinearColor::Yellow);
+            return EExecutionStatus::COMPLETED;
+        }
+    }
+
     FString Uid, DisplayName;
     if (!BanChat::ResolveTarget(this, Sender, Arguments[0], Uid, DisplayName))
         return EExecutionStatus::BAD_ARGUMENTS;
@@ -1397,6 +1442,13 @@ EExecutionStatus AReloadConfigChatCommand::ExecuteCommand_Implementation(
     if (!BanChat::IsAdminSender(Sender, AdminId))
         return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
 
+    // Snapshot key config values BEFORE reload for the diff embed.
+    const UBanChatCommandsConfig* OldCfg = UBanChatCommandsConfig::Get();
+    const int32 OldAdminCount     = OldCfg ? OldCfg->AdminEosPUIDs.Num()     : 0;
+    const int32 OldModCount       = OldCfg ? OldCfg->ModeratorEosPUIDs.Num() : 0;
+    const int32 OldPageSize       = OldCfg ? OldCfg->BanListPageSize          : 10;
+    const bool  OldWarnOnKick     = OldCfg ? OldCfg->bCreateWarnOnKick        : false;
+
     // Force UE to re-read all UPROPERTY(Config) fields from the ini files.
     GetMutableDefault<UBanChatCommandsConfig>()->ReloadConfig();
 
@@ -1413,13 +1465,40 @@ EExecutionStatus AReloadConfigChatCommand::ExecuteCommand_Implementation(
         FString::Printf(TEXT("[BanChatCommands] Config reloaded — %d admin(s) active."), AdminCount),
         FLinearColor::Green);
 
-    // Optionally notify an external dashboard via HTTP POST.
+    // Post config-diff notification to Discord webhook.
     if (Cfg && !Cfg->ReloadConfigWebhookUrl.IsEmpty() &&
         FModuleManager::Get().IsModuleLoaded(TEXT("HTTP")))
     {
+        // Build a list of changed fields for a human-readable diff.
+        TArray<FString> Changes;
+        if (OldAdminCount != AdminCount)
+            Changes.Add(FString::Printf(TEXT("AdminCount: %d → %d"), OldAdminCount, AdminCount));
+        if (OldModCount != (Cfg->ModeratorEosPUIDs.Num()))
+            Changes.Add(FString::Printf(TEXT("ModeratorCount: %d → %d"), OldModCount, Cfg->ModeratorEosPUIDs.Num()));
+        if (OldPageSize != Cfg->BanListPageSize)
+            Changes.Add(FString::Printf(TEXT("BanListPageSize: %d → %d"), OldPageSize, Cfg->BanListPageSize));
+        if (OldWarnOnKick != Cfg->bCreateWarnOnKick)
+            Changes.Add(FString::Printf(TEXT("CreateWarnOnKick: %s → %s"),
+                OldWarnOnKick ? TEXT("true") : TEXT("false"),
+                Cfg->bCreateWarnOnKick ? TEXT("true") : TEXT("false")));
+
+        const FString ChangeList = Changes.IsEmpty()
+            ? TEXT("No changes detected")
+            : FString::Join(Changes, TEXT("\n• "));
+
+        // Escape for JSON.
+        FString EscReloader = Sender->GetSenderName()
+            .Replace(TEXT("\""), TEXT("\\\"")).Replace(TEXT("\n"), TEXT("\\n"));
+        FString EscChanges = ChangeList
+            .Replace(TEXT("\""), TEXT("\\\"")).Replace(TEXT("\n"), TEXT("\\n"));
+
         const FString Payload = FString::Printf(
-            TEXT("{\"event\":\"config_reloaded\",\"adminCount\":%d,\"timestamp\":\"%s\"}"),
-            AdminCount, *FDateTime::UtcNow().ToIso8601());
+            TEXT("{\"embeds\":[{\"title\":\"🔄 Config Reloaded\",\"color\":3066993,\"fields\":["
+                "{\"name\":\"Reloaded By\",\"value\":\"%s\",\"inline\":true},"
+                "{\"name\":\"Admins\",\"value\":\"%d\",\"inline\":true},"
+                "{\"name\":\"Changes\",\"value\":\"%s\",\"inline\":false}],"
+                "\"timestamp\":\"%s\"}]}"),
+            *EscReloader, AdminCount, *EscChanges, *FDateTime::UtcNow().ToIso8601());
 
         TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
             FHttpModule::Get().CreateRequest();
@@ -1430,7 +1509,7 @@ EExecutionStatus AReloadConfigChatCommand::ExecuteCommand_Implementation(
         Request->ProcessRequest();
 
         UE_LOG(LogBanChatCommands, Log,
-            TEXT("BanChatCommands: config-reload notification posted to webhook."));
+            TEXT("BanChatCommands: config-reload diff notification posted to webhook."));
     }
 
     return EExecutionStatus::COMPLETED;
@@ -1607,6 +1686,21 @@ EExecutionStatus AWarnChatCommand::ExecuteCommand_Implementation(
                 FLinearColor::Red);
             BanChat::DoBan(this, Sender, Uid, DisplayName, BanDurationMinutes,
                 TEXT("Auto-banned: reached warning threshold"), TEXT("system"));
+
+            // Post a Discord review embed so staff can approve or override.
+            {
+                FBanEntry ReviewBan;
+                ReviewBan.Uid        = Uid;
+                ReviewBan.PlayerName = DisplayName;
+                ReviewBan.Reason     = TEXT("Auto-banned: reached warning threshold");
+                ReviewBan.BannedBy   = TEXT("system");
+                ReviewBan.BanDate    = FDateTime::UtcNow();
+                ReviewBan.bIsPermanent = (BanDurationMinutes <= 0);
+                ReviewBan.ExpireDate   = ReviewBan.bIsPermanent
+                    ? FDateTime(0)
+                    : FDateTime::UtcNow() + FTimespan::FromMinutes(BanDurationMinutes);
+                FBanDiscordNotifier::NotifyAutoEscalationBan(ReviewBan, WarnCount);
+            }
         }
     }
 
@@ -1632,6 +1726,19 @@ EExecutionStatus AWarningsChatCommand::ExecuteCommand_Implementation(
     FString AdminUid;
     if (!BanChat::IsAdminSender(Sender, AdminUid))
         return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    // Apply per-command cooldown for non-console senders.
+    {
+        const UBanChatCommandsConfig* CoolCfg = UBanChatCommandsConfig::Get();
+        const int32 CoolSecs = CoolCfg ? CoolCfg->WarningCheckCooldownSeconds : 0;
+        if (BanChat::IsOnCooldown(Sender, TEXT("warnings"), CoolSecs, AdminUid))
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] Please wait %d second(s) before using /warnings again."), CoolSecs),
+                FLinearColor::Yellow);
+            return EExecutionStatus::COMPLETED;
+        }
+    }
 
     FString Uid, DisplayName;
     if (!BanChat::ResolveTarget(this, Sender, Arguments[0], Uid, DisplayName))
@@ -2932,6 +3039,236 @@ EExecutionStatus AMuteReasonChatCommand::ExecuteCommand_Implementation(
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] :white_check_mark: Mute reason for **%s** updated."), *DisplayName),
         FLinearColor::Green);
+
+    return EExecutionStatus::COMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AFreezeChatCommand  — /freeze / /spectator
+// ─────────────────────────────────────────────────────────────────────────────
+
+TSet<FString> AFreezeChatCommand::FrozenPlayerUids;
+
+AFreezeChatCommand::AFreezeChatCommand()
+{
+    CommandName          = TEXT("freeze");
+    MinNumberOfArguments = 1;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "FreezeUsage",
+        "/freeze <player|PUID>  — toggle player freeze (repeat to unfreeze)");
+}
+
+EExecutionStatus AFreezeChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString AdminId;
+    if (!BanChat::IsAdminSender(Sender, AdminId))
+        return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    FString Uid, DisplayName;
+    if (!BanChat::ResolveTarget(this, Sender, Arguments[0], Uid, DisplayName))
+        return EExecutionStatus::BAD_ARGUMENTS;
+
+    UWorld* World = GetWorld();
+    if (!World) return EExecutionStatus::UNCOMPLETED;
+
+    const bool bWasFrozen = FrozenPlayerUids.Contains(Uid);
+
+    if (bWasFrozen)
+    {
+        FrozenPlayerUids.Remove(Uid);
+
+        for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+        {
+            APlayerController* PC = It->Get();
+            if (!PC || !PC->PlayerState) continue;
+            if (PC->PlayerState->GetPlayerName() == DisplayName)
+            {
+                PC->SetIgnoreMoveInput(false);
+                break;
+            }
+        }
+
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] %s has been unfrozen."), *DisplayName),
+            FLinearColor::Green);
+    }
+    else
+    {
+        FrozenPlayerUids.Add(Uid);
+
+        for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+        {
+            APlayerController* PC = It->Get();
+            if (!PC || !PC->PlayerState) continue;
+            if (PC->PlayerState->GetPlayerName() == DisplayName)
+            {
+                PC->SetIgnoreMoveInput(true);
+                break;
+            }
+        }
+
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] %s has been frozen. Run /freeze again to unfreeze."), *DisplayName),
+            FLinearColor::Yellow);
+    }
+
+    return EExecutionStatus::COMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AClearChatChatCommand  — /clearchat
+// ─────────────────────────────────────────────────────────────────────────────
+
+AClearChatChatCommand::AClearChatChatCommand()
+{
+    CommandName          = TEXT("clearchat");
+    MinNumberOfArguments = 0;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "ClearChatUsage",
+        "/clearchat [reason...]  — flush chat and notify Discord");
+}
+
+EExecutionStatus AClearChatChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString AdminId;
+    if (!BanChat::IsAdminSender(Sender, AdminId))
+        return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    const FString Reason = Arguments.Num() > 0
+        ? BanChat::JoinArgs(Arguments, 0)
+        : TEXT("Chat cleared by administrator");
+    const FString AdminName = Sender->GetSenderName();
+
+    UWorld* World = GetWorld();
+    if (!World) return EExecutionStatus::UNCOMPLETED;
+
+    // Broadcast blank lines to visually scroll chat off screen.
+    for (int32 i = 0; i < 30; ++i)
+        for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+            if (APlayerController* PC = It->Get())
+                PC->ClientMessage(TEXT(" "));
+
+    // Notify all players.
+    const FString Notice = FString::Printf(
+        TEXT("Chat has been cleared by %s. Reason: %s"), *AdminName, *Reason);
+    for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+        if (APlayerController* PC = It->Get())
+            PC->ClientMessage(Notice);
+
+    // Post to BanSystem Discord webhook.
+    {
+        const UBanSystemConfig* SysCfg = UBanSystemConfig::Get();
+        if (SysCfg && !SysCfg->DiscordWebhookUrl.IsEmpty()
+            && FModuleManager::Get().IsModuleLoaded(TEXT("HTTP")))
+        {
+            auto Esc = [](const FString& S) -> FString
+            {
+                return S.Replace(TEXT("\""), TEXT("\\\"")).Replace(TEXT("\n"), TEXT("\\n"));
+            };
+            const FString JsonPayload = FString::Printf(
+                TEXT("{\"embeds\":[{\"title\":\"Chat Cleared\",\"color\":3447003,\"fields\":["
+                    "{\"name\":\"Admin\",\"value\":\"%s\",\"inline\":true},"
+                    "{\"name\":\"Reason\",\"value\":\"%s\",\"inline\":false}],"
+                    "\"timestamp\":\"%s\"}]}"),
+                *Esc(AdminName), *Esc(Reason), *FDateTime::UtcNow().ToIso8601());
+
+            TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req =
+                FHttpModule::Get().CreateRequest();
+            Req->SetURL(SysCfg->DiscordWebhookUrl);
+            Req->SetVerb(TEXT("POST"));
+            Req->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+            Req->SetContentAsString(JsonPayload);
+            Req->ProcessRequest();
+        }
+    }
+
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("[BanChatCommands] Chat cleared. Reason: %s"), *Reason),
+        FLinearColor::Green);
+
+    return EExecutionStatus::COMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AReportChatCommand  — /report
+// ─────────────────────────────────────────────────────────────────────────────
+
+AReportChatCommand::AReportChatCommand()
+{
+    CommandName          = TEXT("report");
+    MinNumberOfArguments = 1;
+    bOnlyUsableByPlayer  = true;
+    Usage = NSLOCTEXT("BanChatCommands", "ReportUsage",
+        "/report <player> [reason...]  — flag a player for staff review");
+}
+
+EExecutionStatus AReportChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    // Available to all players — no admin check required.
+    // Derive the sender's UID for cooldown keying.
+    FString SenderUid;
+    {
+        APlayerController* PC = Cast<APlayerController>(Sender->GetPlayer());
+        if (PC && PC->PlayerState)
+        {
+            const FUniqueNetIdRepl& Id = PC->PlayerState->GetUniqueId();
+            if (Id.IsValid() && Id.GetType() != FName(TEXT("NONE")))
+                SenderUid = UBanDatabase::MakeUid(TEXT("EOS"), Id.ToString().ToLower());
+            else
+                SenderUid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+        }
+    }
+
+    // 30-second per-sender cooldown to prevent spam.
+    const FString CooldownKey = SenderUid.IsEmpty() ? Sender->GetSenderName() : SenderUid;
+    if (BanChat::IsOnCooldown(Sender, TEXT("report"), 30, CooldownKey))
+    {
+        Sender->SendChatMessage(
+            TEXT("[BanChatCommands] Please wait 30 seconds before submitting another report."),
+            FLinearColor::Yellow);
+        return EExecutionStatus::COMPLETED;
+    }
+
+    const FString TargetName = Arguments[0];
+    const FString Reason = Arguments.Num() > 1
+        ? BanChat::JoinArgs(Arguments, 1)
+        : TEXT("No reason given");
+    const FString ReporterName = Sender->GetSenderName();
+
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("[BanChatCommands] Report submitted against '%s'. Staff have been notified."), *TargetName),
+        FLinearColor::Green);
+
+    // Post to Discord via ReportWebhookUrl.
+    const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
+    const FString WebhookUrl = Cfg ? Cfg->ReportWebhookUrl : TEXT("");
+    if (!WebhookUrl.IsEmpty() && FModuleManager::Get().IsModuleLoaded(TEXT("HTTP")))
+    {
+        auto Esc = [](const FString& S) -> FString
+        {
+            return S.Replace(TEXT("\""), TEXT("\\\"")).Replace(TEXT("\n"), TEXT("\\n"));
+        };
+
+        const FString JsonPayload = FString::Printf(
+            TEXT("{\"embeds\":[{\"title\":\"Player Report\",\"color\":16744272,\"fields\":["
+                "{\"name\":\"Reported Player\",\"value\":\"%s\",\"inline\":true},"
+                "{\"name\":\"Reported By\",\"value\":\"%s\",\"inline\":true},"
+                "{\"name\":\"Reason\",\"value\":\"%s\",\"inline\":false}],"
+                "\"timestamp\":\"%s\"}]}"),
+            *Esc(TargetName), *Esc(ReporterName),
+            *Esc(Reason), *FDateTime::UtcNow().ToIso8601());
+
+        TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req =
+            FHttpModule::Get().CreateRequest();
+        Req->SetURL(WebhookUrl);
+        Req->SetVerb(TEXT("POST"));
+        Req->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+        Req->SetContentAsString(JsonPayload);
+        Req->ProcessRequest();
+    }
 
     return EExecutionStatus::COMPLETED;
 }

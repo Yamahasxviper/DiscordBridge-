@@ -188,7 +188,69 @@ void FBanDiscordNotifier::NotifyPlayerKicked(const FString& PlayerName, const FS
     }
 }
 
-void FBanDiscordNotifier::NotifyBanExpired(const FBanEntry& Entry)
+void FBanDiscordNotifier::NotifyAppealSubmitted(const FBanAppealEntry& Appeal)
+{
+    const FString PlayerValue = Appeal.Uid.IsEmpty() ? TEXT("(unknown)") : Appeal.Uid;
+    const FString SubmittedStr = Appeal.SubmittedAt.ToString(TEXT("%Y-%m-%d %H:%M:%S")) + TEXT(" UTC");
+
+    const FString Fields =
+        Field(TEXT("UID"),         PlayerValue)        + TEXT(",") +
+        Field(TEXT("Contact"),     Appeal.ContactInfo.IsEmpty() ? TEXT("(not provided)") : Appeal.ContactInfo) + TEXT(",") +
+        Field(TEXT("Submitted"),   SubmittedStr,   false) + TEXT(",") +
+        Field(TEXT("Reason"),      Appeal.Reason,  false);
+
+    // Blue-purple: 5793266
+    PostWebhook(BuildEmbed(5793266,
+        FString::Printf(TEXT("📩 Ban Appeal #%lld Submitted"), Appeal.Id),
+        Fields));
+
+    // WebSocket push
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        Obj->SetNumberField(TEXT("appealId"),    static_cast<double>(Appeal.Id));
+        Obj->SetStringField(TEXT("uid"),         Appeal.Uid);
+        Obj->SetStringField(TEXT("contactInfo"), Appeal.ContactInfo);
+        Obj->SetStringField(TEXT("reason"),      Appeal.Reason);
+        Obj->SetStringField(TEXT("submittedAt"), Appeal.SubmittedAt.ToIso8601());
+        UBanWebSocketPusher::PushEvent(TEXT("appeal_submitted"), Obj);
+    }
+}
+
+void FBanDiscordNotifier::NotifyAutoEscalationBan(const FBanEntry& Ban, int32 WarnCount)
+{
+    const FString PlayerValue = Ban.PlayerName.IsEmpty()
+        ? Ban.Uid
+        : Ban.PlayerName + TEXT(" (") + Ban.Uid + TEXT(")");
+
+    const FString DurationValue = Ban.bIsPermanent
+        ? TEXT("Permanent")
+        : FString::Printf(TEXT("%lld minutes"),
+            (Ban.ExpireDate - Ban.BanDate).GetTotalMinutes());
+
+    const FString Fields =
+        Field(TEXT("Player"),       PlayerValue)                    + TEXT(",") +
+        Field(TEXT("Warnings"),     FString::FromInt(WarnCount))    + TEXT(",") +
+        Field(TEXT("Duration"),     DurationValue)                  + TEXT(",") +
+        Field(TEXT("Reason"),       Ban.Reason, false);
+
+    // Dark orange: 16742912
+    PostWebhook(BuildEmbed(16742912,
+        TEXT("⚡ Auto-Escalation Ban Issued (Review Required)"),
+        Fields));
+
+    // WebSocket push
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        Obj->SetStringField(TEXT("uid"),        Ban.Uid);
+        Obj->SetStringField(TEXT("playerName"), Ban.PlayerName);
+        Obj->SetNumberField(TEXT("warnCount"),  static_cast<double>(WarnCount));
+        Obj->SetBoolField  (TEXT("permanent"),  Ban.bIsPermanent);
+        Obj->SetStringField(TEXT("reason"),     Ban.Reason);
+        UBanWebSocketPusher::PushEvent(TEXT("auto_escalation_ban"), Obj);
+    }
+}
+
+
 {
     const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
     if (!Cfg || !Cfg->bNotifyBanExpired) return;
