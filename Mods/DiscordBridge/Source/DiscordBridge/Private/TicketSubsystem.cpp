@@ -15,6 +15,7 @@
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 #include "BanAppealRegistry.h"
+#include "Containers/Ticker.h"
 
 DEFINE_LOG_CATEGORY(LogTicketSystem);
 
@@ -43,12 +44,69 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	// check works correctly immediately after a server restart.
 	LoadTicketState();
 
+	// Start the inactive-ticket check ticker when enabled.
+	if (Config.InactiveTicketTimeoutHours > 0.0f)
+	{
+		// Check every 5 minutes; the real threshold is InactiveTicketTimeoutHours.
+		constexpr float CheckIntervalSeconds = 5.0f * 60.0f;
+
+		TWeakObjectPtr<UTicketSubsystem> WeakThis(this);
+		InactiveTicketCheckHandle = FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
+			{
+				const FTimespan Threshold = FTimespan::FromHours(
+					static_cast<double>(Config.InactiveTicketTimeoutHours));
+				const FDateTime Now = FDateTime::UtcNow();
+
+				// Collect channels that have timed out; avoid modifying the map while iterating.
+				TArray<FString> TimedOut;
+				for (const auto& Pair : TicketChannelToOpener)
+				{
+					const FString& ChanId = Pair.Key;
+					const FDateTime* LastActivity = TicketChannelToLastActivity.Find(ChanId);
+					if (!LastActivity)
+					{
+						// No activity tracked yet — use now as the baseline so a fresh
+						// ticket is not immediately closed after a restart.
+						TicketChannelToLastActivity.Add(ChanId, Now);
+						continue;
+					}
+					if ((Now - *LastActivity) >= Threshold)
+					{
+						TimedOut.Add(ChanId);
+					}
+				}
+
+				for (const FString& ChanId : TimedOut)
+				{
+					UE_LOG(LogTicketSystem, Log,
+					       TEXT("TicketSystem: Closing inactive ticket channel %s (no activity for %.1f h)."),
+					       *ChanId, Config.InactiveTicketTimeoutHours);
+					CloseTicketChannelInactive(ChanId);
+				}
+
+				return true; // keep ticking
+			}),
+			CheckIntervalSeconds);
+
+		UE_LOG(LogTicketSystem, Log,
+		       TEXT("TicketSystem: Inactive-ticket timeout enabled (%.1f h, checked every 5 min)."),
+		       Config.InactiveTicketTimeoutHours);
+	}
+
 	UE_LOG(LogTicketSystem, Log,
 	       TEXT("TicketSystem: Initialized. Waiting for Discord provider to be injected via SetProvider()."));
 }
 
 void UTicketSubsystem::Deinitialize()
 {
+	// Stop the inactive-ticket check ticker.
+	if (InactiveTicketCheckHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(InactiveTicketCheckHandle);
+		InactiveTicketCheckHandle.Reset();
+	}
+
 	// Detach from the provider (unsubscribes delegates, clears CachedProvider).
 	SetProvider(nullptr);
 
@@ -56,6 +114,7 @@ void UTicketSubsystem::Deinitialize()
 	OpenerToTicketChannel.Empty();
 	TicketChannelToAssignee.Empty();
 	TicketChannelToAssigneeName.Empty();
+	TicketChannelToLastActivity.Empty();
 
 	Super::Deinitialize();
 }
@@ -379,6 +438,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		}
 		TicketChannelToAssignee.Remove(SourceChannelId);
 		TicketChannelToAssigneeName.Remove(SourceChannelId);
+		TicketChannelToLastActivity.Remove(SourceChannelId);
 		// Persist the updated state so this closure survives a server restart.
 		SaveTicketState();
 
@@ -907,6 +967,9 @@ void UTicketSubsystem::CreateTicketChannel(
 			// Track the channel.
 			Self->TicketChannelToOpener.Add(NewChannelId, OpenerUserIdCopy);
 			Self->OpenerToTicketChannel.Add(OpenerUserIdCopy, NewChannelId);
+			// Initialise last-activity to now so the inactive-timeout
+			// does not immediately fire on freshly-opened tickets.
+			Self->TicketChannelToLastActivity.Add(NewChannelId, FDateTime::UtcNow());
 			// Persist the updated state so this ticket survives a server restart.
 			Self->SaveTicketState();
 
@@ -1222,6 +1285,12 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	FString SourceChannelId;
 	MessageObj->TryGetStringField(TEXT("channel_id"), SourceChannelId);
 
+	// Update last-activity timestamp for ticket channels on every message.
+	if (!SourceChannelId.IsEmpty() && TicketChannelToOpener.Contains(SourceChannelId))
+	{
+		TicketChannelToLastActivity.Add(SourceChannelId, FDateTime::UtcNow());
+	}
+
 	IDiscordBridgeProvider* Bridge = GetBridge();
 
 	// ── !ticket-assign <@userId> ──────────────────────────────────────────────
@@ -1448,5 +1517,122 @@ void UTicketSubsystem::LoadTicketState()
 		UE_LOG(LogTicketSystem, Log,
 		       TEXT("TicketSystem: Restored %d active ticket(s) from previous session."),
 		       Loaded);
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CloseTicketChannelInactive — auto-close a ticket due to inactivity
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
+{
+	IDiscordBridgeProvider* Bridge = GetBridge();
+	if (!Bridge) return;
+
+	// Remove from all tracking maps.
+	FString RemovedOpener;
+	TicketChannelToOpener.RemoveAndCopyValue(ChannelId, RemovedOpener);
+	if (!RemovedOpener.IsEmpty())
+		OpenerToTicketChannel.Remove(RemovedOpener);
+
+	TicketChannelToAssignee.Remove(ChannelId);
+	TicketChannelToAssigneeName.Remove(ChannelId);
+	TicketChannelToLastActivity.Remove(ChannelId);
+	SaveTicketState();
+
+	// Post an auto-close notice so the transcript includes it.
+	Bridge->SendDiscordChannelMessage(ChannelId,
+		FString::Printf(
+			TEXT(":alarm_clock: This ticket has been automatically closed after %.1f hour(s) of inactivity."),
+			Config.InactiveTicketTimeoutHours));
+
+	// Archive transcript and delete the channel.
+	if (!Config.TicketLogChannelId.IsEmpty() && !Bridge->GetBotToken().IsEmpty())
+	{
+		const FString LogChannelId    = Config.TicketLogChannelId;
+		const FString BotToken        = Bridge->GetBotToken();
+		const FString ClosedChannelId = ChannelId;
+		const FString OpenerIdForLog  = RemovedOpener;
+		const FString ClosedAt        = FDateTime::UtcNow().ToString(TEXT("%Y-%m-%d"));
+
+		TWeakObjectPtr<UTicketSubsystem> WeakThis(this);
+
+		const FString FetchUrl = FString::Printf(
+			TEXT("https://discord.com/api/v10/channels/%s/messages?limit=100"),
+			*ClosedChannelId);
+
+		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> FetchReq =
+			FHttpModule::Get().CreateRequest();
+		FetchReq->SetURL(FetchUrl);
+		FetchReq->SetVerb(TEXT("GET"));
+		FetchReq->SetHeader(TEXT("Authorization"),
+			FString::Printf(TEXT("Bot %s"), *BotToken));
+
+		FetchReq->OnProcessRequestComplete().BindWeakLambda(
+			WeakThis.Get(),
+			[WeakThis, LogChannelId, BotToken, OpenerIdForLog, ClosedAt, ClosedChannelId]
+			(FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bOk) mutable
+			{
+				UTicketSubsystem* Self = WeakThis.Get();
+				if (!Self) return;
+				IDiscordBridgeProvider* B = Self->GetBridge();
+				if (!B) return;
+
+				FString TranscriptText = FString::Printf(
+					TEXT(":scroll: **Ticket Auto-Closed (inactivity)**\n")
+					TEXT("Opener: %s\n")
+					TEXT("Date closed: %s\n\n"),
+					OpenerIdForLog.IsEmpty() ? TEXT("(unknown)") : *FString::Printf(TEXT("<@%s>"), *OpenerIdForLog),
+					*ClosedAt);
+
+				if (bOk && Resp.IsValid() &&
+				    Resp->GetResponseCode() >= 200 && Resp->GetResponseCode() < 300)
+				{
+					TSharedPtr<FJsonValue> Root;
+					TSharedRef<TJsonReader<>> Reader =
+						TJsonReaderFactory<>::Create(Resp->GetContentAsString());
+					if (FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid())
+					{
+						const TArray<TSharedPtr<FJsonValue>>* MsgArr = nullptr;
+						if (Root->TryGetArray(MsgArr) && MsgArr)
+						{
+							for (int32 Idx = MsgArr->Num() - 1; Idx >= 0; --Idx)
+							{
+								const TSharedPtr<FJsonObject>* MsgObjPtr = nullptr;
+								if (!(*MsgArr)[Idx]->TryGetObject(MsgObjPtr) || !MsgObjPtr) continue;
+
+								FString AuthorName;
+								const TSharedPtr<FJsonObject>* AuthorPtr = nullptr;
+								if ((*MsgObjPtr)->TryGetObjectField(TEXT("author"), AuthorPtr) && AuthorPtr)
+								{
+									if (!(*AuthorPtr)->TryGetStringField(TEXT("global_name"), AuthorName) || AuthorName.IsEmpty())
+										(*AuthorPtr)->TryGetStringField(TEXT("username"), AuthorName);
+								}
+								FString MsgContent;
+								(*MsgObjPtr)->TryGetStringField(TEXT("content"), MsgContent);
+
+								if (!AuthorName.IsEmpty() && !MsgContent.IsEmpty())
+									TranscriptText += FString::Printf(TEXT("[%s]: %s\n"), *AuthorName, *MsgContent);
+							}
+						}
+					}
+				}
+				else
+				{
+					TranscriptText += TEXT("*(Could not fetch message history.)*\n");
+				}
+
+				if (TranscriptText.Len() > 1900)
+					TranscriptText = TranscriptText.Left(1900) + TEXT("\n*(transcript truncated)*");
+
+				B->SendDiscordChannelMessage(LogChannelId, TranscriptText);
+			});
+
+		FetchReq->ProcessRequest();
+		Bridge->DeleteDiscordChannel(ChannelId);
+	}
+	else
+	{
+		Bridge->DeleteDiscordChannel(ChannelId);
 	}
 }

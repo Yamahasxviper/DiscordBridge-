@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Dom/JsonObject.h"
+#include "Containers/Ticker.h"
 #include "IDiscordBridgeProvider.h"
 #include "TicketConfig.h"
 #include "TicketSubsystem.generated.h"
@@ -177,6 +178,14 @@ private:
 	/** Build and return the close-ticket button JSON message body. */
 	static TSharedPtr<FJsonObject> MakeCloseButtonMessage(const FString& OpenerUserId);
 
+	/**
+	 * Close a ticket channel due to inactivity (or any programmatic trigger).
+	 * Posts a warning message to the channel, archives a transcript if
+	 * TicketLogChannelId is set, then deletes the Discord channel.
+	 * Removes the channel from all tracking maps and persists state.
+	 */
+	void CloseTicketChannelInactive(const FString& ChannelId);
+
 	/** Return a pointer to IDiscordBridgeProvider (set via SetProvider()). */
 	IDiscordBridgeProvider* GetBridge() const;
 
@@ -238,6 +247,20 @@ private:
 	 * staff member (for display in !ticket-list without a separate API call).
 	 */
 	TMap<FString, FString> TicketChannelToAssigneeName;
+
+	/**
+	 * Maps each active ticket channel ID to the UTC timestamp of the most
+	 * recent message sent in that channel.  Used by the inactive-ticket
+	 * timeout ticker to auto-close channels that have been idle for longer
+	 * than InactiveTicketTimeoutHours.
+	 * Populated when the ticket is created and updated on each MESSAGE_CREATE
+	 * event that originates from a tracked ticket channel.
+	 */
+	TMap<FString, FDateTime> TicketChannelToLastActivity;
+
+	/** Ticker handle for the inactive-ticket check.  Valid only when
+	 *  InactiveTicketTimeoutHours > 0. */
+	FTSTicker::FDelegateHandle InactiveTicketCheckHandle;
 
 	/** Injected Discord provider.  nullptr until SetProvider() is called. */
 	IDiscordBridgeProvider* CachedProvider = nullptr;

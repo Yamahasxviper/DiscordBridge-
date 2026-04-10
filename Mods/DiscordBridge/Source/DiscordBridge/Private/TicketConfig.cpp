@@ -33,6 +33,18 @@ static bool GetIniBool(const FConfigFile& Cfg, const FString& Key, bool Default)
 	return Default;
 }
 
+static float GetIniFloat(const FConfigFile& Cfg, const FString& Key, float Default)
+{
+	FString StrVal;
+	if (Cfg.GetString(TEXT("TicketSystem"), *Key, StrVal))
+	{
+		StrVal.TrimStartAndEndInline();
+		if (!StrVal.IsEmpty())
+			return FCString::Atof(*StrVal);
+	}
+	return Default;
+}
+
 /** Parse every occurrence of "Key=Value" in a raw INI file string. */
 static TArray<FString> ParseRawIniArray(const FString& RawContent, const FString& Key)
 {
@@ -117,6 +129,7 @@ FTicketConfig FTicketConfig::Load()
 		Config.TicketPanelChannelId     = GetIniString(Cfg, TEXT("TicketPanelChannelId"));
 		Config.TicketCategoryId         = GetIniString(Cfg, TEXT("TicketCategoryId"));
 		Config.CustomTicketReasons      = ParseRawIniArray(RawContent, TEXT("TicketReason"));
+		Config.InactiveTicketTimeoutHours = GetIniFloat(Cfg, TEXT("InactiveTicketTimeoutHours"), 0.0f);
 
 		UE_LOG(LogTicketSystem, Log,
 		       TEXT("TicketSystem: Loaded config from %s"), *PrimaryPath);
@@ -144,6 +157,7 @@ FTicketConfig FTicketConfig::Load()
 			Config.TicketPanelChannelId    = GetIniString(BackupCfg, TEXT("TicketPanelChannelId"));
 			Config.TicketCategoryId        = GetIniString(BackupCfg, TEXT("TicketCategoryId"));
 			Config.CustomTicketReasons     = ParseRawIniArray(BackupRaw, TEXT("TicketReason"));
+			Config.InactiveTicketTimeoutHours = GetIniFloat(BackupCfg, TEXT("InactiveTicketTimeoutHours"), 0.0f);
 
 			UE_LOG(LogTicketSystem, Log,
 			       TEXT("TicketSystem: Primary config not found at '%s' – restored from backup."),
@@ -179,6 +193,8 @@ FTicketConfig FTicketConfig::Load()
 		{
 			BackupContent += FString::Printf(TEXT("TicketReason=%s\n"), *Reason);
 		}
+		BackupContent += FString::Printf(TEXT("InactiveTicketTimeoutHours=%.2f\n"),
+			Config.InactiveTicketTimeoutHours);
 
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
 		FFileHelper::SaveStringToFile(BackupContent, *BackupPath);

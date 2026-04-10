@@ -116,6 +116,19 @@ struct DISCORDBRIDGE_API FTicketConfig
 	 */
 	TArray<FString> CustomTicketReasons;
 
+	// ── Inactive-ticket auto-close ────────────────────────────────────────────
+
+	/**
+	 * Number of hours of inactivity after which an open ticket channel is
+	 * automatically closed (transcript archived if TicketLogChannelId is set,
+	 * then the channel is deleted).
+	 *
+	 * Set to 0 (default) to disable automatic closure.
+	 *
+	 * Example: InactiveTicketTimeoutHours=24   ; close tickets with no messages for 24 hours
+	 */
+	float InactiveTicketTimeoutHours{ 0.0f };
+
 	// ── Static helpers ────────────────────────────────────────────────────────
 
 	/** Load settings from DefaultTickets.ini (+ backup) and return a populated config. */

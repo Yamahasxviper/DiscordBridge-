@@ -2,6 +2,7 @@
 
 #include "PlayerSessionRegistry.h"
 #include "BanSystemConfig.h"
+#include "BanWebSocketPusher.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -50,30 +51,45 @@ void UPlayerSessionRegistry::RecordSession(const FString& Uid, const FString& Di
 
     const FString NowStr = FDateTime::UtcNow().ToIso8601();
 
-    FScopeLock Lock(&Mutex);
-
-    // Update existing record if the UID already exists.
-    for (FPlayerSessionRecord& R : Records)
     {
-        if (R.Uid.Equals(Uid, ESearchCase::IgnoreCase))
+        FScopeLock Lock(&Mutex);
+
+        bool bUpdated = false;
+        for (FPlayerSessionRecord& R : Records)
         {
-            R.DisplayName = DisplayName;
-            R.LastSeen    = NowStr;
-            if (!IpAddress.IsEmpty())
-                R.IpAddress = IpAddress;
+            if (R.Uid.Equals(Uid, ESearchCase::IgnoreCase))
+            {
+                R.DisplayName = DisplayName;
+                R.LastSeen    = NowStr;
+                if (!IpAddress.IsEmpty())
+                    R.IpAddress = IpAddress;
+                SaveToFile();
+                bUpdated = true;
+                break;
+            }
+        }
+
+        if (!bUpdated)
+        {
+            FPlayerSessionRecord NewRec;
+            NewRec.Uid         = Uid;
+            NewRec.DisplayName = DisplayName;
+            NewRec.LastSeen    = NowStr;
+            NewRec.IpAddress   = IpAddress;
+            Records.Add(NewRec);
             SaveToFile();
-            return;
         }
     }
 
-    // New UID — append.
-    FPlayerSessionRecord NewRec;
-    NewRec.Uid         = Uid;
-    NewRec.DisplayName = DisplayName;
-    NewRec.LastSeen    = NowStr;
-    NewRec.IpAddress   = IpAddress;
-    Records.Add(NewRec);
-    SaveToFile();
+    // Push player-join event via WebSocket (outside the lock).
+    {
+        TSharedPtr<FJsonObject> Fields = MakeShared<FJsonObject>();
+        Fields->SetStringField(TEXT("uid"),         Uid);
+        Fields->SetStringField(TEXT("displayName"), DisplayName);
+        if (!IpAddress.IsEmpty())
+            Fields->SetStringField(TEXT("ipAddress"), IpAddress);
+        UBanWebSocketPusher::PushEvent(TEXT("player_join"), Fields);
+    }
 }
 
 TArray<FPlayerSessionRecord> UPlayerSessionRegistry::FindByName(const FString& NameSubstring) const

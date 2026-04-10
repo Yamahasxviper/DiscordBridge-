@@ -1536,6 +1536,16 @@ void UBanRestApi::RegisterRoutes()
                 }
             }
 
+            // WebSocket push.
+            {
+                TSharedPtr<FJsonObject> PushFields = MakeShared<FJsonObject>();
+                PushFields->SetStringField(TEXT("uid"),         NewEntry.Uid);
+                PushFields->SetStringField(TEXT("reason"),      NewEntry.Reason);
+                PushFields->SetStringField(TEXT("contactInfo"), NewEntry.ContactInfo);
+                PushFields->SetStringField(TEXT("submittedAt"), NewEntry.SubmittedAt.ToIso8601());
+                UBanWebSocketPusher::PushEvent(TEXT("appeal"), PushFields);
+            }
+
             TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
             Obj->SetNumberField(TEXT("id"),          static_cast<double>(NewEntry.Id));
             Obj->SetStringField(TEXT("uid"),         NewEntry.Uid);

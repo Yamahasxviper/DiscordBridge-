@@ -37,6 +37,7 @@
  *  !note <PUID|name> <text...>             – Add a private admin note.
  *  !notes <PUID|name>                      – List all admin notes for a player.
  *  !reason <UID>                           – Show the ban reason for a UID.
+ *  !mutereason <PUID|name> <new reason...> – Update the reason on an active mute.
  *   *  !appeals                               – List pending ban appeals (max 10).
  *  !dismissappeal <id>                    – Delete a ban appeal by integer ID.
 !reloadconfig                           – Reload BanBridge config from disk.
@@ -48,6 +49,7 @@
  *  !mute <PUID|name> [minutes] [reason]    – Mute a player's in-game chat.
  *  !unmute <PUID|name>                     – Lift a mute from a player.
  *  !tempmute <PUID|name> <minutes>         – Apply a timed mute.
+ *  !tempunmute <PUID|name>                 – Lift a timed mute (fails for indefinite mutes).
  *  !mutecheck <PUID|name>                  – Check mute status and expiry.
  *  !mutelist                               – List all currently muted players.
  *  !announce <message...>                  – Broadcast to all in-game players.
@@ -276,6 +278,25 @@ private:
 
 	/** Handle !mutelist. Lists all currently muted players. */
 	void HandleMuteListCommand(const FString& ChannelId);
+
+	/**
+	 * Handle !tempunmute.
+	 * Lifts a *timed* mute from a player.  Fails with an error when the mute
+	 * is indefinite (use !unmute for those).
+	 * Usage: !tempunmute <PUID|name>
+	 */
+	void HandleTempUnmuteCommand(const TArray<FString>& Args,
+	                              const FString& ChannelId,
+	                              const FString& SenderName);
+
+	/**
+	 * Handle !mutereason.
+	 * Updates the reason stored on an existing active mute without lifting it.
+	 * Usage: !mutereason <PUID|name> <new reason...>
+	 */
+	void HandleMuteReasonCommand(const TArray<FString>& Args,
+	                              const FString& ChannelId,
+	                              const FString& SenderName);
 
 	/** Handle !announce. Usage: !announce <message...> */
 	void HandleAnnounceCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
