@@ -3,68 +3,85 @@
 #pragma once
 #include "CoreMinimal.h"
 
+/** A single whitelist entry with optional EOS PUID and expiry. */
+struct DISCORDBRIDGE_API FWhitelistEntry
+{
+FString   Name;
+FString   EosPUID;
+FDateTime ExpiresAt; // FDateTime(0) = permanent
+};
+
+/** A single audit log entry. */
+struct DISCORDBRIDGE_API FWhitelistAuditEntry
+{
+FDateTime Timestamp;
+FString   AdminName;
+FString   Action;  // "add", "remove", "enable", "disable"
+FString   Target;
+};
+
 /**
  * Manages the server whitelist for the DiscordBridge mod.
- *
- * Config is stored at <ProjectSavedDir>/ServerWhitelist.json.
- * The file is created with defaults on first use and written to disk
- * immediately on every change so changes survive server restarts.
- *
- * No additional dependency beyond Core/Json — uses UE4 Json + FFileHelper.
- *
- * Example file:
- *   {
- *     "enabled": false,
- *     "players": ["Alice", "Bob"]
- *   }
+ * Config stored at <ProjectSavedDir>/ServerWhitelist.json.
  */
 class DISCORDBRIDGE_API FWhitelistManager
 {
 public:
-	/**
-	 * Load (or create) the whitelist file from disk. Call once at startup,
-	 * after the INI config has been loaded.
-	 *
-	 * @param bDefaultEnabled  The WhitelistEnabled value from the INI config.
-	 *                         Applied on every startup — the player list is read
-	 *                         from the JSON file, but the enabled/disabled state
-	 *                         always comes from this parameter so operators can
-	 *                         toggle the whitelist by editing the config and
-	 *                         restarting the server.
-	 */
-	static void Load(bool bDefaultEnabled = false);
+static void Load(bool bDefaultEnabled = false);
+static void Save();
+static bool IsEnabled();
+static void SetEnabled(bool bNewEnabled, const FString& AdminName = TEXT(""));
 
-	/** Persist the current state to disk immediately. */
-	static void Save();
+/** Returns true if the given player name/PUID is on the whitelist (name comparison case-insensitive). */
+static bool IsWhitelisted(const FString& PlayerName, const FString& EosPUID = TEXT(""));
 
-	/** Returns true if the whitelist is currently active. */
-	static bool IsEnabled();
+/** Returns true if the given EOS PUID is on the whitelist. */
+static bool IsWhitelistedByPUID(const FString& EosPUID);
 
-	/** Enable or disable the whitelist and save. */
-	static void SetEnabled(bool bEnabled);
+/**
+ * Adds a player and saves. Returns false if already listed or capacity full.
+ * ExpiresAt == FDateTime(0) means permanent.
+ */
+static bool AddPlayer(const FString& PlayerName,
+                      const FString& EosPUID    = TEXT(""),
+                      const FString& AdminName  = TEXT(""),
+                      FDateTime      ExpiresAt  = FDateTime(0));
 
-	/**
-	 * Returns true if the given player name is on the whitelist.
-	 * Comparison is case-insensitive.
-	 */
-	static bool IsWhitelisted(const FString& PlayerName);
+/**
+ * Removes a player and saves. Returns false if not found.
+ * If EosPUID is non-empty, remove by PUID; otherwise remove by name (case-insensitive).
+ */
+static bool RemovePlayer(const FString& PlayerName, const FString& EosPUID = TEXT(""), const FString& AdminName = TEXT(""));
 
-	/**
-	 * Adds a player and saves. Returns false if already listed.
-	 */
-	static bool AddPlayer(const FString& PlayerName);
+/** Returns a copy of player names (backward-compat). */
+static TArray<FString> GetAll();
 
-	/**
-	 * Removes a player and saves. Returns false if not found.
-	 */
-	static bool RemovePlayer(const FString& PlayerName);
+/** Returns all entries. */
+static TArray<FWhitelistEntry> GetAllEntries();
 
-	/** Returns a copy of the current whitelist. */
-	static TArray<FString> GetAll();
+// ── Audit log ─────────────────────────────────────────────────────────────
+
+static void LogAudit(const FString& Admin, const FString& Action, const FString& Target);
+static TArray<FWhitelistAuditEntry> GetAuditLog(int32 MaxEntries = 20);
+
+// ── Capacity ──────────────────────────────────────────────────────────────
+
+static int32 GetMaxSlots();
+static void  SetMaxSlots(int32 InMaxSlots);
+
+// ── Timed entries ─────────────────────────────────────────────────────────
+
+/** Parse a duration string (e.g. "7d", "2h", "30m", "1w"). Returns FTimespan::Zero() on failure. */
+static FTimespan ParseDuration(const FString& DurStr);
+
+/** Remove expired entries. Fills OutExpiredNames with removed player names. Calls Save() if any removed. */
+static void RemoveExpiredEntries(TArray<FString>& OutExpiredNames);
 
 private:
-	static FString GetFilePath();
+static FString GetFilePath();
 
-	static bool bEnabled;
-	static TArray<FString> Players; // stored lower-case for comparison
+static bool                     bEnabled;
+static TArray<FWhitelistEntry>  Entries;
+static TArray<FWhitelistAuditEntry> AuditLog;
+static int32                    MaxSlots;
 };

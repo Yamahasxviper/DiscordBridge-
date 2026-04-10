@@ -95,6 +95,29 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	// survives restarts, so runtime !whitelist on / !whitelist off changes persist.
 	// To force-reset to this config value: delete ServerWhitelist.json and restart.
 	FWhitelistManager::Load(Config.bWhitelistEnabled);
+	FWhitelistManager::SetMaxSlots(Config.MaxWhitelistSlots);
+
+	// Start a 60-second ticker to remove expired whitelist entries.
+	WhitelistExpiryCheckHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
+		{
+			TArray<FString> ExpiredNames;
+			FWhitelistManager::RemoveExpiredEntries(ExpiredNames);
+			for (const FString& Name : ExpiredNames)
+			{
+				const FString Msg = FString::Printf(
+					TEXT(":clock1: **%s** has been removed from the whitelist (entry expired)."), *Name);
+				const FString& NotifyChan = Config.WhitelistEventsChannelId.IsEmpty()
+					? Config.ChannelId : Config.WhitelistEventsChannelId;
+				if (!NotifyChan.IsEmpty())
+				{
+					SendMessageToChannel(NotifyChan, Msg);
+				}
+			}
+			return true;
+		}),
+		60.0f);
+
 	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Whitelist active = %s (WhitelistEnabled config = %s)"),
 	       FWhitelistManager::IsEnabled() ? TEXT("True") : TEXT("False"),
@@ -201,6 +224,10 @@ void UDiscordBridgeSubsystem::Deinitialize()
 			this, &UDiscordBridgeSubsystem::OnGameChatMessageAdded);
 		BoundChatManager.Reset();
 	}
+
+	// Stop the whitelist expiry ticker.
+	FTSTicker::GetCoreTicker().RemoveTicker(WhitelistExpiryCheckHandle);
+	WhitelistExpiryCheckHandle.Reset();
 
 	// Stop the AFK kick ticker.
 	FTSTicker::GetCoreTicker().RemoveTicker(AfkKickTickerHandle);
@@ -613,6 +640,54 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 		if (!Config.WhitelistRoleId.IsEmpty())
 		{
 			UpdateWhitelistRoleMemberEntry(DataObj);
+		}
+
+		// Auto-sync whitelist with Discord role
+		if (Config.bSyncWhitelistWithRole && !Config.WhitelistRoleId.IsEmpty())
+		{
+			const TSharedPtr<FJsonObject>* UserPtr = nullptr;
+			if (DataObj->TryGetObjectField(TEXT("user"), UserPtr) && UserPtr)
+			{
+				FString SyncUserId;
+				FString SyncUsername;
+				(*UserPtr)->TryGetStringField(TEXT("id"), SyncUserId);
+				if (!(*UserPtr)->TryGetStringField(TEXT("global_name"), SyncUsername) || SyncUsername.IsEmpty())
+					(*UserPtr)->TryGetStringField(TEXT("username"), SyncUsername);
+
+				const TArray<TSharedPtr<FJsonValue>>* RolesArr = nullptr;
+				bool bHasRole = false;
+				if (DataObj->TryGetArrayField(TEXT("roles"), RolesArr) && RolesArr)
+				{
+					for (const TSharedPtr<FJsonValue>& RV : *RolesArr)
+					{
+						FString RId;
+						if (RV->TryGetString(RId) && RId == Config.WhitelistRoleId)
+						{
+							bHasRole = true;
+							break;
+						}
+					}
+				}
+
+				if (EventType == TEXT("GUILD_MEMBER_ADD"))
+				{
+					if (bHasRole && !SyncUsername.IsEmpty())
+					{
+						FWhitelistManager::AddPlayer(SyncUsername, TEXT(""), TEXT("sync-role"));
+					}
+				}
+				else // GUILD_MEMBER_UPDATE
+				{
+					if (bHasRole && !SyncUsername.IsEmpty())
+					{
+						FWhitelistManager::AddPlayer(SyncUsername, TEXT(""), TEXT("sync-role"));
+					}
+					else if (!bHasRole && !SyncUsername.IsEmpty())
+					{
+						FWhitelistManager::RemovePlayer(SyncUsername, TEXT(""), TEXT("sync-remove"));
+					}
+				}
+			}
 		}
 	}
 	else if (EventType == TEXT("GUILD_MEMBER_REMOVE"))
@@ -2560,7 +2635,6 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 
 	FString Response;
 
-	// Split sub-command into verb + optional argument.
 	FString Verb, Arg;
 	if (!SubCommand.Split(TEXT(" "), &Verb, &Arg, ESearchCase::IgnoreCase))
 	{
@@ -2572,27 +2646,92 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 
 	if (Verb == TEXT("on"))
 	{
-		FWhitelistManager::SetEnabled(true);
+		FWhitelistManager::SetEnabled(true, DiscordUsername);
 		Response = TEXT(":white_check_mark: Whitelist **enabled**. Only whitelisted players can join.");
+		PostWhitelistEvent(TEXT("Whitelist **enabled**"), TEXT(""), DiscordUsername, 3447003);
 	}
 	else if (Verb == TEXT("off"))
 	{
-		FWhitelistManager::SetEnabled(false);
+		FWhitelistManager::SetEnabled(false, DiscordUsername);
 		Response = TEXT(":no_entry_sign: Whitelist **disabled**. All players can join freely.");
+		PostWhitelistEvent(TEXT("Whitelist **disabled**"), TEXT(""), DiscordUsername, 10038562);
 	}
 	else if (Verb == TEXT("add"))
 	{
 		if (Arg.IsEmpty())
 		{
-			Response = TEXT(":warning: Usage: `!whitelist add <PlayerName>`");
-		}
-		else if (FWhitelistManager::AddPlayer(Arg))
-		{
-			Response = FString::Printf(TEXT(":green_circle: **%s** has been added to the whitelist."), *Arg);
+			Response = TEXT(":warning: Usage: `!whitelist add <PlayerName> [puid:<PUID>] [duration]`");
 		}
 		else
 		{
-			Response = FString::Printf(TEXT(":yellow_circle: **%s** is already on the whitelist."), *Arg);
+			// Parse PUID prefix: "Alice puid:abc123 7d"
+			FString ParsedName = Arg;
+			FString ParsedPuid;
+			FDateTime ExpiresAt(0);
+
+			// Extract puid: token
+			{
+				TArray<FString> Tokens;
+				Arg.ParseIntoArrayWS(Tokens);
+				TArray<FString> NameParts;
+				for (const FString& Tok : Tokens)
+				{
+					if (Tok.StartsWith(TEXT("puid:"), ESearchCase::IgnoreCase))
+					{
+						ParsedPuid = Tok.Mid(5);
+					}
+					else
+					{
+						NameParts.Add(Tok);
+					}
+				}
+				// Last token may be a duration
+				FTimespan Dur;
+				if (NameParts.Num() > 0)
+				{
+					const FString LastTok = NameParts.Last();
+					Dur = FWhitelistManager::ParseDuration(LastTok);
+					if (!Dur.IsZero())
+					{
+						NameParts.RemoveAt(NameParts.Num() - 1);
+						ExpiresAt = FDateTime::UtcNow() + Dur;
+					}
+				}
+				ParsedName = FString::Join(NameParts, TEXT(" ")).TrimStartAndEnd();
+				if (ParsedName.IsEmpty()) ParsedName = Arg;
+			}
+
+			// Capacity check
+			if (FWhitelistManager::GetMaxSlots() > 0 &&
+			    FWhitelistManager::GetAllEntries().Num() >= FWhitelistManager::GetMaxSlots())
+			{
+				Response = FString::Printf(
+					TEXT(":no_entry: Whitelist is full (%d/%d slots used)."),
+					FWhitelistManager::GetAllEntries().Num(),
+					FWhitelistManager::GetMaxSlots());
+			}
+			else if (FWhitelistManager::AddPlayer(ParsedName, ParsedPuid, DiscordUsername, ExpiresAt))
+			{
+				if (ExpiresAt.GetTicks() > 0)
+				{
+					Response = FString::Printf(
+						TEXT(":green_circle: **%s** added (expires %s)."),
+						*ParsedName,
+						*ExpiresAt.ToString(TEXT("%Y-%m-%d %H:%M UTC")));
+				}
+				else
+				{
+					Response = FString::Printf(
+						TEXT(":green_circle: **%s** has been added to the whitelist."), *ParsedName);
+				}
+				PostWhitelistEvent(
+					FString::Printf(TEXT("**%s** added to the whitelist"), *ParsedName),
+					ParsedName, DiscordUsername, 3066993);
+			}
+			else
+			{
+				Response = FString::Printf(TEXT(":yellow_circle: **%s** is already on the whitelist."), *ParsedName);
+			}
 		}
 	}
 	else if (Verb == TEXT("remove"))
@@ -2601,9 +2740,12 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 		{
 			Response = TEXT(":warning: Usage: `!whitelist remove <PlayerName>`");
 		}
-		else if (FWhitelistManager::RemovePlayer(Arg))
+		else if (FWhitelistManager::RemovePlayer(Arg, TEXT(""), DiscordUsername))
 		{
 			Response = FString::Printf(TEXT(":red_circle: **%s** has been removed from the whitelist."), *Arg);
+			PostWhitelistEvent(
+				FString::Printf(TEXT("**%s** removed from the whitelist"), *Arg),
+				Arg, DiscordUsername, 15158332);
 		}
 		else
 		{
@@ -2630,11 +2772,114 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 		const FString WhitelistState = FWhitelistManager::IsEnabled()
 			? TEXT(":white_check_mark: Whitelist: **ENABLED**")
 			: TEXT(":no_entry_sign: Whitelist: **disabled**");
-		Response = WhitelistState;
+		const int32 Count = FWhitelistManager::GetAllEntries().Num();
+		const int32 Slots = FWhitelistManager::GetMaxSlots();
+		FString SlotInfo;
+		if (Slots > 0)
+		{
+			SlotInfo = FString::Printf(TEXT("\nSlots: %d/%d"), Count, Slots);
+		}
+		else
+		{
+			SlotInfo = FString::Printf(TEXT("\nSlots: %d/unlimited"), Count);
+		}
+		Response = WhitelistState + SlotInfo;
+	}
+	else if (Verb == TEXT("export"))
+	{
+		const TArray<FWhitelistEntry> AllEntries = FWhitelistManager::GetAllEntries();
+		FString JsonOut = TEXT("[");
+		for (int32 i = 0; i < AllEntries.Num(); ++i)
+		{
+			const FWhitelistEntry& E = AllEntries[i];
+			FString ExpiresStr;
+			if (E.ExpiresAt.GetTicks() > 0)
+				ExpiresStr = E.ExpiresAt.ToIso8601();
+			JsonOut += FString::Printf(TEXT("{\"name\":\"%s\",\"puid\":\"%s\",\"expires_at\":\"%s\"}"),
+				*E.Name, *E.EosPUID, *ExpiresStr);
+			if (i < AllEntries.Num() - 1) JsonOut += TEXT(",");
+		}
+		JsonOut += TEXT("]");
+
+		FString Msg = FString::Printf(
+			TEXT(":scroll: **Whitelist Export** (%d entries):\n```json\n%s\n```"),
+			AllEntries.Num(), *JsonOut);
+		if (Msg.Len() > 1900)
+		{
+			Msg = Msg.Left(1900) + TEXT("\n*(truncated)*");
+		}
+		Response = Msg;
+	}
+	else if (Verb == TEXT("import"))
+	{
+		if (Arg.IsEmpty())
+		{
+			Response = TEXT(":warning: Usage: `!whitelist import <json-array>`");
+		}
+		else
+		{
+			int32 Added = 0, Skipped = 0;
+			TSharedPtr<FJsonValue> JsonVal;
+			TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Arg);
+			if (FJsonSerializer::Deserialize(Reader, JsonVal) && JsonVal.IsValid())
+			{
+				const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+				if (JsonVal->TryGetArray(Arr) && Arr)
+				{
+					for (const TSharedPtr<FJsonValue>& Item : *Arr)
+					{
+						if (Item->Type == EJson::String)
+						{
+							if (FWhitelistManager::AddPlayer(Item->AsString(), TEXT(""), DiscordUsername))
+								++Added;
+							else
+								++Skipped;
+						}
+						else if (Item->Type == EJson::Object)
+						{
+							const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+							if (Item->TryGetObject(ObjPtr) && ObjPtr)
+							{
+								FString IName, IPuid;
+								(*ObjPtr)->TryGetStringField(TEXT("name"), IName);
+								(*ObjPtr)->TryGetStringField(TEXT("puid"), IPuid);
+								if (FWhitelistManager::AddPlayer(IName, IPuid, DiscordUsername))
+									++Added;
+								else
+									++Skipped;
+							}
+						}
+					}
+				}
+			}
+			Response = FString::Printf(TEXT(":inbox_tray: Import complete. Added %d, skipped %d."), Added, Skipped);
+		}
+	}
+	else if (Verb == TEXT("log"))
+	{
+		int32 N = 10;
+		if (!Arg.IsEmpty()) N = FMath::Clamp(FCString::Atoi(*Arg), 1, 20);
+		const TArray<FWhitelistAuditEntry> Log = FWhitelistManager::GetAuditLog(N);
+		if (Log.Num() == 0)
+		{
+			Response = TEXT(":scroll: No whitelist audit log entries.");
+		}
+		else
+		{
+			FString LogText = FString::Printf(TEXT(":scroll: **Whitelist Audit Log** (last %d):\n"), Log.Num());
+			for (const FWhitelistAuditEntry& E : Log)
+			{
+				LogText += FString::Printf(TEXT("`[%s]` **%s** `%s` by %s\n"),
+					*E.Timestamp.ToString(TEXT("%Y-%m-%d %H:%M")),
+					*E.Action,
+					*E.Target,
+					E.AdminName.IsEmpty() ? TEXT("system") : *E.AdminName);
+			}
+			Response = LogText;
+		}
 	}
 	else if (Verb == TEXT("role"))
 	{
-		// Sub-sub-command: role add <discord_user_id> / role remove <discord_user_id>
 		FString RoleVerb, TargetUserId;
 		if (!Arg.Split(TEXT(" "), &RoleVerb, &TargetUserId, ESearchCase::IgnoreCase))
 		{
@@ -2662,13 +2907,13 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 		{
 			ModifyDiscordRole(TargetUserId, Config.WhitelistRoleId, /*bGrant=*/true);
 			Response = FString::Printf(
-				TEXT(":green_circle: Granting whitelist role to Discord user `%s`…"), *TargetUserId);
+				TEXT(":green_circle: Granting whitelist role to Discord user `%s`..."), *TargetUserId);
 		}
 		else if (RoleVerb == TEXT("remove"))
 		{
 			ModifyDiscordRole(TargetUserId, Config.WhitelistRoleId, /*bGrant=*/false);
 			Response = FString::Printf(
-				TEXT(":red_circle: Revoking whitelist role from Discord user `%s`…"), *TargetUserId);
+				TEXT(":red_circle: Revoking whitelist role from Discord user `%s`..."), *TargetUserId);
 		}
 		else
 		{
@@ -2679,11 +2924,11 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 	else
 	{
 		Response = TEXT(":question: Unknown whitelist command. Available: `on`, `off`, "
-		                "`add <name>`, `remove <name>`, `list`, `status`, "
+		                "`add <name> [puid:<id>] [duration]`, `remove <name>`, `list`, `status`, "
+		                "`export`, `import <json>`, `log [N]`, "
 		                "`role add <discord_id>`, `role remove <discord_id>`.");
 	}
 
-	// Send the response back to the channel where the command was received.
 	const FString& ReplyChannel = ResponseChannelId.IsEmpty() ? Config.ChannelId : ResponseChannelId;
 	SendMessageToChannel(ReplyChannel, Response);
 }
@@ -3045,7 +3290,6 @@ void UDiscordBridgeSubsystem::HandleInGameWhitelistCommand(const FString& SubCom
 
 	FString Response;
 
-	// Split sub-command into verb + optional argument.
 	FString Verb, Arg;
 	if (!SubCommand.Split(TEXT(" "), &Verb, &Arg, ESearchCase::IgnoreCase))
 	{
@@ -3057,13 +3301,15 @@ void UDiscordBridgeSubsystem::HandleInGameWhitelistCommand(const FString& SubCom
 
 	if (Verb == TEXT("on"))
 	{
-		FWhitelistManager::SetEnabled(true);
+		FWhitelistManager::SetEnabled(true, TEXT("[server]"));
 		Response = TEXT("Whitelist ENABLED. Only whitelisted players can join.");
+		PostWhitelistEvent(TEXT("Whitelist **enabled**"), TEXT(""), TEXT("[server]"), 3447003);
 	}
 	else if (Verb == TEXT("off"))
 	{
-		FWhitelistManager::SetEnabled(false);
+		FWhitelistManager::SetEnabled(false, TEXT("[server]"));
 		Response = TEXT("Whitelist DISABLED. All players can join freely.");
+		PostWhitelistEvent(TEXT("Whitelist **disabled**"), TEXT(""), TEXT("[server]"), 10038562);
 	}
 	else if (Verb == TEXT("add"))
 	{
@@ -3071,9 +3317,18 @@ void UDiscordBridgeSubsystem::HandleInGameWhitelistCommand(const FString& SubCom
 		{
 			Response = TEXT("Usage: !whitelist add <PlayerName>");
 		}
-		else if (FWhitelistManager::AddPlayer(Arg))
+		else if (FWhitelistManager::GetMaxSlots() > 0 &&
+		         FWhitelistManager::GetAllEntries().Num() >= FWhitelistManager::GetMaxSlots())
+		{
+			Response = FString::Printf(TEXT("Whitelist is full (%d/%d slots)."),
+				FWhitelistManager::GetAllEntries().Num(), FWhitelistManager::GetMaxSlots());
+		}
+		else if (FWhitelistManager::AddPlayer(Arg, TEXT(""), TEXT("[server]")))
 		{
 			Response = FString::Printf(TEXT("%s has been added to the whitelist."), *Arg);
+			PostWhitelistEvent(
+				FString::Printf(TEXT("**%s** added to the whitelist"), *Arg),
+				Arg, TEXT("[server]"), 3066993);
 		}
 		else
 		{
@@ -3086,9 +3341,12 @@ void UDiscordBridgeSubsystem::HandleInGameWhitelistCommand(const FString& SubCom
 		{
 			Response = TEXT("Usage: !whitelist remove <PlayerName>");
 		}
-		else if (FWhitelistManager::RemovePlayer(Arg))
+		else if (FWhitelistManager::RemovePlayer(Arg, TEXT(""), TEXT("[server]")))
 		{
 			Response = FString::Printf(TEXT("%s has been removed from the whitelist."), *Arg);
+			PostWhitelistEvent(
+				FString::Printf(TEXT("**%s** removed from the whitelist"), *Arg),
+				Arg, TEXT("[server]"), 15158332);
 		}
 		else
 		{
@@ -3116,12 +3374,78 @@ void UDiscordBridgeSubsystem::HandleInGameWhitelistCommand(const FString& SubCom
 			? TEXT("ENABLED") : TEXT("disabled");
 		Response = FString::Printf(TEXT("Whitelist: %s"), *WhitelistState);
 	}
+	else if (Verb == TEXT("log"))
+	{
+		const TArray<FWhitelistAuditEntry> Log = FWhitelistManager::GetAuditLog(5);
+		if (Log.Num() == 0)
+		{
+			Response = TEXT("No whitelist audit log entries.");
+		}
+		else
+		{
+			FString LogText = TEXT("Whitelist Audit Log (last 5):\n");
+			for (const FWhitelistAuditEntry& E : Log)
+			{
+				LogText += FString::Printf(TEXT("[%s] %s %s by %s\n"),
+					*E.Timestamp.ToString(TEXT("%Y-%m-%d %H:%M")),
+					*E.Action, *E.Target,
+					E.AdminName.IsEmpty() ? TEXT("system") : *E.AdminName);
+			}
+			Response = LogText;
+		}
+	}
 	else
 	{
-		Response = TEXT("Unknown whitelist command. Available: on, off, add <name>, remove <name>, list, status.");
+		Response = TEXT("Unknown whitelist command. Available: on, off, add <name>, remove <name>, list, status, log.");
 	}
 
 	SendGameChatStatusMessage(Response);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PostWhitelistEvent
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::PostWhitelistEvent(const FString& Action, const FString& Target,
+                                                   const FString& AdminName, int32 Color)
+{
+	if (Config.WhitelistEventsChannelId.IsEmpty() || Config.BotToken.IsEmpty())
+	{
+		return;
+	}
+
+	const FString Timestamp = FDateTime::UtcNow().ToIso8601();
+
+	// Build embed JSON
+	const FString EmbedJson = FString::Printf(
+		TEXT("{\"embeds\":[{\"color\":%d,\"title\":\":shield: Whitelist Updated\","
+		     "\"description\":\"%s\","
+		     "\"footer\":{\"text\":\"By %s\"},"
+		     "\"timestamp\":\"%s\"}]}"),
+		Color,
+		*Action.Replace(TEXT("\""), TEXT("\\\"")),
+		*AdminName.Replace(TEXT("\""), TEXT("\\\"")),
+		*Timestamp);
+
+	const FString Url = FString::Printf(
+		TEXT("https://discord.com/api/v10/channels/%s/messages"),
+		*Config.WhitelistEventsChannelId);
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req = FHttpModule::Get().CreateRequest();
+	Req->SetURL(Url);
+	Req->SetVerb(TEXT("POST"));
+	Req->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+	Req->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+	Req->SetContentAsString(EmbedJson);
+	Req->OnProcessRequestComplete().BindWeakLambda(this,
+		[](FHttpRequestPtr, FHttpResponsePtr Resp, bool bOk)
+		{
+			if (!bOk || !Resp.IsValid() || Resp->GetResponseCode() < 200 || Resp->GetResponseCode() >= 300)
+			{
+				UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: PostWhitelistEvent failed."));
+			}
+		});
+	Req->ProcessRequest();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

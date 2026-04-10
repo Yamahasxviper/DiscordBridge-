@@ -129,6 +129,52 @@ struct DISCORDBRIDGE_API FTicketConfig
 	 */
 	float InactiveTicketTimeoutHours{ 0.0f };
 
+	// ── Per-type category IDs ─────────────────────────────────────────────────
+
+	/** Discord category ID for whitelist ticket channels. Falls back to TicketCategoryId when empty. */
+	FString WhitelistCategoryId;
+	/** Discord category ID for help ticket channels. Falls back to TicketCategoryId when empty. */
+	FString HelpCategoryId;
+	/** Discord category ID for report ticket channels. Falls back to TicketCategoryId when empty. */
+	FString ReportCategoryId;
+	/** Discord category ID for ban appeal ticket channels. Falls back to TicketCategoryId when empty. */
+	FString AppealCategoryId;
+
+	// ── Feedback/rating ───────────────────────────────────────────────────────
+
+	/** When true, sends a DM star-rating request to the opener when a ticket is closed. */
+	bool bTicketFeedbackEnabled{ false };
+
+	// ── Macros / canned responses ─────────────────────────────────────────────
+
+	/** List of canned response macros. Format: "name|response text". */
+	TArray<FString> TicketMacros;
+
+	// ── Cooldown ──────────────────────────────────────────────────────────────
+
+	/** Minutes a user must wait after closing a ticket before opening another. 0 = disabled. */
+	int32 TicketCooldownMinutes{ 0 };
+
+	// ── Reopen grace period ───────────────────────────────────────────────────
+
+	/** Minutes after close during which the opener can reopen the ticket. 0 = disabled (immediate delete). */
+	int32 TicketReopenGracePeriodMinutes{ 0 };
+
+	// ── Multi-ticket support ──────────────────────────────────────────────────
+
+	/** When true, users may have one ticket open per type rather than one total. */
+	bool bAllowMultipleTicketTypes{ false };
+
+	// ── Auto-refresh panel ────────────────────────────────────────────────────
+
+	/** When true, delete and re-post the ticket panel on server startup. */
+	bool bAutoRefreshPanel{ false };
+
+	// ── DM on staff reply ─────────────────────────────────────────────────────
+
+	/** When true, DM the ticket opener when staff sends a message in their ticket channel. */
+	bool bDmOpenerOnStaffReply{ false };
+
 	// ── Static helpers ────────────────────────────────────────────────────────
 
 	/** Load settings from DefaultTickets.ini (+ backup) and return a populated config. */

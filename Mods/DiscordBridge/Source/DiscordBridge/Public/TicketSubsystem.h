@@ -262,6 +262,41 @@ private:
 	 *  InactiveTicketTimeoutHours > 0. */
 	FTSTicker::FDelegateHandle InactiveTicketCheckHandle;
 
+	/** Maps ticket channel ID to the opener's Discord username (for Approve & Whitelist). */
+	TMap<FString, FString> TicketChannelToOpenerName;
+
+	/** Maps ticket channel ID to the ticket open time (for stats). */
+	TMap<FString, FDateTime> TicketChannelToOpenTime;
+
+	/** Maps ticket channel ID to the ticket type (for stats and per-type categories). */
+	TMap<FString, FString> TicketChannelToType;
+
+	/** Maps ticket channel ID to its priority level. */
+	TMap<FString, FString> TicketChannelToPriority;
+
+	/** Maps user ID to cooldown expiry (when they can open next ticket). */
+	TMap<FString, FDateTime> UserTicketCooldown;
+
+	/** Channels pending reopen (grace period). Maps channel ID to expiry time. */
+	TMap<FString, FDateTime> PendingReopenExpiry;
+
+	/** Channels pending reopen. Maps channel ID to opener user ID. */
+	TMap<FString, FString> PendingReopenOpener;
+
+	/** Maps opener user ID to (ticketType -> channelId) for multi-ticket support. */
+	TMap<FString, TMap<FString, FString>> OpenerToTicketsByType;
+
+	/** Stored panel message ID for auto-refresh. */
+	FString StoredPanelMessageId;
+	/** Stored panel channel ID for auto-refresh. */
+	FString StoredPanelChannelId;
+
+	/** Ticker handle for the reopen grace period check. */
+	FTSTicker::FDelegateHandle ReopenExpiryTickHandle;
+
+	/** Returns path to TicketStats.json. */
+	static FString GetStatsFilePath();
+
 	/** Injected Discord provider.  nullptr until SetProvider() is called. */
 	IDiscordBridgeProvider* CachedProvider = nullptr;
 };

@@ -850,4 +850,11 @@ private:
 	/** Register built-in Discord application slash commands (/players, /stats, /server)
 	 *  with the Discord REST API. Called on READY when bEnableSlashCommands=true. */
 	void RegisterSlashCommands();
+
+	/** Post a whitelist event embed to WhitelistEventsChannelId. */
+	void PostWhitelistEvent(const FString& Action, const FString& Target,
+	                        const FString& AdminName, int32 Color);
+
+	/** Ticker handle for whitelist expiry check (60-second interval). */
+	FTSTicker::FDelegateHandle WhitelistExpiryCheckHandle;
 };
