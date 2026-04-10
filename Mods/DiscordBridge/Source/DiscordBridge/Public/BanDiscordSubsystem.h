@@ -37,7 +37,9 @@
  *  !note <PUID|name> <text...>             – Add a private admin note.
  *  !notes <PUID|name>                      – List all admin notes for a player.
  *  !reason <UID>                           – Show the ban reason for a UID.
- *  !reloadconfig                           – Reload BanBridge config from disk.
+ *   *  !appeals                               – List pending ban appeals (max 10).
+ *  !dismissappeal <id>                    – Delete a ban appeal by integer ID.
+!reloadconfig                           – Reload BanBridge config from disk.
  *
  * Moderator Commands (require ModeratorRoleId or AdminRoleId)
  * ────────────────────────────────────────────────────────────
@@ -229,6 +231,30 @@ private:
 	/** Handle !reloadconfig. Reloads BanBridge config from disk. */
 	void HandleReloadConfigCommand(const FString& ChannelId, const FString& SenderName);
 
+	/** Handle !appealapprove <id>. Approves an appeal: unbans the player and deletes the appeal. Requires AdminRoleId. */
+	void HandleAppealApproveCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
+
+	/** Handle !appealdeny <id>. Denies an appeal: deletes it without unbanning. Requires AdminRoleId. */
+	void HandleAppealDenyCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
+
+	/**
+	 * Handle !appeals.
+	 * Lists all pending ban appeals from BanAppealRegistry (at most 10, then "(more)").
+	 * Format:
+	 *   :scales: **Pending Ban Appeals (N):**
+	 *   `#1` uid=Discord:123... | contact: … | submitted: 2026-01-01 | reason: …
+	 * Requires AdminRoleId.
+	 */
+	void HandleAppealsCommand(const FString& ChannelId);
+
+	/**
+	 * Handle !dismissappeal <id>.
+	 * Deletes the appeal with the given integer ID from BanAppealRegistry.
+	 * Replies with success or failure.
+	 * Requires AdminRoleId.
+	 */
+	void HandleDismissAppealCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
+
 	/** Handle !kick. Usage: !kick <PUID|name> [reason] */
 	void HandleKickCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
 
@@ -278,4 +304,7 @@ private:
 
 	/** Handle for the raw-message subscription; valid while CachedProvider is set. */
 	FDelegateHandle RawMessageDelegateHandle;
+
+	/** Handle for the UBanAppealRegistry::OnBanAppealSubmitted subscription. */
+	FDelegateHandle AppealSubmittedDelegateHandle;
 };

@@ -43,6 +43,11 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBanRestApi, Log, All);
  *   DELETE /warnings/id/:id    – remove a single warning by integer ID (requires API key if configured)
  *   GET    /audit              – audit log entries, newest first (?limit=N, ?uid=UID)
  *   GET    /metrics            – server statistics
+ *   GET    /appeals            – list all pending appeals (requires API key)
+ *   GET    /appeals/:id        – get a single appeal by integer id (requires API key)
+ *   DELETE /appeals/:id        – dismiss/delete an appeal (requires API key)
+ *   POST   /appeals            – submit a new ban appeal (no auth required)
+ *   POST   /players/prune      – prune session records older than SessionRetentionDays (requires API key)
  *
  * POST /bans body:
  *   {

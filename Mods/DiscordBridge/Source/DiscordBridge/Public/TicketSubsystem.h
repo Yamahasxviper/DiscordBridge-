@@ -33,12 +33,22 @@
  *  5. When either the ticket opener or an admin clicks Close Ticket, the channel
  *     is deleted via the provider's DeleteDiscordChannel() method.
  *
- * Admin command
- * ─────────────
- *  Typing "!ticket-panel" in any Discord channel while holding the
- *  TicketNotifyRoleId role posts the panel to TicketPanelChannelId.
- *  The message includes one button per enabled ticket type plus any custom
- *  TicketReason= entries from DefaultTickets.ini.
+ * Admin commands
+ * ──────────────
+ *  !ticket-panel               – Post the ticket selection panel to TicketPanelChannelId.
+ *                                Requires the sender to hold TicketNotifyRoleId.
+ *  !ticket-assign <@userId>    – Claim an open ticket on behalf of the mentioning staff
+ *                                member.  Can only be used inside an active ticket channel.
+ *                                Updates the TicketChannelToAssignee state map and posts a
+ *                                confirmation message to the channel.
+ *  !ticket-list                – List all open tickets.  Requires TicketNotifyRoleId.
+ *
+ * TicketAssignments
+ * ─────────────────
+ *  Each active ticket channel can be assigned to a single staff member.
+ *  The assignee is stored in TicketChannelToAssignee (channel → Discord user ID)
+ *  and TicketChannelToAssigneeName (channel → display name).  Assignment state is
+ *  included in SaveTicketState / LoadTicketState so it survives server restarts.
  *
  * Required bot permissions
  * ─────────────────────────
@@ -215,6 +225,19 @@ private:
 	 * Used to prevent duplicate tickets (one active ticket per user at a time).
 	 */
 	TMap<FString, FString> OpenerToTicketChannel;
+
+	/**
+	 * Maps each active ticket channel ID to the Discord user ID of the staff
+	 * member who has claimed ("assigned") the ticket.
+	 * Populated by the !ticket-assign command.
+	 */
+	TMap<FString, FString> TicketChannelToAssignee;
+
+	/**
+	 * Maps each active ticket channel ID to the display name of the assigned
+	 * staff member (for display in !ticket-list without a separate API call).
+	 */
+	TMap<FString, FString> TicketChannelToAssigneeName;
 
 	/** Injected Discord provider.  nullptr until SetProvider() is called. */
 	IDiscordBridgeProvider* CachedProvider = nullptr;

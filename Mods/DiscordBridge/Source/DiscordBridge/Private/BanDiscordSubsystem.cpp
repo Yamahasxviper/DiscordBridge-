@@ -9,6 +9,7 @@
 #include "PlayerSessionRegistry.h"
 #include "PlayerWarningRegistry.h"
 #include "BanDiscordNotifier.h"
+#include "BanAppealRegistry.h"
 
 // BanChatCommands public API
 #include "MuteRegistry.h"
@@ -135,6 +136,13 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 		RawMessageDelegateHandle.Reset();
 	}
 
+	// Unbind appeal-submitted notification when clearing the provider.
+	if (AppealSubmittedDelegateHandle.IsValid())
+	{
+		UBanAppealRegistry::OnBanAppealSubmitted.Remove(AppealSubmittedDelegateHandle);
+		AppealSubmittedDelegateHandle.Reset();
+	}
+
 	CachedProvider = InProvider;
 
 	// Subscribe to the new provider.
@@ -147,6 +155,38 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 				if (UBanDiscordSubsystem* Self = WeakThis.Get())
 					Self->OnRawDiscordMessage(MsgObj);
 			});
+
+		// Bind to appeal-submitted notifications so new appeals are posted to Discord.
+		AppealSubmittedDelegateHandle = UBanAppealRegistry::OnBanAppealSubmitted.AddLambda(
+			[WeakThis](const FBanAppealEntry& Entry)
+			{
+				UBanDiscordSubsystem* Self = WeakThis.Get();
+				if (!Self || !Self->CachedProvider)
+					return;
+
+				const FString& ChannelId = Self->Config.ModerationLogChannelId;
+				if (ChannelId.IsEmpty())
+					return;
+
+				const FString SubmittedStr = Entry.SubmittedAt.ToIso8601();
+				const FString Reason       = Entry.Reason.IsEmpty()      ? TEXT("(none)") : Entry.Reason;
+				const FString Contact      = Entry.ContactInfo.IsEmpty() ? TEXT("(none)") : Entry.ContactInfo;
+
+				const FString Message = FString::Printf(
+					TEXT(":scales: **New Ban Appeal Submitted**\n")
+					TEXT("**ID:** #%lld\n")
+					TEXT("**UID:** %s\n")
+					TEXT("**Contact:** %s\n")
+					TEXT("**Submitted:** %s\n")
+					TEXT("**Reason:** %s\n\n")
+					TEXT("React with ✅ to approve (unban) or ❌ to deny (dismiss).\n")
+					TEXT("Use `!appealapprove %lld` or `!appealdeny %lld` to act."),
+					Entry.Id, *Entry.Uid, *Contact, *SubmittedStr, *Reason,
+					Entry.Id, Entry.Id);
+
+				Self->CachedProvider->SendDiscordChannelMessage(ChannelId, Message);
+			});
+
 		UE_LOG(LogBanDiscord, Log,
 		       TEXT("BanDiscordSubsystem: Discord provider injected; "
 		            "ban commands are %s."),
@@ -198,7 +238,8 @@ void UBanDiscordSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Me
 		TEXT("!linkbans"), TEXT("!unlinkbans"), TEXT("!extend"), TEXT("!duration"),
 		TEXT("!playerhistory"), TEXT("!warn"), TEXT("!warnings"),
 		TEXT("!clearwarns"), TEXT("!clearwarn"), TEXT("!note"), TEXT("!notes"),
-		TEXT("!reason"), TEXT("!reloadconfig"),
+		TEXT("!reason"), TEXT("!reloadconfig"), TEXT("!appeals"), TEXT("!dismissappeal"),
+		TEXT("!appealapprove"), TEXT("!appealdeny"),
 		// ── Moderator-or-admin ────────────────────────────────────────────────
 		TEXT("!kick"), TEXT("!modban"),
 		TEXT("!mute"), TEXT("!unmute"), TEXT("!tempmute"),
@@ -286,6 +327,14 @@ void UBanDiscordSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Me
 		HandleReasonCommand(Args, ChannelId);
 	else if (Command == TEXT("!reloadconfig"))
 		HandleReloadConfigCommand(ChannelId, SenderName);
+	else if (Command == TEXT("!appeals"))
+		HandleAppealsCommand(ChannelId);
+	else if (Command == TEXT("!dismissappeal"))
+		HandleDismissAppealCommand(Args, ChannelId, SenderName);
+	else if (Command == TEXT("!appealapprove"))
+		HandleAppealApproveCommand(Args, ChannelId, SenderName);
+	else if (Command == TEXT("!appealdeny"))
+		HandleAppealDenyCommand(Args, ChannelId, SenderName);
 	else if (Command == TEXT("!kick"))
 		HandleKickCommand(Args, ChannelId, SenderName);
 	else if (Command == TEXT("!modban"))
@@ -1944,16 +1993,11 @@ void UBanDiscordSubsystem::HandleReloadConfigCommand(const FString& ChannelId,
 
 	Config = FBanBridgeConfig::Load();
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId,
-		FString::Printf(
-			TEXT("🔄 BanBridge configuration reloaded.\n"
-			     "AdminRoleId: `%s`\nModeratorRoleId: `%s`\nBy: %s"),
-			Config.AdminRoleId.IsEmpty() ? TEXT("(not set)") : *Config.AdminRoleId,
-			Config.ModeratorRoleId.IsEmpty() ? TEXT("(not set)") : *Config.ModeratorRoleId,
-			*SenderName));
-
 	UE_LOG(LogBanDiscord, Log,
 		TEXT("BanDiscordSubsystem: Config reloaded by %s."), *SenderName);
+
+	CachedProvider->SendDiscordChannelMessage(ChannelId,
+		TEXT(":white_check_mark: BanBridge config reloaded."));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2349,4 +2393,222 @@ if (Config.ModerationLogChannelId.IsEmpty()) return;
 if (Config.ModerationLogChannelId == TEXT("0")) return;
 
 CachedProvider->SendDiscordChannelMessage(Config.ModerationLogChannelId, Message);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !appeals
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleAppealsCommand(const FString& ChannelId)
+{
+	if (!CachedProvider) return;
+
+	UBanAppealRegistry* Registry =
+		GetGameInstance() ? GetGameInstance()->GetSubsystem<UBanAppealRegistry>() : nullptr;
+
+	if (!Registry)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT(":x: BanAppealRegistry is not available (BanSystem may not be installed)."));
+		return;
+	}
+
+	const TArray<FBanAppealEntry> Appeals = Registry->GetAllAppeals();
+
+	if (Appeals.IsEmpty())
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT(":white_check_mark: No pending ban appeals."));
+		return;
+	}
+
+	constexpr int32 MaxShow = 10;
+	const int32 TotalCount  = Appeals.Num();
+	const int32 ShowCount   = FMath::Min(TotalCount, MaxShow);
+
+	FString Reply = FString::Printf(
+		TEXT(":scales: **Pending Ban Appeals (%d):**\n"), TotalCount);
+
+	for (int32 i = 0; i < ShowCount; ++i)
+	{
+		const FBanAppealEntry& A = Appeals[i];
+		const FString DateStr = A.SubmittedAt.ToString(TEXT("%Y-%m-%d"));
+		const FString Reason  = A.Reason.IsEmpty() ? TEXT("(none)") : A.Reason.Left(100);
+		const FString Contact = A.ContactInfo.IsEmpty() ? TEXT("(none)") : A.ContactInfo.Left(80);
+
+		Reply += FString::Printf(
+			TEXT("`#%lld` uid=%s | contact: %s | submitted: %s | reason: %s\n"),
+			A.Id, *A.Uid, *Contact, *DateStr, *Reason);
+	}
+
+	if (TotalCount > MaxShow)
+	{
+		Reply += FString::Printf(TEXT("*(+%d more)*"), TotalCount - MaxShow);
+	}
+
+	CachedProvider->SendDiscordChannelMessage(ChannelId, Reply.TrimEnd());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !dismissappeal <id>
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleDismissAppealCommand(const TArray<FString>& Args,
+                                                       const FString& ChannelId,
+                                                       const FString& SenderName)
+{
+	if (!CachedProvider) return;
+
+	if (Args.IsEmpty())
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT("Usage: `!dismissappeal <id>`"));
+		return;
+	}
+
+	const int64 AppealId = FCString::Atoi64(*Args[0]);
+	if (AppealId <= 0)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT(":x: Invalid appeal ID. Must be a positive integer."));
+		return;
+	}
+
+	UBanAppealRegistry* Registry =
+		GetGameInstance() ? GetGameInstance()->GetSubsystem<UBanAppealRegistry>() : nullptr;
+
+	if (!Registry)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT(":x: BanAppealRegistry is not available (BanSystem may not be installed)."));
+		return;
+	}
+
+	if (Registry->DeleteAppeal(AppealId))
+	{
+		UE_LOG(LogTemp, Log,
+		       TEXT("BanDiscordSubsystem: Appeal #%lld dismissed by '%s'."),
+		       AppealId, *SenderName);
+
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			FString::Printf(TEXT(":white_check_mark: Appeal `#%lld` dismissed."), AppealId));
+	}
+	else
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			FString::Printf(TEXT(":x: No appeal found with ID `%lld`."), AppealId));
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !appealapprove <id>
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Args,
+                                                       const FString& ChannelId,
+                                                       const FString& SenderName)
+{
+	if (!CachedProvider) return;
+
+	if (Args.IsEmpty())
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT("Usage: `!appealapprove <id>`"));
+		return;
+	}
+
+	const int64 AppealId = FCString::Atoi64(*Args[0]);
+	if (AppealId <= 0)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT(":x: Invalid appeal ID. Must be a positive integer."));
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	UBanAppealRegistry* Registry = GI ? GI->GetSubsystem<UBanAppealRegistry>() : nullptr;
+	if (!Registry)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT(":x: BanAppealRegistry is not available (BanSystem may not be installed)."));
+		return;
+	}
+
+	const FBanAppealEntry Entry = Registry->GetAppealById(AppealId);
+	if (Entry.Id == 0)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			FString::Printf(TEXT(":x: No appeal found with ID `%lld`."), AppealId));
+		return;
+	}
+
+	// Attempt to remove the ban for this UID.
+	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
+	bool bUnbanned = false;
+	if (DB && !Entry.Uid.IsEmpty())
+		bUnbanned = DB->RemoveBanByUid(Entry.Uid);
+
+	// Always delete the appeal regardless of whether a ban was found.
+	Registry->DeleteAppeal(AppealId);
+
+	const FString Msg = bUnbanned
+		? FString::Printf(TEXT(":white_check_mark: Appeal `#%lld` approved — ban for `%s` removed."), AppealId, *Entry.Uid)
+		: FString::Printf(TEXT(":white_check_mark: Appeal `#%lld` approved — no active ban found for `%s` (appeal dismissed)."), AppealId, *Entry.Uid);
+
+	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	PostModerationLog(FString::Printf(TEXT("%s approved appeal #%lld (uid=%s)"), *SenderName, AppealId, *Entry.Uid));
+
+	UE_LOG(LogTemp, Log,
+	       TEXT("BanDiscordSubsystem: Appeal #%lld approved by '%s' (uid=%s, unbanned=%s)."),
+	       AppealId, *SenderName, *Entry.Uid, bUnbanned ? TEXT("yes") : TEXT("no"));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// !appealdeny <id>
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
+                                                    const FString& ChannelId,
+                                                    const FString& SenderName)
+{
+	if (!CachedProvider) return;
+
+	if (Args.IsEmpty())
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT("Usage: `!appealdeny <id>`"));
+		return;
+	}
+
+	const int64 AppealId = FCString::Atoi64(*Args[0]);
+	if (AppealId <= 0)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT(":x: Invalid appeal ID. Must be a positive integer."));
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	UBanAppealRegistry* Registry = GI ? GI->GetSubsystem<UBanAppealRegistry>() : nullptr;
+	if (!Registry)
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			TEXT(":x: BanAppealRegistry is not available (BanSystem may not be installed)."));
+		return;
+	}
+
+	if (Registry->DeleteAppeal(AppealId))
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			FString::Printf(TEXT(":x: Appeal `#%lld` denied and dismissed."), AppealId));
+		PostModerationLog(FString::Printf(TEXT("%s denied appeal #%lld"), *SenderName, AppealId));
+
+		UE_LOG(LogTemp, Log,
+		       TEXT("BanDiscordSubsystem: Appeal #%lld denied by '%s'."), AppealId, *SenderName);
+	}
+	else
+	{
+		CachedProvider->SendDiscordChannelMessage(ChannelId,
+			FString::Printf(TEXT(":x: No appeal found with ID `%lld`."), AppealId));
+	}
 }

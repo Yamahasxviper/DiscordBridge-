@@ -88,3 +88,29 @@ void UBanWebSocketPusher::PushEvent(const FString& EventType,
 
     Self->Client->SendJson(JsonStr);
 }
+
+void UBanWebSocketPusher::PushMuteEvent(const FString& EventType,
+                                         const FString& Uid,
+                                         const FString& PlayerName,
+                                         const FString& MutedBy,
+                                         const FString& Reason,
+                                         bool           bIsTimed,
+                                         const FString& ExpiresAt)
+{
+    TSharedPtr<FJsonObject> Fields = MakeShared<FJsonObject>();
+    Fields->SetStringField(TEXT("uid"), Uid);
+
+    if (EventType == TEXT("mute"))
+    {
+        Fields->SetStringField(TEXT("playerName"), PlayerName);
+        Fields->SetStringField(TEXT("mutedBy"),    MutedBy);
+        Fields->SetStringField(TEXT("reason"),     Reason);
+        Fields->SetBoolField  (TEXT("isTimed"),    bIsTimed);
+        if (bIsTimed && !ExpiresAt.IsEmpty())
+            Fields->SetStringField(TEXT("expiresAt"), ExpiresAt);
+        else
+            Fields->SetField(TEXT("expiresAt"), MakeShared<FJsonValueNull>());
+    }
+
+    PushEvent(EventType, Fields);
+}

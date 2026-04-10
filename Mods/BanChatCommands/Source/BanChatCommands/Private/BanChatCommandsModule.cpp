@@ -5,6 +5,8 @@
 #include "Command/ChatCommandLibrary.h"
 #include "Commands/BanChatCommands.h"
 #include "MuteRegistry.h"
+#include "BanWebSocketPusher.h"
+#include "BanAuditLog.h"
 #include "Engine/World.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/Crc.h"
@@ -98,9 +100,51 @@ void FBanChatCommandsModule::StartupModule()
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AClearWarnByIdChatCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AExtendBanChatCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AAppealChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AMuteReasonChatCommand::StaticClass());
 
             UE_LOG(LogBanChatCommands, Log,
-                TEXT("BanChatCommands: Registered 35 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns, announce, stafflist, reason, history, mute, unmute, note, notes, duration, tempunmute, mutecheck, banreason, staffchat, mutelist, clearwarn, extend, appeal)."));
+                TEXT("BanChatCommands: Registered 36 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns, announce, stafflist, reason, history, mute, unmute, note, notes, duration, tempunmute, mutecheck, banreason, staffchat, mutelist, clearwarn, extend, appeal, mutereason)."));
+
+            // Bind MuteRegistry delegates to push WebSocket events and write audit log.
+            UGameInstance* GI = World->GetGameInstance();
+            if (GI)
+            {
+                TWeakObjectPtr<UGameInstance> WeakGI(GI);
+                UMuteRegistry* MuteReg = GI->GetSubsystem<UMuteRegistry>();
+                if (MuteReg)
+                {
+                    MuteReg->OnPlayerMuted.AddLambda(
+                        [WeakGI](const FMuteEntry& Entry, bool bIsTimed)
+                        {
+                            UBanWebSocketPusher::PushMuteEvent(
+                                TEXT("mute"), Entry.Uid, Entry.PlayerName,
+                                Entry.MutedBy, Entry.Reason,
+                                bIsTimed,
+                                bIsTimed ? Entry.ExpireDate.ToIso8601() : FString());
+
+                            if (UGameInstance* LiveGI = WeakGI.Get())
+                            {
+                                if (UBanAuditLog* AuditLog = LiveGI->GetSubsystem<UBanAuditLog>())
+                                    AuditLog->LogAction(TEXT("mute"), Entry.Uid, Entry.PlayerName,
+                                        Entry.MutedBy, Entry.MutedBy, Entry.Reason);
+                            }
+                        });
+
+                    MuteReg->OnPlayerUnmuted.AddLambda(
+                        [WeakGI](const FString& Uid)
+                        {
+                            UBanWebSocketPusher::PushMuteEvent(
+                                TEXT("unmute"), Uid, TEXT(""), TEXT(""), TEXT(""), false, FString());
+
+                            if (UGameInstance* LiveGI = WeakGI.Get())
+                            {
+                                if (UBanAuditLog* AuditLog = LiveGI->GetSubsystem<UBanAuditLog>())
+                                    AuditLog->LogAction(TEXT("unmute"), Uid, TEXT(""),
+                                        TEXT("system"), TEXT(""), TEXT(""));
+                            }
+                        });
+                }
+            }
         }
     );
 
@@ -211,6 +255,8 @@ void FBanChatCommandsModule::BackupConfigIfNeeded()
 
     Content += FString::Printf(TEXT("BanListPageSize=%d\n"), Cfg->BanListPageSize);
     Content += FString::Printf(TEXT("ModBanDurationMinutes=%d\n"), Cfg->ModBanDurationMinutes);
+    Content += FString::Printf(TEXT("MaxModMuteDurationMinutes=%d\n"), Cfg->MaxModMuteDurationMinutes);
+    Content += FString::Printf(TEXT("bAllowModNotes=%s\n"), Cfg->bAllowModNotes ? TEXT("True") : TEXT("False"));
 
     IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
     PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
@@ -286,7 +332,11 @@ void FBanChatCommandsModule::RestoreDefaultConfigIfNeeded()
         + TEXT("; +AdminEosPUIDs=YOUR_EOS_PUID_HERE\n")
         + TEXT("; +ModeratorEosPUIDs=MODERATOR_EOS_PUID_HERE\n")
         + TEXT("BanListPageSize=10\n")
-        + TEXT("ModBanDurationMinutes=30\n");
+        + TEXT("ModBanDurationMinutes=30\n")
+        + TEXT("; MaxModMuteDurationMinutes=0  — 0 means no ceiling for moderators.\n")
+        + TEXT("MaxModMuteDurationMinutes=0\n")
+        + TEXT("; bAllowModNotes=False  — set True to let moderators use /note and /notes.\n")
+        + TEXT("bAllowModNotes=False\n");
 
     PlatformFile.CreateDirectoryTree(*FPaths::GetPath(DefaultIniPath));
 

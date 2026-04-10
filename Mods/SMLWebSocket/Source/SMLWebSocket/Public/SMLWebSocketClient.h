@@ -204,6 +204,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket")
 	bool bQueueMessagesWhileDisconnected{false};
 
+	/**
+	 * Maximum number of text messages to keep in the disconnected-send queue.
+	 * When the queue reaches this limit, the oldest message is dropped to make
+	 * room for the new one (FIFO drop-from-front).
+	 * Set to 0 for unlimited (default; original behaviour — can grow very large
+	 * on long disconnects, so set a limit on high-traffic deployments).
+	 * Default: 0.
+	 * Only takes effect when bQueueMessagesWhileDisconnected is true.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket", meta=(ClampMin="0", UIMin="0"))
+	int32 MaxQueuedMessages{0};
+
 	// ── Ping / pong keep-alive ────────────────────────────────────────────────
 
 	/**

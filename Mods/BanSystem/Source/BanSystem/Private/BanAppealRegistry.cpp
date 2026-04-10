@@ -13,6 +13,9 @@
 
 DEFINE_LOG_CATEGORY(LogBanAppealRegistry);
 
+// Static delegate definition.
+UBanAppealRegistry::FOnBanAppealSubmitted UBanAppealRegistry::OnBanAppealSubmitted;
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  USubsystem lifecycle
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,25 +48,31 @@ void UBanAppealRegistry::Deinitialize()
 // ─────────────────────────────────────────────────────────────────────────────
 
 FBanAppealEntry UBanAppealRegistry::AddAppeal(const FString& Uid,
-                                              const FString& Reason,
-                                              const FString& ContactInfo)
+                                               const FString& Reason,
+                                               const FString& ContactInfo)
 {
-    FScopeLock Lock(&Mutex);
-
-    // Determine next Id (max existing + 1).
-    int64 NextId = 1;
-    for (const FBanAppealEntry& A : Appeals)
-        if (A.Id >= NextId) NextId = A.Id + 1;
-
     FBanAppealEntry Entry;
-    Entry.Id          = NextId;
-    Entry.Uid         = Uid;
-    Entry.Reason      = Reason;
-    Entry.ContactInfo = ContactInfo;
-    Entry.SubmittedAt = FDateTime::UtcNow();
 
-    Appeals.Add(Entry);
-    SaveToFile();
+    {
+        FScopeLock Lock(&Mutex);
+
+        // Determine next Id (max existing + 1).
+        int64 NextId = 1;
+        for (const FBanAppealEntry& A : Appeals)
+            if (A.Id >= NextId) NextId = A.Id + 1;
+
+        Entry.Id          = NextId;
+        Entry.Uid         = Uid;
+        Entry.Reason      = Reason;
+        Entry.ContactInfo = ContactInfo;
+        Entry.SubmittedAt = FDateTime::UtcNow();
+
+        Appeals.Add(Entry);
+        SaveToFile();
+    }
+
+    // Broadcast outside the lock so listeners can safely call back into the registry.
+    OnBanAppealSubmitted.Broadcast(Entry);
 
     return Entry;
 }
@@ -72,6 +81,17 @@ TArray<FBanAppealEntry> UBanAppealRegistry::GetAllAppeals() const
 {
     FScopeLock Lock(&Mutex);
     return Appeals;
+}
+
+FBanAppealEntry UBanAppealRegistry::GetAppealById(int64 Id) const
+{
+    FScopeLock Lock(&Mutex);
+    for (const FBanAppealEntry& A : Appeals)
+    {
+        if (A.Id == Id)
+            return A;
+    }
+    return FBanAppealEntry(); // Id == 0 signals "not found"
 }
 
 bool UBanAppealRegistry::DeleteAppeal(int64 Id)

@@ -1100,12 +1100,38 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 		return;
 	}
 
-	OnDiscordMessageReceived.Broadcast(Username, Content);
-}
+	// ── Resolve %Role% label for the DiscordToGameFormat placeholder ──────────
+	// Iterate DiscordRoleLabels in config order; use the first matching entry.
+	CurrentMessageRoleLabel.Empty();
+	if (!Config.DiscordRoleLabels.IsEmpty() && MemberPtr)
+	{
+		TArray<FString> SenderRoleIds;
+		const TArray<TSharedPtr<FJsonValue>>* RoleVals = nullptr;
+		if ((*MemberPtr)->TryGetArrayField(TEXT("roles"), RoleVals) && RoleVals)
+		{
+			for (const TSharedPtr<FJsonValue>& RV : *RoleVals)
+			{
+				FString RId;
+				if (RV->TryGetString(RId))
+					SenderRoleIds.Add(RId);
+			}
+		}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Sending Gateway payloads
-// ─────────────────────────────────────────────────────────────────────────────
+		for (const FString& Entry : Config.DiscordRoleLabels)
+		{
+			FString EntryRoleId, EntryLabel;
+			if (Entry.Split(TEXT("="), &EntryRoleId, &EntryLabel) &&
+			    SenderRoleIds.Contains(EntryRoleId.TrimStartAndEnd()))
+			{
+				CurrentMessageRoleLabel = EntryLabel.TrimStartAndEnd();
+				break;
+			}
+		}
+	}
+
+	OnDiscordMessageReceived.Broadcast(Username, Content);
+	CurrentMessageRoleLabel.Empty();
+}
 
 void UDiscordBridgeSubsystem::SendResume()
 {
@@ -2049,13 +2075,14 @@ void UDiscordBridgeSubsystem::RelayDiscordMessageToGame(const FString& Username,
 	}
 
 	// Apply the configurable DiscordToGameFormat string to produce the full
-	// in-game chat line.  Placeholders: %Username% / %PlayerName% (alias), %Message%.
+	// in-game chat line.  Placeholders: %Username% / %PlayerName% (alias), %Message%, %Role%.
 	// Use a fallback if the format is empty so the message is never silently
 	// dropped due to a misconfigured INI.
 	FString FormattedMessage = Config.DiscordToGameFormat;
 	FormattedMessage = FormattedMessage.Replace(TEXT("%Username%"),   *Username);
 	FormattedMessage = FormattedMessage.Replace(TEXT("%PlayerName%"), *Username);
 	FormattedMessage = FormattedMessage.Replace(TEXT("%Message%"),    *Message);
+	FormattedMessage = FormattedMessage.Replace(TEXT("%Role%"),       *CurrentMessageRoleLabel);
 
 	if (FormattedMessage.IsEmpty())
 	{
@@ -2370,6 +2397,90 @@ void UDiscordBridgeSubsystem::SendPlayerJoinNotification(const FString& PlayerNa
 		       TEXT("DiscordBridge: Player admin-info notification for '%s'"), *PlayerName);
 
 		SendMessageToChannel(Config.PlayerJoinAdminChannelId, AdminMessage);
+	}
+
+	// ── On-join DM welcome ────────────────────────────────────────────────────
+	if (!Config.WelcomeMessageDM.IsEmpty())
+	{
+		// Resolve the player's Discord user ID by matching their in-game name
+		// against the display names of WhitelistRoleId members in the cache.
+		FString DiscordUserId;
+		const FString LoweredName = PlayerName.ToLower();
+		for (const TPair<FString, TArray<FString>>& Pair : RoleMemberIdToNames)
+		{
+			if (Pair.Value.Contains(LoweredName))
+			{
+				DiscordUserId = Pair.Key;
+				break;
+			}
+		}
+
+		if (!DiscordUserId.IsEmpty())
+		{
+			FString DmText = Config.WelcomeMessageDM;
+			DmText = DmText.Replace(TEXT("%PlayerName%"), *PlayerName);
+
+			// Step 1: create / retrieve the DM channel via POST /users/@me/channels.
+			const FString CreateDmUrl =
+				FString::Printf(TEXT("%s/users/@me/channels"), *DiscordApiBase);
+
+			TSharedPtr<FJsonObject> DmBody = MakeShared<FJsonObject>();
+			DmBody->SetStringField(TEXT("recipient_id"), DiscordUserId);
+
+			FString DmBodyStr;
+			TSharedRef<TJsonWriter<>> DmWriter = TJsonWriterFactory<>::Create(&DmBodyStr);
+			FJsonSerializer::Serialize(DmBody.ToSharedRef(), DmWriter);
+
+			TSharedRef<IHttpRequest, ESPMode::ThreadSafe> DmReq =
+				FHttpModule::Get().CreateRequest();
+			DmReq->SetURL(CreateDmUrl);
+			DmReq->SetVerb(TEXT("POST"));
+			DmReq->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
+			DmReq->SetHeader(TEXT("Authorization"),
+				FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+			DmReq->SetContentAsString(DmBodyStr);
+
+			DmReq->OnProcessRequestComplete().BindWeakLambda(
+				this,
+				[this, DmText, DiscordUserId]
+				(FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bOk)
+				{
+					if (!bOk || !Resp.IsValid() ||
+					    Resp->GetResponseCode() < 200 || Resp->GetResponseCode() >= 300)
+					{
+						UE_LOG(LogDiscordBridge, Warning,
+						       TEXT("DiscordBridge: Failed to create DM channel for user %s (HTTP %d)."),
+						       *DiscordUserId,
+						       Resp.IsValid() ? Resp->GetResponseCode() : 0);
+						return;
+					}
+
+					TSharedPtr<FJsonObject> DmChannelObj;
+					TSharedRef<TJsonReader<>> R =
+						TJsonReaderFactory<>::Create(Resp->GetContentAsString());
+					FString DmChannelId;
+					if (FJsonSerializer::Deserialize(R, DmChannelObj) && DmChannelObj.IsValid())
+					{
+						DmChannelObj->TryGetStringField(TEXT("id"), DmChannelId);
+					}
+
+					if (DmChannelId.IsEmpty())
+					{
+						UE_LOG(LogDiscordBridge, Warning,
+						       TEXT("DiscordBridge: DM channel response did not contain 'id'."));
+						return;
+					}
+
+					// Step 2: send the welcome message to the DM channel.
+					SendMessageToChannel(DmChannelId, DmText);
+
+					UE_LOG(LogDiscordBridge, Log,
+					       TEXT("DiscordBridge: Sent welcome DM to Discord user %s via channel %s."),
+					       *DiscordUserId, *DmChannelId);
+				});
+
+			DmReq->ProcessRequest();
+		}
 	}
 }
 

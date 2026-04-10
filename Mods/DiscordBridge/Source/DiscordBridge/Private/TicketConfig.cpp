@@ -108,9 +108,11 @@ FTicketConfig FTicketConfig::Load()
 		Config.BotToken                 = GetIniString(Cfg, TEXT("BotToken"));
 		Config.GuildId                  = GetIniString(Cfg, TEXT("GuildId"));
 		Config.TicketChannelId          = GetIniString(Cfg, TEXT("TicketChannelId"));
-		Config.bTicketWhitelistEnabled  = GetIniBool  (Cfg, TEXT("TicketWhitelistEnabled"), true);
-		Config.bTicketHelpEnabled       = GetIniBool  (Cfg, TEXT("TicketHelpEnabled"),      true);
-		Config.bTicketReportEnabled     = GetIniBool  (Cfg, TEXT("TicketReportEnabled"),    true);
+		Config.TicketLogChannelId       = GetIniString(Cfg, TEXT("TicketLogChannelId"));
+		Config.bTicketWhitelistEnabled  = GetIniBool  (Cfg, TEXT("TicketWhitelistEnabled"),  true);
+		Config.bTicketHelpEnabled       = GetIniBool  (Cfg, TEXT("TicketHelpEnabled"),       true);
+		Config.bTicketReportEnabled     = GetIniBool  (Cfg, TEXT("TicketReportEnabled"),     true);
+		Config.bTicketBanAppealEnabled  = GetIniBool  (Cfg, TEXT("BanAppealEnabled"),        true);
 		Config.TicketNotifyRoleId       = GetIniString(Cfg, TEXT("TicketNotifyRoleId"));
 		Config.TicketPanelChannelId     = GetIniString(Cfg, TEXT("TicketPanelChannelId"));
 		Config.TicketCategoryId         = GetIniString(Cfg, TEXT("TicketCategoryId"));
@@ -133,9 +135,11 @@ FTicketConfig FTicketConfig::Load()
 			Config.BotToken                = GetIniString(BackupCfg, TEXT("BotToken"));
 			Config.GuildId                 = GetIniString(BackupCfg, TEXT("GuildId"));
 			Config.TicketChannelId         = GetIniString(BackupCfg, TEXT("TicketChannelId"));
+			Config.TicketLogChannelId      = GetIniString(BackupCfg, TEXT("TicketLogChannelId"));
 			Config.bTicketWhitelistEnabled = GetIniBool  (BackupCfg, TEXT("TicketWhitelistEnabled"), true);
 			Config.bTicketHelpEnabled      = GetIniBool  (BackupCfg, TEXT("TicketHelpEnabled"),      true);
 			Config.bTicketReportEnabled    = GetIniBool  (BackupCfg, TEXT("TicketReportEnabled"),    true);
+			Config.bTicketBanAppealEnabled = GetIniBool  (BackupCfg, TEXT("BanAppealEnabled"),       true);
 			Config.TicketNotifyRoleId      = GetIniString(BackupCfg, TEXT("TicketNotifyRoleId"));
 			Config.TicketPanelChannelId    = GetIniString(BackupCfg, TEXT("TicketPanelChannelId"));
 			Config.TicketCategoryId        = GetIniString(BackupCfg, TEXT("TicketCategoryId"));
@@ -163,9 +167,11 @@ FTicketConfig FTicketConfig::Load()
 		BackupContent += FString::Printf(TEXT("BotToken=%s\n"),               *Config.BotToken);
 		BackupContent += FString::Printf(TEXT("GuildId=%s\n"),                *Config.GuildId);
 		BackupContent += FString::Printf(TEXT("TicketChannelId=%s\n"),        *Config.TicketChannelId);
+		BackupContent += FString::Printf(TEXT("TicketLogChannelId=%s\n"),     *Config.TicketLogChannelId);
 		BackupContent += FString::Printf(TEXT("TicketWhitelistEnabled=%s\n"), Config.bTicketWhitelistEnabled ? TEXT("True") : TEXT("False"));
 		BackupContent += FString::Printf(TEXT("TicketHelpEnabled=%s\n"),      Config.bTicketHelpEnabled      ? TEXT("True") : TEXT("False"));
 		BackupContent += FString::Printf(TEXT("TicketReportEnabled=%s\n"),    Config.bTicketReportEnabled    ? TEXT("True") : TEXT("False"));
+		BackupContent += FString::Printf(TEXT("BanAppealEnabled=%s\n"),       Config.bTicketBanAppealEnabled ? TEXT("True") : TEXT("False"));
 		BackupContent += FString::Printf(TEXT("TicketNotifyRoleId=%s\n"),     *Config.TicketNotifyRoleId);
 		BackupContent += FString::Printf(TEXT("TicketPanelChannelId=%s\n"),   *Config.TicketPanelChannelId);
 		BackupContent += FString::Printf(TEXT("TicketCategoryId=%s\n"),       *Config.TicketCategoryId);
