@@ -5,6 +5,8 @@
 #include "Command/ChatCommandLibrary.h"
 #include "Commands/BanChatCommands.h"
 #include "MuteRegistry.h"
+#include "BanWebSocketPusher.h"
+#include "BanAuditLog.h"
 #include "Engine/World.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/Crc.h"
@@ -101,6 +103,47 @@ void FBanChatCommandsModule::StartupModule()
 
             UE_LOG(LogBanChatCommands, Log,
                 TEXT("BanChatCommands: Registered 35 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns, announce, stafflist, reason, history, mute, unmute, note, notes, duration, tempunmute, mutecheck, banreason, staffchat, mutelist, clearwarn, extend, appeal)."));
+
+            // Bind MuteRegistry delegates to push WebSocket events and write audit log.
+            UGameInstance* GI = World->GetGameInstance();
+            if (GI)
+            {
+                TWeakObjectPtr<UGameInstance> WeakGI(GI);
+                UMuteRegistry* MuteReg = GI->GetSubsystem<UMuteRegistry>();
+                if (MuteReg)
+                {
+                    MuteReg->OnPlayerMuted.AddLambda(
+                        [WeakGI](const FMuteEntry& Entry, bool bIsTimed)
+                        {
+                            UBanWebSocketPusher::PushMuteEvent(
+                                TEXT("mute"), Entry.Uid, Entry.PlayerName,
+                                Entry.MutedBy, Entry.Reason,
+                                bIsTimed,
+                                bIsTimed ? Entry.ExpireDate.ToIso8601() : FString());
+
+                            if (UGameInstance* LiveGI = WeakGI.Get())
+                            {
+                                if (UBanAuditLog* AuditLog = LiveGI->GetSubsystem<UBanAuditLog>())
+                                    AuditLog->LogAction(TEXT("mute"), Entry.Uid, Entry.PlayerName,
+                                        Entry.MutedBy, Entry.MutedBy, Entry.Reason);
+                            }
+                        });
+
+                    MuteReg->OnPlayerUnmuted.AddLambda(
+                        [WeakGI](const FString& Uid)
+                        {
+                            UBanWebSocketPusher::PushMuteEvent(
+                                TEXT("unmute"), Uid, TEXT(""), TEXT(""), TEXT(""), false, FString());
+
+                            if (UGameInstance* LiveGI = WeakGI.Get())
+                            {
+                                if (UBanAuditLog* AuditLog = LiveGI->GetSubsystem<UBanAuditLog>())
+                                    AuditLog->LogAction(TEXT("unmute"), Uid, TEXT(""),
+                                        TEXT("system"), TEXT(""), TEXT(""));
+                            }
+                        });
+                }
+            }
         }
     );
 

@@ -1586,6 +1586,48 @@ void UBanRestApi::RegisterRoutes()
         }
     ));
 
+    // ── GET /appeals/:id ─────────────────────────────────────────────────────
+    // Must be registered BEFORE DELETE /appeals/:id to avoid route collision.
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/appeals/:id")),
+        EHttpServerRequestVerbs::VERB_GET,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+
+            const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
+            if (IdStr.IsEmpty() || !IdStr.IsNumeric())
+            {
+                Done(BanJson::Error(TEXT("id must be an integer")));
+                return true;
+            }
+            const int64 Id = FCString::Atoi64(*IdStr);
+
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UBanAppealRegistry* AppealsReg = GI->GetSubsystem<UBanAppealRegistry>();
+            if (!AppealsReg) { Done(BanJson::Error(TEXT("AppealRegistry unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            const FBanAppealEntry Entry = AppealsReg->GetAppealById(Id);
+            if (Entry.Id == 0)
+            {
+                Done(BanJson::Error(
+                    FString::Printf(TEXT("No appeal found with id %lld"), Id),
+                    EHttpServerResponseCodes::NotFound));
+                return true;
+            }
+
+            TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+            Obj->SetNumberField(TEXT("id"),          static_cast<double>(Entry.Id));
+            Obj->SetStringField(TEXT("uid"),         Entry.Uid);
+            Obj->SetStringField(TEXT("reason"),      Entry.Reason);
+            Obj->SetStringField(TEXT("contactInfo"), Entry.ContactInfo);
+            Obj->SetStringField(TEXT("submittedAt"), Entry.SubmittedAt.ToIso8601());
+            Done(BanJson::Json(BanJson::ObjectToString(Obj)));
+            return true;
+        }
+    ));
+
     // ── DELETE /appeals/:id ──────────────────────────────────────────────────
     Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/appeals/:id")),

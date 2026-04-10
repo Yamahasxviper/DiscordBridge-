@@ -108,11 +108,19 @@ int32 UPlayerWarningRegistry::GetWarningCount(const FString& Uid) const
 {
     FScopeLock Lock(&Mutex);
 
+    const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+    const int32 DecayDays = Cfg ? Cfg->WarnDecayDays : 0;
+    const FDateTime DecayCutoff = (DecayDays > 0)
+        ? FDateTime::UtcNow() - FTimespan::FromDays(static_cast<double>(DecayDays))
+        : FDateTime::MinValue();
+
     int32 Count = 0;
     for (const FWarningEntry& W : Warnings)
     {
-        if (W.Uid.Equals(Uid, ESearchCase::IgnoreCase) && !W.IsExpired())
-            ++Count;
+        if (!W.Uid.Equals(Uid, ESearchCase::IgnoreCase)) continue;
+        if (W.IsExpired()) continue;
+        if (DecayDays > 0 && W.WarnDate < DecayCutoff) continue;
+        ++Count;
     }
     return Count;
 }

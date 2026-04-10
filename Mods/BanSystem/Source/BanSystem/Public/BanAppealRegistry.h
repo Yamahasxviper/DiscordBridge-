@@ -44,11 +44,26 @@ public:
     TArray<FBanAppealEntry> GetAllAppeals() const;
 
     /**
+     * Returns the single appeal with the given Id, or an empty entry (Id==0) if not found.
+     * Thread-safe.
+     */
+    FBanAppealEntry GetAppealById(int64 Id) const;
+
+    /**
      * Delete the appeal with the given Id.
      * Returns true if an appeal was found and removed.
      * Thread-safe.
      */
     bool DeleteAppeal(int64 Id);
+
+    // ── Delegates ─────────────────────────────────────────────────────────────
+
+    /**
+     * Fired after every AddAppeal() call.
+     * External systems (e.g. DiscordBridge) bind here to post notifications.
+     */
+    DECLARE_MULTICAST_DELEGATE_OneParam(FOnBanAppealSubmitted, const FBanAppealEntry&);
+    static FOnBanAppealSubmitted OnBanAppealSubmitted;
 
 private:
     void    LoadFromFile();

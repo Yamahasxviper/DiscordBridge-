@@ -51,6 +51,27 @@ public:
     static void PushEvent(const FString& EventType,
                           const TSharedPtr<FJsonObject>& Fields);
 
+    /**
+     * Convenience helper called by BanChatCommands to push mute/unmute events.
+     * Builds the appropriate Fields object and forwards to PushEvent().
+     * No-op when the subsystem is not active.
+     *
+     * @param EventType   "mute" or "unmute".
+     * @param Uid         Compound UID of the affected player.
+     * @param PlayerName  Display name (may be empty for unmute events).
+     * @param MutedBy     Admin who issued the mute (may be empty for unmute).
+     * @param Reason      Reason for the mute (may be empty for unmute).
+     * @param bIsTimed    True when the mute has a finite duration.
+     * @param ExpiresAt   ISO-8601 expiry timestamp, or empty string if indefinite.
+     */
+    static void PushMuteEvent(const FString& EventType,
+                               const FString& Uid,
+                               const FString& PlayerName,
+                               const FString& MutedBy,
+                               const FString& Reason,
+                               bool           bIsTimed,
+                               const FString& ExpiresAt);
+
 private:
     /** The WebSocket client connected to WebSocketPushUrl. */
     UPROPERTY()

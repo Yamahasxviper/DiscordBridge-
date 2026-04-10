@@ -190,6 +190,16 @@ public:
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
     FString WebSocketPushUrl;
 
+    /**
+     * Number of days after which warnings are considered "decayed" and excluded from
+     * automatic escalation checks (default: 0 = warnings never decay).
+     * When non-zero, warnings older than WarnDecayDays days are ignored by
+     * GetWarningCount() (they are NOT deleted — they remain in the history for audit).
+     * Set to 0 to use all warnings regardless of age (original behaviour).
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    int32 WarnDecayDays = 0;
+
     /** Returns the singleton config instance. */
     static const UBanSystemConfig* Get();
 };
