@@ -188,7 +188,8 @@ bool UPlayerNoteRegistry::SaveToFile() const
         return false;
     }
 
-    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath))
+    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath,
+        FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
         UE_LOG(LogBanChatCommands, Error,
             TEXT("PlayerNoteRegistry: failed to write %s"), *FilePath);

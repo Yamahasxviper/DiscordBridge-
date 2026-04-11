@@ -326,7 +326,8 @@ bool UPlayerWarningRegistry::SaveToFile() const
         return false;
     }
 
-    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath))
+    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath,
+        FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
         UE_LOG(LogPlayerWarningRegistry, Error,
             TEXT("PlayerWarningRegistry: failed to write %s"), *FilePath);

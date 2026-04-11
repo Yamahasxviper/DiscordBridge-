@@ -45,6 +45,24 @@ static float GetIniFloat(const FConfigFile& Cfg, const FString& Key, float Defau
 	return Default;
 }
 
+/** Strip a leading UTF-8 BOM (EF BB BF) from a file on disk. */
+static void CleanFileBOM(const FString& FilePath)
+{
+	TArray<uint8> RawBytes;
+	if (!FFileHelper::LoadFileToArray(RawBytes, *FilePath))
+		return;
+	if (RawBytes.Num() >= 3 &&
+	    RawBytes[0] == 0xEF &&
+	    RawBytes[1] == 0xBB &&
+	    RawBytes[2] == 0xBF)
+	{
+		RawBytes.RemoveAt(0, 3, /*bAllowShrinking=*/false);
+		FFileHelper::SaveArrayToFile(RawBytes, *FilePath);
+		UE_LOG(LogTicketSystem, Log,
+		       TEXT("TicketSystem: Stripped UTF-8 BOM from '%s'."), *FilePath);
+	}
+}
+
 /** Parse every occurrence of "Key=Value" in a raw INI file string. */
 static TArray<FString> ParseRawIniArray(const FString& RawContent, const FString& Key)
 {
@@ -105,6 +123,12 @@ FTicketConfig FTicketConfig::Load()
 
 	const FString PrimaryPath = GetConfigFilePath();
 	const FString BackupPath  = GetBackupFilePath();
+
+	// Proactively strip UTF-8 BOM if present.
+	if (PlatformFile.FileExists(*PrimaryPath))
+		CleanFileBOM(PrimaryPath);
+	if (PlatformFile.FileExists(*BackupPath))
+		CleanFileBOM(BackupPath);
 
 	// ── Try to load the primary config file ───────────────────────────────────
 	const bool bPrimaryExists = PlatformFile.FileExists(*PrimaryPath);

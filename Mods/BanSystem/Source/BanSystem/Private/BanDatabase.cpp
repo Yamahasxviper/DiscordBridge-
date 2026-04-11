@@ -292,7 +292,8 @@ bool UBanDatabase::SaveToFile() const
         return false;
     }
 
-    if (!FFileHelper::SaveStringToFile(JsonStr, *DbPath))
+    if (!FFileHelper::SaveStringToFile(JsonStr, *DbPath,
+        FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
         UE_LOG(LogBanDatabase, Error,
             TEXT("BanDatabase: failed to write %s"), *DbPath);

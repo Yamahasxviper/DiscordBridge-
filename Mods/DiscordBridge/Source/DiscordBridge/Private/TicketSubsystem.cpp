@@ -670,7 +670,8 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 			TSharedRef<TJsonWriter<>> SW = TJsonWriterFactory<>::Create(&OutStats);
 			FJsonSerializer::Serialize(Stats.ToSharedRef(), SW);
 			FPlatformFileManager::Get().GetPlatformFile().CreateDirectoryTree(*FPaths::GetPath(StatsPath));
-			FFileHelper::SaveStringToFile(OutStats, *StatsPath);
+			FFileHelper::SaveStringToFile(OutStats, *StatsPath,
+				FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 		}
 
 		Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
@@ -2779,7 +2780,8 @@ void UTicketSubsystem::SaveTicketState() const
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonContent);
 	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
 
-	if (!FFileHelper::SaveStringToFile(JsonContent, *StatePath))
+	if (!FFileHelper::SaveStringToFile(JsonContent, *StatePath,
+		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 	{
 		UE_LOG(LogTicketSystem, Warning,
 		       TEXT("TicketSystem: Failed to save active ticket state to '%s'."),
@@ -3183,7 +3185,8 @@ FString JsonContent;
 TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonContent);
 FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
 
-if (!FFileHelper::SaveStringToFile(JsonContent, *Path))
+if (!FFileHelper::SaveStringToFile(JsonContent, *Path,
+	FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 {
 UE_LOG(LogTicketSystem, Warning,
        TEXT("TicketSystem: Failed to save blacklist to '%s'."), *Path);

@@ -243,7 +243,8 @@ bool UPlayerSessionRegistry::SaveToFile() const
         return false;
     }
 
-    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath))
+    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath,
+        FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
         UE_LOG(LogPlayerSessionRegistry, Error,
             TEXT("PlayerSessionRegistry: failed to write %s"), *FilePath);

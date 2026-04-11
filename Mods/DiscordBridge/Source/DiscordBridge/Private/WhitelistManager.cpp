@@ -194,7 +194,8 @@ FString OutJson;
 const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
 FJsonSerializer::Serialize(Root, Writer);
 
-if (!FFileHelper::SaveStringToFile(OutJson, *FilePath))
+if (!FFileHelper::SaveStringToFile(OutJson, *FilePath,
+	FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 {
 UE_LOG(LogWhitelistManager, Error,
 TEXT("Failed to save whitelist to %s"), *FilePath);

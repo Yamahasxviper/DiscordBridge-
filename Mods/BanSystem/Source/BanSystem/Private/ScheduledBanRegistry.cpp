@@ -264,7 +264,8 @@ bool UScheduledBanRegistry::SaveToFile() const
         return false;
     }
 
-    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath))
+    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath,
+        FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
         UE_LOG(LogScheduledBanRegistry, Error,
             TEXT("ScheduledBanRegistry: failed to write %s"), *FilePath);
