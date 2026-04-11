@@ -1905,7 +1905,10 @@ void UBanRestApi::RegisterRoutes()
             if (HostHeader && HostHeader->Num() > 0) Host = (*HostHeader)[0];
             const FString Api = Host.IsEmpty() ? TEXT("") : FString::Printf(TEXT("http://%s"), *Host);
 
-            const FString Html = FString::Printf(TEXT(R"HTML(<!DOCTYPE html>
+            // Split the HTML into two string literals to stay within MSVC's 16380-char
+            // string-literal limit (C2026).  Only the second part uses FString::Printf
+            // because it contains the API base-URL placeholder (%s).
+            FString Html = TEXT(R"HTML(<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -2005,8 +2008,8 @@ void UBanRestApi::RegisterRoutes()
   </div>
 
   <p class="error-msg" id="errorMsg"></p>
-</main>
-<script>
+</main>)HTML");
+            Html += FString::Printf(TEXT(R"HTML(<script>
   const API = '%s';
   const KEY = new URLSearchParams(location.search).get('key') || '';
 

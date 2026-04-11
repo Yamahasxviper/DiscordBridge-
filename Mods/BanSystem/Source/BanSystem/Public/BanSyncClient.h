@@ -56,6 +56,7 @@ public:
 
 private:
     /** Handles an incoming JSON message from a peer. */
+    UFUNCTION()
     void OnPeerMessage(const FString& Message);
 
     /** Called by UBanDatabase::OnBanAdded to forward local bans to peers. */
