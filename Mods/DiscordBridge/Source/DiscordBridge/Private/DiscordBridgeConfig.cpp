@@ -607,7 +607,8 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("InGameWhitelistCommandPrefix=!whitelist\n");
 				}
 
-				if (FFileHelper::SaveStringToFile(ExistingContent + AppendContent, *ModFilePath))
+				if (FFileHelper::SaveStringToFile(ExistingContent + AppendContent, *ModFilePath,
+				    FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 				{
 					UE_LOG(LogTemp, Log,
 					       TEXT("DiscordBridge: Updated '%s' with whitelist settings. "
@@ -859,7 +860,8 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 					FString ExistingContent2;
 					FFileHelper::LoadFileToString(ExistingContent2, *ModFilePath);
 
-					if (FFileHelper::SaveStringToFile(ExistingContent2 + AppendContent2, *ModFilePath))
+					if (FFileHelper::SaveStringToFile(ExistingContent2 + AppendContent2, *ModFilePath,
+					    FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 					{
 						UE_LOG(LogTemp, Log,
 						       TEXT("DiscordBridge: Updated '%s' with missing settings. "
@@ -1040,7 +1042,8 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		// Ensure the Config directory exists before writing.
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(ModFilePath));
 
-		if (FFileHelper::SaveStringToFile(DefaultContent, *ModFilePath))
+		if (FFileHelper::SaveStringToFile(DefaultContent, *ModFilePath,
+			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 		{
 			UE_LOG(LogTemp, Log,
 			       TEXT("DiscordBridge: Wrote default config to '%s'. "
@@ -1348,7 +1351,8 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 					PrimaryContent = MoveTemp(Rebuilt);
 				}
 
-				if (FFileHelper::SaveStringToFile(PrimaryContent, *ModFilePath))
+				if (FFileHelper::SaveStringToFile(PrimaryContent, *ModFilePath,
+				    FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 				{
 					UE_LOG(LogTemp, Log,
 					       TEXT("DiscordBridge: Updated primary config at '%s' with all restored settings."),
@@ -1499,7 +1503,8 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupFilePath));
 
-		if (FFileHelper::SaveStringToFile(FullBackupContent, *BackupFilePath))
+		if (FFileHelper::SaveStringToFile(FullBackupContent, *BackupFilePath,
+			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 		{
 			if (Config.BotToken.IsEmpty())
 			{

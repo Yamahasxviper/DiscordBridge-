@@ -254,7 +254,8 @@ FTicketConfig FTicketConfig::Load()
 		}
 
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
-		if (FFileHelper::SaveStringToFile(BackupContent, *BackupPath))
+		if (FFileHelper::SaveStringToFile(BackupContent, *BackupPath,
+			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 		{
 			UE_LOG(LogTicketSystem, Log,
 			       TEXT("TicketSystem: Updated backup config at '%s'."), *BackupPath);
@@ -387,7 +388,8 @@ void FTicketConfig::RestoreDefaultConfigIfNeeded()
 		TEXT("TicketEscalationCategoryId=\n");
 
 	PlatformFile.CreateDirectoryTree(*FPaths::GetPath(PrimaryPath));
-	if (FFileHelper::SaveStringToFile(Template, *PrimaryPath))
+	if (FFileHelper::SaveStringToFile(Template, *PrimaryPath,
+		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 	{
 		UE_LOG(LogTicketSystem, Log,
 		       TEXT("TicketSystem: Created annotated config template at '%s'. "
