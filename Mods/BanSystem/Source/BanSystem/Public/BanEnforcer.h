@@ -153,6 +153,13 @@ private:
      */
     FString GetCachedIpForPlayer(APlayerController* PC) const;
 
+    /**
+     * Returns the cached client version string for the player's UNetConnection,
+     * or an empty string if it was not present in the PreLogin Options string or
+     * the player has already disconnected.
+     */
+    FString GetCachedVersionForPlayer(APlayerController* PC) const;
+
     FDelegateHandle PostLoginHandle;
 
     /**
@@ -190,6 +197,15 @@ private:
      */
     TMap<TWeakObjectPtr<UNetConnection>, FString> CachedConnectionIPs;
 
+    /**
+     * Client version string cache populated by the PreLogin hook.
+     * Extracted from the join Options string (?SMLVersion= or ?version=).
+     * Keyed by UNetConnection pointer; evicted on player logout.
+     * Passed to UPlayerSessionRegistry::RecordSession() for audit purposes.
+     * May be empty when the client does not include a version option.
+     */
+    TMap<TWeakObjectPtr<UNetConnection>, FString> CachedConnectionVersions;
+
     /** Players queued for PlayerState / identity polling (CSS async init). */
     TArray<FPendingBanCheck> PendingBanChecks;
 
@@ -201,4 +217,19 @@ private:
      *  Kept so Deinitialize() can clear the timer even if GetWorld() is
      *  already null at that point. */
     TWeakObjectPtr<UWorld> PollTimerWorld;
+
+    /**
+     * True when UBanEnforcer bound itself to
+     * UFGServerSubsystem::CheckHealthCheckCompatibility.
+     * Used in Deinitialize() to conditionally call Unbind() — we only unbind
+     * if we were the ones who registered, to avoid removing another mod's handler.
+     */
+    bool bBoundHealthCheck = false;
+
+    /**
+     * BanSystem mod version string cached at Initialize() time for use inside
+     * the CheckHealthCheckCompatibility lambda (which cannot call UModLoadingLibrary
+     * itself without a game-instance reference).
+     */
+    FString CachedBanSystemModVersion;
 };

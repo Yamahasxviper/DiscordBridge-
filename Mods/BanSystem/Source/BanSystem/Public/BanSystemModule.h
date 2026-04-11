@@ -37,14 +37,39 @@ private:
     /** Ticker callback that fires every 30 s to apply due scheduled bans. */
     bool OnScheduledBanTick(float DeltaTime);
 
+    /**
+     * Ticker callback that polls the BanSystem config files every
+     * ConfigPollIntervalSeconds seconds and reloads them when changed.
+     *
+     * This provides Alpakit-safe hot reload: operators can edit
+     * Saved/BanSystem/BanSystem.ini (which is never touched by Alpakit
+     * staging) and have the new settings take effect within one poll
+     * interval without restarting the server.
+     */
+    bool OnConfigPollTick(float DeltaTime);
+
     FTSTicker::FDelegateHandle BackupTickHandle;
     FTSTicker::FDelegateHandle PruneTickHandle;
     FTSTicker::FDelegateHandle SessionPruneTickHandle;
     FTSTicker::FDelegateHandle ScheduledBanTickHandle;
+    FTSTicker::FDelegateHandle ConfigPollTickHandle;
+
     /** Accumulated time since the last scheduled backup (seconds). */
     float BackupAccumulatedSeconds = 0.0f;
     /** Accumulated time since the last scheduled prune (seconds). */
     float PruneAccumulatedSeconds = 0.0f;
     /** Accumulated time since the last session-records prune (seconds). */
     float SessionPruneAccumulatedSeconds = 0.0f;
+
+    /** How often (seconds) to poll for config-file changes (matches BanChatCommands). */
+    static constexpr float ConfigPollIntervalSeconds = 60.0f;
+
+    /**
+     * File modification timestamps captured on the last successful config reload.
+     * Two files are monitored:
+     *   [0] Saved/BanSystem/BanSystem.ini     — persistent operator override
+     *   [1] Mods/BanSystem/Config/DefaultBanSystem.ini — mod-distributed defaults
+     * A change in either file triggers a ReloadConfig() + BackupConfigIfNeeded().
+     */
+    FDateTime ConfigFileModTimes[2];
 };

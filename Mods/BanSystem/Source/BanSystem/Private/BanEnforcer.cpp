@@ -6,6 +6,8 @@
 #include "BanDiscordNotifier.h"
 #include "BanSystemConfig.h"
 #include "PlayerSessionRegistry.h"
+#include "ModLoading/ModLoadingLibrary.h"
+#include "FGServerSubsystem.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -137,6 +139,33 @@ void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
                     TEXT("BanEnforcer: cached remote IP %s for incoming connection"),
                     *RemoteIp);
             }
+
+            // Capture the client version string from the Options URL if present.
+            // Standard UE clients include ?version=<buildid>; CSS/SML may add
+            // ?SMLVersion=.  If absent the field stays empty (backward compat).
+            auto ExtractOption = [&Options](const FString& Key) -> FString
+            {
+                int32 OptIdx = Options.Find(Key, ESearchCase::IgnoreCase);
+                if (OptIdx == INDEX_NONE) return FString();
+                FString Val = Options.Mid(OptIdx + Key.Len());
+                int32 Sep;
+                if (Val.FindChar(TEXT('?'), Sep))
+                    Val = Val.Left(Sep);
+                Val.TrimStartAndEndInline();
+                return Val;
+            };
+
+            FString ClientVersion = ExtractOption(TEXT("SMLVersion="));
+            if (ClientVersion.IsEmpty())
+                ClientVersion = ExtractOption(TEXT("version="));
+            if (!ClientVersion.IsEmpty())
+            {
+                Enforcer->CachedConnectionVersions.Add(
+                    TWeakObjectPtr<UNetConnection>(Conn), ClientVersion);
+                UE_LOG(LogBanEnforcer, Log,
+                    TEXT("BanEnforcer: cached client version '%s' for incoming connection"),
+                    *ClientVersion);
+            }
         }));
 
     // Evict cache entries when the player's connection is torn down.
@@ -154,6 +183,7 @@ void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
                     UE_LOG(LogBanEnforcer, Log,
                         TEXT("BanEnforcer: evicted cached EOS PUID on player logout"));
                 Enforcer->CachedConnectionIPs.Remove(TWeakObjectPtr<UNetConnection>(Conn));
+                Enforcer->CachedConnectionVersions.Remove(TWeakObjectPtr<UNetConnection>(Conn));
             }
 
             // Also prune any fully garbage-collected (stale) entries.
@@ -167,9 +197,77 @@ void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
                 if (!It.Key().IsValid())
                     It.RemoveCurrent();
             }
+            for (auto It = Enforcer->CachedConnectionVersions.CreateIterator(); It; ++It)
+            {
+                if (!It.Key().IsValid())
+                    It.RemoveCurrent();
+            }
         }));
 
     UE_LOG(LogBanEnforcer, Log, TEXT("BanEnforcer: login enforcement active (PostLogin)"));
+
+    // Bind to UFGServerSubsystem::CheckHealthCheckCompatibility so that the
+    // server health-check response includes BanSystem status information.
+    // This lets the CSS server browser / health-check clients surface ban-system
+    // health alongside standard game metrics (completely additive, zero risk).
+    //
+    // We only bind when the delegate is currently unbound to avoid overwriting a
+    // handler registered by another mod.  Single-bind delegates support at most
+    // one handler; prefer binding early at subsystem init time.
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UFGServerSubsystem* FGSub = GI->GetSubsystem<UFGServerSubsystem>())
+        {
+            if (!FGSub->CheckHealthCheckCompatibility.IsBound())
+            {
+                bBoundHealthCheck = true;
+                TWeakObjectPtr<UBanEnforcer> WeakThis(this);
+                FGSub->CheckHealthCheckCompatibility.BindLambda(
+                    [WeakThis](const FString& /*ClientCustomData*/, FString& OutServerCustomData)
+                        -> FFGServerErrorResponse
+                    {
+                        UBanEnforcer* Enforcer = WeakThis.Get();
+                        if (Enforcer)
+                        {
+                            // Append BanSystem status fields to OutServerCustomData.
+                            // Use a simple key=value format so other fields already
+                            // written by CSS are not disturbed.
+                            UGameInstance* GI2 = Enforcer->GetGameInstance();
+                            int32 ActiveBanCount = 0;
+                            if (GI2)
+                            {
+                                if (UBanDatabase* DB = GI2->GetSubsystem<UBanDatabase>())
+                                    ActiveBanCount = DB->GetActiveBans().Num();
+                            }
+                            if (!OutServerCustomData.IsEmpty())
+                                OutServerCustomData += TEXT(",");
+                            OutServerCustomData += FString::Printf(
+                                TEXT("banSystemActiveBans=%d,banSystemModVersion=%s"),
+                                ActiveBanCount, *Enforcer->CachedBanSystemModVersion);
+                        }
+                        return FFGServerErrorResponse::Ok();
+                    });
+                UE_LOG(LogBanEnforcer, Log,
+                    TEXT("BanEnforcer: bound to UFGServerSubsystem::CheckHealthCheckCompatibility"));
+            }
+            else
+            {
+                UE_LOG(LogBanEnforcer, Log,
+                    TEXT("BanEnforcer: CheckHealthCheckCompatibility already bound — health-check integration skipped to avoid conflict"));
+            }
+        }
+    }
+
+    // Cache the BanSystem mod version string for use in the health-check callback.
+    if (UGameInstance* GI2 = GetGameInstance())
+    {
+        if (UModLoadingLibrary* ModLib = GI2->GetSubsystem<UModLoadingLibrary>())
+        {
+            FModInfo ModInfo;
+            if (ModLib->GetLoadedModInfo(TEXT("BanSystem"), ModInfo))
+                CachedBanSystemModVersion = ModInfo.Version.ToString();
+        }
+    }
 }
 
 void UBanEnforcer::Deinitialize()
@@ -183,9 +281,21 @@ void UBanEnforcer::Deinitialize()
     UNSUBSCRIBE_UOBJECT_METHOD(UFGGameModeDSComponent, NotifyPlayerLogout, PlayerLogoutHookHandle);
     PlayerLogoutHookHandle.Reset();
 
+    // Unbind the health-check delegate if we were the ones who bound it.
+    if (bBoundHealthCheck)
+    {
+        if (UGameInstance* GI = GetGameInstance())
+        {
+            if (UFGServerSubsystem* FGSub = GI->GetSubsystem<UFGServerSubsystem>())
+                FGSub->CheckHealthCheckCompatibility.Unbind();
+        }
+        bBoundHealthCheck = false;
+    }
+
     // Clear the EOS PUID cache.
     CachedConnectionPuids.Empty();
     CachedConnectionIPs.Empty();
+    CachedConnectionVersions.Empty();
 
     // Cancel any in-flight identity poll and clear the queue.
     PendingBanChecks.Empty();
@@ -498,7 +608,9 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
         if (GI)
         {
             if (UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>())
-                Registry->RecordSession(Uid, PC->PlayerState->GetPlayerName(), GetCachedIpForPlayer(PC));
+                Registry->RecordSession(Uid, PC->PlayerState->GetPlayerName(),
+                                        GetCachedIpForPlayer(PC),
+                                        GetCachedVersionForPlayer(PC));
         }
 
         // Geo-IP check (async, config-gated).
@@ -795,7 +907,9 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
         if (GI)
         {
             if (UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>())
-                Registry->RecordSession(Uid, PlayerName, GetCachedIpForPlayer(PC));
+                Registry->RecordSession(Uid, PlayerName,
+                                        GetCachedIpForPlayer(PC),
+                                        GetCachedVersionForPlayer(PC));
         }
 
         // Geo-IP check (async, config-gated) — same logic as PerformBanCheckForPlayer.
@@ -983,6 +1097,19 @@ FString UBanEnforcer::GetCachedIpForPlayer(APlayerController* PC) const
     if (!Conn) return FString();
 
     if (const FString* Cached = CachedConnectionIPs.Find(TWeakObjectPtr<UNetConnection>(Conn)))
+        return *Cached;
+
+    return FString();
+}
+
+FString UBanEnforcer::GetCachedVersionForPlayer(APlayerController* PC) const
+{
+    if (!IsValid(PC)) return FString();
+
+    UNetConnection* Conn = Cast<UNetConnection>(PC->Player);
+    if (!Conn) return FString();
+
+    if (const FString* Cached = CachedConnectionVersions.Find(TWeakObjectPtr<UNetConnection>(Conn)))
         return *Cached;
 
     return FString();

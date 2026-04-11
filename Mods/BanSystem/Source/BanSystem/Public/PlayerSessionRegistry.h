@@ -32,6 +32,15 @@ struct BANSYSTEM_API FPlayerSessionRecord
     /** Remote IP address recorded at the most recent join (may be empty for legacy records). */
     UPROPERTY(BlueprintReadOnly, Category = "BanSystem")
     FString IpAddress;
+
+    /**
+     * Client version string extracted from the join Options URL at PreLogin time.
+     * Standard UE clients include ?version=<buildid>; CSS/SML may add other keys.
+     * May be empty for clients that do not include a version option or for records
+     * written by older versions of BanSystem (backward-compatible JSON field).
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "BanSystem")
+    FString ClientVersion;
 };
 
 /**
@@ -67,8 +76,13 @@ public:
      * Record (or update) the most-recent-seen timestamp for a UID + display name.
      * Thread-safe.  Called from the game thread by BanEnforcer after a successful
      * ban check.
+     * @param ClientVersion  Optional version string extracted from the join Options
+     *                       URL (e.g. the UE ?version= or ?SMLVersion= option).
+     *                       Defaults to empty for backward compatibility.
      */
-    void RecordSession(const FString& Uid, const FString& DisplayName, const FString& IpAddress = FString());
+    void RecordSession(const FString& Uid, const FString& DisplayName,
+                       const FString& IpAddress = FString(),
+                       const FString& ClientVersion = FString());
 
     /**
      * Returns all session records whose display name contains the given substring
