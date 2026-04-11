@@ -646,7 +646,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 				if (FJsonSerializer::Deserialize(SR, Loaded) && Loaded.IsValid())
 					Stats = Loaded;
 			}
-			TSharedPtr<FJsonObject>* RatingsPtr = nullptr;
+			const TSharedPtr<FJsonObject>* RatingsPtr = nullptr;
 			TSharedPtr<FJsonObject> Ratings;
 			if (Stats->TryGetObjectField(TEXT("ratings"), RatingsPtr) && RatingsPtr)
 				Ratings = *RatingsPtr;

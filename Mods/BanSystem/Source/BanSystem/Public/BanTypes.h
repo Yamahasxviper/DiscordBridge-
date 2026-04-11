@@ -47,6 +47,16 @@ struct BANSYSTEM_API FBanTemplate
     /** Optional ban category tag applied when the template is used. */
     UPROPERTY(BlueprintReadOnly, Category = "Ban System")
     FString Category;
+
+    /**
+     * Parse a pipe-delimited config string ("slug|DurationMinutes|Reason[|Category]")
+     * into an FBanTemplate.  Returns true on success, false if the string has
+     * fewer than 3 pipe-separated fields.
+     */
+    static bool FromConfigString(const FString& ConfigStr, FBanTemplate& OutTemplate);
+
+    /** Convenience: parse a whole TArray<FString> into an array of templates. */
+    static TArray<FBanTemplate> ParseTemplates(const TArray<FString>& ConfigStrings);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
