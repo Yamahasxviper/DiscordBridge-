@@ -71,6 +71,22 @@ public:
     int32 GetWarningPoints(const FString& Uid) const;
 
     /**
+     * Add a new warning from a pre-populated FWarningEntry struct.
+     * The entry's Id and WarnDate are overwritten with auto-generated values.
+     * Saves to disk immediately. Thread-safe.
+     */
+    void AddWarning(const FWarningEntry& Entry);
+
+    /**
+     * Add a new warning with an optional expiry time (Points defaults to 1).
+     * ExpiryMinutes == 0 means no expiry (the warning never expires).
+     * Saves to disk immediately. Thread-safe.
+     */
+    void AddWarning(const FString& Uid, const FString& PlayerName,
+                    const FString& Reason, const FString& WarnedBy,
+                    int32 ExpiryMinutes);
+
+    /**
      * Add a new warning with an optional expiry time and point value.
      * ExpiryMinutes == 0 means no expiry (the warning never expires).
      * Points defaults to 1 (minor warning).
