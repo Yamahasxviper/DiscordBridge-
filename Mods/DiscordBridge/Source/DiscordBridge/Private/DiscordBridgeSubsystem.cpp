@@ -2180,39 +2180,44 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 			{
 				const FString DiscordUserId  = *DiscordUserIdPtr;
 				const FString* NamePtr       = PendingVerificationNames.Find(Code);
-				const FString  RequestedName = NamePtr ? *NamePtr : PlayerName;
+				// Always whitelist using the actual in-game PlayerName of the player who typed
+				// !verify – EosPUID is not available in HandleIncomingChatMessage so we add
+				// by name only. The Discord-submitted name is kept only for the audit log.
+				const FString  AuditName     = NamePtr && !NamePtr->IsEmpty() ? *NamePtr : PlayerName;
 
 				PendingVerifications.Remove(Code);
 				PendingVerificationNames.Remove(Code);
 				PendingVerificationExpiry.Remove(Code);
 
-				if (FWhitelistManager::AddPlayer(RequestedName, TEXT(""), TEXT("[Verification]")))
+				// Add using the real in-game player name, no PUID.
+				if (FWhitelistManager::AddPlayer(PlayerName, TEXT(""), TEXT("[Verification]")))
 				{
 					SendGameChatStatusMessage(FString::Printf(
 						TEXT("[DiscordBridge] Account linked! **%s** has been added to the whitelist."),
-						*RequestedName));
+						*PlayerName));
 					PostWhitelistEvent(
-						FString::Printf(TEXT("**%s** added via in-game verification"), *RequestedName),
-						RequestedName, TEXT("[Verification]"), 3066993);
+						FString::Printf(TEXT("**%s** added via in-game verification (Discord: %s)"),
+							*PlayerName, *AuditName),
+						PlayerName, TEXT("[Verification]"), 3066993);
 
 					// Confirm to the Discord user who initiated the link.
 					if (!Config.WhitelistApprovedDmMessage.IsEmpty())
 					{
 						const FString DmMsg = Config.WhitelistApprovedDmMessage
-							.Replace(TEXT("%PlayerName%"), *RequestedName);
+							.Replace(TEXT("%PlayerName%"), *PlayerName);
 						SendDiscordDM(DiscordUserId, DmMsg);
 					}
 					else
 					{
 						SendDiscordDM(DiscordUserId, FString::Printf(
 							TEXT("✅ Your in-game account **%s** has been verified and added to the whitelist!"),
-							*RequestedName));
+							*PlayerName));
 					}
 				}
 				else
 				{
 					SendGameChatStatusMessage(FString::Printf(
-						TEXT("[DiscordBridge] **%s** is already on the whitelist."), *RequestedName));
+						TEXT("[DiscordBridge] **%s** is already on the whitelist."), *PlayerName));
 				}
 			}
 		}
