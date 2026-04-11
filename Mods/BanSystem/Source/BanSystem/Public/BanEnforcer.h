@@ -5,6 +5,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/TimerHandle.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "BanEnforcer.generated.h"
 
@@ -20,6 +21,8 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBanEnforcer, Log, All);
 
 class UWorld;
 class UNetConnection;
+class AGameModeBase;
+class APlayerController;
 
 /**
  * Tracks a player whose PlayerState or platform identity was not yet available
