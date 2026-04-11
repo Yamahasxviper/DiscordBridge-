@@ -29,7 +29,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBanRestApi, Log, All);
  *   GET    /bans               – list active bans
  *   GET    /bans/all           – list all bans (including expired)
  *   GET    /bans/check/:uid    – check if UID is currently banned
- *   GET    /bans/export.csv    – export all bans as CSV (text/csv)
+ *   GET    /bans/export-csv    – export all bans as CSV (text/csv)
  *   POST   /bans               – create a ban (requires API key if configured)
  *   PATCH  /bans/:uid          – update ban reason/duration (requires API key if configured)
  *   DELETE /bans/:uid          – remove ban by compound UID (requires API key if configured)
