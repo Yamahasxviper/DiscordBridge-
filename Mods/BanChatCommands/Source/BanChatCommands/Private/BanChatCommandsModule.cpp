@@ -264,6 +264,12 @@ void FBanChatCommandsModule::BackupConfigIfNeeded()
     Content += FString::Printf(TEXT("ModBanDurationMinutes=%d\n"), Cfg->ModBanDurationMinutes);
     Content += FString::Printf(TEXT("MaxModMuteDurationMinutes=%d\n"), Cfg->MaxModMuteDurationMinutes);
     Content += FString::Printf(TEXT("bAllowModNotes=%s\n"), Cfg->bAllowModNotes ? TEXT("True") : TEXT("False"));
+    Content += FString::Printf(TEXT("bCreateWarnOnKick=%s\n"), Cfg->bCreateWarnOnKick ? TEXT("True") : TEXT("False"));
+    Content += FString::Printf(TEXT("WarningCheckCooldownSeconds=%d\n"), Cfg->WarningCheckCooldownSeconds);
+    Content += FString::Printf(TEXT("AdminBanRateLimitCount=%d\n"), Cfg->AdminBanRateLimitCount);
+    Content += FString::Printf(TEXT("AdminBanRateLimitMinutes=%d\n"), Cfg->AdminBanRateLimitMinutes);
+    Content += TEXT("ReloadConfigWebhookUrl=") + Cfg->ReloadConfigWebhookUrl + TEXT("\n");
+    Content += TEXT("ReportWebhookUrl=") + Cfg->ReportWebhookUrl + TEXT("\n");
 
     IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
     PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
@@ -298,52 +304,72 @@ void FBanChatCommandsModule::RestoreDefaultConfigIfNeeded()
     {
         FString Existing;
         FFileHelper::LoadFileToString(Existing, *DefaultIniPath);
-        if (Existing.Contains(TEXT("; ")))
+        if (Existing.Contains(TEXT("# ")))
             return; // comment lines present — leave as-is
     }
 
     const FString Content =
-        FString(TEXT("; BanChatCommands admin configuration.\n"))
-        + TEXT(";\n")
-        + TEXT("; RECOMMENDED: place your admin and moderator lists in\n")
-        + TEXT(";   Saved/BanChatCommands/BanChatCommands.ini\n")
-        + TEXT("; using the section header below.  That file is never overwritten by mod\n")
-        + TEXT("; updates.  BanChatCommands writes your current lists there on every\n")
-        + TEXT("; server start so they survive any wipe of the mod directory.\n")
-        + TEXT(";\n")
-        + TEXT("; EOS Product User IDs -- Each +AdminEosPUIDs= entry grants that player permission to run\n")
-        + TEXT("; /ban, /tempban, /unban, /bancheck, /banlist, /linkbans, /unlinkbans, /playerhistory,\n")
-        + TEXT("; /warn, /warnings, and /clearwarns from in-game chat.\n")
-        + TEXT(";\n")
-        + TEXT("; Each +ModeratorEosPUIDs= entry grants permission to run /kick and /modban only.\n")
-        + TEXT("; Admins automatically have moderator permissions too.\n")
-        + TEXT(";\n")
-        + TEXT("; BanListPageSize controls how many bans are shown per page in /banlist (default: 10, max: 50).\n")
-        + TEXT(";\n")
-        + TEXT("; EOS PUIDs are 32-character hex strings.  Players can find their own PUID by running\n")
-        + TEXT("; /whoami in-game.\n")
-        + TEXT(";\n")
-        + TEXT("; Note: On CSS Dedicated Server, all players are identified by their EOS Product User ID\n")
-        + TEXT("; regardless of their launch platform (Steam, Epic, etc.).\n")
-        + TEXT(";\n")
-        + TEXT("; If the admin list is empty, those commands are only usable from the server console.\n")
-        + TEXT("; /whoami is always available to all players regardless of this setting.\n")
-        + TEXT(";\n")
-        + TEXT("; Example:\n")
-        + TEXT(";   [/Script/BanChatCommands.BanChatCommandsConfig]\n")
-        + TEXT(";   +AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d51\n")
-        + TEXT(";   +ModeratorEosPUIDs=aabbccdd11223344aabbccdd11223344\n")
-        + TEXT(";   BanListPageSize=10\n")
+        FString(TEXT("# BanChatCommands admin configuration.\n"))
+        + TEXT("#\n")
+        + TEXT("# ── How to persist settings across mod updates ───────────────────────────────\n")
+        + TEXT("#\n")
+        + TEXT("# This file ships with the mod and may be replaced when you update BanChatCommands.\n")
+        + TEXT("# To keep your admin list permanently, place your overrides in ONE of:\n")
+        + TEXT("#\n")
+        + TEXT("#   1. Saved/BanChatCommands/BanChatCommands.ini  <- written by BanChatCommands on\n")
+        + TEXT("#                                                    every start; survives mod wipes\n")
+        + TEXT("#   2. Saved/Config/<Platform>/BanChatCommands.ini <- standard UE config override\n")
+        + TEXT("#\n")
+        + TEXT("# Both use the same [/Script/BanChatCommands.BanChatCommandsConfig] section header.\n")
+        + TEXT("# Restart the server after editing any config file.\n")
+        + TEXT("#\n")
+        + TEXT("# ── Admin list ───────────────────────────────────────────────────────────────\n")
+        + TEXT("#\n")
+        + TEXT("# EOS Product User IDs — each +AdminEosPUIDs= entry grants that player permission\n")
+        + TEXT("# to run the following commands from in-game chat:\n")
+        + TEXT("#\n")
+        + TEXT("#   /ban, /tempban, /unban, /bancheck, /banlist,\n")
+        + TEXT("#   /linkbans, /unlinkbans, /playerhistory\n")
+        + TEXT("#\n")
+        + TEXT("# EOS PUIDs are 32-character hex strings (case-insensitive).\n")
+        + TEXT("# Players can find their own PUID by running /whoami in-game.\n")
+        + TEXT("#\n")
+        + TEXT("# Note: On CSS Dedicated Server all players are identified by their EOS Product\n")
+        + TEXT("# User ID regardless of their launch platform (Steam, Epic Games Store, etc.).\n")
+        + TEXT("#\n")
+        + TEXT("# If the list is empty, those commands are only usable from the server console.\n")
+        + TEXT("# /whoami is always available to all connected players regardless of this setting.\n")
+        + TEXT("# The server console always bypasses the admin list.\n")
+        + TEXT("#\n")
+        + TEXT("# Example:\n")
+        + TEXT("#   [/Script/BanChatCommands.BanChatCommandsConfig]\n")
+        + TEXT("#   +AdminEosPUIDs=00020aed06f0a6958c3c067fb4b73d51\n")
+        + TEXT("#   +AdminEosPUIDs=aabbccdd11223344aabbccdd11223344\n")
         + TEXT("\n")
         + TEXT("[/Script/BanChatCommands.BanChatCommandsConfig]\n")
-        + TEXT("; +AdminEosPUIDs=YOUR_EOS_PUID_HERE\n")
-        + TEXT("; +ModeratorEosPUIDs=MODERATOR_EOS_PUID_HERE\n")
+        + TEXT("# +AdminEosPUIDs=YOUR_EOS_PUID_HERE\n")
+        + TEXT("# +ModeratorEosPUIDs=MODERATOR_EOS_PUID_HERE\n")
         + TEXT("BanListPageSize=10\n")
         + TEXT("ModBanDurationMinutes=30\n")
-        + TEXT("; MaxModMuteDurationMinutes=0  — 0 means no ceiling for moderators.\n")
+        + TEXT("# Maximum mute duration (minutes) a moderator may pass to /tempunmute.\n")
+        + TEXT("# 0 = no ceiling (same as admins).\n")
         + TEXT("MaxModMuteDurationMinutes=0\n")
-        + TEXT("; bAllowModNotes=False  — set True to let moderators use /note and /notes.\n")
-        + TEXT("bAllowModNotes=False\n");
+        + TEXT("# Set to True to allow moderators to use /note and /notes (default: only admins).\n")
+        + TEXT("bAllowModNotes=False\n")
+        + TEXT("# Cooldown in seconds between !warnings / !bancheck uses for non-admin senders.\n")
+        + TEXT("# Set to 0 to disable (default).\n")
+        + TEXT("WarningCheckCooldownSeconds=0\n")
+        + TEXT("# Discord webhook URL for /report command notifications.\n")
+        + TEXT("# Leave empty to disable Discord delivery.\n")
+        + TEXT("# ReportWebhookUrl=https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN\n")
+        + TEXT("# When True, issuing /kick also records a warning to the player's history (default: False).\n")
+        + TEXT("bCreateWarnOnKick=False\n")
+        + TEXT("# Discord webhook URL called when !reloadconfig is used. Leave empty to disable.\n")
+        + TEXT("# ReloadConfigWebhookUrl=\n")
+        + TEXT("# Maximum ban actions an admin may issue within AdminBanRateLimitMinutes (0 = disabled).\n")
+        + TEXT("AdminBanRateLimitCount=0\n")
+        + TEXT("# Time window in minutes for the admin ban rate limit (default: 5).\n")
+        + TEXT("AdminBanRateLimitMinutes=5\n");
 
     PlatformFile.CreateDirectoryTree(*FPaths::GetPath(DefaultIniPath));
 
