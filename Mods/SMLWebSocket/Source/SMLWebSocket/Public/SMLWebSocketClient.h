@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/CriticalSection.h"
 #include "UObject/Object.h"
 #include <atomic>
 #include "SMLWebSocketClient.generated.h"

@@ -7,7 +7,6 @@
 #include "CoreMinimal.h"
 #include "Engine/TimerHandle.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "Engine/TimerHandle.h"
 #include "BanEnforcer.generated.h"
 
 // Forward declaration to avoid pulling GameFramework/OnlineReplStructs.h into every
@@ -24,8 +23,6 @@ class AGameModeBase;
 class APlayerController;
 class UWorld;
 class UNetConnection;
-class AGameModeBase;
-class APlayerController;
 
 /**
  * Tracks a player whose PlayerState or platform identity was not yet available

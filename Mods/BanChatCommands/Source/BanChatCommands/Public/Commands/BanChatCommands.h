@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/CriticalSection.h"
 #include "Command/ChatCommandInstance.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "BanChatCommands.generated.h"
