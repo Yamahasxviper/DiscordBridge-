@@ -15,6 +15,7 @@
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/GameSession.h"
 #include "GameFramework/PlayerState.h"
+#include "GameFramework/OnlineReplStructs.h"
 #include "FGChatManager.h"
 #include "FGGamePhaseManager.h"
 #include "FGGamePhase.h"
@@ -2181,16 +2182,35 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 				const FString DiscordUserId  = *DiscordUserIdPtr;
 				const FString* NamePtr       = PendingVerificationNames.Find(Code);
 				// Always whitelist using the actual in-game PlayerName of the player who typed
-				// !verify – EosPUID is not available in HandleIncomingChatMessage so we add
-				// by name only. The Discord-submitted name is kept only for the audit log.
+				// !verify. The Discord-submitted name is kept only for the audit log.
 				const FString  AuditName     = NamePtr && !NamePtr->IsEmpty() ? *NamePtr : PlayerName;
+
+				// Resolve EosPUID from the currently-connected player controller whose
+				// name matches PlayerName. Use the safe FUniqueNetIdRepl accessors
+				// (GetType/ToString) – never dereference via operator-> on CSS DS.
+				FString ResolvedEosPUID;
+				if (UWorld* VerWorld = GetWorld())
+				{
+					for (FConstPlayerControllerIterator It = VerWorld->GetPlayerControllerIterator(); It; ++It)
+					{
+						APlayerController* VerPC = It->Get();
+						if (!VerPC || !VerPC->PlayerState) continue;
+						if (VerPC->PlayerState->GetPlayerName() != PlayerName) continue;
+						const FUniqueNetIdRepl& NetId = VerPC->PlayerState->GetUniqueId();
+						if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
+						{
+							ResolvedEosPUID = NetId.ToString().ToLower();
+						}
+						break;
+					}
+				}
 
 				PendingVerifications.Remove(Code);
 				PendingVerificationNames.Remove(Code);
 				PendingVerificationExpiry.Remove(Code);
 
-				// Add using the real in-game player name, no PUID.
-				if (FWhitelistManager::AddPlayer(PlayerName, TEXT(""), TEXT("[Verification]")))
+				// Add using the real in-game player name and resolved EosPUID (may be empty).
+				if (FWhitelistManager::AddPlayer(PlayerName, ResolvedEosPUID, TEXT("[Verification]")))
 				{
 					SendGameChatStatusMessage(FString::Printf(
 						TEXT("[DiscordBridge] Account linked! **%s** has been added to the whitelist."),
