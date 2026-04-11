@@ -71,4 +71,12 @@ private:
     TArray<FAuditEntry>  Entries;
     mutable FCriticalSection Mutex;
     FString FilePath;
+
+    /**
+     * BanSystem mod version string cached at Initialize() time via SML's
+     * UModLoadingLibrary.  Written into every FAuditEntry.ModVersion so that
+     * audit consumers can see which build of BanSystem recorded each action.
+     * Empty when the mod info is not available (e.g. standalone unit tests).
+     */
+    FString CachedModVersion;
 };

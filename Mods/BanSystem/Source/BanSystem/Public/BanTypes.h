@@ -374,6 +374,15 @@ struct BANSYSTEM_API FAuditEntry
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     FString Details;
 
+    /**
+     * BanSystem mod version at the time of the action.
+     * Populated automatically by UBanAuditLog::LogAction() from SML's
+     * UModLoadingLibrary.  Empty on records loaded from files written by
+     * older versions of BanSystem (backward-compatible JSON field).
+     */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString ModVersion;
+
     /** UTC timestamp when the action was performed. */
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     FDateTime Timestamp;

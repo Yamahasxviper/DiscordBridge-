@@ -7,6 +7,7 @@
 #include "PlayerWarningRegistry.h"
 #include "PlayerSessionRegistry.h"
 #include "ScheduledBanRegistry.h"
+#include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -79,6 +80,25 @@ void FBanSystemModule::StartupModule()
         FTickerDelegate::CreateRaw(this, &FBanSystemModule::OnScheduledBanTick),
         1.0f);
     UE_LOG(LogBanSystem, Log, TEXT("BanSystem: scheduled-ban ticker started."));
+
+    // Start the config-file hot-reload watcher.
+    // Capture baseline mod-times for both monitored INI files so the first
+    // poll can detect changes made between server start and the first tick.
+    {
+        const FString SavedIni = FPaths::Combine(
+            FPaths::ProjectSavedDir(), TEXT("BanSystem"), TEXT("BanSystem.ini"));
+        const FString DefaultIni = FPaths::Combine(
+            FPaths::ProjectDir(), TEXT("Mods"), TEXT("BanSystem"),
+            TEXT("Config"), TEXT("DefaultBanSystem.ini"));
+        ConfigFileModTimes[0] = IFileManager::Get().GetTimeStamp(*SavedIni);
+        ConfigFileModTimes[1] = IFileManager::Get().GetTimeStamp(*DefaultIni);
+    }
+    ConfigPollTickHandle = FTSTicker::GetCoreTicker().AddTicker(
+        FTickerDelegate::CreateRaw(this, &FBanSystemModule::OnConfigPollTick),
+        ConfigPollIntervalSeconds);
+    UE_LOG(LogBanSystem, Log,
+        TEXT("BanSystem: config auto-reload enabled — polling every %.0f seconds."),
+        ConfigPollIntervalSeconds);
 
     UE_LOG(LogBanSystem, Log, TEXT("BanSystem module started."));
 }
@@ -346,6 +366,11 @@ void FBanSystemModule::ShutdownModule()
         FTSTicker::GetCoreTicker().RemoveTicker(ScheduledBanTickHandle);
         ScheduledBanTickHandle.Reset();
     }
+    if (ConfigPollTickHandle.IsValid())
+    {
+        FTSTicker::GetCoreTicker().RemoveTicker(ConfigPollTickHandle);
+        ConfigPollTickHandle.Reset();
+    }
     UE_LOG(LogBanSystem, Log, TEXT("BanSystem module shut down."));
 }
 
@@ -353,12 +378,6 @@ bool FBanSystemModule::OnBackupTick(float DeltaTime)
 {
     const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
     if (!Cfg || Cfg->BackupIntervalHours <= 0.0f) return true;
-
-    BackupAccumulatedSeconds += DeltaTime;
-    const float IntervalSeconds = Cfg->BackupIntervalHours * 3600.0f;
-    if (BackupAccumulatedSeconds < IntervalSeconds) return true;
-
-    BackupAccumulatedSeconds = 0.0f;
 
     // Find the game instance to get the UBanDatabase subsystem.
     // We walk the GEngine world list to find the first server world.
@@ -369,10 +388,22 @@ bool FBanSystemModule::OnBackupTick(float DeltaTime)
             UWorld* World = Ctx.World();
             if (!World) continue;
             if (World->GetNetMode() != NM_DedicatedServer && World->GetNetMode() != NM_ListenServer) continue;
+
+            // Auto-pause-aware: don't accumulate interval time while the server
+            // is paused (no players connected).  Bans/backups are deferred until
+            // activity resumes, keeping the timer semantically meaningful.
+            if (World->IsPaused()) return true;
+
+            BackupAccumulatedSeconds += DeltaTime;
+            const float IntervalSeconds = Cfg->BackupIntervalHours * 3600.0f;
+            if (BackupAccumulatedSeconds < IntervalSeconds) return true;
+
+            BackupAccumulatedSeconds = 0.0f;
+
             UGameInstance* GI = World->GetGameInstance();
-            if (!GI) continue;
+            if (!GI) break;
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
-            if (!DB) continue;
+            if (!DB) break;
 
             const FString BackupDir = FPaths::GetPath(DB->GetDatabasePath()) / TEXT("backups");
             const FString Dest = DB->Backup(BackupDir, Cfg ? Cfg->MaxBackups : 5);
@@ -396,12 +427,6 @@ bool FBanSystemModule::OnPruneTick(float DeltaTime)
     const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
     if (!Cfg || Cfg->PruneIntervalHours <= 0.0f) return true;
 
-    PruneAccumulatedSeconds += DeltaTime;
-    const float IntervalSeconds = Cfg->PruneIntervalHours * 3600.0f;
-    if (PruneAccumulatedSeconds < IntervalSeconds) return true;
-
-    PruneAccumulatedSeconds = 0.0f;
-
     if (GEngine)
     {
         for (const FWorldContext& Ctx : GEngine->GetWorldContexts())
@@ -409,10 +434,20 @@ bool FBanSystemModule::OnPruneTick(float DeltaTime)
             UWorld* World = Ctx.World();
             if (!World) continue;
             if (World->GetNetMode() != NM_DedicatedServer && World->GetNetMode() != NM_ListenServer) continue;
+
+            // Auto-pause-aware: freeze the prune interval while the server is idle.
+            if (World->IsPaused()) return true;
+
+            PruneAccumulatedSeconds += DeltaTime;
+            const float IntervalSeconds = Cfg->PruneIntervalHours * 3600.0f;
+            if (PruneAccumulatedSeconds < IntervalSeconds) return true;
+
+            PruneAccumulatedSeconds = 0.0f;
+
             UGameInstance* GI = World->GetGameInstance();
-            if (!GI) continue;
+            if (!GI) break;
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
-            if (!DB) continue;
+            if (!DB) break;
 
             const int32 Pruned = DB->PruneExpiredBans();
             if (Pruned > 0)
@@ -439,10 +474,6 @@ bool FBanSystemModule::OnSessionPruneTick(float DeltaTime)
 
     // Run once per 24 hours.
     static constexpr float SessionPruneIntervalSeconds = 24.0f * 3600.0f;
-    SessionPruneAccumulatedSeconds += DeltaTime;
-    if (SessionPruneAccumulatedSeconds < SessionPruneIntervalSeconds) return true;
-
-    SessionPruneAccumulatedSeconds = 0.0f;
 
     if (GEngine)
     {
@@ -451,10 +482,19 @@ bool FBanSystemModule::OnSessionPruneTick(float DeltaTime)
             UWorld* World = Ctx.World();
             if (!World) continue;
             if (World->GetNetMode() != NM_DedicatedServer && World->GetNetMode() != NM_ListenServer) continue;
+
+            // Auto-pause-aware: hold the session-prune clock while idle.
+            if (World->IsPaused()) return true;
+
+            SessionPruneAccumulatedSeconds += DeltaTime;
+            if (SessionPruneAccumulatedSeconds < SessionPruneIntervalSeconds) return true;
+
+            SessionPruneAccumulatedSeconds = 0.0f;
+
             UGameInstance* GI = World->GetGameInstance();
-            if (!GI) continue;
+            if (!GI) break;
             UPlayerSessionRegistry* Reg = GI->GetSubsystem<UPlayerSessionRegistry>();
-            if (!Reg) continue;
+            if (!Reg) break;
 
             const int32 Pruned = Reg->PruneOldRecords(Cfg->SessionRetentionDays);
             if (Pruned > 0)
@@ -479,14 +519,58 @@ bool FBanSystemModule::OnScheduledBanTick(float DeltaTime)
             UWorld* World = Ctx.World();
             if (!World) continue;
             if (World->GetNetMode() != NM_DedicatedServer && World->GetNetMode() != NM_ListenServer) continue;
+
+            // Auto-pause-aware: when the server is auto-paused (no players) we
+            // freeze the 30-second interval accumulator so scheduled bans do not
+            // fire during idle time.  When the server unpauses, any ban whose
+            // EffectiveAt has passed will be applied on the very next tick because
+            // UScheduledBanRegistry::Tick() compares against FDateTime::UtcNow().
+            if (World->IsPaused()) return true;
+
             UGameInstance* GI = World->GetGameInstance();
-            if (!GI) continue;
+            if (!GI) break;
             UScheduledBanRegistry* Reg = GI->GetSubsystem<UScheduledBanRegistry>();
             if (Reg)
                 Reg->Tick(DeltaTime);
             break;
         }
     }
+    return true; // keep ticking
+}
+
+bool FBanSystemModule::OnConfigPollTick(float /*DeltaTime*/)
+{
+    // Paths to both monitored INI files.
+    const FString SavedIni = FPaths::Combine(
+        FPaths::ProjectSavedDir(), TEXT("BanSystem"), TEXT("BanSystem.ini"));
+    const FString DefaultIni = FPaths::Combine(
+        FPaths::ProjectDir(), TEXT("Mods"), TEXT("BanSystem"),
+        TEXT("Config"), TEXT("DefaultBanSystem.ini"));
+
+    const FDateTime NewTimes[2] = {
+        IFileManager::Get().GetTimeStamp(*SavedIni),
+        IFileManager::Get().GetTimeStamp(*DefaultIni)
+    };
+
+    const bool bChanged = (NewTimes[0] != ConfigFileModTimes[0])
+                       || (NewTimes[1] != ConfigFileModTimes[1]);
+
+    if (bChanged)
+    {
+        ConfigFileModTimes[0] = NewTimes[0];
+        ConfigFileModTimes[1] = NewTimes[1];
+
+        // Force UE to re-read all UPROPERTY(Config) fields from the ini files.
+        GetMutableDefault<UBanSystemConfig>()->ReloadConfig();
+
+        // Update the persistent backup so any changes are mirrored to
+        // Saved/BanSystem/BanSystem.ini even if the operator edited DefaultBanSystem.ini.
+        BackupConfigIfNeeded();
+
+        UE_LOG(LogBanSystem, Log,
+            TEXT("BanSystem: config auto-reloaded (INI file changed on disk)."));
+    }
+
     return true; // keep ticking
 }
 

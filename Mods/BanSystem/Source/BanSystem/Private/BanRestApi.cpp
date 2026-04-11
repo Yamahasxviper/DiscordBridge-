@@ -219,6 +219,8 @@ namespace BanJson
         Obj->SetStringField(TEXT("adminUid"),   E.AdminUid);
         Obj->SetStringField(TEXT("adminName"),  E.AdminName);
         Obj->SetStringField(TEXT("details"),    E.Details);
+        if (!E.ModVersion.IsEmpty())
+            Obj->SetStringField(TEXT("modVersion"), E.ModVersion);
         Obj->SetStringField(TEXT("timestamp"),  E.Timestamp.ToIso8601());
         return Obj;
     }
@@ -1471,7 +1473,7 @@ void UBanRestApi::RegisterRoutes()
                 return TEXT("\"") + S.Replace(TEXT("\""), TEXT("\"\"")) + TEXT("\"");
             };
 
-            FString Csv = TEXT("id,action,targetUid,targetName,adminUid,adminName,details,timestamp\n");
+            FString Csv = TEXT("id,action,targetUid,targetName,adminUid,adminName,details,modVersion,timestamp\n");
             for (const FAuditEntry& E : Entries)
             {
                 Csv += FString::Printf(TEXT("%lld,"), E.Id);
@@ -1481,6 +1483,7 @@ void UBanRestApi::RegisterRoutes()
                 Csv += CsvQ(E.AdminUid)   + TEXT(",");
                 Csv += CsvQ(E.AdminName)  + TEXT(",");
                 Csv += CsvQ(E.Details)    + TEXT(",");
+                Csv += CsvQ(E.ModVersion) + TEXT(",");
                 Csv += E.Timestamp.ToIso8601() + TEXT("\n");
             }
 
@@ -2015,7 +2018,7 @@ void UBanRestApi::RegisterRoutes()
 
   <!-- Audit Log -->
   <div id="tab-audit" class="tab-content">
-    <table><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>By</th><th>Reason</th></tr></thead>
+    <table><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>By</th><th>Reason</th><th>Mod Ver</th></tr></thead>
     <tbody id="auditTable"></tbody></table>
   </div>
 
@@ -2118,8 +2121,8 @@ void UBanRestApi::RegisterRoutes()
       // Audit log
       if(audit.status==='fulfilled'){
         const rows = (audit.value.entries||[]).slice(0,200).map(e=>
-          `<tr><td>${esc(e.timestamp)}</td><td>${badge(e.action,'blue')}</td><td>${esc(e.targetName||e.targetUid)}</td><td>${esc(e.performedBy)}</td><td>${esc(e.reason)}</td></tr>`).join('');
-        document.getElementById('auditTable').innerHTML = rows || '<tr><td colspan="5" style="text-align:center;color:#9ca3af">No audit entries</td></tr>';
+          `<tr><td>${esc(e.timestamp)}</td><td>${badge(e.action,'blue')}</td><td>${esc(e.targetName||e.targetUid)}</td><td>${esc(e.performedBy)}</td><td>${esc(e.reason)}</td><td>${esc(e.modVersion||'')}</td></tr>`).join('');
+        document.getElementById('auditTable').innerHTML = rows || '<tr><td colspan="6" style="text-align:center;color:#9ca3af">No audit entries</td></tr>';
       }
 
       // Metrics detail

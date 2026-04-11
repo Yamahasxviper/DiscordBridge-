@@ -2,6 +2,7 @@
 
 #include "BanAuditLog.h"
 #include "BanSystemConfig.h"
+#include "ModLoading/ModLoadingLibrary.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -29,6 +30,20 @@ void UBanAuditLog::Initialize(FSubsystemCollectionBase& Collection)
         PF.CreateDirectoryTree(*Dir);
 
     LoadFromFile();
+
+    // Cache the BanSystem mod version once so every audit entry records
+    // which build of the mod performed the action.  This is done via SML's
+    // UModLoadingLibrary, which is a GameInstanceSubsystem and is always
+    // available by the time our Initialize() runs.
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UModLoadingLibrary* ModLib = GI->GetSubsystem<UModLoadingLibrary>())
+        {
+            FModInfo ModInfo;
+            if (ModLib->GetLoadedModInfo(TEXT("BanSystem"), ModInfo))
+                CachedModVersion = ModInfo.Version.ToString();
+        }
+    }
 
     UE_LOG(LogBanAuditLog, Log,
         TEXT("BanAuditLog: loaded %s (%d entry/entries)"),
@@ -64,6 +79,7 @@ void UBanAuditLog::LogAction(const FString& Action,
     Entry.AdminUid   = AdminUid;
     Entry.AdminName  = AdminName;
     Entry.Details    = Details;
+    Entry.ModVersion = CachedModVersion;
     Entry.Timestamp  = FDateTime::UtcNow();
 
     Entries.Add(Entry);
@@ -146,6 +162,7 @@ void UBanAuditLog::LoadFromFile()
             (*ObjPtr)->TryGetStringField(TEXT("adminUid"),   Entry.AdminUid);
             (*ObjPtr)->TryGetStringField(TEXT("adminName"),  Entry.AdminName);
             (*ObjPtr)->TryGetStringField(TEXT("details"),    Entry.Details);
+            (*ObjPtr)->TryGetStringField(TEXT("modVersion"), Entry.ModVersion);
 
             FString TimestampStr;
             if ((*ObjPtr)->TryGetStringField(TEXT("timestamp"), TimestampStr))
@@ -176,6 +193,8 @@ bool UBanAuditLog::SaveToFile() const
         Obj->SetStringField(TEXT("adminUid"),   E.AdminUid);
         Obj->SetStringField(TEXT("adminName"),  E.AdminName);
         Obj->SetStringField(TEXT("details"),    E.Details);
+        if (!E.ModVersion.IsEmpty())
+            Obj->SetStringField(TEXT("modVersion"), E.ModVersion);
         Obj->SetStringField(TEXT("timestamp"),  E.Timestamp.ToIso8601());
         EntryArr.Add(MakeShared<FJsonValueObject>(Obj));
     }
