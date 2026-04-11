@@ -68,6 +68,25 @@ void UPlayerWarningRegistry::AddWarning(const FString& Uid, const FString& Playe
     SaveToFile();
 }
 
+void UPlayerWarningRegistry::AddWarning(const FWarningEntry& InEntry)
+{
+    if (InEntry.Uid.IsEmpty()) return;
+
+    FScopeLock Lock(&Mutex);
+
+    // Determine the next Id (max existing + 1).
+    int64 NextId = 1;
+    for (const FWarningEntry& W : Warnings)
+        if (W.Id >= NextId) NextId = W.Id + 1;
+
+    FWarningEntry Entry = InEntry;
+    Entry.Id       = NextId;
+    Entry.WarnDate = FDateTime::UtcNow();
+
+    Warnings.Add(Entry);
+    SaveToFile();
+}
+
 TArray<FWarningEntry> UPlayerWarningRegistry::GetWarningsForUid(const FString& Uid) const
 {
     FScopeLock Lock(&Mutex);
