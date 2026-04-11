@@ -4,6 +4,7 @@
 
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
+#include "HAL/CriticalSection.h"
 #include "Containers/Queue.h"
 #include "Templates/SharedPointer.h"
 #include <atomic>

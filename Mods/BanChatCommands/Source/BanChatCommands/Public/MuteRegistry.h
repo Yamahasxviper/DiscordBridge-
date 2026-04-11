@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/CriticalSection.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "MuteRegistry.generated.h"
 

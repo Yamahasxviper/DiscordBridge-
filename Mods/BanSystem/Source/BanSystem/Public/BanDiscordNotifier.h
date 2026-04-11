@@ -4,7 +4,6 @@
 
 #include "CoreMinimal.h"
 #include "BanTypes.h"
-#include "BanAppealRegistry.h"
 
 /**
  * FBanDiscordNotifier
