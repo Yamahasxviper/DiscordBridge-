@@ -599,10 +599,10 @@ void UBanRestApi::RegisterRoutes()
         }
     ));
 
-    // ── GET /bans/export.csv ─────────────────────────────────────────────────
+    // ── GET /bans/export-csv ─────────────────────────────────────────────────
     // Must be registered before /bans/:uid to avoid route collision.
     Routes->Handles.Add(Router->BindRoute(
-        FHttpPath(TEXT("/bans/export.csv")),
+        FHttpPath(TEXT("/bans/export-csv")),
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
         {
@@ -1432,9 +1432,9 @@ void UBanRestApi::RegisterRoutes()
         }
     ));
 
-    // ── GET /audit/export.csv ────────────────────────────────────────────────
+    // ── GET /audit/export-csv ────────────────────────────────────────────────
     Routes->Handles.Add(Router->BindRoute(
-        FHttpPath(TEXT("/audit/export.csv")),
+        FHttpPath(TEXT("/audit/export-csv")),
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
         {
@@ -1521,9 +1521,9 @@ void UBanRestApi::RegisterRoutes()
         }
     ));
 
-    // ── GET /warnings/export.csv ─────────────────────────────────────────────
+    // ── GET /warnings/export-csv ─────────────────────────────────────────────
     Routes->Handles.Add(Router->BindRoute(
-        FHttpPath(TEXT("/warnings/export.csv")),
+        FHttpPath(TEXT("/warnings/export-csv")),
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
         {
@@ -1557,9 +1557,9 @@ void UBanRestApi::RegisterRoutes()
         }
     ));
 
-    // ── GET /players/export.csv ──────────────────────────────────────────────
+    // ── GET /players/export-csv ──────────────────────────────────────────────
     Routes->Handles.Add(Router->BindRoute(
-        FHttpPath(TEXT("/players/export.csv")),
+        FHttpPath(TEXT("/players/export-csv")),
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
         {
