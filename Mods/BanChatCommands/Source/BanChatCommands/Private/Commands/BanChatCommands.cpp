@@ -32,6 +32,9 @@ DEFINE_LOG_CATEGORY(LogBanChatCommands);
 // ─────────────────────────────────────────────────────────────────────────────
 namespace BanChat
 {
+    // Forward declarations for functions used before their definition.
+    static bool IsBanRateLimited(UCommandSender* Sender, const FString& AdminUid);
+
     static UBanDatabase* GetDB(UObject* Ctx)
     {
         if (!Ctx) return nullptr;
@@ -600,9 +603,6 @@ namespace BanChat
     }
 
 } // namespace BanChat
-
-TMap<FString, FDateTime>              BanChat::CommandCooldowns;
-TMap<FString, TArray<FDateTime>>      BanChat::AdminBanTimestamps;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ALinkBansChatCommand  — /linkbans

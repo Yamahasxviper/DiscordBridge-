@@ -32,7 +32,7 @@ void UBanWebSocketPusher::Initialize(FSubsystemCollectionBase& Collection)
     Client->bAutoReconnect = true;
     Client->ReconnectInitialDelaySeconds = 5.0f;
     Client->MaxReconnectDelaySeconds     = 60.0f;
-    Client->Connect(Cfg->WebSocketPushUrl);
+    Client->Connect(Cfg->WebSocketPushUrl, TArray<FString>(), TMap<FString, FString>());
 
     ActiveInstance = this;
 

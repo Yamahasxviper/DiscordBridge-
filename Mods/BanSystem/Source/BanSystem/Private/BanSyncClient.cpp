@@ -36,11 +36,11 @@ void UBanSyncClient::Initialize(FSubsystemCollectionBase& Collection)
         if (!Client) continue;
 
         // Subscribe to incoming messages.
-        Client->OnMessageReceived.AddUObject(this, &UBanSyncClient::OnPeerMessage);
+        Client->OnMessage.AddDynamic(this, &UBanSyncClient::OnPeerMessage);
 
         // Auto-reconnect with default parameters.
         Client->bAutoReconnect = true;
-        Client->Connect(Url);
+        Client->Connect(Url, TArray<FString>(), TMap<FString, FString>());
 
         PeerClients.Add(Client);
 
