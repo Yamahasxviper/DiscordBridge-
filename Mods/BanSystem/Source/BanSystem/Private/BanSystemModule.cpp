@@ -299,7 +299,8 @@ void FBanSystemModule::BackupConfigIfNeeded()
     IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
     PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
 
-    if (FFileHelper::SaveStringToFile(FullContent, *BackupPath))
+    if (FFileHelper::SaveStringToFile(FullContent, *BackupPath,
+        FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
         UE_LOG(LogBanSystem, Log,
             TEXT("BanSystem: Updated backup config at '%s'."), *BackupPath);
@@ -529,7 +530,8 @@ void FBanSystemModule::RestoreDefaultConfigIfNeeded()
 
     PlatformFile.CreateDirectoryTree(*FPaths::GetPath(DefaultIniPath));
 
-    if (FFileHelper::SaveStringToFile(Content, *DefaultIniPath))
+    if (FFileHelper::SaveStringToFile(Content, *DefaultIniPath,
+        FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
         UE_LOG(LogBanSystem, Log,
             TEXT("BanSystem: Restored annotated default config at '%s'."), *DefaultIniPath);

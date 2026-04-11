@@ -121,7 +121,8 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 			+ TEXT("ModerationLogChannelId=") + Out.ModerationLogChannelId + TEXT("\n");
 
 		PF.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
-		if (FFileHelper::SaveStringToFile(BackupContent, *BackupPath))
+		if (FFileHelper::SaveStringToFile(BackupContent, *BackupPath,
+			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 		{
 			UE_LOG(LogBanDiscord, Log,
 			       TEXT("BanBridge: Updated backup config at '%s'."), *BackupPath);
@@ -207,7 +208,8 @@ void FBanBridgeConfig::RestoreDefaultConfigIfNeeded()
 		TEXT("ModerationLogChannelId=\n");
 
 	PF.CreateDirectoryTree(*FPaths::GetPath(PrimaryPath));
-	if (FFileHelper::SaveStringToFile(Template, *PrimaryPath))
+	if (FFileHelper::SaveStringToFile(Template, *PrimaryPath,
+		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 	{
 		UE_LOG(LogBanDiscord, Log,
 		       TEXT("BanBridge: Created annotated config template at '%s'. "

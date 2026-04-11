@@ -274,7 +274,8 @@ void FBanChatCommandsModule::BackupConfigIfNeeded()
     IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
     PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
 
-    if (FFileHelper::SaveStringToFile(Content, *BackupPath))
+    if (FFileHelper::SaveStringToFile(Content, *BackupPath,
+        FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
         UE_LOG(LogBanChatCommands, Log,
             TEXT("BanChatCommands: Updated backup config at '%s'."), *BackupPath);
@@ -373,7 +374,8 @@ void FBanChatCommandsModule::RestoreDefaultConfigIfNeeded()
 
     PlatformFile.CreateDirectoryTree(*FPaths::GetPath(DefaultIniPath));
 
-    if (FFileHelper::SaveStringToFile(Content, *DefaultIniPath))
+    if (FFileHelper::SaveStringToFile(Content, *DefaultIniPath,
+        FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
         UE_LOG(LogBanChatCommands, Log,
             TEXT("BanChatCommands: Restored annotated default config at '%s'."), *DefaultIniPath);
