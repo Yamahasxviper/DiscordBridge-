@@ -2976,7 +2976,7 @@ TEXT("{\"embeds\":[{\"title\":\"📊 %s\",\"color\":5793266,\"fields\":[%s],"
 *FDateTime::UtcNow().ToIso8601());
 
 // Send via the provider's body helper (bypasses text escaping).
-CachedProvider->SendMessageBodyToChannel(ChannelId, EmbedJson);
+CachedProvider->SendDiscordChannelMessage(ChannelId, EmbedJson);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3288,7 +3288,7 @@ Color,
 *Fields,
 *FDateTime::UtcNow().ToIso8601());
 
-CachedProvider->SendMessageBodyToChannel(ChannelId, EmbedJson);
+CachedProvider->SendDiscordChannelMessage(ChannelId, EmbedJson);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
