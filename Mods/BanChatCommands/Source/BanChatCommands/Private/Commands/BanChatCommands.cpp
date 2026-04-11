@@ -3493,11 +3493,14 @@ EExecutionStatus AQBanChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::COMPLETED;
     }
 
+    // Parse pipe-delimited template strings into FBanTemplate structs.
+    const TArray<FBanTemplate> Templates = FBanTemplate::ParseTemplates(SysCfg->BanTemplates);
+
     // List templates when no arguments or only template name given.
     if (Arguments.IsEmpty())
     {
         Sender->SendChatMessage(TEXT("[BanChatCommands] Available ban templates:"), FLinearColor::White);
-        for (const FBanTemplate& T : SysCfg->BanTemplates)
+        for (const FBanTemplate& T : Templates)
         {
             Sender->SendChatMessage(
                 FString::Printf(TEXT("  %s  |  %s  |  %s"),
@@ -3520,7 +3523,7 @@ EExecutionStatus AQBanChatCommand::ExecuteCommand_Implementation(
 
     // Find the template.
     const FBanTemplate* Template = nullptr;
-    for (const FBanTemplate& T : SysCfg->BanTemplates)
+    for (const FBanTemplate& T : Templates)
     {
         if (T.Slug.ToLower() == Slug) { Template = &T; break; }
     }

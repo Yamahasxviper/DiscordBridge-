@@ -1484,7 +1484,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 
 		// DiscordRoleLabels array backup lines
 		FString BackupRoleLabelLines;
-		BackupRoleLabelLines += TEXT("\n")
+		BackupRoleLabelLines += FString(TEXT("\n"))
 			+ TEXT("; -- Discord Role Labels (for %Role% placeholder) --------------------------\n")
 			+ TEXT("WelcomeMessageDM=") + Config.WelcomeMessageDM + TEXT("\n");
 		for (const FString& Entry : Config.DiscordRoleLabels)

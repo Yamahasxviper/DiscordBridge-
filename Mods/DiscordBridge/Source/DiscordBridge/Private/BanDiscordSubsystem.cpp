@@ -3120,10 +3120,13 @@ TEXT(":x: No ban templates configured (`BanTemplates=` in DefaultBanSystem.ini).
 return;
 }
 
+// Parse pipe-delimited template strings into FBanTemplate structs.
+const TArray<FBanTemplate> Templates = FBanTemplate::ParseTemplates(SysCfg->BanTemplates);
+
 if (Args.IsEmpty())
 {
 FString List = TEXT("**Available ban templates:**\n");
-for (const FBanTemplate& T : SysCfg->BanTemplates)
+for (const FBanTemplate& T : Templates)
 {
 const FString DurStr = T.DurationMinutes == 0 ? TEXT("permanent") : FString::Printf(TEXT("%dmin"), T.DurationMinutes);
 List += FString::Printf(TEXT("`%s` — %s — %s\n"), *T.Slug, *DurStr, *T.Reason);
@@ -3141,7 +3144,7 @@ return;
 
 const FString Slug = Args[0].ToLower();
 const FBanTemplate* Template = nullptr;
-for (const FBanTemplate& T : SysCfg->BanTemplates)
+for (const FBanTemplate& T : Templates)
 {
 if (T.Slug.ToLower() == Slug) { Template = &T; break; }
 }

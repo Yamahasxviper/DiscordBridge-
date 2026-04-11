@@ -4,6 +4,38 @@
 #include "BanSystemConfig.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  FBanTemplate helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool FBanTemplate::FromConfigString(const FString& ConfigStr, FBanTemplate& OutTemplate)
+{
+    TArray<FString> Parts;
+    ConfigStr.ParseIntoArray(Parts, TEXT("|"));
+    if (Parts.Num() < 3) return false;
+
+    OutTemplate.Slug            = Parts[0];
+    OutTemplate.DurationMinutes = FCString::Atoi(*Parts[1]);
+    OutTemplate.Reason          = Parts[2];
+    OutTemplate.Category        = Parts.Num() > 3 ? Parts[3] : FString();
+    return true;
+}
+
+TArray<FBanTemplate> FBanTemplate::ParseTemplates(const TArray<FString>& ConfigStrings)
+{
+    TArray<FBanTemplate> Result;
+    Result.Reserve(ConfigStrings.Num());
+    for (const FString& Str : ConfigStrings)
+    {
+        FBanTemplate T;
+        if (FromConfigString(Str, T))
+        {
+            Result.Add(MoveTemp(T));
+        }
+    }
+    return Result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  FBanEntry::GetKickMessage
 // ─────────────────────────────────────────────────────────────────────────────
 
