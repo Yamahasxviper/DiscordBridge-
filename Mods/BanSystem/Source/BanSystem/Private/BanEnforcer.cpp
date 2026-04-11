@@ -724,12 +724,12 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
 //  Kick helper
 // ─────────────────────────────────────────────────────────────────────────────
 
-void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const FString& Reason)
+bool UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const FString& Reason)
 {
-    if (!World) return;
+    if (!World) return false;
 
     AGameModeBase* GM = World->GetAuthGameMode();
-    if (!GM || !GM->GameSession) return;
+    if (!GM || !GM->GameSession) return false;
 
     // Parse the platform and raw player ID from the compound UID so we can fall back
     // to a second matching strategy when GetUniqueId() is not yet populated.
@@ -824,11 +824,12 @@ void UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
 
         UE_LOG(LogBanEnforcer, Log,
             TEXT("BanEnforcer: kicked connected player %s — %s"), *Uid, *Reason);
-        return;
+        return true;
     }
 
     UE_LOG(LogBanEnforcer, Log,
         TEXT("BanEnforcer: KickConnectedPlayer — no connected player found for UID %s"), *Uid);
+    return false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

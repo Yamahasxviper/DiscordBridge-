@@ -76,7 +76,7 @@ public:
      * identity), the raw player ID embedded in the UID is compared against the
      * PlayerState display name as a best-effort fallback.
      */
-    static void KickConnectedPlayer(UWorld* World, const FString& Uid, const FString& Reason);
+    static bool KickConnectedPlayer(UWorld* World, const FString& Uid, const FString& Reason);
 
     /**
      * CSS DS 1.1.0 workaround: extract the EOS Product User ID from the
