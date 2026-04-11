@@ -1,4 +1,4 @@
-// Copyright Coffee Stain Studios. All Rights Reserved.
+// Copyright Yamahasxviper. All Rights Reserved.
 
 #include "SMLWebSocketServerRunnable.h"
 #include "SMLWebSocketServer.h"
