@@ -1131,6 +1131,7 @@ void UBanRestApi::RegisterRoutes()
 
     // ── GET /audit ───────────────────────────────────────────────────────────
     Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/audit")),
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {

@@ -221,12 +221,12 @@ void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
             if (!FGSub->CheckHealthCheckCompatibility.IsBound())
             {
                 bBoundHealthCheck = true;
-                TWeakObjectPtr<UBanEnforcer> WeakThis(this);
+                TWeakObjectPtr<UBanEnforcer> WeakThisHealth(this);
                 FGSub->CheckHealthCheckCompatibility.BindLambda(
-                    [WeakThis](const FString& /*ClientCustomData*/, FString& OutServerCustomData)
+                    [WeakThisHealth](const FString& /*ClientCustomData*/, FString& OutServerCustomData)
                         -> FFGServerErrorResponse
                     {
-                        UBanEnforcer* Enforcer = WeakThis.Get();
+                        UBanEnforcer* Enforcer = WeakThisHealth.Get();
                         if (Enforcer)
                         {
                             // Append BanSystem status fields to OutServerCustomData.

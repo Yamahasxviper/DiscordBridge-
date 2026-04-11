@@ -252,8 +252,7 @@ bool FSMLWebSocketServerRunnable::PerformHandshake(FClientState& Client)
     {
         FString AuthValue;
         const FString AuthPrefix = TEXT("Authorization:");
-        int32 AuthIdx = INDEX_NONE;
-        Headers.FindSubstring(AuthPrefix, AuthIdx, ESearchCase::IgnoreCase);
+        int32 AuthIdx = Headers.Find(AuthPrefix, ESearchCase::IgnoreCase);
         if (AuthIdx != INDEX_NONE)
         {
             const int32 ValueStart = AuthIdx + AuthPrefix.Len();
