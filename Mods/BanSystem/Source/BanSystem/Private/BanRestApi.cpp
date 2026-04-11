@@ -11,6 +11,7 @@
 #include "BanDiscordNotifier.h"
 #include "BanAppealRegistry.h"
 #include "BanWebSocketPusher.h"
+#include "ScheduledBanRegistry.h"
 
 #include "HttpServerModule.h"
 #include "IHttpRouter.h"
@@ -57,6 +58,20 @@ namespace BanJson
         else
             Obj->SetStringField(TEXT("expireDate"), E.ExpireDate.ToIso8601());
         Obj->SetBoolField  (TEXT("isPermanent"), E.bIsPermanent);
+
+        // Category (optional).
+        if (!E.Category.IsEmpty())
+            Obj->SetStringField(TEXT("category"), E.Category);
+
+        // Evidence (optional).
+        if (E.Evidence.Num() > 0)
+        {
+            TArray<TSharedPtr<FJsonValue>> EvidArr;
+            for (const FString& Ev : E.Evidence)
+                EvidArr.Add(MakeShared<FJsonValueString>(Ev));
+            Obj->SetArrayField(TEXT("evidence"), EvidArr);
+        }
+
         return Obj;
     }
 
@@ -151,6 +166,46 @@ namespace BanJson
         Obj->SetStringField(TEXT("reason"),     W.Reason);
         Obj->SetStringField(TEXT("warnedBy"),   W.WarnedBy);
         Obj->SetStringField(TEXT("warnDate"),   W.WarnDate.ToIso8601());
+        Obj->SetNumberField(TEXT("points"),     static_cast<double>(W.Points > 0 ? W.Points : 1));
+        return Obj;
+    }
+
+    static TSharedPtr<FJsonObject> AppealToJson(const FBanAppealEntry& A)
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        Obj->SetNumberField(TEXT("id"),          static_cast<double>(A.Id));
+        Obj->SetStringField(TEXT("uid"),         A.Uid);
+        Obj->SetStringField(TEXT("reason"),      A.Reason);
+        Obj->SetStringField(TEXT("contactInfo"), A.ContactInfo);
+        Obj->SetStringField(TEXT("submittedAt"), A.SubmittedAt.ToIso8601());
+
+        FString StatusStr;
+        switch (A.Status)
+        {
+        case EAppealStatus::Approved: StatusStr = TEXT("approved"); break;
+        case EAppealStatus::Denied:   StatusStr = TEXT("denied");   break;
+        default:                      StatusStr = TEXT("pending");  break;
+        }
+        Obj->SetStringField(TEXT("status"),     StatusStr);
+        Obj->SetStringField(TEXT("reviewedBy"), A.ReviewedBy);
+        Obj->SetStringField(TEXT("reviewNote"), A.ReviewNote);
+        if (A.ReviewedAt != FDateTime(0))
+            Obj->SetStringField(TEXT("reviewedAt"), A.ReviewedAt.ToIso8601());
+        return Obj;
+    }
+
+    static TSharedPtr<FJsonObject> ScheduledToJson(const FScheduledBanEntry& S)
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        Obj->SetNumberField(TEXT("id"),              static_cast<double>(S.Id));
+        Obj->SetStringField(TEXT("uid"),             S.Uid);
+        Obj->SetStringField(TEXT("playerName"),      S.PlayerName);
+        Obj->SetStringField(TEXT("reason"),          S.Reason);
+        Obj->SetStringField(TEXT("scheduledBy"),     S.ScheduledBy);
+        Obj->SetStringField(TEXT("category"),        S.Category);
+        Obj->SetNumberField(TEXT("durationMinutes"), static_cast<double>(S.DurationMinutes));
+        Obj->SetStringField(TEXT("effectiveAt"),     S.EffectiveAt.ToIso8601());
+        Obj->SetStringField(TEXT("createdAt"),       S.CreatedAt.ToIso8601());
         return Obj;
     }
 
@@ -916,17 +971,20 @@ void UBanRestApi::RegisterRoutes()
             const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
             if (Cfg)
             {
+                const int32 WarnPoints = WarnReg->GetWarningPoints(Uid);
                 int32 BanDurationMinutes = -1;
 
                 // Check escalation tiers (highest matching tier wins).
+                // When a tier has PointThreshold > 0, use accumulated points; otherwise use count.
                 if (Cfg->WarnEscalationTiers.Num() > 0)
                 {
                     for (const FWarnEscalationTier& Tier : Cfg->WarnEscalationTiers)
                     {
-                        if (WarnCount >= Tier.WarnCount)
-                        {
+                        const bool bHit = (Tier.PointThreshold > 0)
+                            ? (WarnPoints >= Tier.PointThreshold)
+                            : (WarnCount  >= Tier.WarnCount);
+                        if (bHit)
                             BanDurationMinutes = Tier.DurationMinutes;
-                        }
                     }
                 }
                 else if (Cfg->AutoBanWarnCount > 0 && WarnCount >= Cfg->AutoBanWarnCount)
@@ -1628,18 +1686,21 @@ void UBanRestApi::RegisterRoutes()
 
             TArray<FBanAppealEntry> Appeals = AppealsReg->GetAllAppeals();
 
+            // Optional status filter: ?status=pending|approved|denied
+            const FString* StatusFilter = Req.QueryParams.Find(TEXT("status"));
+            if (StatusFilter && !StatusFilter->IsEmpty())
+            {
+                EAppealStatus FilterStatus = EAppealStatus::Pending;
+                const FString Norm = StatusFilter->ToLower();
+                if (Norm == TEXT("approved"))      FilterStatus = EAppealStatus::Approved;
+                else if (Norm == TEXT("denied"))   FilterStatus = EAppealStatus::Denied;
+                Appeals.RemoveAll([FilterStatus](const FBanAppealEntry& A){ return A.Status != FilterStatus; });
+            }
+
             TArray<TSharedPtr<FJsonValue>> Arr;
             Arr.Reserve(Appeals.Num());
             for (const FBanAppealEntry& E : Appeals)
-            {
-                TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-                Obj->SetNumberField(TEXT("id"),          static_cast<double>(E.Id));
-                Obj->SetStringField(TEXT("uid"),         E.Uid);
-                Obj->SetStringField(TEXT("reason"),      E.Reason);
-                Obj->SetStringField(TEXT("contactInfo"), E.ContactInfo);
-                Obj->SetStringField(TEXT("submittedAt"), E.SubmittedAt.ToIso8601());
-                Arr.Add(MakeShared<FJsonValueObject>(Obj));
-            }
+                Arr.Add(MakeShared<FJsonValueObject>(BanJson::AppealToJson(E)));
 
             TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
             Root->SetNumberField(TEXT("count"),   static_cast<double>(Appeals.Num()));
@@ -1680,13 +1741,7 @@ void UBanRestApi::RegisterRoutes()
                 return true;
             }
 
-            TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-            Obj->SetNumberField(TEXT("id"),          static_cast<double>(Entry.Id));
-            Obj->SetStringField(TEXT("uid"),         Entry.Uid);
-            Obj->SetStringField(TEXT("reason"),      Entry.Reason);
-            Obj->SetStringField(TEXT("contactInfo"), Entry.ContactInfo);
-            Obj->SetStringField(TEXT("submittedAt"), Entry.SubmittedAt.ToIso8601());
-            Done(BanJson::Json(BanJson::ObjectToString(Obj)));
+            Done(BanJson::Json(BanJson::ObjectToString(BanJson::AppealToJson(Entry))));
             return true;
         }
     ));
@@ -2103,6 +2158,469 @@ void UBanRestApi::RegisterRoutes()
             auto R = FHttpServerResponse::Create(Html, TEXT("text/html; charset=utf-8"));
             R->Code = EHttpServerResponseCodes::Ok;
             Done(MoveTemp(R));
+            return true;
+        }
+    ));
+
+    // ── PATCH /appeals/:id ───────────────────────────────────────────────────
+    // Review (approve or deny) a pending appeal.
+    // Body: { "status": "approved"|"denied", "reviewedBy": "adminname", "reviewNote": "..." }
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/appeals/:id")),
+        EHttpServerRequestVerbs::VERB_PATCH,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+
+            const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
+            if (IdStr.IsEmpty() || !IdStr.IsNumeric())
+            {
+                Done(BanJson::Error(TEXT("id must be an integer")));
+                return true;
+            }
+            const int64 Id = FCString::Atoi64(*IdStr);
+
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UBanAppealRegistry* AppealsReg = GI->GetSubsystem<UBanAppealRegistry>();
+            if (!AppealsReg) { Done(BanJson::Error(TEXT("AppealRegistry unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            const FString BodyStr = BanJson::BodyToString(Req);
+            TSharedPtr<FJsonObject> Body;
+            TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(BodyStr);
+            if (!FJsonSerializer::Deserialize(Reader, Body) || !Body.IsValid())
+            {
+                Done(BanJson::Error(TEXT("Invalid JSON body")));
+                return true;
+            }
+
+            FString StatusStr, ReviewedBy, ReviewNote;
+            if (!Body->TryGetStringField(TEXT("status"), StatusStr) || StatusStr.IsEmpty())
+            {
+                Done(BanJson::Error(TEXT("status is required (\"approved\" or \"denied\")")));
+                return true;
+            }
+            Body->TryGetStringField(TEXT("reviewedBy"), ReviewedBy);
+            Body->TryGetStringField(TEXT("reviewNote"), ReviewNote);
+
+            const FString Norm = StatusStr.ToLower();
+            EAppealStatus NewStatus;
+            if (Norm == TEXT("approved"))      NewStatus = EAppealStatus::Approved;
+            else if (Norm == TEXT("denied"))   NewStatus = EAppealStatus::Denied;
+            else
+            {
+                Done(BanJson::Error(TEXT("status must be \"approved\" or \"denied\"")));
+                return true;
+            }
+
+            if (!AppealsReg->ReviewAppeal(Id, NewStatus, ReviewedBy, ReviewNote))
+            {
+                Done(BanJson::Error(
+                    FString::Printf(TEXT("No appeal found with id %lld"), Id),
+                    EHttpServerResponseCodes::NotFound));
+                return true;
+            }
+
+            // If approved, auto-unban the player.
+            if (NewStatus == EAppealStatus::Approved)
+            {
+                const FBanAppealEntry Appeal = AppealsReg->GetAppealById(Id);
+                if (!Appeal.Uid.IsEmpty())
+                {
+                    UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
+                    if (DB && DB->RemoveBanByUid(Appeal.Uid))
+                    {
+                        FBanDiscordNotifier::NotifyBanRemoved(Appeal.Uid, Appeal.Uid, ReviewedBy);
+                        if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+                            AuditLog->LogAction(TEXT("unban"), Appeal.Uid, TEXT(""), ReviewedBy, ReviewedBy,
+                                FString::Printf(TEXT("Appeal #%lld approved: %s"), Id, *ReviewNote));
+                    }
+                }
+            }
+
+            if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+                AuditLog->LogAction(TEXT("appeal_review"),
+                    FString::Printf(TEXT("appeal#%lld"), Id), TEXT(""),
+                    ReviewedBy, ReviewedBy,
+                    FString::Printf(TEXT("status=%s note=%s"), *Norm, *ReviewNote));
+
+            Done(BanJson::Ok(
+                FString::Printf(TEXT("Appeal #%lld %s"), Id, *Norm)));
+            return true;
+        }
+    ));
+
+    // ── DELETE /appeals/:id ───────────────────────────────────────────────────
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/appeals/:id")),
+        EHttpServerRequestVerbs::VERB_DELETE,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+
+            const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
+            if (IdStr.IsEmpty() || !IdStr.IsNumeric())
+            {
+                Done(BanJson::Error(TEXT("id must be an integer")));
+                return true;
+            }
+            const int64 Id = FCString::Atoi64(*IdStr);
+
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UBanAppealRegistry* AppealsReg = GI->GetSubsystem<UBanAppealRegistry>();
+            if (!AppealsReg) { Done(BanJson::Error(TEXT("AppealRegistry unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            if (!AppealsReg->DeleteAppeal(Id))
+            {
+                Done(BanJson::Error(
+                    FString::Printf(TEXT("No appeal found with id %lld"), Id),
+                    EHttpServerResponseCodes::NotFound));
+                return true;
+            }
+
+            Done(BanJson::Ok(FString::Printf(TEXT("Appeal #%lld deleted"), Id)));
+            return true;
+        }
+    ));
+
+    // ── GET /scheduled ──────────────────────────────────────────────────────
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/scheduled")),
+        EHttpServerRequestVerbs::VERB_GET,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UScheduledBanRegistry* SchReg = GI->GetSubsystem<UScheduledBanRegistry>();
+            if (!SchReg) { Done(BanJson::Error(TEXT("ScheduledBanRegistry unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            TArray<FScheduledBanEntry> Pending = SchReg->GetAllPending();
+            TArray<TSharedPtr<FJsonValue>> Arr;
+            Arr.Reserve(Pending.Num());
+            for (const FScheduledBanEntry& S : Pending)
+                Arr.Add(MakeShared<FJsonValueObject>(BanJson::ScheduledToJson(S)));
+
+            TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+            Root->SetNumberField(TEXT("count"),     static_cast<double>(Pending.Num()));
+            Root->SetArrayField (TEXT("scheduled"), Arr);
+            Done(BanJson::Json(BanJson::ObjectToString(Root)));
+            return true;
+        }
+    ));
+
+    // ── POST /scheduled ─────────────────────────────────────────────────────
+    // Body: { "uid", "playerName", "reason", "scheduledBy", "effectiveAt" (ISO8601),
+    //         "durationMinutes" (0=permanent), "category" (optional) }
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/scheduled")),
+        EHttpServerRequestVerbs::VERB_POST,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UScheduledBanRegistry* SchReg = GI->GetSubsystem<UScheduledBanRegistry>();
+            if (!SchReg) { Done(BanJson::Error(TEXT("ScheduledBanRegistry unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            const FString BodyStr = BanJson::BodyToString(Req);
+            TSharedPtr<FJsonObject> Body;
+            TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(BodyStr);
+            if (!FJsonSerializer::Deserialize(Reader, Body) || !Body.IsValid())
+            {
+                Done(BanJson::Error(TEXT("Invalid JSON body")));
+                return true;
+            }
+
+            FString Uid, PlayerName, Reason, ScheduledBy, EffectiveAtStr, Category;
+            if (!Body->TryGetStringField(TEXT("uid"), Uid) || Uid.IsEmpty())
+            {
+                Done(BanJson::Error(TEXT("uid is required")));
+                return true;
+            }
+            Body->TryGetStringField(TEXT("playerName"),  PlayerName);
+            Body->TryGetStringField(TEXT("reason"),      Reason);
+            Body->TryGetStringField(TEXT("scheduledBy"), ScheduledBy);
+            Body->TryGetStringField(TEXT("effectiveAt"), EffectiveAtStr);
+            Body->TryGetStringField(TEXT("category"),    Category);
+
+            if (Reason.IsEmpty())      Reason      = TEXT("Scheduled ban");
+            if (ScheduledBy.IsEmpty()) ScheduledBy = TEXT("api");
+
+            FDateTime EffectiveAt = FDateTime::UtcNow() + FTimespan::FromMinutes(5.0);
+            if (!EffectiveAtStr.IsEmpty())
+                FDateTime::ParseIso8601(*EffectiveAtStr, EffectiveAt);
+
+            double DurDbl = 0.0;
+            Body->TryGetNumberField(TEXT("durationMinutes"), DurDbl);
+            const int32 DurationMinutes = static_cast<int32>(DurDbl);
+
+            const FScheduledBanEntry NewEntry = SchReg->AddScheduled(
+                Uid, PlayerName, Reason, ScheduledBy, EffectiveAt, DurationMinutes, Category);
+
+            if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+                AuditLog->LogAction(TEXT("schedule_ban"), Uid, PlayerName,
+                    ScheduledBy, ScheduledBy,
+                    FString::Printf(TEXT("effectiveAt=%s reason=%s"), *EffectiveAt.ToIso8601(), *Reason));
+
+            auto Resp = BanJson::Json(BanJson::ObjectToString(BanJson::ScheduledToJson(NewEntry)));
+            Resp->Code = EHttpServerResponseCodes::Created;
+            Done(MoveTemp(Resp));
+            return true;
+        }
+    ));
+
+    // ── DELETE /scheduled/:id ────────────────────────────────────────────────
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/scheduled/:id")),
+        EHttpServerRequestVerbs::VERB_DELETE,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+
+            const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
+            if (IdStr.IsEmpty() || !IdStr.IsNumeric())
+            {
+                Done(BanJson::Error(TEXT("id must be an integer")));
+                return true;
+            }
+            const int64 Id = FCString::Atoi64(*IdStr);
+
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UScheduledBanRegistry* SchReg = GI->GetSubsystem<UScheduledBanRegistry>();
+            if (!SchReg) { Done(BanJson::Error(TEXT("ScheduledBanRegistry unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            if (!SchReg->DeleteScheduled(Id))
+            {
+                Done(BanJson::Error(
+                    FString::Printf(TEXT("No scheduled ban found with id %lld"), Id),
+                    EHttpServerResponseCodes::NotFound));
+                return true;
+            }
+
+            Done(BanJson::Ok(FString::Printf(TEXT("Scheduled ban #%lld cancelled"), Id)));
+            return true;
+        }
+    ));
+
+    // ── GET /reputation/:uid ─────────────────────────────────────────────────
+    // Returns a reputation summary: warnings, bans, kicks, first/last seen,
+    // computed score.
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/reputation/:uid")),
+        EHttpServerRequestVerbs::VERB_GET,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            const FString RawUid = Req.PathParams.FindRef(TEXT("uid"));
+            const FString Uid    = FGenericPlatformHttp::UrlDecode(RawUid);
+
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+
+            UBanDatabase*           DB        = GI->GetSubsystem<UBanDatabase>();
+            UPlayerWarningRegistry* WarnReg   = GI->GetSubsystem<UPlayerWarningRegistry>();
+            UPlayerSessionRegistry* PlayerReg = GI->GetSubsystem<UPlayerSessionRegistry>();
+            UBanAuditLog*           AuditLog  = GI->GetSubsystem<UBanAuditLog>();
+
+            // Warning count and points.
+            const int32 WarnCount  = WarnReg  ? WarnReg->GetWarningCount(Uid)  : 0;
+            const int32 WarnPoints = WarnReg  ? WarnReg->GetWarningPoints(Uid) : 0;
+
+            // Historical ban count (all bans, including expired).
+            int32 TotalBans = 0;
+            bool  bCurrentlyBanned = false;
+            if (DB)
+            {
+                for (const FBanEntry& B : DB->GetAllBans())
+                {
+                    if (B.Uid.Equals(Uid, ESearchCase::IgnoreCase))
+                    {
+                        ++TotalBans;
+                        if (!B.IsExpired()) bCurrentlyBanned = true;
+                    }
+                }
+            }
+
+            // Kick count from audit log.
+            int32 KickCount = 0;
+            if (AuditLog)
+            {
+                for (const FAuditEntry& E : AuditLog->GetEntriesForTarget(Uid))
+                {
+                    if (E.Action == TEXT("kick")) ++KickCount;
+                }
+            }
+
+            // Session info.
+            FString DisplayName, LastSeen;
+            if (PlayerReg)
+            {
+                FPlayerSessionRecord Rec;
+                if (PlayerReg->FindByUid(Uid, Rec))
+                {
+                    DisplayName = Rec.DisplayName;
+                    LastSeen    = Rec.LastSeen;
+                }
+            }
+
+            // Simple reputation score: 100 minus deductions.
+            // Deductions: -5 per warn point, -15 per ban, -3 per kick.
+            const int32 Score = FMath::Max(0,
+                100 - (WarnPoints * 5) - (TotalBans * 15) - (KickCount * 3));
+
+            TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+            Obj->SetStringField(TEXT("uid"),             Uid);
+            Obj->SetStringField(TEXT("displayName"),     DisplayName);
+            Obj->SetStringField(TEXT("lastSeen"),        LastSeen);
+            Obj->SetNumberField(TEXT("warnCount"),       static_cast<double>(WarnCount));
+            Obj->SetNumberField(TEXT("warnPoints"),      static_cast<double>(WarnPoints));
+            Obj->SetNumberField(TEXT("totalBans"),       static_cast<double>(TotalBans));
+            Obj->SetBoolField  (TEXT("currentlyBanned"), bCurrentlyBanned);
+            Obj->SetNumberField(TEXT("kickCount"),       static_cast<double>(KickCount));
+            Obj->SetNumberField(TEXT("reputationScore"), static_cast<double>(Score));
+            Done(BanJson::Json(BanJson::ObjectToString(Obj)));
+            return true;
+        }
+    ));
+
+    // ── POST /bans/bulk ──────────────────────────────────────────────────────
+    // Body: { "uids": ["EOS:xxx", ...], "reason": "...", "bannedBy": "...",
+    //         "durationMinutes": 0, "category": "" }
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/bans/bulk")),
+        EHttpServerRequestVerbs::VERB_POST,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
+            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            const FString BodyStr = BanJson::BodyToString(Req);
+            TSharedPtr<FJsonObject> Body;
+            TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(BodyStr);
+            if (!FJsonSerializer::Deserialize(Reader, Body) || !Body.IsValid())
+            {
+                Done(BanJson::Error(TEXT("Invalid JSON body")));
+                return true;
+            }
+
+            const TArray<TSharedPtr<FJsonValue>>* UidsArr = nullptr;
+            if (!Body->TryGetArrayField(TEXT("uids"), UidsArr) || !UidsArr || UidsArr->IsEmpty())
+            {
+                Done(BanJson::Error(TEXT("uids array is required and must be non-empty")));
+                return true;
+            }
+
+            FString Reason, BannedBy, Category;
+            Body->TryGetStringField(TEXT("reason"),   Reason);
+            Body->TryGetStringField(TEXT("bannedBy"), BannedBy);
+            Body->TryGetStringField(TEXT("category"), Category);
+            if (Reason.IsEmpty())   Reason   = TEXT("Bulk ban");
+            if (BannedBy.IsEmpty()) BannedBy = TEXT("api");
+
+            double DurDbl = 0.0;
+            Body->TryGetNumberField(TEXT("durationMinutes"), DurDbl);
+            const int32 DurationMinutes = static_cast<int32>(DurDbl);
+
+            int32 Added = 0;
+            TArray<TSharedPtr<FJsonValue>> ResultArr;
+
+            for (const TSharedPtr<FJsonValue>& Val : *UidsArr)
+            {
+                FString Uid;
+                if (!Val.IsValid() || !Val->TryGetString(Uid) || Uid.IsEmpty()) continue;
+
+                FBanEntry Ban;
+                Ban.Uid        = Uid;
+                UBanDatabase::ParseUid(Uid, Ban.Platform, Ban.PlayerUID);
+                Ban.PlayerName      = Uid;
+                Ban.Reason          = Reason;
+                Ban.BannedBy        = BannedBy;
+                Ban.BanDate         = FDateTime::UtcNow();
+                Ban.Category        = Category;
+                Ban.bIsPermanent    = (DurationMinutes <= 0);
+                Ban.ExpireDate      = Ban.bIsPermanent
+                    ? FDateTime(0)
+                    : FDateTime::UtcNow() + FTimespan::FromMinutes(DurationMinutes);
+
+                if (DB->AddBan(Ban))
+                {
+                    FBanDiscordNotifier::NotifyBanCreated(Ban);
+                    if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+                        AuditLog->LogAction(TEXT("ban"), Uid, TEXT(""), BannedBy, BannedBy, Reason);
+                    ResultArr.Add(MakeShared<FJsonValueObject>(BanJson::EntryToJson(Ban)));
+                    ++Added;
+                }
+            }
+
+            TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+            Root->SetNumberField(TEXT("banned"), static_cast<double>(Added));
+            Root->SetArrayField (TEXT("bans"),   ResultArr);
+            auto Resp = BanJson::Json(BanJson::ObjectToString(Root));
+            Resp->Code = EHttpServerResponseCodes::Created;
+            Done(MoveTemp(Resp));
+            return true;
+        }
+    ));
+
+    // ── DELETE /bans/bulk ────────────────────────────────────────────────────
+    // Body: { "uids": ["EOS:xxx", ...] }
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/bans/bulk")),
+        EHttpServerRequestVerbs::VERB_DELETE,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+            UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
+            if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
+
+            const FString BodyStr = BanJson::BodyToString(Req);
+            TSharedPtr<FJsonObject> Body;
+            TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(BodyStr);
+            if (!FJsonSerializer::Deserialize(Reader, Body) || !Body.IsValid())
+            {
+                Done(BanJson::Error(TEXT("Invalid JSON body")));
+                return true;
+            }
+
+            const TArray<TSharedPtr<FJsonValue>>* UidsArr = nullptr;
+            if (!Body->TryGetArrayField(TEXT("uids"), UidsArr) || !UidsArr || UidsArr->IsEmpty())
+            {
+                Done(BanJson::Error(TEXT("uids array is required")));
+                return true;
+            }
+
+            FString RemovedBy;
+            Body->TryGetStringField(TEXT("removedBy"), RemovedBy);
+            if (RemovedBy.IsEmpty()) RemovedBy = TEXT("api");
+
+            int32 Removed = 0;
+            for (const TSharedPtr<FJsonValue>& Val : *UidsArr)
+            {
+                FString Uid;
+                if (!Val.IsValid() || !Val->TryGetString(Uid) || Uid.IsEmpty()) continue;
+                if (DB->RemoveBanByUid(Uid))
+                {
+                    FBanDiscordNotifier::NotifyBanRemoved(Uid, TEXT(""), RemovedBy);
+                    if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+                        AuditLog->LogAction(TEXT("unban"), Uid, TEXT(""), RemovedBy, RemovedBy, TEXT("bulk unban"));
+                    ++Removed;
+                }
+            }
+
+            TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+            Root->SetNumberField(TEXT("unbanned"), static_cast<double>(Removed));
+            Done(BanJson::Json(BanJson::ObjectToString(Root)));
             return true;
         }
     ));

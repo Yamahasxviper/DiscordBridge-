@@ -34,9 +34,13 @@ private:
      *  when SessionRetentionDays > 0. */
     bool OnSessionPruneTick(float DeltaTime);
 
+    /** Ticker callback that fires every 30 s to apply due scheduled bans. */
+    bool OnScheduledBanTick(float DeltaTime);
+
     FTSTicker::FDelegateHandle BackupTickHandle;
     FTSTicker::FDelegateHandle PruneTickHandle;
     FTSTicker::FDelegateHandle SessionPruneTickHandle;
+    FTSTicker::FDelegateHandle ScheduledBanTickHandle;
     /** Accumulated time since the last scheduled backup (seconds). */
     float BackupAccumulatedSeconds = 0.0f;
     /** Accumulated time since the last scheduled prune (seconds). */

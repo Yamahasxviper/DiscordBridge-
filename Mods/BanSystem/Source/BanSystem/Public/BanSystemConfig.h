@@ -8,17 +8,26 @@
 
 /**
  * A single warning-escalation tier.
- * When a player accumulates WarnCount or more warnings, they are automatically
- * banned for DurationMinutes minutes (0 = permanent).
+ * When a player accumulates WarnCount or more warnings (or PointThreshold or more
+ * warning points when PointThreshold > 0), they are automatically banned for
+ * DurationMinutes minutes (0 = permanent).
  */
 USTRUCT(BlueprintType)
 struct BANSYSTEM_API FWarnEscalationTier
 {
     GENERATED_BODY()
 
-    /** Warning count threshold that triggers this tier. */
+    /** Warning count threshold that triggers this tier (evaluated when PointThreshold == 0). */
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
     int32 WarnCount = 0;
+
+    /**
+     * Accumulated warning-point threshold that triggers this tier.
+     * When non-zero, points are used instead of plain warn count.
+     * Set this to use the Warning Points System; leave 0 for plain count mode.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    int32 PointThreshold = 0;
 
     /** Ban duration in minutes (0 = permanent). */
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
@@ -199,6 +208,169 @@ public:
      */
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
     int32 WarnDecayDays = 0;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Ban templates (quick-ban presets)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Ban preset definitions for the /qban and !qban quick-ban commands.
+     * Each entry is a pipe-delimited string: "slug|DurationMinutes|Reason[|Category]"
+     *   slug            — short identifier used in the command (e.g. "griefing")
+     *   DurationMinutes — 0 = permanent
+     *   Reason          — pre-filled ban reason
+     *   Category        — optional category tag
+     *
+     * Example (DefaultBanSystem.ini):
+     *   +BanTemplates=griefing|10080|Griefing — destroying other players' builds|griefing
+     *   +BanTemplates=cheating|0|Cheating — use of third-party tools|cheating
+     *   +BanTemplates=harassment|1440|Harassment of other players|harassment
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    TArray<FString> BanTemplates;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Configurable kick message templates
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Custom message shown to players who are permanently banned (default: built-in).
+     * Supports template variables: {reason}, {appeal_url}.
+     * Leave empty to use the default message.
+     *
+     * Example:
+     *   BanKickMessageTemplate=You are permanently banned. Reason: {reason}. Appeal at {appeal_url}
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    FString BanKickMessageTemplate;
+
+    /**
+     * Custom message shown to players who are temporarily banned (default: built-in).
+     * Supports template variables: {reason}, {expiry}, {appeal_url}.
+     * Leave empty to use the default message.
+     *
+     * Example:
+     *   TempBanKickMessageTemplate=You are banned until {expiry} UTC. Reason: {reason}
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    FString TempBanKickMessageTemplate;
+
+    /**
+     * URL included in the {appeal_url} template variable for ban kick messages.
+     * Typically the address of the /appeals/portal endpoint.
+     * Example: http://myserver.com:3000/appeals/portal
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    FString AppealUrl;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Multi-server ban sync
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * WebSocket endpoint URLs of peer servers to synchronise bans with.
+     * When a ban or unban is applied on this server it is broadcast as a JSON
+     * event to all configured peers; incoming ban events from peers are applied
+     * automatically by UBanSyncClient.
+     *
+     * Example (DefaultBanSystem.ini):
+     *   +PeerWebSocketUrls=ws://server2.example.com:9000/events
+     *   +PeerWebSocketUrls=ws://192.168.1.50:9000/events
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    TArray<FString> PeerWebSocketUrls;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Geo-IP region blocking
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * When true, GeoIP lookups are performed at player login using GeoIpApiUrl.
+     * Players from blocked (or not in the allowed) countries are kicked.
+     * Default: false.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    bool bGeoIpEnabled = false;
+
+    /**
+     * HTTP URL of the GeoIP API endpoint.
+     * The URL must accept GET requests with the IP address as the last path component
+     * and return a JSON object containing a "countryCode" string field (ISO 3166-1 alpha-2).
+     *
+     * Example (ip-api.com free tier):
+     *   GeoIpApiUrl=http://ip-api.com/json/{ip}?fields=countryCode
+     *
+     * The placeholder {ip} is replaced at runtime with the connecting player's IP address.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    FString GeoIpApiUrl;
+
+    /**
+     * Allowlist of ISO 3166-1 alpha-2 country codes (e.g. "US", "CA", "GB").
+     * When non-empty, only players from listed countries are allowed to join.
+     * Mutually exclusive with BlockedCountryCodes (allowed list takes precedence).
+     *
+     * Example: +AllowedCountryCodes=US
+     *          +AllowedCountryCodes=CA
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    TArray<FString> AllowedCountryCodes;
+
+    /**
+     * Blocklist of ISO 3166-1 alpha-2 country codes.
+     * Players from listed countries are kicked at login.
+     * Ignored when AllowedCountryCodes is non-empty.
+     *
+     * Example: +BlockedCountryCodes=XX
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    TArray<FString> BlockedCountryCodes;
+
+    /**
+     * Message shown to players kicked by the Geo-IP filter.
+     * Supports {country} template variable.
+     * Default: "You are not permitted to join this server from your region."
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    FString GeoIpKickMessage;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Admin action rate limiting
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Maximum number of ban/tempban actions an admin can issue within
+     * AdminBanRateLimitMinutes before subsequent bans are rejected.
+     * Default: 0 = disabled.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    int32 AdminBanRateLimitCount = 0;
+
+    /**
+     * Rolling window in minutes for the admin ban rate limiter.
+     * Default: 5.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    int32 AdminBanRateLimitMinutes = 5;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Chat-pattern auto-warn / auto-mute
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Number of chat-filter hits within ChatFilterAutoWarnWindowMinutes that
+     * automatically triggers a warning for the player.
+     * Default: 0 = disabled.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    int32 ChatFilterAutoWarnThreshold = 0;
+
+    /**
+     * Rolling window in minutes for the chat-filter auto-warn counter.
+     * Default: 10.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
+    int32 ChatFilterAutoWarnWindowMinutes = 10;
 
     /** Returns the singleton config instance. */
     static const UBanSystemConfig* Get();

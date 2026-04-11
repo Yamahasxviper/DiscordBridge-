@@ -6,6 +6,106 @@
 #include "CoreMinimal.h"
 #include "BanTypes.generated.h"
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Appeal status
+// ─────────────────────────────────────────────────────────────────────────────
+
+UENUM(BlueprintType)
+enum class EAppealStatus : uint8
+{
+    Pending  UMETA(DisplayName = "Pending"),
+    Approved UMETA(DisplayName = "Approved"),
+    Denied   UMETA(DisplayName = "Denied"),
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Ban template (quick-ban preset)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A ban template (preset) defined in DefaultBanSystem.ini as:
+ *   +BanTemplates=slug|DurationMinutes|Human-readable reason
+ * Duration 0 = permanent.
+ */
+USTRUCT(BlueprintType)
+struct BANSYSTEM_API FBanTemplate
+{
+    GENERATED_BODY()
+
+    /** Short identifier used with /qban and !qban (e.g. "griefing"). */
+    UPROPERTY(BlueprintReadOnly, Category = "Ban System")
+    FString Slug;
+
+    /** Ban duration in minutes (0 = permanent). */
+    UPROPERTY(BlueprintReadOnly, Category = "Ban System")
+    int32 DurationMinutes = 0;
+
+    /** Pre-filled reason string. */
+    UPROPERTY(BlueprintReadOnly, Category = "Ban System")
+    FString Reason;
+
+    /** Optional ban category tag applied when the template is used. */
+    UPROPERTY(BlueprintReadOnly, Category = "Ban System")
+    FString Category;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Scheduled ban entry
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A ban scheduled to take effect at a future UTC timestamp.
+ * Stored in scheduled_bans.json (same directory as bans.json).
+ */
+USTRUCT(BlueprintType)
+struct BANSYSTEM_API FScheduledBanEntry
+{
+    GENERATED_BODY()
+
+    /** Auto-incremented integer primary key (0 when not yet persisted). */
+    UPROPERTY(BlueprintReadOnly, Category = "Ban System")
+    int64 Id = 0;
+
+    /** Compound UID to ban: "EOS:xxx". */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString Uid;
+
+    /** Display name at time of scheduling (informational). */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString PlayerName;
+
+    /** Ban reason. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString Reason;
+
+    /** Admin who scheduled the ban. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString ScheduledBy;
+
+    /** UTC timestamp when the ban should take effect. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FDateTime EffectiveAt;
+
+    /** UTC timestamp when the ban was created. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FDateTime CreatedAt;
+
+    /** Duration in minutes (0 = permanent). */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    int32 DurationMinutes = 0;
+
+    /** Optional ban category tag. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString Category;
+
+    FScheduledBanEntry()
+        : Id(0)
+        , EffectiveAt(FDateTime::UtcNow())
+        , CreatedAt(FDateTime::UtcNow())
+        , DurationMinutes(0)
+    {}
+};
+
 /**
  * A single ban record — mirrors the SQLite schema in database.ts and
  * the BanRecord interface in models.ts exactly.
@@ -69,6 +169,21 @@ struct BANSYSTEM_API FBanEntry
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     TArray<FString> LinkedUids;
 
+    /**
+     * Optional category/severity tag (e.g. "griefing", "cheating", "harassment").
+     * Used for filtering in /banlist, the REST API, and Discord commands.
+     * Set automatically when a ban template is used.
+     */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString Category;
+
+    /**
+     * Optional list of evidence URLs or descriptions (screenshots, video links, logs).
+     * Stored as-is; no validation is performed on the content.
+     */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    TArray<FString> Evidence;
+
     FBanEntry()
         : Id(0)
         , BanDate(FDateTime::UtcNow())
@@ -95,19 +210,13 @@ struct BANSYSTEM_API FBanEntry
         return false;
     }
 
-    /** Human-readable message shown to the player when they are kicked. */
-    FString GetKickMessage() const
-    {
-        if (bIsPermanent)
-        {
-            return FString::Printf(
-                TEXT("You have been permanently banned. Reason: %s"), *Reason);
-        }
-        return FString::Printf(
-            TEXT("You are banned until %s UTC. Reason: %s"),
-            *ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")),
-            *Reason);
-    }
+    /** Human-readable message shown to the player when they are kicked.
+     *
+     * Supports template variables: {reason}, {expiry}, {appeal_url}.
+     * Template strings come from UBanSystemConfig::BanKickMessageTemplate
+     * and TempBanKickMessageTemplate when non-empty.
+     */
+    FString GetKickMessage() const;
 };
 
 /**
@@ -150,11 +259,20 @@ struct BANSYSTEM_API FWarningEntry
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     bool bHasExpiry = false;
 
+    /**
+     * Point value of this warning (default 1 = minor).
+     * Escalation tiers can be triggered by accumulated point total rather than count.
+     * Common values: 1=minor, 2=moderate, 3=severe.
+     */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    int32 Points = 1;
+
     FWarningEntry()
         : Id(0)
         , WarnDate(FDateTime::UtcNow())
         , ExpireDate(FDateTime(0))
         , bHasExpiry(false)
+        , Points(1)
     {}
 
     /** Returns true when this is a timed warning that has passed its expiry date. */
@@ -193,9 +311,27 @@ struct BANSYSTEM_API FBanAppealEntry
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     FDateTime SubmittedAt;
 
+    /** Current status of the appeal (default: Pending). */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    EAppealStatus Status = EAppealStatus::Pending;
+
+    /** Admin who reviewed the appeal (empty if still pending). */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString ReviewedBy;
+
+    /** Optional admin note recorded when approving or denying. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString ReviewNote;
+
+    /** UTC timestamp when the appeal was reviewed (FDateTime(0) if pending). */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FDateTime ReviewedAt;
+
     FBanAppealEntry()
         : Id(0)
         , SubmittedAt(FDateTime::UtcNow())
+        , Status(EAppealStatus::Pending)
+        , ReviewedAt(FDateTime(0))
     {}
 };
 

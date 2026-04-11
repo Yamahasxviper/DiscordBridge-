@@ -63,13 +63,22 @@ public:
     int32 GetWarningCount(const FString& Uid) const;
 
     /**
-     * Add a new warning with an optional expiry time.
+     * Returns the total accumulated warning points for the given UID.
+     * Points are the sum of FWarningEntry::Points for all non-expired warnings
+     * within the decay window (respects WarnDecayDays like GetWarningCount).
+     * Thread-safe.
+     */
+    int32 GetWarningPoints(const FString& Uid) const;
+
+    /**
+     * Add a new warning with an optional expiry time and point value.
      * ExpiryMinutes == 0 means no expiry (the warning never expires).
+     * Points defaults to 1 (minor warning).
      * Saves to disk immediately. Thread-safe.
      */
     void AddWarning(const FString& Uid, const FString& PlayerName,
                     const FString& Reason, const FString& WarnedBy,
-                    int32 ExpiryMinutes);
+                    int32 ExpiryMinutes, int32 Points);
 
     /**
      * Removes the single warning with the given integer ID.

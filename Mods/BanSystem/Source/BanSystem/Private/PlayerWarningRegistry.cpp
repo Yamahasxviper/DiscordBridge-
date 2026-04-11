@@ -129,6 +129,13 @@ void UPlayerWarningRegistry::AddWarning(const FString& Uid, const FString& Playe
                                          const FString& Reason, const FString& WarnedBy,
                                          int32 ExpiryMinutes)
 {
+    AddWarning(Uid, PlayerName, Reason, WarnedBy, ExpiryMinutes, 1);
+}
+
+void UPlayerWarningRegistry::AddWarning(const FString& Uid, const FString& PlayerName,
+                                         const FString& Reason, const FString& WarnedBy,
+                                         int32 ExpiryMinutes, int32 Points)
+{
     if (Uid.IsEmpty()) return;
 
     FScopeLock Lock(&Mutex);
@@ -144,6 +151,7 @@ void UPlayerWarningRegistry::AddWarning(const FString& Uid, const FString& Playe
     Entry.Reason     = Reason;
     Entry.WarnedBy   = WarnedBy;
     Entry.WarnDate   = FDateTime::UtcNow();
+    Entry.Points     = FMath::Max(1, Points);
     if (ExpiryMinutes > 0)
     {
         Entry.bHasExpiry  = true;
@@ -152,6 +160,27 @@ void UPlayerWarningRegistry::AddWarning(const FString& Uid, const FString& Playe
 
     Warnings.Add(Entry);
     SaveToFile();
+}
+
+int32 UPlayerWarningRegistry::GetWarningPoints(const FString& Uid) const
+{
+    FScopeLock Lock(&Mutex);
+
+    const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+    const int32 DecayDays = Cfg ? Cfg->WarnDecayDays : 0;
+    const FDateTime DecayCutoff = (DecayDays > 0)
+        ? FDateTime::UtcNow() - FTimespan::FromDays(static_cast<double>(DecayDays))
+        : FDateTime::MinValue();
+
+    int32 TotalPoints = 0;
+    for (const FWarningEntry& W : Warnings)
+    {
+        if (!W.Uid.Equals(Uid, ESearchCase::IgnoreCase)) continue;
+        if (W.IsExpired()) continue;
+        if (DecayDays > 0 && W.WarnDate < DecayCutoff) continue;
+        TotalPoints += FMath::Max(1, W.Points);
+    }
+    return TotalPoints;
 }
 
 int32 UPlayerWarningRegistry::PruneExpiredWarnings()
@@ -235,6 +264,11 @@ void UPlayerWarningRegistry::LoadFromFile()
             if ((*ObjPtr)->TryGetStringField(TEXT("expireDate"), ExpireDateStr) && !ExpireDateStr.IsEmpty())
                 FDateTime::ParseIso8601(*ExpireDateStr, Entry.ExpireDate);
 
+            // Points (default 1 for records written before this feature).
+            double PointsDbl = 1.0;
+            if ((*ObjPtr)->TryGetNumberField(TEXT("points"), PointsDbl) && PointsDbl >= 1.0)
+                Entry.Points = static_cast<int32>(PointsDbl);
+
             if (!Entry.Uid.IsEmpty())
                 Warnings.Add(Entry);
         }
@@ -257,6 +291,7 @@ bool UPlayerWarningRegistry::SaveToFile() const
         Obj->SetStringField(TEXT("warnDate"),   W.WarnDate.ToIso8601());
         Obj->SetBoolField  (TEXT("hasExpiry"),  W.bHasExpiry);
         Obj->SetStringField(TEXT("expireDate"), W.bHasExpiry ? W.ExpireDate.ToIso8601() : TEXT(""));
+        Obj->SetNumberField(TEXT("points"),     static_cast<double>(W.Points > 0 ? W.Points : 1));
         WarningArr.Add(MakeShared<FJsonValueObject>(Obj));
     }
 

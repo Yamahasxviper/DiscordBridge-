@@ -56,6 +56,16 @@ public:
      */
     bool DeleteAppeal(int64 Id);
 
+    /**
+     * Mark an appeal as Approved or Denied.
+     * Updates Status, ReviewedBy, ReviewNote, and ReviewedAt then saves to disk.
+     * Returns true when the appeal was found and updated; false when not found.
+     * Thread-safe.
+     */
+    bool ReviewAppeal(int64 Id, EAppealStatus NewStatus,
+                      const FString& ReviewedByName,
+                      const FString& ReviewNote);
+
     // ── Delegates ─────────────────────────────────────────────────────────────
 
     /**
@@ -64,6 +74,13 @@ public:
      */
     DECLARE_MULTICAST_DELEGATE_OneParam(FOnBanAppealSubmitted, const FBanAppealEntry&);
     static FOnBanAppealSubmitted OnBanAppealSubmitted;
+
+    /**
+     * Fired after a successful ReviewAppeal() call.
+     * External systems (e.g. DiscordBridge) bind here to post review notifications.
+     */
+    DECLARE_MULTICAST_DELEGATE_OneParam(FOnBanAppealReviewed, const FBanAppealEntry&);
+    static FOnBanAppealReviewed OnBanAppealReviewed;
 
 private:
     void    LoadFromFile();

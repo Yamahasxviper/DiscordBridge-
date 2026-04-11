@@ -6,6 +6,7 @@
 #include "BanSystemConfig.h"
 #include "PlayerWarningRegistry.h"
 #include "PlayerSessionRegistry.h"
+#include "ScheduledBanRegistry.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -69,6 +70,15 @@ void FBanSystemModule::StartupModule()
             TEXT("BanSystem: session retention enabled — keeping records for %d day(s)."),
             Cfg->SessionRetentionDays);
     }
+
+    // Always start the scheduled-ban ticker (every 30 s).
+    // UScheduledBanRegistry is a GameInstanceSubsystem and initialises automatically,
+    // but we route the tick through the module ticker so the registry stays active
+    // even when no game-instance tick is running at module startup.
+    ScheduledBanTickHandle = FTSTicker::GetCoreTicker().AddTicker(
+        FTickerDelegate::CreateRaw(this, &FBanSystemModule::OnScheduledBanTick),
+        1.0f);
+    UE_LOG(LogBanSystem, Log, TEXT("BanSystem: scheduled-ban ticker started."));
 
     UE_LOG(LogBanSystem, Log, TEXT("BanSystem module started."));
 }
@@ -331,6 +341,11 @@ void FBanSystemModule::ShutdownModule()
         FTSTicker::GetCoreTicker().RemoveTicker(SessionPruneTickHandle);
         SessionPruneTickHandle.Reset();
     }
+    if (ScheduledBanTickHandle.IsValid())
+    {
+        FTSTicker::GetCoreTicker().RemoveTicker(ScheduledBanTickHandle);
+        ScheduledBanTickHandle.Reset();
+    }
     UE_LOG(LogBanSystem, Log, TEXT("BanSystem module shut down."));
 }
 
@@ -452,6 +467,26 @@ bool FBanSystemModule::OnSessionPruneTick(float DeltaTime)
         }
     }
 
+    return true; // keep ticking
+}
+
+bool FBanSystemModule::OnScheduledBanTick(float DeltaTime)
+{
+    if (GEngine)
+    {
+        for (const FWorldContext& Ctx : GEngine->GetWorldContexts())
+        {
+            UWorld* World = Ctx.World();
+            if (!World) continue;
+            if (World->GetNetMode() != NM_DedicatedServer && World->GetNetMode() != NM_ListenServer) continue;
+            UGameInstance* GI = World->GetGameInstance();
+            if (!GI) continue;
+            UScheduledBanRegistry* Reg = GI->GetSubsystem<UScheduledBanRegistry>();
+            if (Reg)
+                Reg->Tick(DeltaTime);
+            break;
+        }
+    }
     return true; // keep ticking
 }
 
