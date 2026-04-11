@@ -15,6 +15,7 @@ DEFINE_LOG_CATEGORY(LogBanAppealRegistry);
 
 // Static delegate definition.
 UBanAppealRegistry::FOnBanAppealSubmitted UBanAppealRegistry::OnBanAppealSubmitted;
+UBanAppealRegistry::FOnBanAppealReviewed  UBanAppealRegistry::OnBanAppealReviewed;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  USubsystem lifecycle
@@ -108,6 +109,36 @@ bool UBanAppealRegistry::DeleteAppeal(int64 Id)
     return bRemoved;
 }
 
+bool UBanAppealRegistry::ReviewAppeal(int64 Id, EAppealStatus NewStatus,
+                                       const FString& ReviewedByName,
+                                       const FString& ReviewNoteText)
+{
+    FBanAppealEntry ReviewedEntry;
+    bool bFound = false;
+
+    {
+        FScopeLock Lock(&Mutex);
+        for (FBanAppealEntry& A : Appeals)
+        {
+            if (A.Id != Id) continue;
+            A.Status     = NewStatus;
+            A.ReviewedBy = ReviewedByName;
+            A.ReviewNote = ReviewNoteText;
+            A.ReviewedAt = FDateTime::UtcNow();
+            ReviewedEntry = A;
+            bFound = true;
+            break;
+        }
+        if (bFound)
+            SaveToFile();
+    }
+
+    if (bFound)
+        OnBanAppealReviewed.Broadcast(ReviewedEntry);
+
+    return bFound;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  File I/O
 // ─────────────────────────────────────────────────────────────────────────────
@@ -163,6 +194,21 @@ void UBanAppealRegistry::LoadFromFile()
             if ((*ObjPtr)->TryGetStringField(TEXT("submittedAt"), DateStr))
                 FDateTime::ParseIso8601(*DateStr, Entry.SubmittedAt);
 
+            // Status (default Pending for records written before this feature).
+            FString StatusStr;
+            if ((*ObjPtr)->TryGetStringField(TEXT("status"), StatusStr))
+            {
+                if (StatusStr == TEXT("approved"))      Entry.Status = EAppealStatus::Approved;
+                else if (StatusStr == TEXT("denied"))   Entry.Status = EAppealStatus::Denied;
+                else                                    Entry.Status = EAppealStatus::Pending;
+            }
+
+            (*ObjPtr)->TryGetStringField(TEXT("reviewedBy"),  Entry.ReviewedBy);
+            (*ObjPtr)->TryGetStringField(TEXT("reviewNote"),  Entry.ReviewNote);
+            FString ReviewedAtStr;
+            if ((*ObjPtr)->TryGetStringField(TEXT("reviewedAt"), ReviewedAtStr) && !ReviewedAtStr.IsEmpty())
+                FDateTime::ParseIso8601(*ReviewedAtStr, Entry.ReviewedAt);
+
             if (!Entry.Uid.IsEmpty())
                 Appeals.Add(Entry);
         }
@@ -182,6 +228,24 @@ bool UBanAppealRegistry::SaveToFile() const
         Obj->SetStringField(TEXT("reason"),      A.Reason);
         Obj->SetStringField(TEXT("contactInfo"), A.ContactInfo);
         Obj->SetStringField(TEXT("submittedAt"), A.SubmittedAt.ToIso8601());
+
+        // Status
+        FString StatusStr;
+        switch (A.Status)
+        {
+        case EAppealStatus::Approved: StatusStr = TEXT("approved"); break;
+        case EAppealStatus::Denied:   StatusStr = TEXT("denied");   break;
+        default:                      StatusStr = TEXT("pending");  break;
+        }
+        Obj->SetStringField(TEXT("status"), StatusStr);
+
+        if (!A.ReviewedBy.IsEmpty())
+            Obj->SetStringField(TEXT("reviewedBy"), A.ReviewedBy);
+        if (!A.ReviewNote.IsEmpty())
+            Obj->SetStringField(TEXT("reviewNote"), A.ReviewNote);
+        if (A.ReviewedAt != FDateTime(0))
+            Obj->SetStringField(TEXT("reviewedAt"), A.ReviewedAt.ToIso8601());
+
         AppealArr.Add(MakeShared<FJsonValueObject>(Obj));
     }
 

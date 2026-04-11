@@ -118,6 +118,25 @@ public:
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
     FString ReportWebhookUrl;
 
+    /**
+     * Maximum number of bans an admin may issue within AdminBanRateLimitMinutes
+     * before a rate-limit warning is shown.  Set to 0 to disable rate limiting.
+     * This prevents accidental mass bans.  Default: 0 (disabled).
+     *
+     * Example: AdminBanRateLimitCount=5, AdminBanRateLimitMinutes=5
+     *   → after 5 bans within 5 minutes the next ban attempt is blocked until
+     *     the window expires, preventing runaway mass-banning.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
+    int32 AdminBanRateLimitCount = 0;
+
+    /**
+     * Time window in minutes for AdminBanRateLimitCount.  Default: 5.
+     * Has no effect when AdminBanRateLimitCount is 0.
+     */
+    UPROPERTY(Config, BlueprintReadOnly, Category = "BanChatCommands")
+    int32 AdminBanRateLimitMinutes = 5;
+
     /** Returns the singleton config instance. */
     static const UBanChatCommandsConfig* Get();
 

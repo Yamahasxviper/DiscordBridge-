@@ -4,6 +4,9 @@
 #include "BanSystemConfig.h"
 #include "BanWebSocketPusher.h"
 
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonWriter.h"
+#include "Serialization/JsonSerializer.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
@@ -250,7 +253,7 @@ void FBanDiscordNotifier::NotifyAutoEscalationBan(const FBanEntry& Ban, int32 Wa
     }
 }
 
-
+void FBanDiscordNotifier::NotifyBanExpired(const FBanEntry& Entry)
 {
     const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
     if (!Cfg || !Cfg->bNotifyBanExpired) return;
@@ -277,5 +280,69 @@ void FBanDiscordNotifier::NotifyAutoEscalationBan(const FBanEntry& Ban, int32 Wa
         Obj->SetStringField(TEXT("reason"),     Entry.Reason);
         Obj->SetStringField(TEXT("expireDate"), Entry.ExpireDate.ToIso8601());
         UBanWebSocketPusher::PushEvent(TEXT("ban_expired"), Obj);
+    }
+}
+
+void FBanDiscordNotifier::NotifyAppealReviewed(const FBanAppealEntry& Appeal)
+{
+    const bool bApproved = (Appeal.Status == EAppealStatus::Approved);
+    const FString StatusLabel = bApproved ? TEXT("✅ Approved") : TEXT("❌ Denied");
+    const int32 Color         = bApproved ? 3066993 : 15158332; // green or red
+
+    const FString Fields =
+        Field(TEXT("Appeal #"),    FString::Printf(TEXT("%lld"), Appeal.Id)) + TEXT(",") +
+        Field(TEXT("Player UID"),  Appeal.Uid)                               + TEXT(",") +
+        Field(TEXT("Contact"),     Appeal.ContactInfo)                       + TEXT(",") +
+        Field(TEXT("Reviewed By"), Appeal.ReviewedBy.IsEmpty() ? TEXT("-") : Appeal.ReviewedBy) + TEXT(",") +
+        Field(TEXT("Note"),        Appeal.ReviewNote.IsEmpty()  ? TEXT("-") : Appeal.ReviewNote, false);
+
+    PostWebhook(BuildEmbed(Color,
+        FString::Printf(TEXT("⚖️ Ban Appeal %s"), *StatusLabel),
+        Fields));
+
+    // WebSocket push
+    {
+        FString StatusStr;
+        switch (Appeal.Status)
+        {
+        case EAppealStatus::Approved: StatusStr = TEXT("approved"); break;
+        case EAppealStatus::Denied:   StatusStr = TEXT("denied");   break;
+        default:                      StatusStr = TEXT("pending");  break;
+        }
+
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        Obj->SetNumberField(TEXT("appealId"),   static_cast<double>(Appeal.Id));
+        Obj->SetStringField(TEXT("uid"),        Appeal.Uid);
+        Obj->SetStringField(TEXT("status"),     StatusStr);
+        Obj->SetStringField(TEXT("reviewedBy"), Appeal.ReviewedBy);
+        Obj->SetStringField(TEXT("reviewNote"), Appeal.ReviewNote);
+        UBanWebSocketPusher::PushEvent(TEXT("appeal_reviewed"), Obj);
+    }
+}
+
+void FBanDiscordNotifier::NotifyGeoIpBlocked(const FString& PlayerName, const FString& Uid,
+                                              const FString& IpAddress, const FString& CountryCode)
+{
+    const FString PlayerValue = PlayerName.IsEmpty()
+        ? Uid
+        : PlayerName + TEXT(" (") + Uid + TEXT(")");
+
+    const FString Fields =
+        Field(TEXT("Player"),      PlayerValue)   + TEXT(",") +
+        Field(TEXT("IP"),          IpAddress)     + TEXT(",") +
+        Field(TEXT("Country"),     CountryCode)   + TEXT(",") +
+        Field(TEXT("Reason"),      TEXT("Geo-IP region blocked"), false);
+
+    // Amber: 16744272
+    PostWebhook(BuildEmbed(16744272, TEXT("🌍 Geo-IP Block"), Fields));
+
+    // WebSocket push
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        Obj->SetStringField(TEXT("uid"),         Uid);
+        Obj->SetStringField(TEXT("playerName"),  PlayerName);
+        Obj->SetStringField(TEXT("ipAddress"),   IpAddress);
+        Obj->SetStringField(TEXT("countryCode"), CountryCode);
+        UBanWebSocketPusher::PushEvent(TEXT("geoip_block"), Obj);
     }
 }

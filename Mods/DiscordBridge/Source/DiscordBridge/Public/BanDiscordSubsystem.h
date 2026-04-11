@@ -146,6 +146,12 @@ private:
 	/** Returns true when Query looks like an IPv4/IPv6 address or partial IP (contains a dot). */
 	static bool IsValidIPQuery(const FString& Query);
 
+	/**
+	 * Parses a human-readable duration string (e.g. "30m", "2h", "1d", "1w") into minutes.
+	 * Returns the parsed duration in minutes, or 0 if the string is invalid.
+	 */
+	static int32 ParseDurationMinutes(const FString& DurationStr);
+
 	// ── Command handlers ──────────────────────────────────────────────────────
 
 	/**
@@ -335,6 +341,24 @@ private:
 
 	/** Handle !poll. Usage: !poll <question> | <optionA> | <optionB> [...] */
 	void HandlePollCommand(const TArray<FString>& Args, const FString& ChannelId);
+
+	/** Handle !scheduleban. Usage: !scheduleban <player|PUID> <delay> [banDuration] [reason...] */
+	void HandleScheduleBanCommand(const TArray<FString>& Args,
+	                               const FString& ChannelId,
+	                               const FString& SenderName);
+
+	/** Handle !qban. Usage: !qban <templateSlug> <player|PUID> */
+	void HandleQBanCommand(const TArray<FString>& Args,
+	                        const FString& ChannelId,
+	                        const FString& SenderName);
+
+	/** Handle !reputation. Usage: !reputation <player|PUID> */
+	void HandleReputationCommand(const TArray<FString>& Args, const FString& ChannelId);
+
+	/** Handle !bulkban. Usage: !bulkban <PUID1> ... -- <reason> */
+	void HandleBulkBanCommand(const TArray<FString>& Args,
+	                           const FString& ChannelId,
+	                           const FString& SenderName);
 
 	// ── State ─────────────────────────────────────────────────────────────────
 

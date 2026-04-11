@@ -13,6 +13,7 @@
 #include "BanSystemConfig.h"
 #include "BanDiscordNotifier.h"
 #include "BanAuditLog.h"
+#include "ScheduledBanRegistry.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
@@ -334,6 +335,18 @@ namespace BanChat
             return EExecutionStatus::UNCOMPLETED;
         }
 
+        // Admin rate-limit check.
+        // Derive the admin UID from the BannedBy name by checking the current session.
+        // As a proxy we use the sender's display name as the rate-limit key.
+        {
+            // Use BannedBy as the rate-limit key; if empty fall back to sender name.
+            const FString RateLimitKey = BannedBy.IsEmpty()
+                ? (Sender ? Sender->GetSenderName() : TEXT("unknown"))
+                : BannedBy;
+            if (IsBanRateLimited(Sender, RateLimitKey))
+                return EExecutionStatus::UNCOMPLETED;
+        }
+
         FString Platform, RawId;
         UBanDatabase::ParseUid(Uid, Platform, RawId);
 
@@ -546,9 +559,50 @@ namespace BanChat
         return false;
     }
 
+    /**
+     * Admin ban rate-limit tracker.
+     * Maps AdminUid → array of timestamps of recent bans.
+     */
+    static TMap<FString, TArray<FDateTime>> AdminBanTimestamps;
+
+    /**
+     * Returns true if the admin has exceeded the configured ban rate limit.
+     * Sends a warning message to Sender and returns true when blocked.
+     */
+    static bool IsBanRateLimited(UCommandSender* Sender, const FString& AdminUid)
+    {
+        const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
+        if (!Cfg || Cfg->AdminBanRateLimitCount <= 0) return false;
+
+        const int32 LimitCount = Cfg->AdminBanRateLimitCount;
+        const int32 LimitMins  = FMath::Max(1, Cfg->AdminBanRateLimitMinutes);
+        const FDateTime Now    = FDateTime::UtcNow();
+        const FTimespan Window = FTimespan::FromMinutes(LimitMins);
+
+        TArray<FDateTime>& Timestamps = AdminBanTimestamps.FindOrAdd(AdminUid);
+        // Prune old timestamps outside the window.
+        Timestamps.RemoveAll([&Now, &Window](const FDateTime& T){ return (Now - T) > Window; });
+
+        if (Timestamps.Num() >= LimitCount)
+        {
+            if (Sender)
+            {
+                Sender->SendChatMessage(
+                    FString::Printf(TEXT("[BanChatCommands] Rate limit: you have issued %d bans in the past %d minutes. Please wait before banning again."),
+                        Timestamps.Num(), LimitMins),
+                    FLinearColor::Yellow);
+            }
+            return true;
+        }
+
+        Timestamps.Add(Now);
+        return false;
+    }
+
 } // namespace BanChat
 
-TMap<FString, FDateTime> BanChat::CommandCooldowns;
+TMap<FString, FDateTime>              BanChat::CommandCooldowns;
+TMap<FString, TArray<FDateTime>>      BanChat::AdminBanTimestamps;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ALinkBansChatCommand  — /linkbans
@@ -3269,6 +3323,455 @@ EExecutionStatus AReportChatCommand::ExecuteCommand_Implementation(
         Req->SetContentAsString(JsonPayload);
         Req->ProcessRequest();
     }
+
+    return EExecutionStatus::COMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AScheduleBanChatCommand  — /scheduleban
+// ─────────────────────────────────────────────────────────────────────────────
+
+AScheduleBanChatCommand::AScheduleBanChatCommand()
+{
+    CommandName          = TEXT("scheduleban");
+    MinNumberOfArguments = 0;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "ScheduleBanUsage",
+        "/scheduleban <player|PUID> <delay> [banDuration] [reason...]  — ban a player at a future time");
+}
+
+EExecutionStatus AScheduleBanChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString AdminUid;
+    if (!BanChat::IsAdminSender(Sender, AdminUid)) return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    UBanDatabase* DB = BanChat::GetDB(this);
+    if (!DB) { Sender->SendChatMessage(TEXT("[BanChatCommands] Database unavailable."), FLinearColor::Red); return EExecutionStatus::COMPLETED; }
+
+    // List pending scheduled bans when no arguments.
+    if (Arguments.IsEmpty())
+    {
+        UWorld* W = GetWorld();
+        UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
+        UScheduledBanRegistry* SchReg = GI ? GI->GetSubsystem<UScheduledBanRegistry>() : nullptr;
+        if (!SchReg)
+        {
+            Sender->SendChatMessage(TEXT("[BanChatCommands] ScheduledBanRegistry unavailable."), FLinearColor::Red);
+            return EExecutionStatus::COMPLETED;
+        }
+        TArray<FScheduledBanEntry> Pending = SchReg->GetAllPending();
+        if (Pending.IsEmpty())
+        {
+            Sender->SendChatMessage(TEXT("[BanChatCommands] No pending scheduled bans."), FLinearColor::White);
+        }
+        else
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] %d scheduled ban(s):"), Pending.Num()),
+                FLinearColor::White);
+            for (const FScheduledBanEntry& S : Pending)
+            {
+                Sender->SendChatMessage(
+                    FString::Printf(TEXT("  #%lld  %s  at %s  [%s]"),
+                        S.Id, *S.Uid, *S.EffectiveAt.ToString(TEXT("%Y-%m-%d %H:%M:%S")), *S.Reason),
+                    FLinearColor::White);
+            }
+        }
+        return EExecutionStatus::COMPLETED;
+    }
+
+    if (Arguments.Num() < 2)
+    {
+        Sender->SendChatMessage(
+            TEXT("[BanChatCommands] Usage: /scheduleban <player|PUID> <delay> [banDuration] [reason...]"),
+            FLinearColor::Yellow);
+        return EExecutionStatus::COMPLETED;
+    }
+
+    const FString TargetArg = Arguments[0];
+    const FString DelayStr  = Arguments[1];
+
+    int32 DelayMinutes = BanChat::ParseDurationMinutes(DelayStr);
+    if (DelayMinutes <= 0)
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Invalid delay '%s'. Use format like 30m, 2h, 1d."), *DelayStr),
+            FLinearColor::Yellow);
+        return EExecutionStatus::COMPLETED;
+    }
+
+    // Optional ban duration (3rd argument).
+    int32 BanDurationMinutes = 0; // 0 = permanent
+    int32 ReasonStartIdx = 2;
+    if (Arguments.Num() > 2 && Arguments[2] != TEXT("perm") && Arguments[2] != TEXT("0"))
+    {
+        const int32 Parsed = BanChat::ParseDurationMinutes(Arguments[2]);
+        if (Parsed > 0)
+        {
+            BanDurationMinutes = Parsed;
+            ReasonStartIdx = 3;
+        }
+        else if (Arguments[2] == TEXT("perm") || Arguments[2] == TEXT("permanent"))
+        {
+            BanDurationMinutes = 0;
+            ReasonStartIdx = 3;
+        }
+    }
+    else if (Arguments.Num() > 2 && (Arguments[2] == TEXT("perm") || Arguments[2] == TEXT("permanent")))
+    {
+        BanDurationMinutes = 0;
+        ReasonStartIdx = 3;
+    }
+
+    const FString Reason = Arguments.Num() > ReasonStartIdx
+        ? BanChat::JoinArgs(Arguments, ReasonStartIdx)
+        : TEXT("Scheduled ban");
+
+    // Resolve target UID.
+    FString Uid, PlayerName;
+    if (!BanChat::ResolveTarget(this, Sender, TargetArg, Uid, PlayerName))
+    {
+        Uid        = UBanDatabase::MakeUid(TEXT("EOS"), TargetArg.ToLower());
+        PlayerName = TargetArg;
+    }
+
+    const FString AdminName = Sender->GetSenderName();
+    const FDateTime EffectiveAt = FDateTime::UtcNow() + FTimespan::FromMinutes(DelayMinutes);
+
+    UWorld* W = GetWorld();
+    UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
+    UScheduledBanRegistry* SchReg = GI ? GI->GetSubsystem<UScheduledBanRegistry>() : nullptr;
+    if (!SchReg)
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] ScheduledBanRegistry unavailable."), FLinearColor::Red);
+        return EExecutionStatus::COMPLETED;
+    }
+
+    FScheduledBanEntry Entry = SchReg->AddScheduled(
+        Uid, PlayerName, Reason, AdminName, EffectiveAt, BanDurationMinutes);
+
+    const FString DurationStr = (BanDurationMinutes == 0)
+        ? TEXT("permanent")
+        : FString::Printf(TEXT("%d minutes"), BanDurationMinutes);
+
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("[BanChatCommands] Scheduled ban #%lld for %s in %d minutes (%s). Duration: %s. Reason: %s"),
+            Entry.Id, *PlayerName, DelayMinutes, *EffectiveAt.ToString(TEXT("%Y-%m-%d %H:%M:%S")),
+            *DurationStr, *Reason),
+        FLinearColor::Green);
+
+    if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
+        AuditLog->LogAction(TEXT("schedule_ban"), Uid, PlayerName, AdminName, AdminName, Reason);
+
+    return EExecutionStatus::COMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AQBanChatCommand  — /qban (quick-ban from template)
+// ─────────────────────────────────────────────────────────────────────────────
+
+AQBanChatCommand::AQBanChatCommand()
+{
+    CommandName          = TEXT("qban");
+    MinNumberOfArguments = 0;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "QBanUsage",
+        "/qban <templateSlug> <player|PUID>  — quick-ban using a preset template");
+}
+
+EExecutionStatus AQBanChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString AdminUid;
+    if (!BanChat::IsAdminSender(Sender, AdminUid)) return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    const UBanSystemConfig* SysCfg = UBanSystemConfig::Get();
+    if (!SysCfg || SysCfg->BanTemplates.IsEmpty())
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] No ban templates configured (BanTemplates= in DefaultBanSystem.ini)."), FLinearColor::Yellow);
+        return EExecutionStatus::COMPLETED;
+    }
+
+    // List templates when no arguments or only template name given.
+    if (Arguments.IsEmpty())
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] Available ban templates:"), FLinearColor::White);
+        for (const FBanTemplate& T : SysCfg->BanTemplates)
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("  %s  |  %s  |  %s"),
+                    *T.Slug,
+                    T.DurationMinutes == 0 ? TEXT("permanent") : *FString::Printf(TEXT("%dmin"), T.DurationMinutes),
+                    *T.Reason),
+                FLinearColor::White);
+        }
+        return EExecutionStatus::COMPLETED;
+    }
+
+    if (Arguments.Num() < 2)
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] Usage: /qban <templateSlug> <player|PUID>"), FLinearColor::Yellow);
+        return EExecutionStatus::COMPLETED;
+    }
+
+    const FString Slug      = Arguments[0].ToLower();
+    const FString TargetArg = Arguments[1];
+
+    // Find the template.
+    const FBanTemplate* Template = nullptr;
+    for (const FBanTemplate& T : SysCfg->BanTemplates)
+    {
+        if (T.Slug.ToLower() == Slug) { Template = &T; break; }
+    }
+    if (!Template)
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Unknown template '%s'. Use /qban to list templates."), *Slug),
+            FLinearColor::Yellow);
+        return EExecutionStatus::COMPLETED;
+    }
+
+    // Resolve target.
+    FString Uid, PlayerName;
+    if (!BanChat::ResolveTarget(this, Sender, TargetArg, Uid, PlayerName))
+    {
+        Uid        = UBanDatabase::MakeUid(TEXT("EOS"), TargetArg.ToLower());
+        PlayerName = TargetArg;
+    }
+
+    UBanDatabase* DB = BanChat::GetDB(this);
+    if (!DB) { Sender->SendChatMessage(TEXT("[BanChatCommands] Database unavailable."), FLinearColor::Red); return EExecutionStatus::COMPLETED; }
+
+    const FString AdminName = Sender->GetSenderName();
+
+    FBanEntry Ban;
+    Ban.Uid        = Uid;
+    UBanDatabase::ParseUid(Uid, Ban.Platform, Ban.PlayerUID);
+    Ban.PlayerName      = PlayerName;
+    Ban.Reason          = Template->Reason;
+    Ban.BannedBy        = AdminName;
+    Ban.BanDate         = FDateTime::UtcNow();
+    Ban.Category        = Template->Category;
+    Ban.bIsPermanent    = (Template->DurationMinutes <= 0);
+    Ban.ExpireDate      = Ban.bIsPermanent
+        ? FDateTime(0)
+        : FDateTime::UtcNow() + FTimespan::FromMinutes(Template->DurationMinutes);
+
+    if (!DB->AddBan(Ban))
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] Failed to apply ban."), FLinearColor::Red);
+        return EExecutionStatus::COMPLETED;
+    }
+
+    // Kick if online.
+    if (UWorld* W = GetWorld())
+        UBanEnforcer::KickConnectedPlayer(W, Uid, Ban.GetKickMessage());
+
+    FBanDiscordNotifier::NotifyBanCreated(Ban);
+
+    UWorld* W = GetWorld();
+    UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
+    if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
+        AuditLog->LogAction(TEXT("ban"), Uid, PlayerName, AdminName, AdminName,
+            FString::Printf(TEXT("[qban:%s] %s"), *Slug, *Template->Reason));
+
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("[BanChatCommands] [%s] Banned %s. Reason: %s"),
+            *Slug, *PlayerName, *Template->Reason),
+        FLinearColor::Green);
+
+    return EExecutionStatus::COMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AReputationChatCommand  — /reputation
+// ─────────────────────────────────────────────────────────────────────────────
+
+AReputationChatCommand::AReputationChatCommand()
+{
+    CommandName          = TEXT("reputation");
+    MinNumberOfArguments = 1;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "ReputationUsage",
+        "/reputation <player|PUID>  — show a player's reputation score");
+}
+
+EExecutionStatus AReputationChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString AdminUid;
+    if (!BanChat::IsAdminSender(Sender, AdminUid)) return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    const FString TargetArg = Arguments[0];
+    FString Uid, PlayerName;
+    if (!BanChat::ResolveTarget(this, Sender, TargetArg, Uid, PlayerName))
+    {
+        Uid        = UBanDatabase::MakeUid(TEXT("EOS"), TargetArg.ToLower());
+        PlayerName = TargetArg;
+    }
+
+    UWorld* W = GetWorld();
+    UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
+    if (!GI) { Sender->SendChatMessage(TEXT("[BanChatCommands] GameInstance unavailable."), FLinearColor::Red); return EExecutionStatus::COMPLETED; }
+
+    UBanDatabase*           DB        = GI->GetSubsystem<UBanDatabase>();
+    UPlayerWarningRegistry* WarnReg   = GI->GetSubsystem<UPlayerWarningRegistry>();
+    UPlayerSessionRegistry* PlayerReg = GI->GetSubsystem<UPlayerSessionRegistry>();
+    UBanAuditLog*           AuditLog  = GI->GetSubsystem<UBanAuditLog>();
+
+    const int32 WarnCount  = WarnReg  ? WarnReg->GetWarningCount(Uid)  : 0;
+    const int32 WarnPoints = WarnReg  ? WarnReg->GetWarningPoints(Uid) : 0;
+
+    // Count all historical bans.
+    int32 TotalBans = 0;
+    bool  bCurrentlyBanned = false;
+    if (DB)
+    {
+        for (const FBanEntry& B : DB->GetAllBans())
+        {
+            if (B.Uid.Equals(Uid, ESearchCase::IgnoreCase))
+            {
+                ++TotalBans;
+                if (!B.IsExpired()) bCurrentlyBanned = true;
+            }
+        }
+    }
+
+    // Count kicks in audit log.
+    int32 KickCount = 0;
+    if (AuditLog)
+    {
+        for (const FAuditEntry& E : AuditLog->GetEntriesForTarget(Uid))
+        {
+            if (E.Action == TEXT("kick")) ++KickCount;
+        }
+    }
+
+    // Last seen.
+    FString LastSeen = TEXT("unknown");
+    if (PlayerReg)
+    {
+        FPlayerSessionRecord Rec;
+        if (PlayerReg->FindByUid(Uid, Rec))
+        {
+            LastSeen    = Rec.LastSeen;
+            PlayerName  = Rec.DisplayName;
+        }
+    }
+
+    // Reputation score.
+    const int32 Score = FMath::Max(0,
+        100 - (WarnPoints * 5) - (TotalBans * 15) - (KickCount * 3));
+
+    FString ScoreLabel;
+    FLinearColor Color;
+    if (Score >= 70)       { ScoreLabel = TEXT("Good");      Color = FLinearColor::Green; }
+    else if (Score >= 40)  { ScoreLabel = TEXT("Moderate");  Color = FLinearColor::Yellow; }
+    else                   { ScoreLabel = TEXT("High Risk");  Color = FLinearColor::Red; }
+
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("[Reputation] %s (%s)"), *PlayerName, *Uid), Color);
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("  Score: %d/100 [%s]  Banned: %s"),
+            Score, *ScoreLabel, bCurrentlyBanned ? TEXT("YES") : TEXT("no")),
+        Color);
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("  Warnings: %d (pts: %d)  Bans: %d  Kicks: %d  Last seen: %s"),
+            WarnCount, WarnPoints, TotalBans, KickCount, *LastSeen),
+        FLinearColor::White);
+
+    return EExecutionStatus::COMPLETED;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  ABulkBanChatCommand  — /bulkban
+// ─────────────────────────────────────────────────────────────────────────────
+
+ABulkBanChatCommand::ABulkBanChatCommand()
+{
+    CommandName          = TEXT("bulkban");
+    MinNumberOfArguments = 2;
+    bOnlyUsableByPlayer  = false;
+    Usage = NSLOCTEXT("BanChatCommands", "BulkBanUsage",
+        "/bulkban <PUID1> <PUID2> ... -- <reason>  — ban multiple players at once");
+}
+
+EExecutionStatus ABulkBanChatCommand::ExecuteCommand_Implementation(
+    UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
+{
+    FString AdminUid;
+    if (!BanChat::IsAdminSender(Sender, AdminUid)) return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+
+    UBanDatabase* DB = BanChat::GetDB(this);
+    if (!DB) { Sender->SendChatMessage(TEXT("[BanChatCommands] Database unavailable."), FLinearColor::Red); return EExecutionStatus::COMPLETED; }
+
+    // Split on " -- " to separate UIDs from reason.
+    TArray<FString> Uids;
+    FString Reason = TEXT("Bulk ban");
+
+    // Find " -- " separator in arguments.
+    int32 SepIdx = -1;
+    for (int32 i = 0; i < Arguments.Num(); ++i)
+    {
+        if (Arguments[i] == TEXT("--")) { SepIdx = i; break; }
+    }
+
+    if (SepIdx > 0 && SepIdx < Arguments.Num() - 1)
+    {
+        for (int32 i = 0; i < SepIdx; ++i)
+            Uids.Add(Arguments[i]);
+        Reason = BanChat::JoinArgs(Arguments, SepIdx + 1);
+    }
+    else
+    {
+        // No separator — all args are UIDs, no reason.
+        Uids = Arguments;
+    }
+
+    if (Uids.IsEmpty())
+    {
+        Sender->SendChatMessage(TEXT("[BanChatCommands] Usage: /bulkban <PUID1> ... -- <reason>"), FLinearColor::Yellow);
+        return EExecutionStatus::COMPLETED;
+    }
+
+    const FString AdminName = Sender->GetSenderName();
+    UWorld* W = GetWorld();
+    UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
+    int32 BannedCount = 0;
+
+    for (const FString& RawUid : Uids)
+    {
+        const FString Uid = UBanDatabase::MakeUid(TEXT("EOS"), RawUid.ToLower());
+
+        FBanEntry Ban;
+        Ban.Uid        = Uid;
+        UBanDatabase::ParseUid(Uid, Ban.Platform, Ban.PlayerUID);
+        Ban.PlayerName      = RawUid;
+        Ban.Reason          = Reason;
+        Ban.BannedBy        = AdminName;
+        Ban.BanDate         = FDateTime::UtcNow();
+        Ban.bIsPermanent    = true;
+        Ban.ExpireDate      = FDateTime(0);
+
+        if (DB->AddBan(Ban))
+        {
+            if (W)
+                UBanEnforcer::KickConnectedPlayer(W, Uid, Ban.GetKickMessage());
+
+            FBanDiscordNotifier::NotifyBanCreated(Ban);
+
+            if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
+                AuditLog->LogAction(TEXT("ban"), Uid, RawUid, AdminName, AdminName, Reason);
+
+            ++BannedCount;
+        }
+    }
+
+    Sender->SendChatMessage(
+        FString::Printf(TEXT("[BanChatCommands] Bulk ban complete: %d/%d players banned. Reason: %s"),
+            BannedCount, Uids.Num(), *Reason),
+        FLinearColor::Green);
 
     return EExecutionStatus::COMPLETED;
 }

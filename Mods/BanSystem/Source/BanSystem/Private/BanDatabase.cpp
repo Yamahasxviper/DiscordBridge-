@@ -46,6 +46,18 @@ namespace BanDbJson
             Obj->SetArrayField(TEXT("linkedUids"), LinkedArr);
         }
 
+        // Category and evidence (may be empty — omit for cleaner JSON).
+        if (!E.Category.IsEmpty())
+            Obj->SetStringField(TEXT("category"), E.Category);
+
+        if (E.Evidence.Num() > 0)
+        {
+            TArray<TSharedPtr<FJsonValue>> EvidArr;
+            for (const FString& Ev : E.Evidence)
+                EvidArr.Add(MakeShared<FJsonValueString>(Ev));
+            Obj->SetArrayField(TEXT("evidence"), EvidArr);
+        }
+
         return Obj;
     }
 
@@ -108,9 +120,28 @@ namespace BanDbJson
             }
         }
 
+        // Category (optional, absent in records written before this feature).
+        Obj->TryGetStringField(TEXT("category"), OutEntry.Category);
+
+        // Evidence (optional array).
+        const TArray<TSharedPtr<FJsonValue>>* EvidArr = nullptr;
+        if (Obj->TryGetArrayField(TEXT("evidence"), EvidArr) && EvidArr)
+        {
+            for (const TSharedPtr<FJsonValue>& Val : *EvidArr)
+            {
+                FString Ev;
+                if (Val.IsValid() && Val->TryGetString(Ev) && !Ev.IsEmpty())
+                    OutEntry.Evidence.Add(Ev);
+            }
+        }
+
         return !OutEntry.Uid.IsEmpty();
     }
 } // namespace BanDbJson
+
+// Static delegate definitions.
+UBanDatabase::FOnBanAdded   UBanDatabase::OnBanAdded;
+UBanDatabase::FOnBanRemoved UBanDatabase::OnBanRemoved;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  USubsystem lifecycle
@@ -262,30 +293,54 @@ bool UBanDatabase::SaveToFile() const
 
 bool UBanDatabase::AddBan(const FBanEntry& Entry)
 {
-    FScopeLock Lock(&DbMutex);
+    FBanEntry NewEntry;
+    bool bSaved;
 
-    // Upsert: remove any existing record with the same UID first.
-    Bans.RemoveAll([&Entry](const FBanEntry& E){ return E.Uid == Entry.Uid; });
+    {
+        FScopeLock Lock(&DbMutex);
 
-    FBanEntry NewEntry = Entry;
-    if (NewEntry.Id <= 0)
-        NewEntry.Id = NextId++;
-    else
-        NextId = FMath::Max(NextId, NewEntry.Id + 1);
+        // Upsert: remove any existing record with the same UID first.
+        Bans.RemoveAll([&Entry](const FBanEntry& E){ return E.Uid == Entry.Uid; });
 
-    Bans.Add(NewEntry);
-    return SaveToFile();
+        NewEntry = Entry;
+        if (NewEntry.Id <= 0)
+            NewEntry.Id = NextId++;
+        else
+            NextId = FMath::Max(NextId, NewEntry.Id + 1);
+
+        Bans.Add(NewEntry);
+        bSaved = SaveToFile();
+    }
+
+    if (bSaved)
+        OnBanAdded.Broadcast(NewEntry);
+
+    return bSaved;
 }
 
 bool UBanDatabase::RemoveBanByUid(const FString& Uid)
 {
-    FScopeLock Lock(&DbMutex);
+    FString RemovedPlayerName;
+    bool bRemoved;
 
-    const int32 Removed = Bans.RemoveAll([&Uid](const FBanEntry& E){ return E.Uid == Uid; });
-    if (Removed == 0)
-        return false;
+    {
+        FScopeLock Lock(&DbMutex);
 
-    return SaveToFile();
+        // Capture player name before removal for the delegate.
+        for (const FBanEntry& E : Bans)
+        {
+            if (E.Uid == Uid) { RemovedPlayerName = E.PlayerName; break; }
+        }
+
+        const int32 Removed = Bans.RemoveAll([&Uid](const FBanEntry& E){ return E.Uid == Uid; });
+        bRemoved = (Removed > 0);
+        if (bRemoved) SaveToFile();
+    }
+
+    if (bRemoved)
+        OnBanRemoved.Broadcast(Uid, RemovedPlayerName);
+
+    return bRemoved;
 }
 
 bool UBanDatabase::RemoveBanById(int64 Id)

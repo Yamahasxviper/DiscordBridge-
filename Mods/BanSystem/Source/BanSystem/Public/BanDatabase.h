@@ -144,6 +144,21 @@ public:
      */
     void ReloadIfChanged();
 
+    // ── Delegates (fired after every successful write) ─────────────────────
+
+    /** Fired after a ban is successfully added (from any code path). */
+    DECLARE_MULTICAST_DELEGATE_OneParam(FOnBanAdded, const FBanEntry&);
+    static FOnBanAdded OnBanAdded;
+
+    /**
+     * Fired after a ban is successfully removed.
+     * @param Uid        Compound UID of the removed ban.
+     * @param PlayerName Display name (may be empty for IP bans).
+     */
+    DECLARE_MULTICAST_DELEGATE_TwoParams(FOnBanRemoved, const FString& /*Uid*/,
+                                          const FString& /*PlayerName*/);
+    static FOnBanRemoved OnBanRemoved;
+
 private:
     void LoadFromFile();
     bool SaveToFile() const;
