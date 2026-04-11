@@ -741,10 +741,20 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 
 	if (!DB->RemoveBanByUid(Uid))
 	{
-		CachedProvider->SendDiscordChannelMessage(
-			ChannelId,
-			FString::Printf(TEXT("⚠️ No active ban found for `%s` (`%s`)."),
-			                *DisplayName, *Uid));
+		// No ban record was found in the database for this UID.  That means the
+		// player is already not banned (the file may have been absent or the ban
+		// was never persisted).  Report this as a non-fatal note so an admin can
+		// always clear a stale or missing-file situation.
+		const FString Msg = FString::Printf(
+			TEXT("ℹ️ No active ban record found for **%s** (`%s`) — the player is already unbanned.\nUnbanned by: %s"),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
+
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: %s issued !unban for %s (%s) — no record in DB (already clear)."),
+		       *SenderName, *DisplayName, *Uid);
+
+		CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+		PostModerationLog(Msg);
 		return;
 	}
 

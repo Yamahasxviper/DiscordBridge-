@@ -161,6 +161,17 @@ void UBanDatabase::Initialize(FSubsystemCollectionBase& Collection)
 
     LoadFromFile();
 
+    // Bootstrap the file the very first time (or if it was deleted).
+    // Calling SaveToFile() here ensures bans.json always exists after
+    // initialization so that a subsequent !ban + server-restart cycle can
+    // never leave the file absent.
+    if (!PF.FileExists(*DbPath))
+    {
+        SaveToFile();
+        UE_LOG(LogBanDatabase, Log,
+            TEXT("BanDatabase: created empty ban database at %s"), *DbPath);
+    }
+
     // Capture the mtime so we can detect external edits in ReloadIfChanged().
     LastKnownFileModTime = IFileManager::Get().GetTimeStamp(*DbPath);
 
@@ -256,6 +267,14 @@ void UBanDatabase::LoadFromFile()
 bool UBanDatabase::SaveToFile() const
 {
     // Caller must hold DbMutex.
+
+    // Defensively recreate the directory — it may have been absent on first
+    // run or removed externally between Initialize() and the first write.
+    const FString Dir = FPaths::GetPath(DbPath);
+    IPlatformFile& PF = FPlatformFileManager::Get().GetPlatformFile();
+    if (!PF.DirectoryExists(*Dir))
+        PF.CreateDirectoryTree(*Dir);
+
     TArray<TSharedPtr<FJsonValue>> BanArray;
     BanArray.Reserve(Bans.Num());
     for (const FBanEntry& E : Bans)
