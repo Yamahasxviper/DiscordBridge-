@@ -104,9 +104,13 @@ void FBanChatCommandsModule::StartupModule()
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AFreezeChatCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AClearChatChatCommand::StaticClass());
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), AReportChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AScheduleBanChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AQBanChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AReputationChatCommand::StaticClass());
+            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ABulkBanChatCommand::StaticClass());
 
             UE_LOG(LogBanChatCommands, Log,
-                TEXT("BanChatCommands: Registered 39 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns, announce, stafflist, reason, history, mute, unmute, note, notes, duration, tempunmute, mutecheck, banreason, staffchat, mutelist, clearwarn, extend, appeal, mutereason, freeze, clearchat, report)."));
+                TEXT("BanChatCommands: Registered 43 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns, announce, stafflist, reason, history, mute, unmute, note, notes, duration, tempunmute, mutecheck, banreason, staffchat, mutelist, clearwarn, extend, appeal, mutereason, freeze, clearchat, report, scheduleban, qban, reputation, bulkban)."));
 
             // Bind MuteRegistry delegates to push WebSocket events and write audit log.
             UGameInstance* GI = World->GetGameInstance();

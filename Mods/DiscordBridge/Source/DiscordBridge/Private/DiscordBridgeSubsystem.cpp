@@ -4,6 +4,11 @@
 #include "TicketSubsystem.h"
 #include "BanDiscordSubsystem.h"
 
+#include "BanDatabase.h"
+#include "BanSystemConfig.h"
+#include "BanDiscordNotifier.h"
+#include "PlayerWarningRegistry.h"
+
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
@@ -2306,6 +2311,84 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 	}
 
 	if (bDropMessage) return;
+
+	// Feature: auto-warn on repeated chat-filter hits.
+	// When ChatFilterAutoWarnThreshold > 0, track how many times this player has
+	// triggered the filter within ChatFilterAutoWarnWindowMinutes.  On threshold
+	// breach, issue an automatic warning via UPlayerWarningRegistry.
+	{
+		const UBanSystemConfig* BanCfg = UBanSystemConfig::Get();
+		if (BanCfg && BanCfg->ChatFilterAutoWarnThreshold > 0 && FilteredMessage != MessageText)
+		{
+			// Derive the sender's UID from the PlayerState.
+			// We look up the active PlayerController by name as a best-effort.
+			const UWorld* W = GetWorld();
+			UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
+			UPlayerWarningRegistry* WarnReg = GI ? GI->GetSubsystem<UPlayerWarningRegistry>() : nullptr;
+
+			if (WarnReg)
+			{
+				const FDateTime Now       = FDateTime::UtcNow();
+				const FTimespan Window    = FTimespan::FromMinutes(BanCfg->ChatFilterAutoWarnWindowMinutes > 0
+					? BanCfg->ChatFilterAutoWarnWindowMinutes : 10);
+
+				// Update the hit-count tracker.
+				FFilterHitRecord& Rec = ChatFilterHits.FindOrAdd(PlayerName);
+				Rec.HitTimestamps.Add(Now);
+				// Prune timestamps outside the window.
+				Rec.HitTimestamps.RemoveAll([&Now, &Window](const FDateTime& T){ return (Now - T) > Window; });
+
+				const int32 HitCount = Rec.HitTimestamps.Num();
+				UE_LOG(LogDiscordBridge, Verbose,
+					TEXT("DiscordBridge: ChatFilter hit by '%s' — %d in window (threshold=%d)"),
+					*PlayerName, HitCount, BanCfg->ChatFilterAutoWarnThreshold);
+
+				if (HitCount >= BanCfg->ChatFilterAutoWarnThreshold)
+				{
+					// Reset so they can be warned again after another full window of hits.
+					Rec.HitTimestamps.Empty();
+
+					// Derive UID.
+					FString Uid;
+					if (W)
+					{
+						for (FConstPlayerControllerIterator It = W->GetPlayerControllerIterator(); It; ++It)
+						{
+							APlayerController* PC = It->Get();
+							if (!PC || !PC->PlayerState) continue;
+							if (!PC->PlayerState->GetPlayerName().Equals(PlayerName, ESearchCase::IgnoreCase)) continue;
+
+							const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+							if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
+							{
+								Uid = UBanDatabase::MakeUid(
+									NetId.GetType().ToString().ToUpper(),
+									NetId.ToString().ToLower());
+								break;
+							}
+						}
+					}
+
+					if (!Uid.IsEmpty())
+					{
+						const FString WarnReason = FString::Printf(
+							TEXT("Auto-warn: triggered chat filter %d times within %d minutes"),
+							HitCount, BanCfg->ChatFilterAutoWarnWindowMinutes);
+
+						FWarningEntry WarnEntry;
+						WarnEntry.Uid        = Uid;
+						WarnEntry.PlayerName = PlayerName;
+						WarnEntry.Reason     = WarnReason;
+						WarnEntry.WarnedBy   = TEXT("auto");
+						WarnEntry.Points     = 1;
+
+						WarnReg->AddWarning(WarnEntry);
+						FBanDiscordNotifier::NotifyWarningIssued(Uid, PlayerName, WarnReason, TEXT("auto"), WarnReg->GetWarningCount(Uid));
+					}
+				}
+			}
+		}
+	}
 
 	SendGameMessageToDiscord(PlayerName, FilteredMessage);
 }

@@ -39,12 +39,19 @@ public:
     /** Called when a player submits a ban appeal via the REST API. */
     static void NotifyAppealSubmitted(const FBanAppealEntry& Appeal);
 
+    /** Called when an appeal is approved or denied by an admin. */
+    static void NotifyAppealReviewed(const FBanAppealEntry& Appeal);
+
     /**
      * Called when a warn-based auto-escalation triggers an automatic ban.
      * Posts an embed to Discord so staff can review and override.
      * Only has an effect when DiscordWebhookUrl is set.
      */
     static void NotifyAutoEscalationBan(const FBanEntry& Ban, int32 WarnCount);
+
+    /** Called when a geo-IP check blocks a player from connecting. */
+    static void NotifyGeoIpBlocked(const FString& PlayerName, const FString& Uid,
+                                    const FString& IpAddress, const FString& CountryCode);
 
 private:
     /**

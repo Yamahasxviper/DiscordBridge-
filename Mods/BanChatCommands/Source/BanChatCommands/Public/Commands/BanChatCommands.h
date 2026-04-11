@@ -1080,3 +1080,122 @@ public:
         const TArray<FString>& Arguments,
         const FString& Label) override;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /scheduleban  — ban a player at a future time
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /scheduleban <player|PUID> <delayDuration> [banDuration] [reason...]
+ *
+ * Schedules a ban to take effect after a specified delay.
+ *   delayDuration  — when the ban activates (e.g. "2h", "30m", "1d")
+ *   banDuration    — how long the ban lasts (0 or "perm" = permanent)
+ *   reason         — optional reason string
+ *
+ * The scheduled ban is persisted and survives server restarts.
+ * Use /scheduleban without arguments to list pending scheduled bans.
+ *
+ * Requires admin.
+ *
+ * Examples:
+ *   /scheduleban BadPlayer 2h 1d Griefing
+ *   /scheduleban 00020aed 30m perm Cheating
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AScheduleBanChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AScheduleBanChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /qban  — quick-ban using a preset template
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /qban <templateSlug> <player|PUID>
+ *
+ * Applies a pre-configured ban template (defined in DefaultBanSystem.ini as
+ * +BanTemplates=slug|DurationMinutes|Reason|Category).
+ * With no arguments, lists available templates.
+ *
+ * Requires admin.
+ *
+ * Examples:
+ *   /qban griefing BadPlayer
+ *   /qban cheating 00020aed
+ *   /qban  (lists all configured templates)
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AQBanChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AQBanChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /reputation  — show a player's reputation score
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /reputation <player|PUID>
+ *
+ * Shows a player's computed reputation score, warning count, warning points,
+ * historical ban count, kick count, and last-seen timestamp.
+ * A high-risk score (< 30) triggers an in-chat staff alert.
+ *
+ * Requires admin.
+ *
+ * Examples:
+ *   /reputation BadPlayer
+ *   /reputation 00020aed06f0a6958c3c067fb4b73d51
+ */
+UCLASS()
+class BANCHATCOMMANDS_API AReputationChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    AReputationChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /bulkban  — ban multiple players in one command
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /bulkban <PUID1> <PUID2> ... -- <reason>
+ *
+ * Issues a permanent ban to each listed EOS PUID.
+ * The reason must be separated from the UIDs by " -- ".
+ *
+ * Requires admin.
+ *
+ * Example:
+ *   /bulkban 00020aed 0004beef -- Coordinated griefing attack
+ */
+UCLASS()
+class BANCHATCOMMANDS_API ABulkBanChatCommand : public AChatCommandInstance
+{
+    GENERATED_BODY()
+public:
+    ABulkBanChatCommand();
+    virtual EExecutionStatus ExecuteCommand_Implementation(
+        UCommandSender* Sender,
+        const TArray<FString>& Arguments,
+        const FString& Label) override;
+};

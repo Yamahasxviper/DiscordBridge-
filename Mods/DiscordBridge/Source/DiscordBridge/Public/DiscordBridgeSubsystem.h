@@ -881,6 +881,17 @@ private:
 	/** Maps 6-digit verification code → expiry time (10 minutes from creation). */
 	TMap<FString, FDateTime> PendingVerificationExpiry;
 
+	// ── Chat-filter auto-warn tracking ────────────────────────────────────────
+
+	/** Per-player timestamps of recent chat-filter hits (for auto-warn threshold). */
+	struct FFilterHitRecord
+	{
+		TArray<FDateTime> HitTimestamps;
+	};
+
+	/** Maps player display-name → recent filter-hit timestamps. */
+	TMap<FString, FFilterHitRecord> ChatFilterHits;
+
 	/**
 	 * Send a Direct Message to a Discord user.
 	 * Step 1: POST /users/@me/channels to create a DM channel.

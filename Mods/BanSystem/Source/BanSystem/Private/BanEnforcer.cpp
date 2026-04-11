@@ -4,7 +4,15 @@
 #include "BanEnforcer.h"
 #include "BanDatabase.h"
 #include "BanDiscordNotifier.h"
+#include "BanSystemConfig.h"
 #include "PlayerSessionRegistry.h"
+
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "HttpModule.h"
+#include "Interfaces/IHttpRequest.h"
+#include "Interfaces/IHttpResponse.h"
 
 // Pull in the full FUniqueNetIdRepl definition that was forward-declared in the header.
 #include "GameFramework/OnlineReplStructs.h"
@@ -493,6 +501,82 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
                 Registry->RecordSession(Uid, PC->PlayerState->GetPlayerName(), GetCachedIpForPlayer(PC));
         }
 
+        // Geo-IP check (async, config-gated).
+        // Kick players from blocked/non-allowed regions without auto-banning.
+        {
+            const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+            if (Cfg && Cfg->bGeoIpEnabled && !Cfg->GeoIpApiUrl.IsEmpty())
+            {
+                const FString PlayerName = PC->PlayerState->GetPlayerName();
+                const FString IpAddress  = GetCachedIpForPlayer(PC);
+                if (!IpAddress.IsEmpty() && FModuleManager::Get().IsModuleLoaded(TEXT("HTTP")))
+                {
+                    FString ApiUrl = Cfg->GeoIpApiUrl;
+                    ApiUrl = ApiUrl.Replace(TEXT("{ip}"), *IpAddress, ESearchCase::IgnoreCase);
+
+                    const TArray<FString> Allowed = Cfg->AllowedCountryCodes;
+                    const TArray<FString> Blocked = Cfg->BlockedCountryCodes;
+                    const FString KickMsg = Cfg->GeoIpKickMessage.IsEmpty()
+                        ? TEXT("You are not permitted to join this server from your region.")
+                        : Cfg->GeoIpKickMessage;
+
+                    TWeakObjectPtr<UBanEnforcer> WeakThis(this);
+                    TWeakObjectPtr<APlayerController> WeakPC(PC);
+                    const FString CapturedUid = Uid;
+
+                    TSharedRef<IHttpRequest, ESPMode::ThreadSafe> GeoReq =
+                        FHttpModule::Get().CreateRequest();
+                    GeoReq->SetURL(ApiUrl);
+                    GeoReq->SetVerb(TEXT("GET"));
+                    GeoReq->OnProcessRequestComplete().BindLambda(
+                        [WeakThis, WeakPC, PlayerName, IpAddress, CapturedUid,
+                         Allowed, Blocked, KickMsg]
+                        (FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bSuccess)
+                        {
+                            if (!bSuccess || !Resp.IsValid()) return;
+
+                            TSharedPtr<FJsonObject> Root;
+                            TSharedRef<TJsonReader<>> Reader =
+                                TJsonReaderFactory<>::Create(Resp->GetContentAsString());
+                            if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid()) return;
+
+                            FString CountryCode;
+                            Root->TryGetStringField(TEXT("countryCode"), CountryCode);
+                            CountryCode = CountryCode.ToUpper();
+                            if (CountryCode.IsEmpty()) return;
+
+                            // Determine whether to block.
+                            bool bBlock = false;
+                            if (Allowed.Num() > 0)
+                                bBlock = !Allowed.ContainsByPredicate([&CountryCode](const FString& C){ return C.ToUpper() == CountryCode; });
+                            else if (Blocked.Num() > 0)
+                                bBlock = Blocked.ContainsByPredicate([&CountryCode](const FString& C){ return C.ToUpper() == CountryCode; });
+
+                            if (!bBlock) return;
+
+                            UBanEnforcer* Enforcer = WeakThis.Get();
+                            APlayerController* PCKick = WeakPC.Get();
+                            if (!IsValid(PCKick)) return;
+
+                            UGameInstance* GI2 = Enforcer ? Enforcer->GetGameInstance() : nullptr;
+                            UWorld* W2 = GI2 ? GI2->GetWorld() : nullptr;
+
+                            const FString FinalMsg = KickMsg.Replace(TEXT("{country}"), *CountryCode);
+                            UE_LOG(LogBanEnforcer, Log,
+                                TEXT("BanEnforcer: GeoIP block '%s' (%s) from %s"),
+                                *PlayerName, *CapturedUid, *CountryCode);
+
+                            if (W2)
+                                UBanEnforcer::KickConnectedPlayer(W2, CapturedUid, FinalMsg);
+
+                            FBanDiscordNotifier::NotifyGeoIpBlocked(
+                                PlayerName, CapturedUid, IpAddress, CountryCode);
+                        });
+                    GeoReq->ProcessRequest();
+                }
+            }
+        }
+
         return;
     }
 
@@ -713,6 +797,77 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
             if (UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>())
                 Registry->RecordSession(Uid, PlayerName, GetCachedIpForPlayer(PC));
         }
+
+        // Geo-IP check (async, config-gated) — same logic as PerformBanCheckForPlayer.
+        {
+            const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+            if (Cfg && Cfg->bGeoIpEnabled && !Cfg->GeoIpApiUrl.IsEmpty())
+            {
+                const FString IpAddress  = GetCachedIpForPlayer(PC);
+                if (!IpAddress.IsEmpty() && FModuleManager::Get().IsModuleLoaded(TEXT("HTTP")))
+                {
+                    FString ApiUrl = Cfg->GeoIpApiUrl;
+                    ApiUrl = ApiUrl.Replace(TEXT("{ip}"), *IpAddress, ESearchCase::IgnoreCase);
+
+                    const TArray<FString> Allowed = Cfg->AllowedCountryCodes;
+                    const TArray<FString> Blocked = Cfg->BlockedCountryCodes;
+                    const FString KickMsg = Cfg->GeoIpKickMessage.IsEmpty()
+                        ? TEXT("You are not permitted to join this server from your region.")
+                        : Cfg->GeoIpKickMessage;
+
+                    TWeakObjectPtr<UBanEnforcer> WeakThis(this);
+                    TWeakObjectPtr<APlayerController> WeakPC(PC);
+                    const FString CapturedUid  = Uid;
+                    const FString CapturedName = PlayerName;
+
+                    TSharedRef<IHttpRequest, ESPMode::ThreadSafe> GeoReq =
+                        FHttpModule::Get().CreateRequest();
+                    GeoReq->SetURL(ApiUrl);
+                    GeoReq->SetVerb(TEXT("GET"));
+                    GeoReq->OnProcessRequestComplete().BindLambda(
+                        [WeakThis, WeakPC, CapturedName, IpAddress, CapturedUid,
+                         Allowed, Blocked, KickMsg]
+                        (FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bSuccess)
+                        {
+                            if (!bSuccess || !Resp.IsValid()) return;
+
+                            TSharedPtr<FJsonObject> Root;
+                            TSharedRef<TJsonReader<>> Reader =
+                                TJsonReaderFactory<>::Create(Resp->GetContentAsString());
+                            if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid()) return;
+
+                            FString CountryCode;
+                            Root->TryGetStringField(TEXT("countryCode"), CountryCode);
+                            CountryCode = CountryCode.ToUpper();
+                            if (CountryCode.IsEmpty()) return;
+
+                            bool bBlock = false;
+                            if (Allowed.Num() > 0)
+                                bBlock = !Allowed.ContainsByPredicate([&CountryCode](const FString& C){ return C.ToUpper() == CountryCode; });
+                            else if (Blocked.Num() > 0)
+                                bBlock = Blocked.ContainsByPredicate([&CountryCode](const FString& C){ return C.ToUpper() == CountryCode; });
+
+                            if (!bBlock) return;
+
+                            UBanEnforcer* Enforcer = WeakThis.Get();
+                            APlayerController* PCKick = WeakPC.Get();
+                            if (!IsValid(PCKick)) return;
+
+                            UGameInstance* GI2 = Enforcer ? Enforcer->GetGameInstance() : nullptr;
+                            UWorld* W2 = GI2 ? GI2->GetWorld() : nullptr;
+
+                            const FString FinalMsg = KickMsg.Replace(TEXT("{country}"), *CountryCode);
+                            if (W2)
+                                UBanEnforcer::KickConnectedPlayer(W2, CapturedUid, FinalMsg);
+
+                            FBanDiscordNotifier::NotifyGeoIpBlocked(
+                                CapturedName, CapturedUid, IpAddress, CountryCode);
+                        });
+                    GeoReq->ProcessRequest();
+                }
+            }
+        }
+
         return;
     }
 
