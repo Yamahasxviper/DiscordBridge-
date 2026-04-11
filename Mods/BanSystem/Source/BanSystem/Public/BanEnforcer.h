@@ -6,6 +6,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/TimerHandle.h"
 #include "BanEnforcer.generated.h"
 
 // Forward declaration to avoid pulling GameFramework/OnlineReplStructs.h into every
@@ -18,6 +19,8 @@ class UBanDatabase;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogBanEnforcer, Log, All);
 
+class AGameModeBase;
+class APlayerController;
 class UWorld;
 class UNetConnection;
 
