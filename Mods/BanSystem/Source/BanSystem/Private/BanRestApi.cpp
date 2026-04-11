@@ -1062,55 +1062,31 @@ void UBanRestApi::RegisterRoutes()
         EHttpServerRequestVerbs::VERB_DELETE,
         [WeakGI](const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete) -> bool
         {
-            UGameInstance* GI = WeakGI.Get();
-            if (!GI) { OnComplete(FHttpServerResponse::Error(503, TEXT(""), TEXT("{}"))); return true; }
+            if (!BanJson::CheckApiKey(Request)) { OnComplete(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
 
-            // Auth check
-            const UBanSystemConfig* SysCfg = UBanSystemConfig::Get();
-            if (SysCfg && !SysCfg->RestApiKey.IsEmpty())
-            {
-                const FString* Key = Request.Headers.Find(TEXT("X-Api-Key"));
-                if (!Key || *Key != SysCfg->RestApiKey)
-                {
-                    TSharedPtr<FJsonObject> Err = MakeShared<FJsonObject>();
-                    Err->SetStringField(TEXT("error"), TEXT("Unauthorized"));
-                    auto R = FHttpServerResponse::Create(BanJson::ObjectToString(Err), TEXT("application/json"));
-                    R->Code = 401;
-                    OnComplete(MoveTemp(R));
-                    return true;
-                }
-            }
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { OnComplete(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
 
             const FString* IdParam = Request.PathParams.Find(TEXT("id"));
             const int64 Id = IdParam ? FCString::Atoi64(**IdParam) : 0;
             if (Id <= 0)
             {
-                TSharedPtr<FJsonObject> Err = MakeShared<FJsonObject>();
-                Err->SetStringField(TEXT("error"), TEXT("Invalid warning ID"));
-                auto R = FHttpServerResponse::Create(BanJson::ObjectToString(Err), TEXT("application/json"));
-                R->Code = 400;
-                OnComplete(MoveTemp(R));
+                OnComplete(BanJson::Error(TEXT("Invalid warning ID"), EHttpServerResponseCodes::BadRequest));
                 return true;
             }
 
             UPlayerWarningRegistry* WarnReg = GI->GetSubsystem<UPlayerWarningRegistry>();
             if (!WarnReg)
             {
-                TSharedPtr<FJsonObject> Err = MakeShared<FJsonObject>();
-                Err->SetStringField(TEXT("error"), TEXT("PlayerWarningRegistry unavailable"));
-                auto R = FHttpServerResponse::Create(BanJson::ObjectToString(Err), TEXT("application/json"));
-                R->Code = 503;
-                OnComplete(MoveTemp(R));
+                OnComplete(BanJson::Error(TEXT("PlayerWarningRegistry unavailable"), EHttpServerResponseCodes::ServiceUnavail));
                 return true;
             }
 
             if (!WarnReg->DeleteWarningById(Id))
             {
-                TSharedPtr<FJsonObject> Err = MakeShared<FJsonObject>();
-                Err->SetStringField(TEXT("error"), FString::Printf(TEXT("No warning found with id %lld"), Id));
-                auto R = FHttpServerResponse::Create(BanJson::ObjectToString(Err), TEXT("application/json"));
-                R->Code = 404;
-                OnComplete(MoveTemp(R));
+                OnComplete(BanJson::Error(
+                    FString::Printf(TEXT("No warning found with id %lld"), Id),
+                    EHttpServerResponseCodes::NotFound));
                 return true;
             }
 
