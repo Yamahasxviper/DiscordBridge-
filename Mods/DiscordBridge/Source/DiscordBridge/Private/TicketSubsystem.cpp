@@ -128,6 +128,85 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	UE_LOG(LogTicketSystem, Log,
 	       TEXT("TicketSystem: Initialized. Waiting for Discord provider to be injected via SetProvider()."));
+
+	// Start the SLA warning ticker when enabled.
+	if (Config.TicketSlaWarningMinutes > 0)
+	{
+		SlaCheckHandle = FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
+			{
+				if (Config.TicketSlaWarningMinutes <= 0) return true;
+				const FDateTime Now = FDateTime::UtcNow();
+				const FTimespan SlaThreshold = FTimespan::FromMinutes(
+					static_cast<double>(Config.TicketSlaWarningMinutes));
+				IDiscordBridgeProvider* SlaB = GetBridge();
+				if (!SlaB) return true;
+
+				for (const TPair<FString, FString>& SLAPair : TicketChannelToOpener)
+				{
+					const FString& SlaChanId = SLAPair.Key;
+					const bool* bReplied = TicketChannelStaffReplied.Find(SlaChanId);
+					if (bReplied && *bReplied) continue;
+
+					const FDateTime* OpenTime = TicketChannelToOpenTime.Find(SlaChanId);
+					if (!OpenTime) continue;
+
+					if ((Now - *OpenTime) >= SlaThreshold)
+					{
+						const FString WarnMsg = FString::Printf(
+							TEXT(":alarm_clock: SLA WARNING: Ticket <#%s> opened by <@%s> "
+							     "has not received a staff response after %d minutes!"),
+							*SlaChanId, *SLAPair.Value, Config.TicketSlaWarningMinutes);
+						const TArray<FString> SlaChans =
+							FTicketConfig::ParseChannelIds(Config.TicketChannelId);
+						for (const FString& NChan : SlaChans)
+						{
+							if (!NChan.IsEmpty())
+								SlaB->SendDiscordChannelMessage(NChan, WarnMsg);
+						}
+						// Mark as warned to prevent repeated SLA warnings for this ticket.
+						TicketChannelStaffReplied.Add(SlaChanId, true);
+					}
+				}
+				return true;
+			}),
+			60.0f);
+
+		UE_LOG(LogTicketSystem, Log,
+		       TEXT("TicketSystem: SLA warning ticker enabled (%d min threshold)."),
+		       Config.TicketSlaWarningMinutes);
+	}
+
+	// Start the follow-up reminder check ticker (always active; no-op when map is empty).
+	ReminderCheckHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
+		{
+			if (TicketChannelToReminder.Num() == 0) return true;
+			const FDateTime RNow = FDateTime::UtcNow();
+			TArray<FString> FiredReminders;
+			for (const TPair<FString, FDateTime>& RPair : TicketChannelToReminder)
+			{
+				if (RNow >= RPair.Value)
+					FiredReminders.Add(RPair.Key);
+			}
+			IDiscordBridgeProvider* RemB = GetBridge();
+			for (const FString& RemChanId : FiredReminders)
+			{
+				TicketChannelToReminder.Remove(RemChanId);
+				if (RemB)
+				{
+					RemB->SendDiscordChannelMessage(RemChanId,
+						TEXT(":alarm_clock: **Reminder:** This ticket needs follow-up!"));
+				}
+			}
+			if (FiredReminders.Num() > 0)
+				SaveTicketState();
+			return true;
+		}),
+		60.0f);
+
+	// Load the ticket blacklist.
+	LoadTicketBlacklist();
 }
 
 void UTicketSubsystem::Deinitialize()
@@ -137,6 +216,20 @@ void UTicketSubsystem::Deinitialize()
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(InactiveTicketCheckHandle);
 		InactiveTicketCheckHandle.Reset();
+	}
+
+	// Stop the SLA warning ticker.
+	if (SlaCheckHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(SlaCheckHandle);
+		SlaCheckHandle.Reset();
+	}
+
+	// Stop the follow-up reminder ticker.
+	if (ReminderCheckHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(ReminderCheckHandle);
+		ReminderCheckHandle.Reset();
 	}
 
 	// Detach from the provider (unsubscribes delegates, clears CachedProvider).
@@ -161,6 +254,11 @@ void UTicketSubsystem::Deinitialize()
 	PendingReopenExpiry.Empty();
 	PendingReopenOpener.Empty();
 	OpenerToTicketsByType.Empty();
+	TicketChannelToTags.Empty();
+	TicketChannelToNotes.Empty();
+	TicketChannelStaffReplied.Empty();
+	TicketChannelToReminder.Empty();
+	TicketBlacklist.Empty();
 
 	Super::Deinitialize();
 }
@@ -521,6 +619,11 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		TicketChannelToOpenerName.Remove(SourceChannelId);
 		TicketChannelToType.Remove(SourceChannelId);
 		TicketChannelToOpenTime.Remove(SourceChannelId);
+		TicketChannelToPriority.Remove(SourceChannelId);
+		TicketChannelToTags.Remove(SourceChannelId);
+		TicketChannelToNotes.Remove(SourceChannelId);
+		TicketChannelStaffReplied.Remove(SourceChannelId);
+		TicketChannelToReminder.Remove(SourceChannelId);
 		SaveTicketState();
 
 		Bridge->DeleteDiscordChannel(SourceChannelId);
@@ -612,6 +715,11 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		Bridge->RespondToInteraction(InteractionId, InteractionToken,
 			/*type=*/6, TEXT(""), /*bEphemeral=*/false);
 
+		// Capture notes for transcript before removing from maps.
+		TArray<FString> CloseNotesForLog;
+		if (const TArray<FString>* CloseNotesPtr = TicketChannelToNotes.Find(SourceChannelId))
+			CloseNotesForLog = *CloseNotesPtr;
+
 		// Remove from tracking and delete.
 		FString RemovedOpener;
 		if (TicketChannelToOpener.RemoveAndCopyValue(SourceChannelId, RemovedOpener))
@@ -626,6 +734,10 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		TicketChannelToType.RemoveAndCopyValue(SourceChannelId, RemovedType);
 		TicketChannelToOpenTime.Remove(SourceChannelId);
 		TicketChannelToPriority.Remove(SourceChannelId);
+		TicketChannelToTags.Remove(SourceChannelId);
+		TicketChannelToNotes.Remove(SourceChannelId);
+		TicketChannelStaffReplied.Remove(SourceChannelId);
+		TicketChannelToReminder.Remove(SourceChannelId);
 		if (Config.bAllowMultipleTicketTypes && !RemovedOpener.IsEmpty() && !RemovedType.IsEmpty())
 		{
 			if (TMap<FString, FString>* TypeMap = OpenerToTicketsByType.Find(RemovedOpener))
@@ -705,7 +817,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 
 			FetchReq->OnProcessRequestComplete().BindWeakLambda(
 				WeakThis.Get(),
-				[WeakThis, LogChannelId, BotToken, OpenerIdForLog, ClosedAt, ClosedChannelId]
+				[WeakThis, LogChannelId, BotToken, OpenerIdForLog, ClosedAt, ClosedChannelId, CloseNotesForLog]
 				(FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bOk) mutable
 				{
 					UTicketSubsystem* Self = WeakThis.Get();
@@ -766,6 +878,14 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 						TranscriptText += TEXT("*(Could not fetch message history.)*\n");
 					}
 
+					// Append staff notes (internal) if any.
+					if (!CloseNotesForLog.IsEmpty())
+					{
+						TranscriptText += TEXT("\n**Staff Notes (internal):**\n");
+						for (const FString& N : CloseNotesForLog)
+							TranscriptText += FString::Printf(TEXT("- %s\n"), *N);
+					}
+
 					// Discord messages have a 2000-char limit; truncate if necessary.
 					if (TranscriptText.Len() > 1900)
 					{
@@ -786,6 +906,18 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		{
 			Bridge->DeleteDiscordChannel(SourceChannelId);
 		}
+		return;
+	}
+
+	// ── Blacklist check ───────────────────────────────────────────────────────
+	// Applied before opening any ticket type.
+	if (!DiscordUserId.IsEmpty() && TicketBlacklist.Contains(DiscordUserId))
+	{
+		Bridge->RespondToInteraction(InteractionId, InteractionToken,
+			/*type=*/4,
+			TEXT(":no_entry: You are not allowed to open tickets. "
+			     "Contact an admin if you believe this is an error."),
+			/*bEphemeral=*/true);
 		return;
 	}
 
@@ -1226,6 +1358,7 @@ void UTicketSubsystem::CreateTicketChannel(
 			Self->TicketChannelToOpenerName.Add(NewChannelId, OpenerUsernameCopy);
 			Self->TicketChannelToOpenTime.Add(NewChannelId, FDateTime::UtcNow());
 			Self->TicketChannelToType.Add(NewChannelId, TicketTypeCopy);
+			Self->TicketChannelStaffReplied.Add(NewChannelId, false);
 			if (Self->Config.bAllowMultipleTicketTypes)
 			{
 				Self->OpenerToTicketsByType.FindOrAdd(OpenerUserIdCopy).Add(TicketTypeCopy, NewChannelId);
@@ -1358,6 +1491,20 @@ void UTicketSubsystem::CreateTicketChannel(
 						TSharedPtr<FJsonObject> NoticeMsg = MakeShared<FJsonObject>();
 						NoticeMsg->SetStringField(TEXT("content"), AdminNotice);
 						B->SendMessageBodyToChannel(AdminChanId, NoticeMsg);
+					}
+				}
+
+				// Post auto-response if configured for this ticket type.
+				for (const FString& AR : Self->Config.TicketAutoResponses)
+				{
+					FString ARType, ARText;
+					AR.Split(TEXT("|"), &ARType, &ARText);
+					ARType.TrimStartAndEndInline();
+					ARText.TrimStartAndEndInline();
+					if (ARType.Equals(TicketTypeCopy, ESearchCase::IgnoreCase) && !ARText.IsEmpty())
+					{
+						B->SendDiscordChannelMessage(NewChannelId, ARText);
+						break;
 					}
 				}
 			}
@@ -1573,6 +1720,14 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	if (!SourceChannelId.IsEmpty() && TicketChannelToOpener.Contains(SourceChannelId))
 	{
 		TicketChannelToLastActivity.Add(SourceChannelId, FDateTime::UtcNow());
+
+		// Track first staff reply for SLA monitoring.
+		if (SenderHasNotifyRole())
+		{
+			bool* bSlaReplied = TicketChannelStaffReplied.Find(SourceChannelId);
+			if (!bSlaReplied || !*bSlaReplied)
+				TicketChannelStaffReplied.Add(SourceChannelId, true);
+		}
 	}
 
 	IDiscordBridgeProvider* Bridge = GetBridge();
@@ -1657,9 +1812,14 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 			if (AssigneeName && !AssigneeName->IsEmpty())
 				AssignedSuffix = FString::Printf(TEXT("  [assigned to %s]"), **AssigneeName);
 
+			FString TagSuffix;
+			const TArray<FString>* ListTags = TicketChannelToTags.Find(Pair.Key);
+			if (ListTags && ListTags->Num() > 0)
+				TagSuffix = TEXT("  [tags: ") + FString::Join(*ListTags, TEXT(", ")) + TEXT("]");
+
 			ListMsg += FString::Printf(
-				TEXT("• <#%s> — opened by <@%s>%s\n"),
-				*Pair.Key, *Pair.Value, *AssignedSuffix);
+				TEXT("• <#%s> — opened by <@%s>%s%s\n"),
+				*Pair.Key, *Pair.Value, *AssignedSuffix, *TagSuffix);
 		}
 
 		Bridge->SendDiscordChannelMessage(SourceChannelId, ListMsg.TrimEnd());
@@ -1995,6 +2155,502 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		return;
 	}
 
+	// ── !ticket-report <week|month> ───────────────────────────────────────────
+	if (Content.StartsWith(TEXT("!ticket-report"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can view ticket reports."));
+			return;
+		}
+		const FString PeriodArg = Content.Mid(FCString::Strlen(TEXT("!ticket-report"))).TrimStartAndEnd();
+		if (PeriodArg.IsEmpty())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":warning: Usage: `!ticket-report <week|month>`"));
+			return;
+		}
+		const FString StatsPathRpt = GetStatsFilePath();
+		FString StatsJsonRpt;
+		TSharedPtr<FJsonObject> StatsRpt = MakeShared<FJsonObject>();
+		if (FFileHelper::LoadFileToString(StatsJsonRpt, *StatsPathRpt))
+		{
+			TSharedRef<TJsonReader<>> SR2 = TJsonReaderFactory<>::Create(StatsJsonRpt);
+			TSharedPtr<FJsonObject> Loaded2;
+			if (FJsonSerializer::Deserialize(SR2, Loaded2) && Loaded2.IsValid())
+				StatsRpt = Loaded2;
+		}
+		double RptOpened = 0, RptClosed = 0, RptAvgTime = 0, RptTotalRatings = 0, RptRatingSum = 0;
+		StatsRpt->TryGetNumberField(TEXT("total_opened"), RptOpened);
+		StatsRpt->TryGetNumberField(TEXT("total_closed"), RptClosed);
+		StatsRpt->TryGetNumberField(TEXT("avg_close_time_seconds"), RptAvgTime);
+		StatsRpt->TryGetNumberField(TEXT("total_ratings"), RptTotalRatings);
+		StatsRpt->TryGetNumberField(TEXT("rating_sum"), RptRatingSum);
+
+		FString RptAvgTimeStr;
+		if (RptAvgTime >= 3600)
+			RptAvgTimeStr = FString::Printf(TEXT("%.1fh"), RptAvgTime / 3600.0);
+		else if (RptAvgTime >= 60)
+			RptAvgTimeStr = FString::Printf(TEXT("%.0fm"), RptAvgTime / 60.0);
+		else
+			RptAvgTimeStr = FString::Printf(TEXT("%.0fs"), RptAvgTime);
+
+		FString RptRatingStr = TEXT("N/A");
+		if (RptTotalRatings > 0)
+			RptRatingStr = FString::Printf(TEXT("%.1f/5 (%d rating%s)"),
+				RptRatingSum / RptTotalRatings,
+				static_cast<int32>(RptTotalRatings),
+				RptTotalRatings == 1 ? TEXT("") : TEXT("s"));
+
+		const FString PeriodDisplay = PeriodArg.Equals(TEXT("week"), ESearchCase::IgnoreCase)
+			? TEXT("week") : TEXT("month");
+		const FString ReportMsg = FString::Printf(
+			TEXT(":bar_chart: **Ticket Report (%s) — All-time aggregate**\n")
+			TEXT("Opened: %d | Closed: %d | Currently open: %d\n")
+			TEXT("Avg close time: %s\n")
+			TEXT("Average rating: %s\n")
+			TEXT("*(Date-filtered reporting unavailable; showing all-time totals.)*"),
+			*PeriodDisplay,
+			static_cast<int32>(RptOpened),
+			static_cast<int32>(RptClosed),
+			TicketChannelToOpener.Num(),
+			*RptAvgTimeStr,
+			*RptRatingStr);
+		Bridge->SendDiscordChannelMessage(SourceChannelId, ReportMsg);
+		return;
+	}
+
+	// ── !ticket-tags ─────────────────────────────────────────────────────────
+	// (Must be checked before !ticket-tag to avoid prefix collision.)
+	if (Content.Equals(TEXT("!ticket-tags"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
+		const TArray<FString>* TagsView = TicketChannelToTags.Find(SourceChannelId);
+		if (!TagsView || TagsView->Num() == 0)
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":label: This ticket has no tags."));
+		}
+		else
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":label: **Tags:** ") + FString::Join(*TagsView, TEXT(", ")));
+		}
+		return;
+	}
+
+	// ── !ticket-untag <tag> ───────────────────────────────────────────────────
+	if (Content.StartsWith(TEXT("!ticket-untag"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can remove tags."));
+			return;
+		}
+		const FString UntagArg = Content.Mid(FCString::Strlen(TEXT("!ticket-untag"))).TrimStartAndEnd();
+		if (UntagArg.IsEmpty())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":warning: Usage: `!ticket-untag <tag>`"));
+			return;
+		}
+		TArray<FString>& UntagList = TicketChannelToTags.FindOrAdd(SourceChannelId);
+		const int32 Removed = UntagList.RemoveSingleSwap(UntagArg);
+		SaveTicketState();
+		if (Removed > 0)
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				FString::Printf(TEXT(":label: Tag **%s** removed."), *UntagArg));
+		else
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				FString::Printf(TEXT(":question: Tag **%s** was not found on this ticket."), *UntagArg));
+		return;
+	}
+
+	// ── !ticket-tag <tag> ─────────────────────────────────────────────────────
+	if (Content.StartsWith(TEXT("!ticket-tag"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can tag tickets."));
+			return;
+		}
+		const FString TagArg = Content.Mid(FCString::Strlen(TEXT("!ticket-tag"))).TrimStartAndEnd();
+		if (TagArg.IsEmpty())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":warning: Usage: `!ticket-tag <tag>`"));
+			return;
+		}
+		TArray<FString>& TagList = TicketChannelToTags.FindOrAdd(SourceChannelId);
+		TagList.AddUnique(TagArg);
+		SaveTicketState();
+		Bridge->SendDiscordChannelMessage(SourceChannelId,
+			FString::Printf(TEXT(":label: Tag **%s** added."), *TagArg));
+		return;
+	}
+
+	// ── !ticket-notes ─────────────────────────────────────────────────────────
+	// (Must be checked before !ticket-note to avoid prefix collision.)
+	if (Content.Equals(TEXT("!ticket-notes"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can view ticket notes."));
+			return;
+		}
+		const TArray<FString>* NotesView = TicketChannelToNotes.Find(SourceChannelId);
+		if (!NotesView || NotesView->Num() == 0)
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":notepad_spiral: No notes on this ticket."));
+		}
+		else
+		{
+			FString NotesList = TEXT(":notepad_spiral: **Staff notes (internal):**\n");
+			for (int32 i = 0; i < NotesView->Num(); ++i)
+				NotesList += FString::Printf(TEXT("%d. %s\n"), i + 1, *(*NotesView)[i]);
+			Bridge->SendDiscordChannelMessage(SourceChannelId, NotesList.TrimEnd());
+		}
+		return;
+	}
+
+	// ── !ticket-note <text> ───────────────────────────────────────────────────
+	if (Content.StartsWith(TEXT("!ticket-note"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can add notes."));
+			return;
+		}
+		const FString NoteText = Content.Mid(FCString::Strlen(TEXT("!ticket-note"))).TrimStartAndEnd();
+		if (NoteText.IsEmpty())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":warning: Usage: `!ticket-note <text>`"));
+			return;
+		}
+		TicketChannelToNotes.FindOrAdd(SourceChannelId).Add(NoteText);
+		SaveTicketState();
+		Bridge->SendDiscordChannelMessage(SourceChannelId,
+			TEXT(":notepad_spiral: Note added (visible to staff only)."));
+		return;
+	}
+
+	// ── !ticket-escalate ──────────────────────────────────────────────────────
+	if (Content.Equals(TEXT("!ticket-escalate"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can escalate tickets."));
+			return;
+		}
+		TicketChannelToPriority.Add(SourceChannelId, TEXT("Urgent"));
+		SaveTicketState();
+
+		const FString EscalateMsg = Config.TicketEscalationRoleId.IsEmpty()
+			? TEXT(":rotating_light: **This ticket has been escalated.**")
+			: FString::Printf(TEXT(":rotating_light: **This ticket has been escalated.** <@&%s>"),
+			                  *Config.TicketEscalationRoleId);
+		Bridge->SendDiscordChannelMessage(SourceChannelId, EscalateMsg);
+
+		// Move to escalation category if configured.
+		if (!Config.TicketEscalationCategoryId.IsEmpty() && !Bridge->GetBotToken().IsEmpty())
+		{
+			const FString EscPatchBody = FString::Printf(
+				TEXT("{\"parent_id\":\"%s\"}"), *Config.TicketEscalationCategoryId);
+			TSharedRef<IHttpRequest, ESPMode::ThreadSafe> EscReq =
+				FHttpModule::Get().CreateRequest();
+			EscReq->SetURL(FString::Printf(
+				TEXT("https://discord.com/api/v10/channels/%s"), *SourceChannelId));
+			EscReq->SetVerb(TEXT("PATCH"));
+			EscReq->SetHeader(TEXT("Authorization"),
+				FString::Printf(TEXT("Bot %s"), *Bridge->GetBotToken()));
+			EscReq->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+			EscReq->SetContentAsString(EscPatchBody);
+			EscReq->ProcessRequest();
+		}
+		return;
+	}
+
+	// ── !ticket-remind <duration> ─────────────────────────────────────────────
+	if (Content.StartsWith(TEXT("!ticket-remind"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can set reminders."));
+			return;
+		}
+		const FString RemindArg = Content.Mid(FCString::Strlen(TEXT("!ticket-remind"))).TrimStartAndEnd();
+		if (RemindArg.IsEmpty())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":warning: Usage: `!ticket-remind <duration>` (e.g. `30m`, `2h`, `1d`)"));
+			return;
+		}
+		// Parse duration: numeric prefix + suffix (w/d/h/m).
+		FTimespan RemindSpan = FTimespan::Zero();
+		bool bParsedRemind = false;
+		if (RemindArg.Len() >= 2)
+		{
+			const TCHAR RemindSuffix = FChar::ToLower(RemindArg[RemindArg.Len() - 1]);
+			const FString RemindNumStr = RemindArg.Left(RemindArg.Len() - 1);
+			const double RemindVal = FCString::Atod(*RemindNumStr);
+			if (RemindVal > 0.0)
+			{
+				if (RemindSuffix == TCHAR('w'))      { RemindSpan = FTimespan::FromDays(RemindVal * 7.0);  bParsedRemind = true; }
+				else if (RemindSuffix == TCHAR('d')) { RemindSpan = FTimespan::FromDays(RemindVal);         bParsedRemind = true; }
+				else if (RemindSuffix == TCHAR('h')) { RemindSpan = FTimespan::FromHours(RemindVal);        bParsedRemind = true; }
+				else if (RemindSuffix == TCHAR('m')) { RemindSpan = FTimespan::FromMinutes(RemindVal);      bParsedRemind = true; }
+			}
+		}
+		if (!bParsedRemind)
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":warning: Invalid duration. Examples: `30m`, `2h`, `1d`, `1w`"));
+			return;
+		}
+		TicketChannelToReminder.Add(SourceChannelId, FDateTime::UtcNow() + RemindSpan);
+		SaveTicketState();
+		Bridge->SendDiscordChannelMessage(SourceChannelId,
+			FString::Printf(TEXT(":alarm_clock: Reminder set for **%s** from now."), *RemindArg));
+		return;
+	}
+
+	// ── !ticket-blacklist-list ────────────────────────────────────────────────
+	// (Must be checked before !ticket-blacklist to avoid prefix collision.)
+	if (Content.Equals(TEXT("!ticket-blacklist-list"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can view the blacklist."));
+			return;
+		}
+		if (TicketBlacklist.Num() == 0)
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":white_check_mark: The ticket blacklist is empty."));
+		}
+		else
+		{
+			FString BLList = FString::Printf(
+				TEXT(":no_entry: **Ticket blacklist (%d):**\n"), TicketBlacklist.Num());
+			for (const FString& BLID : TicketBlacklist)
+				BLList += FString::Printf(TEXT("• %s\n"), *BLID);
+			Bridge->SendDiscordChannelMessage(SourceChannelId, BLList.TrimEnd());
+		}
+		return;
+	}
+
+	// ── !ticket-blacklist <userId> ────────────────────────────────────────────
+	if (Content.StartsWith(TEXT("!ticket-blacklist"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can blacklist users."));
+			return;
+		}
+		FString BLArg = Content.Mid(FCString::Strlen(TEXT("!ticket-blacklist"))).TrimStartAndEnd();
+		// Extract user ID from <@userId> or plain ID.
+		FString BLUserId;
+		if (BLArg.StartsWith(TEXT("<@")))
+		{
+			int32 BLEnd = INDEX_NONE;
+			BLArg.FindChar(TCHAR('>'), BLEnd);
+			if (BLEnd != INDEX_NONE)
+			{
+				BLUserId = BLArg.Mid(2, BLEnd - 2);
+				if (BLUserId.StartsWith(TEXT("!"))) BLUserId = BLUserId.Mid(1);
+			}
+		}
+		else
+		{
+			BLUserId = BLArg;
+		}
+		if (BLUserId.IsEmpty())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":warning: Usage: `!ticket-blacklist <@user or userId>`"));
+			return;
+		}
+		TicketBlacklist.Add(BLUserId);
+		SaveTicketBlacklist();
+		Bridge->SendDiscordChannelMessage(SourceChannelId,
+			FString::Printf(TEXT(":no_entry: User **%s** has been blacklisted from opening tickets."),
+			                *BLUserId));
+		return;
+	}
+
+	// ── !ticket-unblacklist <userId> ──────────────────────────────────────────
+	if (Content.StartsWith(TEXT("!ticket-unblacklist"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can unblacklist users."));
+			return;
+		}
+		FString UBLArg = Content.Mid(FCString::Strlen(TEXT("!ticket-unblacklist"))).TrimStartAndEnd();
+		FString UBLUserId;
+		if (UBLArg.StartsWith(TEXT("<@")))
+		{
+			int32 UBLEnd = INDEX_NONE;
+			UBLArg.FindChar(TCHAR('>'), UBLEnd);
+			if (UBLEnd != INDEX_NONE)
+			{
+				UBLUserId = UBLArg.Mid(2, UBLEnd - 2);
+				if (UBLUserId.StartsWith(TEXT("!"))) UBLUserId = UBLUserId.Mid(1);
+			}
+		}
+		else
+		{
+			UBLUserId = UBLArg;
+		}
+		if (UBLUserId.IsEmpty())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":warning: Usage: `!ticket-unblacklist <@user or userId>`"));
+			return;
+		}
+		const bool bWasBlacklisted = TicketBlacklist.Remove(UBLUserId) > 0;
+		SaveTicketBlacklist();
+		if (bWasBlacklisted)
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				FString::Printf(TEXT(":white_check_mark: User **%s** has been removed from the ticket blacklist."),
+				                *UBLUserId));
+		else
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				FString::Printf(TEXT(":question: User **%s** was not in the blacklist."), *UBLUserId));
+		return;
+	}
+
+	// ── !ticket-merge <channelId or #channelId> ───────────────────────────────
+	if (Content.StartsWith(TEXT("!ticket-merge"), ESearchCase::IgnoreCase))
+	{
+		if (!Bridge) return;
+		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
+		if (!SenderHasNotifyRole())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":no_entry: Only members with the support role can merge tickets."));
+			return;
+		}
+		FString MergeArg = Content.Mid(FCString::Strlen(TEXT("!ticket-merge"))).TrimStartAndEnd();
+		// Support <#channelId> channel mention format.
+		FString TargetChanId;
+		if (MergeArg.StartsWith(TEXT("<#")))
+		{
+			int32 MergeEnd = INDEX_NONE;
+			MergeArg.FindChar(TCHAR('>'), MergeEnd);
+			if (MergeEnd != INDEX_NONE)
+				TargetChanId = MergeArg.Mid(2, MergeEnd - 2);
+		}
+		else
+		{
+			TargetChanId = MergeArg;
+		}
+		TargetChanId.TrimStartAndEndInline();
+
+		if (TargetChanId.IsEmpty())
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":warning: Usage: `!ticket-merge <#channel or channelId>`"));
+			return;
+		}
+		if (TargetChanId == SourceChannelId)
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				TEXT(":warning: You cannot merge a ticket with itself."));
+			return;
+		}
+		if (!TicketChannelToOpener.Contains(TargetChanId))
+		{
+			Bridge->SendDiscordChannelMessage(SourceChannelId,
+				FString::Printf(TEXT(":warning: <#%s> is not a tracked ticket channel."), *TargetChanId));
+			return;
+		}
+
+		// Capture opener name from A to add as a note in B.
+		FString MergeOpenerName;
+		if (const FString* MN = TicketChannelToOpenerName.Find(SourceChannelId))
+			MergeOpenerName = *MN;
+		if (MergeOpenerName.IsEmpty())
+		{
+			if (const FString* MO = TicketChannelToOpener.Find(SourceChannelId))
+				MergeOpenerName = FString::Printf(TEXT("<@%s>"), **MO);
+		}
+
+		// Post merge notices to both channels.
+		Bridge->SendDiscordChannelMessage(SourceChannelId,
+			FString::Printf(
+				TEXT(":twisted_rightwards_arrows: **Merged with** <#%s>. This ticket has been closed."),
+				*TargetChanId));
+		Bridge->SendDiscordChannelMessage(TargetChanId,
+			FString::Printf(
+				TEXT(":twisted_rightwards_arrows: **Ticket merged from** <#%s>. Contents were merged here."),
+				*SourceChannelId));
+
+		// Add opener info from A as a note in B.
+		if (!MergeOpenerName.IsEmpty())
+		{
+			TicketChannelToNotes.FindOrAdd(TargetChanId).Add(
+				FString::Printf(TEXT("Merged from <#%s> (opener: %s)"), *SourceChannelId, *MergeOpenerName));
+		}
+
+		// Close channel A: remove from all tracking maps.
+		FString MergeRemovedOpener;
+		TicketChannelToOpener.RemoveAndCopyValue(SourceChannelId, MergeRemovedOpener);
+		if (!MergeRemovedOpener.IsEmpty())
+			OpenerToTicketChannel.Remove(MergeRemovedOpener);
+		TicketChannelToAssignee.Remove(SourceChannelId);
+		TicketChannelToAssigneeName.Remove(SourceChannelId);
+		TicketChannelToLastActivity.Remove(SourceChannelId);
+		TicketChannelToOpenerName.Remove(SourceChannelId);
+		FString MergeRemovedType;
+		TicketChannelToType.RemoveAndCopyValue(SourceChannelId, MergeRemovedType);
+		TicketChannelToOpenTime.Remove(SourceChannelId);
+		TicketChannelToPriority.Remove(SourceChannelId);
+		TicketChannelToTags.Remove(SourceChannelId);
+		TicketChannelToNotes.Remove(SourceChannelId);
+		TicketChannelStaffReplied.Remove(SourceChannelId);
+		TicketChannelToReminder.Remove(SourceChannelId);
+		if (Config.bAllowMultipleTicketTypes && !MergeRemovedOpener.IsEmpty() && !MergeRemovedType.IsEmpty())
+		{
+			if (TMap<FString, FString>* MergeTypeMap = OpenerToTicketsByType.Find(MergeRemovedOpener))
+				MergeTypeMap->Remove(MergeRemovedType);
+		}
+		SaveTicketState();
+
+		// Delete channel A.
+		Bridge->DeleteDiscordChannel(SourceChannelId);
+		return;
+	}
+
 	// ── !ticket-panel ─────────────────────────────────────────────────────────
 	if (!Content.Equals(TEXT("!ticket-panel"), ESearchCase::IgnoreCase))
 	{
@@ -2050,6 +2706,37 @@ void UTicketSubsystem::SaveTicketState() const
 			Entry->SetStringField(TEXT("open_time"), OpenTime->ToIso8601());
 		const FString* OpenerName = TicketChannelToOpenerName.Find(Pair.Key);
 		if (OpenerName)   Entry->SetStringField(TEXT("opener_name"),   *OpenerName);
+
+		// Persist tags.
+		const TArray<FString>* SaveTags = TicketChannelToTags.Find(Pair.Key);
+		if (SaveTags && SaveTags->Num() > 0)
+		{
+			TArray<TSharedPtr<FJsonValue>> TagJsonArr;
+			for (const FString& T : *SaveTags)
+				TagJsonArr.Add(MakeShared<FJsonValueString>(T));
+			Entry->SetArrayField(TEXT("tags"), TagJsonArr);
+		}
+
+		// Persist notes.
+		const TArray<FString>* SaveNotes = TicketChannelToNotes.Find(Pair.Key);
+		if (SaveNotes && SaveNotes->Num() > 0)
+		{
+			TArray<TSharedPtr<FJsonValue>> NoteJsonArr;
+			for (const FString& N : *SaveNotes)
+				NoteJsonArr.Add(MakeShared<FJsonValueString>(N));
+			Entry->SetArrayField(TEXT("notes"), NoteJsonArr);
+		}
+
+		// Persist staff-replied flag.
+		const bool* bSaveStaffReplied = TicketChannelStaffReplied.Find(Pair.Key);
+		if (bSaveStaffReplied)
+			Entry->SetBoolField(TEXT("staff_replied"), *bSaveStaffReplied);
+
+		// Persist reminder.
+		const FDateTime* SaveReminder = TicketChannelToReminder.Find(Pair.Key);
+		if (SaveReminder && SaveReminder->GetTicks() > 0)
+			Entry->SetStringField(TEXT("reminder"), SaveReminder->ToIso8601());
+
 		TicketArray.Add(MakeShared<FJsonValueObject>(Entry));
 	}
 
@@ -2176,6 +2863,52 @@ void UTicketSubsystem::LoadTicketState()
 				TicketChannelToOpenTime.Add(ChannelId, OT);
 		}
 
+		// Restore tags.
+		const TArray<TSharedPtr<FJsonValue>>* LoadTagArr = nullptr;
+		if ((*EntryObj)->TryGetArrayField(TEXT("tags"), LoadTagArr) && LoadTagArr)
+		{
+			TArray<FString> LoadedTags;
+			for (const TSharedPtr<FJsonValue>& TV : *LoadTagArr)
+			{
+				FString TStr;
+				if (TV->TryGetString(TStr) && !TStr.IsEmpty())
+					LoadedTags.Add(TStr);
+			}
+			if (LoadedTags.Num() > 0)
+				TicketChannelToTags.Add(ChannelId, LoadedTags);
+		}
+
+		// Restore notes.
+		const TArray<TSharedPtr<FJsonValue>>* LoadNoteArr = nullptr;
+		if ((*EntryObj)->TryGetArrayField(TEXT("notes"), LoadNoteArr) && LoadNoteArr)
+		{
+			TArray<FString> LoadedNotes;
+			for (const TSharedPtr<FJsonValue>& NV : *LoadNoteArr)
+			{
+				FString NStr;
+				if (NV->TryGetString(NStr) && !NStr.IsEmpty())
+					LoadedNotes.Add(NStr);
+			}
+			if (LoadedNotes.Num() > 0)
+				TicketChannelToNotes.Add(ChannelId, LoadedNotes);
+		}
+
+		// Restore staff-replied flag.
+		bool bLoadedStaffReplied = false;
+		if ((*EntryObj)->TryGetBoolField(TEXT("staff_replied"), bLoadedStaffReplied))
+			TicketChannelStaffReplied.Add(ChannelId, bLoadedStaffReplied);
+		else
+			TicketChannelStaffReplied.Add(ChannelId, false);
+
+		// Restore reminder.
+		FString LoadReminderStr;
+		if ((*EntryObj)->TryGetStringField(TEXT("reminder"), LoadReminderStr) && !LoadReminderStr.IsEmpty())
+		{
+			FDateTime LoadRemTime;
+			if (FDateTime::ParseIso8601(*LoadReminderStr, LoadRemTime) && LoadRemTime > FDateTime::UtcNow())
+				TicketChannelToReminder.Add(ChannelId, LoadRemTime);
+		}
+
 		++Loaded;
 	}
 
@@ -2261,6 +2994,20 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 	TicketChannelToAssignee.Remove(ChannelId);
 	TicketChannelToAssigneeName.Remove(ChannelId);
 	TicketChannelToLastActivity.Remove(ChannelId);
+	TicketChannelToType.Remove(ChannelId);
+	TicketChannelToPriority.Remove(ChannelId);
+	TicketChannelToOpenTime.Remove(ChannelId);
+	TicketChannelToOpenerName.Remove(ChannelId);
+
+	// Capture notes for transcript before removing.
+	TArray<FString> InactiveNotesForLog;
+	if (const TArray<FString>* INPtr = TicketChannelToNotes.Find(ChannelId))
+		InactiveNotesForLog = *INPtr;
+
+	TicketChannelToTags.Remove(ChannelId);
+	TicketChannelToNotes.Remove(ChannelId);
+	TicketChannelStaffReplied.Remove(ChannelId);
+	TicketChannelToReminder.Remove(ChannelId);
 	SaveTicketState();
 
 	// Post an auto-close notice so the transcript includes it.
@@ -2293,7 +3040,7 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 
 		FetchReq->OnProcessRequestComplete().BindWeakLambda(
 			WeakThis.Get(),
-			[WeakThis, LogChannelId, BotToken, OpenerIdForLog, ClosedAt, ClosedChannelId]
+			[WeakThis, LogChannelId, BotToken, OpenerIdForLog, ClosedAt, ClosedChannelId, InactiveNotesForLog]
 			(FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bOk) mutable
 			{
 				UTicketSubsystem* Self = WeakThis.Get();
@@ -2345,6 +3092,14 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 					TranscriptText += TEXT("*(Could not fetch message history.)*\n");
 				}
 
+				// Append staff notes if any.
+				if (!InactiveNotesForLog.IsEmpty())
+				{
+					TranscriptText += TEXT("\n**Staff Notes (internal):**\n");
+					for (const FString& InN : InactiveNotesForLog)
+						TranscriptText += FString::Printf(TEXT("- %s\n"), *InN);
+				}
+
 				if (TranscriptText.Len() > 1900)
 					TranscriptText = TranscriptText.Left(1900) + TEXT("\n*(transcript truncated)*");
 
@@ -2358,4 +3113,78 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 	{
 		Bridge->DeleteDiscordChannel(ChannelId);
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ticket blacklist persistence
+// ─────────────────────────────────────────────────────────────────────────────
+
+FString UTicketSubsystem::GetBlacklistFilePath()
+{
+return FPaths::ProjectSavedDir() / TEXT("Config/TicketSystem/TicketBlacklist.json");
+}
+
+void UTicketSubsystem::LoadTicketBlacklist()
+{
+const FString Path = GetBlacklistFilePath();
+FString JsonContent;
+if (!FFileHelper::LoadFileToString(JsonContent, *Path))
+{
+// No file on first run is fine.
+return;
+}
+
+TSharedPtr<FJsonObject> Root;
+TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonContent);
+if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+{
+UE_LOG(LogTicketSystem, Warning,
+       TEXT("TicketSystem: Failed to parse blacklist from '%s'. Blacklist cleared."), *Path);
+return;
+}
+
+const TArray<TSharedPtr<FJsonValue>>* Ids = nullptr;
+if (!Root->TryGetArrayField(TEXT("blacklist"), Ids) || !Ids)
+{
+return;
+}
+
+TicketBlacklist.Empty();
+for (const TSharedPtr<FJsonValue>& IdVal : *Ids)
+{
+FString UserId;
+if (IdVal->TryGetString(UserId) && !UserId.IsEmpty())
+{
+TicketBlacklist.Add(UserId);
+}
+}
+
+UE_LOG(LogTicketSystem, Log,
+       TEXT("TicketSystem: Loaded %d blacklisted user(s)."), TicketBlacklist.Num());
+}
+
+void UTicketSubsystem::SaveTicketBlacklist() const
+{
+const FString Path = GetBlacklistFilePath();
+IPlatformFile& PF = FPlatformFileManager::Get().GetPlatformFile();
+PF.CreateDirectoryTree(*FPaths::GetPath(Path));
+
+TArray<TSharedPtr<FJsonValue>> IdArray;
+for (const FString& UserId : TicketBlacklist)
+{
+IdArray.Add(MakeShared<FJsonValueString>(UserId));
+}
+
+TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+Root->SetArrayField(TEXT("blacklist"), IdArray);
+
+FString JsonContent;
+TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonContent);
+FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
+
+if (!FFileHelper::SaveStringToFile(JsonContent, *Path))
+{
+UE_LOG(LogTicketSystem, Warning,
+       TEXT("TicketSystem: Failed to save blacklist to '%s'."), *Path);
+}
 }
