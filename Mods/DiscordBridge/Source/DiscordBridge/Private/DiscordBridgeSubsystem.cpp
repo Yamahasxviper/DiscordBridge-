@@ -15,6 +15,7 @@
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/GameSession.h"
 #include "GameFramework/PlayerState.h"
+#include "GameFramework/OnlineReplStructs.h"
 #include "FGChatManager.h"
 #include "FGGamePhaseManager.h"
 #include "FGGamePhase.h"
@@ -97,10 +98,12 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	FWhitelistManager::Load(Config.bWhitelistEnabled);
 	FWhitelistManager::SetMaxSlots(Config.MaxWhitelistSlots);
 
-	// Start a 60-second ticker to remove expired whitelist entries.
+	// Start a 60-second ticker to remove expired whitelist entries and
+	// post expiry warnings when WhitelistExpiryWarningHours > 0.
 	WhitelistExpiryCheckHandle = FTSTicker::GetCoreTicker().AddTicker(
 		FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
 		{
+			// ── Remove fully-expired entries ────────────────────────────────
 			TArray<FString> ExpiredNames;
 			FWhitelistManager::RemoveExpiredEntries(ExpiredNames);
 			for (const FString& Name : ExpiredNames)
@@ -113,7 +116,55 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				{
 					SendMessageToChannel(NotifyChan, Msg);
 				}
+				WarnedExpiryNames.Remove(Name);
 			}
+
+			// ── Post expiry warnings ─────────────────────────────────────────
+			if (Config.WhitelistExpiryWarningHours > 0.0f)
+			{
+				const FDateTime Now       = FDateTime::UtcNow();
+				const FTimespan WarnWindow = FTimespan::FromHours(Config.WhitelistExpiryWarningHours);
+				for (const FWhitelistEntry& E : FWhitelistManager::GetAllEntries())
+				{
+					if (E.ExpiresAt.GetTicks() == 0) continue;   // permanent
+					if (WarnedExpiryNames.Contains(E.Name)) continue;
+					const FTimespan Remaining = E.ExpiresAt - Now;
+					if (Remaining > FTimespan::Zero() && Remaining <= WarnWindow)
+					{
+						WarnedExpiryNames.Add(E.Name);
+						const FString WarnChan = Config.WhitelistEventsChannelId.IsEmpty()
+							? Config.ChannelId : Config.WhitelistEventsChannelId;
+						if (!WarnChan.IsEmpty())
+						{
+							const FString WarnMsg = FString::Printf(
+								TEXT(":warning: **%s**'s whitelist entry expires in **%dh %dm** (%s UTC)."),
+								*E.Name,
+								static_cast<int32>(Remaining.GetTotalHours()),
+								static_cast<int32>(Remaining.GetMinutes()),
+								*E.ExpiresAt.ToString(TEXT("%Y-%m-%d %H:%M")));
+							SendMessageToChannel(WarnChan, WarnMsg);
+						}
+					}
+				}
+			}
+
+			// ── Clean up expired verification codes ──────────────────────────
+			{
+				const FDateTime Now = FDateTime::UtcNow();
+				TArray<FString> ExpiredCodes;
+				for (const auto& Pair : PendingVerificationExpiry)
+				{
+					if (Pair.Value <= Now)
+						ExpiredCodes.Add(Pair.Key);
+				}
+				for (const FString& Code : ExpiredCodes)
+				{
+					PendingVerifications.Remove(Code);
+					PendingVerificationNames.Remove(Code);
+					PendingVerificationExpiry.Remove(Code);
+				}
+			}
+
 			return true;
 		}),
 		60.0f);
@@ -625,6 +676,129 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 	}
 	else if (EventType == TEXT("INTERACTION_CREATE"))
 	{
+		// Handle whitelist application button interactions before broadcasting.
+		{
+			const TSharedPtr<FJsonObject>* InteractionDataPtr = nullptr;
+			FString CustomId;
+			if (DataObj->TryGetObjectField(TEXT("data"), InteractionDataPtr) && InteractionDataPtr)
+				(*InteractionDataPtr)->TryGetStringField(TEXT("custom_id"), CustomId);
+
+			if (CustomId.StartsWith(TEXT("wl_approve:")) || CustomId.StartsWith(TEXT("wl_deny:")))
+			{
+				const bool  bApprove       = CustomId.StartsWith(TEXT("wl_approve:"));
+				const FString TargetDiscordId = bApprove ? CustomId.Mid(11) : CustomId.Mid(8);
+
+				FString InteractionId, InteractionToken;
+				DataObj->TryGetStringField(TEXT("id"),    InteractionId);
+				DataObj->TryGetStringField(TEXT("token"), InteractionToken);
+
+				// Verify that the clicker holds WhitelistCommandRoleId.
+				bool bHasRole = Config.WhitelistCommandRoleId.IsEmpty();
+				const TSharedPtr<FJsonObject>* MemberObjPtr = nullptr;
+				if (DataObj->TryGetObjectField(TEXT("member"), MemberObjPtr) && MemberObjPtr)
+				{
+					// Guild owner always allowed
+					{
+						const TSharedPtr<FJsonObject>* UserPtr = nullptr;
+						if ((*MemberObjPtr)->TryGetObjectField(TEXT("user"), UserPtr) && UserPtr)
+						{
+							FString ClickerId;
+							(*UserPtr)->TryGetStringField(TEXT("id"), ClickerId);
+							if (!GuildOwnerId.IsEmpty() && ClickerId == GuildOwnerId)
+								bHasRole = true;
+						}
+					}
+					if (!bHasRole && !Config.WhitelistCommandRoleId.IsEmpty())
+					{
+						const TArray<TSharedPtr<FJsonValue>>* RolesArr = nullptr;
+						if ((*MemberObjPtr)->TryGetArrayField(TEXT("roles"), RolesArr) && RolesArr)
+						{
+							for (const TSharedPtr<FJsonValue>& RoleVal : *RolesArr)
+							{
+								FString RId;
+								if (RoleVal->TryGetString(RId) && RId == Config.WhitelistCommandRoleId)
+								{
+									bHasRole = true;
+									break;
+								}
+							}
+						}
+					}
+				}
+
+				if (!bHasRole)
+				{
+					RespondToInteraction(InteractionId, InteractionToken, 4,
+						TEXT(":no_entry: You do not have permission to approve or deny whitelist applications."),
+						/*bEphemeral=*/true);
+				}
+				else if (bApprove)
+				{
+					const FString* PendingNamePtr = PendingWhitelistApps.Find(TargetDiscordId);
+					if (PendingNamePtr && !PendingNamePtr->IsEmpty())
+					{
+						const FString PlayerNameCopy = *PendingNamePtr;
+						PendingWhitelistApps.Remove(TargetDiscordId);
+
+						if (FWhitelistManager::AddPlayer(PlayerNameCopy, TEXT(""), TEXT("[Discord Approval]")))
+						{
+							RespondToInteraction(InteractionId, InteractionToken, 4,
+								FString::Printf(
+									TEXT(":white_check_mark: **%s** has been approved and added to the whitelist."),
+									*PlayerNameCopy),
+								/*bEphemeral=*/false);
+							PostWhitelistEvent(
+								FString::Printf(TEXT("**%s** approved via application"), *PlayerNameCopy),
+								PlayerNameCopy, TEXT("[Discord Approval]"), 3066993);
+
+							if (!Config.WhitelistApprovedDmMessage.IsEmpty())
+							{
+								const FString DmMsg = Config.WhitelistApprovedDmMessage
+									.Replace(TEXT("%PlayerName%"), *PlayerNameCopy);
+								SendDiscordDM(TargetDiscordId, DmMsg);
+							}
+						}
+						else
+						{
+							RespondToInteraction(InteractionId, InteractionToken, 4,
+								FString::Printf(
+									TEXT(":yellow_circle: **%s** is already on the whitelist."),
+									*PlayerNameCopy),
+								/*bEphemeral=*/false);
+						}
+					}
+					else
+					{
+						RespondToInteraction(InteractionId, InteractionToken, 4,
+							TEXT(":warning: This application is no longer pending (already processed or expired)."),
+							/*bEphemeral=*/true);
+					}
+				}
+				else // wl_deny
+				{
+					const FString* PendingNamePtr = PendingWhitelistApps.Find(TargetDiscordId);
+					if (PendingNamePtr && !PendingNamePtr->IsEmpty())
+					{
+						const FString PlayerNameCopy = *PendingNamePtr;
+						PendingWhitelistApps.Remove(TargetDiscordId);
+						RespondToInteraction(InteractionId, InteractionToken, 4,
+							FString::Printf(
+								TEXT(":red_circle: Whitelist application for **%s** (in-game: `%s`) has been denied."),
+								*TargetDiscordId, *PlayerNameCopy),
+							/*bEphemeral=*/false);
+					}
+					else
+					{
+						RespondToInteraction(InteractionId, InteractionToken, 4,
+							TEXT(":warning: This application is no longer pending (already processed or expired)."),
+							/*bEphemeral=*/true);
+					}
+				}
+				// Don't broadcast — handled internally.
+				return;
+			}
+		}
+
 		// Fire the native delegate so extension modules can handle button clicks
 		// and modal submits without modifying DiscordBridge directly.
 		if (OnDiscordInteractionReceived.IsBound())
@@ -1083,7 +1257,23 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 	if (!Config.WhitelistCommandPrefix.IsEmpty() &&
 	    Content.StartsWith(Config.WhitelistCommandPrefix, ESearchCase::IgnoreCase))
 	{
-		if (!HasRequiredRole(Config.WhitelistCommandRoleId))
+		const FString SubCommand = Content.Mid(Config.WhitelistCommandPrefix.Len()).TrimStartAndEnd();
+
+		// Determine the first word (verb) to decide if a role check is needed.
+		FString FirstVerb;
+		{
+			int32 SpaceIdx = INDEX_NONE;
+			SubCommand.FindChar(TEXT(' '), SpaceIdx);
+			FirstVerb = (SpaceIdx != INDEX_NONE)
+				? SubCommand.Left(SpaceIdx).ToLower()
+				: SubCommand.ToLower();
+		}
+
+		// "apply" and "link" are self-service commands that do not require
+		// WhitelistCommandRoleId.  All other verbs still require the role.
+		const bool bIsPublicVerb = (FirstVerb == TEXT("apply") || FirstVerb == TEXT("link"));
+
+		if (!bIsPublicVerb && !HasRequiredRole(Config.WhitelistCommandRoleId))
 		{
 			UE_LOG(LogDiscordBridge, Log,
 			       TEXT("DiscordBridge: Ignoring whitelist command from '%s' – sender lacks WhitelistCommandRoleId."),
@@ -1091,9 +1281,7 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 			SendMessageToChannel(MsgChannelId, TEXT(":no_entry: You do not have permission to use whitelist commands."));
 			return;
 		}
-		// Extract everything after the prefix as the sub-command (trimmed).
-		const FString SubCommand = Content.Mid(Config.WhitelistCommandPrefix.Len()).TrimStartAndEnd();
-		HandleWhitelistCommand(SubCommand, Username, MsgChannelId);
+		HandleWhitelistCommand(SubCommand, Username, MsgChannelId, AuthorId);
 		return; // Do not relay whitelist commands to in-game chat.
 	}
 
@@ -1972,6 +2160,94 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 		return; // Do not forward commands to Discord.
 	}
 
+	// Handle the in-game !verify <code> command for account linking (Feature 6).
+	if (Config.bWhitelistVerificationEnabled &&
+	    MessageText.StartsWith(TEXT("!verify "), ESearchCase::IgnoreCase))
+	{
+		const FString Code = MessageText.Mid(8).TrimStartAndEnd();
+		const FString* DiscordUserIdPtr = PendingVerifications.Find(Code);
+		if (DiscordUserIdPtr && !DiscordUserIdPtr->IsEmpty())
+		{
+			const FDateTime* ExpiryPtr = PendingVerificationExpiry.Find(Code);
+			if (ExpiryPtr && *ExpiryPtr <= FDateTime::UtcNow())
+			{
+				// Code expired.
+				PendingVerifications.Remove(Code);
+				PendingVerificationNames.Remove(Code);
+				PendingVerificationExpiry.Remove(Code);
+				SendGameChatStatusMessage(TEXT("[DiscordBridge] Verification code has expired. Please request a new one with !whitelist link."));
+			}
+			else
+			{
+				const FString DiscordUserId  = *DiscordUserIdPtr;
+				const FString* NamePtr       = PendingVerificationNames.Find(Code);
+				// Always whitelist using the actual in-game PlayerName of the player who typed
+				// !verify. The Discord-submitted name is kept only for the audit log.
+				const FString  AuditName     = NamePtr && !NamePtr->IsEmpty() ? *NamePtr : PlayerName;
+
+				// Resolve EosPUID from the currently-connected player controller whose
+				// name matches PlayerName. Use the safe FUniqueNetIdRepl accessors
+				// (GetType/ToString) – never dereference via operator-> on CSS DS.
+				FString ResolvedEosPUID;
+				if (UWorld* VerWorld = GetWorld())
+				{
+					for (FConstPlayerControllerIterator It = VerWorld->GetPlayerControllerIterator(); It; ++It)
+					{
+						APlayerController* VerPC = It->Get();
+						if (!VerPC || !VerPC->PlayerState) continue;
+						if (VerPC->PlayerState->GetPlayerName() != PlayerName) continue;
+						const FUniqueNetIdRepl& NetId = VerPC->PlayerState->GetUniqueId();
+						if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
+						{
+							ResolvedEosPUID = NetId.ToString().ToLower();
+						}
+						break;
+					}
+				}
+
+				PendingVerifications.Remove(Code);
+				PendingVerificationNames.Remove(Code);
+				PendingVerificationExpiry.Remove(Code);
+
+				// Add using the real in-game player name and resolved EosPUID (may be empty).
+				if (FWhitelistManager::AddPlayer(PlayerName, ResolvedEosPUID, TEXT("[Verification]")))
+				{
+					SendGameChatStatusMessage(FString::Printf(
+						TEXT("[DiscordBridge] Account linked! **%s** has been added to the whitelist."),
+						*PlayerName));
+					PostWhitelistEvent(
+						FString::Printf(TEXT("**%s** added via in-game verification (Discord: %s)"),
+							*PlayerName, *AuditName),
+						PlayerName, TEXT("[Verification]"), 3066993);
+
+					// Confirm to the Discord user who initiated the link.
+					if (!Config.WhitelistApprovedDmMessage.IsEmpty())
+					{
+						const FString DmMsg = Config.WhitelistApprovedDmMessage
+							.Replace(TEXT("%PlayerName%"), *PlayerName);
+						SendDiscordDM(DiscordUserId, DmMsg);
+					}
+					else
+					{
+						SendDiscordDM(DiscordUserId, FString::Printf(
+							TEXT("✅ Your in-game account **%s** has been verified and added to the whitelist!"),
+							*PlayerName));
+					}
+				}
+				else
+				{
+					SendGameChatStatusMessage(FString::Printf(
+						TEXT("[DiscordBridge] **%s** is already on the whitelist."), *PlayerName));
+				}
+			}
+		}
+		else
+		{
+			SendGameChatStatusMessage(TEXT("[DiscordBridge] Unknown or expired verification code."));
+		}
+		return;
+	}
+
 	// Feature 3: /discord in-game command – reply with the invite link.
 	if (MessageText.Equals(TEXT("/discord"), ESearchCase::IgnoreCase) ||
 	    MessageText.Equals(TEXT("!discord"), ESearchCase::IgnoreCase))
@@ -2628,7 +2904,8 @@ void UDiscordBridgeSubsystem::OnLogout(AGameModeBase* /*GameMode*/, AController*
 
 void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
                                                       const FString& DiscordUsername,
-                                                      const FString& ResponseChannelId)
+                                                      const FString& ResponseChannelId,
+                                                      const FString& AuthorDiscordId)
 {
 	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Whitelist command from '%s': '%s'"), *DiscordUsername, *SubCommand);
@@ -2660,16 +2937,16 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 	{
 		if (Arg.IsEmpty())
 		{
-			Response = TEXT(":warning: Usage: `!whitelist add <PlayerName> [puid:<PUID>] [duration]`");
+			Response = TEXT(":warning: Usage: `!whitelist add <PlayerName> [puid:<PUID>] [group:<Group>] [duration]`");
 		}
 		else
 		{
-			// Parse PUID prefix: "Alice puid:abc123 7d"
+			// Parse tokens: "Alice puid:abc123 group:VIP 7d"
 			FString ParsedName = Arg;
 			FString ParsedPuid;
+			FString ParsedGroup;
 			FDateTime ExpiresAt(0);
 
-			// Extract puid: token
 			{
 				TArray<FString> Tokens;
 				Arg.ParseIntoArrayWS(Tokens);
@@ -2679,6 +2956,10 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 					if (Tok.StartsWith(TEXT("puid:"), ESearchCase::IgnoreCase))
 					{
 						ParsedPuid = Tok.Mid(5);
+					}
+					else if (Tok.StartsWith(TEXT("group:"), ESearchCase::IgnoreCase))
+					{
+						ParsedGroup = Tok.Mid(6);
 					}
 					else
 					{
@@ -2710,23 +2991,34 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 					FWhitelistManager::GetAllEntries().Num(),
 					FWhitelistManager::GetMaxSlots());
 			}
-			else if (FWhitelistManager::AddPlayer(ParsedName, ParsedPuid, DiscordUsername, ExpiresAt))
+			else if (FWhitelistManager::AddPlayer(ParsedName, ParsedPuid, DiscordUsername, ExpiresAt, ParsedGroup))
 			{
+				FString AddedMsg;
 				if (ExpiresAt.GetTicks() > 0)
 				{
-					Response = FString::Printf(
+					AddedMsg = FString::Printf(
 						TEXT(":green_circle: **%s** added (expires %s)."),
 						*ParsedName,
 						*ExpiresAt.ToString(TEXT("%Y-%m-%d %H:%M UTC")));
 				}
 				else
 				{
-					Response = FString::Printf(
+					AddedMsg = FString::Printf(
 						TEXT(":green_circle: **%s** has been added to the whitelist."), *ParsedName);
 				}
+				if (!ParsedGroup.IsEmpty())
+					AddedMsg += FString::Printf(TEXT(" Group: **%s**."), *ParsedGroup);
+				Response = AddedMsg;
 				PostWhitelistEvent(
 					FString::Printf(TEXT("**%s** added to the whitelist"), *ParsedName),
 					ParsedName, DiscordUsername, 3066993);
+
+				// DM on add when AuthorDiscordId is known and DM is configured.
+				if (!Config.WhitelistApprovedDmMessage.IsEmpty() && !AuthorDiscordId.IsEmpty())
+				{
+					// Only DM if the command was "add" and we have the target's Discord ID.
+					// For direct !whitelist add we don't know the target's Discord ID, so skip.
+				}
 			}
 			else
 			{
@@ -2754,17 +3046,35 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 	}
 	else if (Verb == TEXT("list"))
 	{
-		const TArray<FString> All = FWhitelistManager::GetAll();
-		const FString Status = FWhitelistManager::IsEnabled() ? TEXT("ENABLED") : TEXT("disabled");
-		if (All.Num() == 0)
+		// Arg may be empty (list all) or a group name to filter by.
+		const bool bFilterByGroup = !Arg.IsEmpty();
+		TArray<FWhitelistEntry> AllEntries = FWhitelistManager::GetAllEntries();
+
+		TArray<FString> Names;
+		for (const FWhitelistEntry& E : AllEntries)
 		{
-			Response = FString::Printf(TEXT(":scroll: Whitelist is **%s**. No players listed."), *Status);
+			if (!bFilterByGroup || E.Group.Equals(Arg, ESearchCase::IgnoreCase))
+				Names.Add(E.Name);
+		}
+
+		const FString Status = FWhitelistManager::IsEnabled() ? TEXT("ENABLED") : TEXT("disabled");
+		if (Names.Num() == 0)
+		{
+			if (bFilterByGroup)
+				Response = FString::Printf(TEXT(":scroll: Whitelist is **%s**. No players in group `%s`."), *Status, *Arg);
+			else
+				Response = FString::Printf(TEXT(":scroll: Whitelist is **%s**. No players listed."), *Status);
 		}
 		else
 		{
-			Response = FString::Printf(
-				TEXT(":scroll: Whitelist is **%s**. Players (%d): %s"),
-				*Status, All.Num(), *FString::Join(All, TEXT(", ")));
+			if (bFilterByGroup)
+				Response = FString::Printf(
+					TEXT(":scroll: Whitelist is **%s**. Group `%s` (%d players): %s"),
+					*Status, *Arg, Names.Num(), *FString::Join(Names, TEXT(", ")));
+			else
+				Response = FString::Printf(
+					TEXT(":scroll: Whitelist is **%s**. Players (%d): %s"),
+					*Status, Names.Num(), *FString::Join(Names, TEXT(", ")));
 		}
 	}
 	else if (Verb == TEXT("status"))
@@ -2921,12 +3231,178 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 			                "or `!whitelist role remove <discord_user_id>`");
 		}
 	}
+	else if (Verb == TEXT("search"))
+	{
+		if (Arg.IsEmpty())
+		{
+			Response = TEXT(":warning: Usage: `!whitelist search <partial-name>`");
+		}
+		else
+		{
+			const TArray<FWhitelistEntry> Results = FWhitelistManager::Search(Arg);
+			if (Results.Num() == 0)
+			{
+				Response = FString::Printf(TEXT(":mag: No whitelist entries matching `%s`."), *Arg);
+			}
+			else
+			{
+				FString ResultText = FString::Printf(TEXT(":mag: Search results for `%s` (%d):\n"), *Arg, Results.Num());
+				for (const FWhitelistEntry& E : Results)
+				{
+					FString ExtraInfo;
+					if (!E.Group.IsEmpty())
+						ExtraInfo += FString::Printf(TEXT(" [%s]"), *E.Group);
+					if (E.ExpiresAt.GetTicks() > 0)
+						ExtraInfo += FString::Printf(TEXT(" (expires %s)"),
+							*E.ExpiresAt.ToString(TEXT("%Y-%m-%d %H:%M UTC")));
+					ResultText += FString::Printf(TEXT("• **%s**%s\n"), *E.Name, *ExtraInfo);
+				}
+				Response = ResultText.TrimEnd();
+				if (Response.Len() > 1900)
+					Response = Response.Left(1900) + TEXT("\n*(truncated)*");
+			}
+		}
+	}
+	else if (Verb == TEXT("groups"))
+	{
+		const TArray<FWhitelistEntry> AllEntries = FWhitelistManager::GetAllEntries();
+		TMap<FString, int32> GroupCounts;
+		for (const FWhitelistEntry& E : AllEntries)
+		{
+			const FString GroupKey = E.Group.IsEmpty() ? TEXT("(default)") : E.Group;
+			int32& Count = GroupCounts.FindOrAdd(GroupKey);
+			++Count;
+		}
+		if (GroupCounts.Num() == 0)
+		{
+			Response = TEXT(":busts_in_silhouette: Whitelist is empty — no groups.");
+		}
+		else
+		{
+			FString GroupText = FString::Printf(TEXT(":busts_in_silhouette: **Whitelist Groups** (%d entries total):\n"),
+				AllEntries.Num());
+			for (const auto& Pair : GroupCounts)
+			{
+				GroupText += FString::Printf(TEXT("• **%s** — %d player%s\n"),
+					*Pair.Key, Pair.Value, Pair.Value == 1 ? TEXT("") : TEXT("s"));
+			}
+			Response = GroupText.TrimEnd();
+		}
+	}
+	else if (Verb == TEXT("apply"))
+	{
+		if (!Config.bWhitelistApplyEnabled)
+		{
+			Response = TEXT(":no_entry_sign: Whitelist applications are not enabled on this server.");
+		}
+		else if (Config.WhitelistApplicationChannelId.IsEmpty())
+		{
+			Response = TEXT(":warning: Whitelist application channel is not configured.");
+		}
+		else if (Arg.IsEmpty())
+		{
+			Response = TEXT(":warning: Usage: `!whitelist apply <YourInGameName>`");
+		}
+		else if (AuthorDiscordId.IsEmpty())
+		{
+			Response = TEXT(":warning: Could not determine your Discord user ID. Please try again.");
+		}
+		else
+		{
+			// Store the pending application keyed by Discord user ID.
+			PendingWhitelistApps.Add(AuthorDiscordId, Arg);
+
+			// Build an embed with Approve/Deny buttons posted to WhitelistApplicationChannelId.
+			const FString AppJson = FString::Printf(
+				TEXT("{")
+				TEXT("\"embeds\":[{")
+				TEXT("\"color\":3447003,")
+				TEXT("\"title\":\":clipboard: Whitelist Application\",")
+				TEXT("\"description\":\"**Discord User:** <@%s>\\n**In-Game Name:** `%s`\",")
+				TEXT("\"footer\":{\"text\":\"Use the buttons below to approve or deny\"}")
+				TEXT("}],")
+				TEXT("\"components\":[{")
+				TEXT("\"type\":1,")
+				TEXT("\"components\":[")
+				TEXT("{\"type\":2,\"style\":3,\"label\":\"Approve\",\"custom_id\":\"wl_approve:%s\"},")
+				TEXT("{\"type\":2,\"style\":4,\"label\":\"Deny\",\"custom_id\":\"wl_deny:%s\"}")
+				TEXT("]")
+				TEXT("}]}"),
+				*AuthorDiscordId,
+				*Arg.Replace(TEXT("\""), TEXT("\\\"")),
+				*AuthorDiscordId,
+				*AuthorDiscordId);
+
+			const FString AppUrl = FString::Printf(
+				TEXT("https://discord.com/api/v10/channels/%s/messages"),
+				*Config.WhitelistApplicationChannelId);
+
+			TSharedRef<IHttpRequest, ESPMode::ThreadSafe> AppReq = FHttpModule::Get().CreateRequest();
+			AppReq->SetURL(AppUrl);
+			AppReq->SetVerb(TEXT("POST"));
+			AppReq->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+			AppReq->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+			AppReq->SetContentAsString(AppJson);
+			AppReq->OnProcessRequestComplete().BindWeakLambda(this,
+				[](FHttpRequestPtr, FHttpResponsePtr Resp, bool bOk)
+				{
+					if (!bOk || !Resp.IsValid() || Resp->GetResponseCode() < 200 || Resp->GetResponseCode() >= 300)
+					{
+						UE_LOG(LogDiscordBridge, Warning,
+						       TEXT("DiscordBridge: Failed to post whitelist application embed."));
+					}
+				});
+			AppReq->ProcessRequest();
+
+			Response = FString::Printf(
+				TEXT(":mailbox_with_mail: Your application for **%s** has been submitted! "
+				     "An admin will review it shortly."), *Arg);
+		}
+	}
+	else if (Verb == TEXT("link"))
+	{
+		if (!Config.bWhitelistVerificationEnabled)
+		{
+			Response = TEXT(":no_entry_sign: Account verification is not enabled on this server.");
+		}
+		else if (Arg.IsEmpty())
+		{
+			Response = TEXT(":warning: Usage: `!whitelist link <YourInGameName>`");
+		}
+		else if (AuthorDiscordId.IsEmpty())
+		{
+			Response = TEXT(":warning: Could not determine your Discord user ID. Please try again.");
+		}
+		else if (!Config.WhitelistVerificationChannelId.IsEmpty() &&
+		         ResponseChannelId != Config.WhitelistVerificationChannelId)
+		{
+			Response = FString::Printf(
+				TEXT(":no_entry_sign: Please use this command in <#%s>."),
+				*Config.WhitelistVerificationChannelId);
+		}
+		else
+		{
+			// Generate a random 6-digit code.
+			const int32 Code = FMath::RandRange(100000, 999999);
+			const FString CodeStr = FString::FromInt(Code);
+
+			PendingVerifications.Add(CodeStr, AuthorDiscordId);
+			PendingVerificationNames.Add(CodeStr, Arg);
+			PendingVerificationExpiry.Add(CodeStr, FDateTime::UtcNow() + FTimespan::FromMinutes(10.0));
+
+			Response = FString::Printf(
+				TEXT(":key: Type `!verify %s` in-game within **10 minutes** to link your account **%s** to the whitelist."),
+				*CodeStr, *Arg);
+		}
+	}
 	else
 	{
 		Response = TEXT(":question: Unknown whitelist command. Available: `on`, `off`, "
-		                "`add <name> [puid:<id>] [duration]`, `remove <name>`, `list`, `status`, "
+		                "`add <name> [puid:<id>] [group:<group>] [duration]`, `remove <name>`, "
+		                "`list [group]`, `search <partial>`, `groups`, `status`, "
 		                "`export`, `import <json>`, `log [N]`, "
-		                "`role add <discord_id>`, `role remove <discord_id>`.");
+		                "`role add <discord_id>`, `role remove <discord_id>`, "
+		                "`apply <in-game-name>`, `link <in-game-name>`.");
 	}
 
 	const FString& ReplyChannel = ResponseChannelId.IsEmpty() ? Config.ChannelId : ResponseChannelId;
@@ -3006,6 +3482,56 @@ void UDiscordBridgeSubsystem::RebuildWhitelistRoleNameSet()
 			WhitelistRoleMemberNames.Add(Name);
 		}
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SendDiscordDM
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::SendDiscordDM(const FString& DiscordUserId, const FString& Message)
+{
+	if (DiscordUserId.IsEmpty() || Message.IsEmpty() || Config.BotToken.IsEmpty())
+	{
+		return;
+	}
+
+	// Step 1: Create (or retrieve) the DM channel.
+	const FString CreateDMUrl = DiscordApiBase + TEXT("/users/@me/channels");
+	const FString BodyJson    = FString::Printf(TEXT("{\"recipient_id\":\"%s\"}"), *DiscordUserId);
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req = FHttpModule::Get().CreateRequest();
+	Req->SetURL(CreateDMUrl);
+	Req->SetVerb(TEXT("POST"));
+	Req->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+	Req->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+	Req->SetContentAsString(BodyJson);
+
+	const FString MessageCopy = Message;
+	Req->OnProcessRequestComplete().BindWeakLambda(this,
+		[this, MessageCopy](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bOk)
+		{
+			if (!bOk || !Resp.IsValid() || Resp->GetResponseCode() < 200 || Resp->GetResponseCode() >= 300)
+			{
+				UE_LOG(LogDiscordBridge, Warning,
+				       TEXT("DiscordBridge: SendDiscordDM – failed to create DM channel (HTTP %d)."),
+				       Resp.IsValid() ? Resp->GetResponseCode() : 0);
+				return;
+			}
+			TSharedPtr<FJsonObject> DMObj;
+			TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Resp->GetContentAsString());
+			if (!FJsonSerializer::Deserialize(Reader, DMObj) || !DMObj.IsValid())
+			{
+				return;
+			}
+			FString DMChannelId;
+			DMObj->TryGetStringField(TEXT("id"), DMChannelId);
+			if (!DMChannelId.IsEmpty())
+			{
+				// Step 2: Send the message to the DM channel.
+				SendMessageToChannel(DMChannelId, MessageCopy);
+			}
+		});
+	Req->ProcessRequest();
 }
 
 void UDiscordBridgeSubsystem::UpdateWhitelistRoleMemberEntry(

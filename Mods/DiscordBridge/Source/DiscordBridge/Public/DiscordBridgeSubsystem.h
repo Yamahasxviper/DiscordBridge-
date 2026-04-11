@@ -607,9 +607,11 @@ private:
 
 	/** Handle a whitelist management command received from Discord.
 	 *  @param ResponseChannelId  The channel to send the response to.
-	 *                            When empty, falls back to the main ChannelId. */
+	 *                            When empty, falls back to the main ChannelId.
+	 *  @param AuthorDiscordId    Discord user ID of the sender (used for apply/link). */
 	void HandleWhitelistCommand(const FString& SubCommand, const FString& DiscordUsername,
-	                            const FString& ResponseChannelId);
+	                            const FString& ResponseChannelId,
+	                            const FString& AuthorDiscordId = TEXT(""));
 
 	/** Handle a whitelist management command typed in the Satisfactory in-game chat. */
 	void HandleInGameWhitelistCommand(const FString& SubCommand);
@@ -857,4 +859,33 @@ private:
 
 	/** Ticker handle for whitelist expiry check (60-second interval). */
 	FTSTicker::FDelegateHandle WhitelistExpiryCheckHandle;
+
+	// ── Whitelist application flow (Feature 3) ────────────────────────────────
+
+	/** Maps Discord user ID → in-game player name for pending whitelist applications. */
+	TMap<FString, FString> PendingWhitelistApps;
+
+	// ── Whitelist expiry warnings (Feature 5) ─────────────────────────────────
+
+	/** Player names that have already received an expiry-warning notification. */
+	TSet<FString> WarnedExpiryNames;
+
+	// ── Linked account verification (Feature 6) ───────────────────────────────
+
+	/** Maps 6-digit verification code → Discord user ID. */
+	TMap<FString, FString> PendingVerifications;
+
+	/** Maps 6-digit verification code → in-game player name submitted by that Discord user. */
+	TMap<FString, FString> PendingVerificationNames;
+
+	/** Maps 6-digit verification code → expiry time (10 minutes from creation). */
+	TMap<FString, FDateTime> PendingVerificationExpiry;
+
+	/**
+	 * Send a Direct Message to a Discord user.
+	 * Step 1: POST /users/@me/channels to create a DM channel.
+	 * Step 2: POST /channels/<id>/messages to send the message.
+	 * No-op when DiscordUserId, Message, or BotToken is empty.
+	 */
+	void SendDiscordDM(const FString& DiscordUserId, const FString& Message);
 };

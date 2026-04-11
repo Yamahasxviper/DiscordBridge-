@@ -175,6 +175,41 @@ struct DISCORDBRIDGE_API FTicketConfig
 	/** When true, DM the ticket opener when staff sends a message in their ticket channel. */
 	bool bDmOpenerOnStaffReply{ false };
 
+	// ── SLA / Response-time tracking ──────────────────────────────────────────
+
+	/**
+	 * Post a warning to TicketChannelId if no staff has replied in a ticket
+	 * within this many minutes.  0 = disabled.
+	 */
+	int32 TicketSlaWarningMinutes{ 0 };
+
+	// ── Ticket escalation ─────────────────────────────────────────────────────
+
+	/** Discord role ID to @mention when a ticket is escalated via !ticket-escalate. */
+	FString TicketEscalationRoleId;
+
+	/** Discord category ID to move escalated ticket channels to.  Leave empty to skip. */
+	FString TicketEscalationCategoryId;
+
+	// ── Multi-field ticket templates ──────────────────────────────────────────
+
+	/**
+	 * Multi-field ticket templates.  Format: "TypeSlug|Field1Label|Field2Label|...".
+	 * Example: "report|Player Name|What happened|Evidence link"
+	 * Config key: TicketTemplate= (one per line).
+	 */
+	TArray<FString> TicketTemplates;
+
+	// ── Per-type auto-responses ───────────────────────────────────────────────
+
+	/**
+	 * Bot message posted automatically to a new ticket channel once created.
+	 * Format: "TypeSlug|Auto-response message text".
+	 * Example: "whitelist|Please provide your in-game name and how you found the server."
+	 * Config key: TicketAutoResponse= (one per line).
+	 */
+	TArray<FString> TicketAutoResponses;
+
 	// ── Static helpers ────────────────────────────────────────────────────────
 
 	/** Load settings from DefaultTickets.ini (+ backup) and return a populated config. */

@@ -141,6 +141,11 @@ FTicketConfig FTicketConfig::Load()
 		Config.bAllowMultipleTicketTypes   = GetIniBool  (Cfg, TEXT("AllowMultipleTicketTypes"),   false);
 		Config.bAutoRefreshPanel           = GetIniBool  (Cfg, TEXT("AutoRefreshPanel"),           false);
 		Config.bDmOpenerOnStaffReply       = GetIniBool  (Cfg, TEXT("DmOpenerOnStaffReply"),       false);
+		Config.TicketSlaWarningMinutes     = static_cast<int32>(GetIniFloat(Cfg, TEXT("TicketSlaWarningMinutes"), 0.0f));
+		Config.TicketEscalationRoleId      = GetIniString(Cfg, TEXT("TicketEscalationRoleId"));
+		Config.TicketEscalationCategoryId  = GetIniString(Cfg, TEXT("TicketEscalationCategoryId"));
+		Config.TicketTemplates             = ParseRawIniArray(RawContent, TEXT("TicketTemplate"));
+		Config.TicketAutoResponses         = ParseRawIniArray(RawContent, TEXT("TicketAutoResponse"));
 
 		UE_LOG(LogTicketSystem, Log,
 		       TEXT("TicketSystem: Loaded config from %s"), *PrimaryPath);
@@ -180,6 +185,11 @@ FTicketConfig FTicketConfig::Load()
 			Config.bAllowMultipleTicketTypes   = GetIniBool  (BackupCfg, TEXT("AllowMultipleTicketTypes"),   false);
 			Config.bAutoRefreshPanel           = GetIniBool  (BackupCfg, TEXT("AutoRefreshPanel"),           false);
 			Config.bDmOpenerOnStaffReply       = GetIniBool  (BackupCfg, TEXT("DmOpenerOnStaffReply"),       false);
+			Config.TicketSlaWarningMinutes     = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("TicketSlaWarningMinutes"), 0.0f));
+			Config.TicketEscalationRoleId      = GetIniString(BackupCfg, TEXT("TicketEscalationRoleId"));
+			Config.TicketEscalationCategoryId  = GetIniString(BackupCfg, TEXT("TicketEscalationCategoryId"));
+			Config.TicketTemplates             = ParseRawIniArray(BackupRaw, TEXT("TicketTemplate"));
+			Config.TicketAutoResponses         = ParseRawIniArray(BackupRaw, TEXT("TicketAutoResponse"));
 
 			UE_LOG(LogTicketSystem, Log,
 			       TEXT("TicketSystem: Primary config not found at '%s' – restored from backup."),
@@ -227,6 +237,17 @@ FTicketConfig FTicketConfig::Load()
 		BackupContent += FString::Printf(TEXT("AllowMultipleTicketTypes=%s\n"),    Config.bAllowMultipleTicketTypes   ? TEXT("True") : TEXT("False"));
 		BackupContent += FString::Printf(TEXT("AutoRefreshPanel=%s\n"),            Config.bAutoRefreshPanel           ? TEXT("True") : TEXT("False"));
 		BackupContent += FString::Printf(TEXT("DmOpenerOnStaffReply=%s\n"),        Config.bDmOpenerOnStaffReply       ? TEXT("True") : TEXT("False"));
+		BackupContent += FString::Printf(TEXT("TicketSlaWarningMinutes=%d\n"),     Config.TicketSlaWarningMinutes);
+		BackupContent += FString::Printf(TEXT("TicketEscalationRoleId=%s\n"),      *Config.TicketEscalationRoleId);
+		BackupContent += FString::Printf(TEXT("TicketEscalationCategoryId=%s\n"),  *Config.TicketEscalationCategoryId);
+		for (const FString& Tmpl : Config.TicketTemplates)
+		{
+			BackupContent += FString::Printf(TEXT("TicketTemplate=%s\n"), *Tmpl);
+		}
+		for (const FString& AR : Config.TicketAutoResponses)
+		{
+			BackupContent += FString::Printf(TEXT("TicketAutoResponse=%s\n"), *AR);
+		}
 		for (const FString& Macro : Config.TicketMacros)
 		{
 			BackupContent += FString::Printf(TEXT("TicketMacro=%s\n"), *Macro);

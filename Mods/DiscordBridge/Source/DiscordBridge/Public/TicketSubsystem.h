@@ -294,6 +294,36 @@ private:
 	/** Ticker handle for the reopen grace period check. */
 	FTSTicker::FDelegateHandle ReopenExpiryTickHandle;
 
+	/** Maps ticket channel ID to list of tags applied by staff. */
+	TMap<FString, TArray<FString>> TicketChannelToTags;
+
+	/** Maps ticket channel ID to list of internal staff notes. */
+	TMap<FString, TArray<FString>> TicketChannelToNotes;
+
+	/** Maps ticket channel ID to whether a staff member has replied (for SLA tracking). */
+	TMap<FString, bool> TicketChannelStaffReplied;
+
+	/** Ticker handle for the SLA warning check.  Valid only when TicketSlaWarningMinutes > 0. */
+	FTSTicker::FDelegateHandle SlaCheckHandle;
+
+	/** Maps ticket channel ID to the time a scheduled follow-up reminder should fire. */
+	TMap<FString, FDateTime> TicketChannelToReminder;
+
+	/** Ticker handle for the follow-up reminder check (fires every 60 s). */
+	FTSTicker::FDelegateHandle ReminderCheckHandle;
+
+	/** Set of Discord user IDs that are blacklisted from opening tickets. */
+	TSet<FString> TicketBlacklist;
+
+	/** Load TicketBlacklist from disk. */
+	void LoadTicketBlacklist();
+
+	/** Persist TicketBlacklist to disk. */
+	void SaveTicketBlacklist() const;
+
+	/** Returns the absolute path to the ticket blacklist JSON file. */
+	static FString GetBlacklistFilePath();
+
 	/** Returns path to TicketStats.json. */
 	static FString GetStatsFilePath();
 
