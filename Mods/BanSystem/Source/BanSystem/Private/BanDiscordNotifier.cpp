@@ -92,7 +92,7 @@ void FBanDiscordNotifier::NotifyBanCreated(const FBanEntry& Entry)
     const FString DurationValue = Entry.bIsPermanent
         ? TEXT("Permanent")
         : FString::Printf(TEXT("%lld minutes"),
-            (Entry.ExpireDate - Entry.BanDate).GetTotalMinutes());
+            static_cast<int64>((Entry.ExpireDate - Entry.BanDate).GetTotalMinutes()));
 
     const FString Fields =
         Field(TEXT("Player"),    PlayerValue)         + TEXT(",") +
@@ -228,7 +228,7 @@ void FBanDiscordNotifier::NotifyAutoEscalationBan(const FBanEntry& Ban, int32 Wa
     const FString DurationValue = Ban.bIsPermanent
         ? TEXT("Permanent")
         : FString::Printf(TEXT("%lld minutes"),
-            (Ban.ExpireDate - Ban.BanDate).GetTotalMinutes());
+            static_cast<int64>((Ban.ExpireDate - Ban.BanDate).GetTotalMinutes()));
 
     const FString Fields =
         Field(TEXT("Player"),       PlayerValue)                    + TEXT(",") +

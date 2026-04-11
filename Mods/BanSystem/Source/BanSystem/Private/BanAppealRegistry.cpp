@@ -111,7 +111,7 @@ bool UBanAppealRegistry::DeleteAppeal(int64 Id)
 
 bool UBanAppealRegistry::ReviewAppeal(int64 Id, EAppealStatus NewStatus,
                                        const FString& ReviewedByName,
-                                       const FString& ReviewNoteText)
+                                       const FString& ReviewNote)
 {
     FBanAppealEntry ReviewedEntry;
     bool bFound = false;
@@ -123,7 +123,7 @@ bool UBanAppealRegistry::ReviewAppeal(int64 Id, EAppealStatus NewStatus,
             if (A.Id != Id) continue;
             A.Status     = NewStatus;
             A.ReviewedBy = ReviewedByName;
-            A.ReviewNote = ReviewNoteText;
+            A.ReviewNote = ReviewNote;
             A.ReviewedAt = FDateTime::UtcNow();
             ReviewedEntry = A;
             bFound = true;
