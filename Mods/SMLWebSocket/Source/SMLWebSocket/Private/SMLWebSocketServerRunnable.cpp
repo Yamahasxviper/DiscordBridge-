@@ -239,9 +239,10 @@ bool FSMLWebSocketServerRunnable::PerformHandshake(FClientState& Client)
 
     // Compute accept key: SHA1(Key + GUID) → Base64.
     const FString Combined = Key + TEXT("258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+    const FTCHARToUTF8 CombinedUtf8(*Combined);
     FSHA1 Sha;
-    Sha.Update(reinterpret_cast<const uint8*>(TCHAR_TO_ANSI(*Combined)),
-               static_cast<uint32>(FTCHARToUTF8(*Combined).Length()));
+    Sha.Update(reinterpret_cast<const uint8*>(CombinedUtf8.Get()),
+               static_cast<uint32>(CombinedUtf8.Length()));
     Sha.Final();
     uint8 Hash[20];
     Sha.GetHash(Hash);
@@ -325,7 +326,18 @@ bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClient
         }
 
         const int32 MaskSize = bMasked ? 4 : 0;
-        const int32 TotalSize = HeaderSize + MaskSize + static_cast<int32>(PayloadLen);
+
+        // Guard against payloads larger than int32 max (TArray size limit).
+        if (PayloadLen > static_cast<uint64>(MAX_int32 - HeaderSize - MaskSize))
+        {
+            UE_LOG(LogWSServer, Error,
+                TEXT("WSServer: Frame payload too large (%llu bytes) – dropping client"),
+                static_cast<unsigned long long>(PayloadLen));
+            return false;
+        }
+
+        const int32 PayloadLen32 = static_cast<int32>(PayloadLen);
+        const int32 TotalSize = HeaderSize + MaskSize + PayloadLen32;
         if (Buf.Num() < TotalSize) break;
 
         if (Opcode == 0x8) // Close
@@ -344,8 +356,8 @@ bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClient
             }
 
             TArray<uint8> Payload;
-            Payload.SetNum(static_cast<int32>(PayloadLen));
-            for (int32 i = 0; i < static_cast<int32>(PayloadLen); ++i)
+            Payload.SetNum(PayloadLen32);
+            for (int32 i = 0; i < PayloadLen32; ++i)
                 Payload[i] = Buf[HeaderSize + MaskSize + i] ^ (bMasked ? Mask[i % 4] : 0);
 
             const FString Text = FString(UTF8_TO_TCHAR(reinterpret_cast<const ANSICHAR*>(Payload.GetData())));

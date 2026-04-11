@@ -1244,7 +1244,7 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 	const uint64 EffectiveMax = (ReconnectCfg.MaxMessageSizeBytes > 0)
 		? static_cast<uint64>(ReconnectCfg.MaxMessageSizeBytes)
 		: MaxPayloadBytes;
-	if (PayloadLen > EffectiveMax)
+	if (PayloadLen > EffectiveMax || PayloadLen > static_cast<uint64>(MAX_int32))
 	{
 		UE_LOG(LogSMLWebSocket, Error,
 		       TEXT("SMLWebSocket: Incoming frame payload too large (%llu bytes) – closing connection"),
@@ -1252,12 +1252,14 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 		return false;
 	}
 
+	const int32 PayloadLen32 = static_cast<int32>(PayloadLen);
+
 	// Read payload
 	TArray<uint8> Payload;
-	if (PayloadLen > 0)
+	if (PayloadLen32 > 0)
 	{
-		Payload.SetNumUninitialized(static_cast<int32>(PayloadLen));
-		if (!NetRecvExact(Payload.GetData(), static_cast<int32>(PayloadLen))) return false;
+		Payload.SetNumUninitialized(PayloadLen32);
+		if (!NetRecvExact(Payload.GetData(), PayloadLen32)) return false;
 
 		if (bMasked)
 		{
