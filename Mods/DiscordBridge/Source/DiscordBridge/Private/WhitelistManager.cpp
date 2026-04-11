@@ -102,6 +102,7 @@ FString NameStr;
 (*ObjPtr)->TryGetStringField(TEXT("name"), NameStr);
 E.Name    = NameStr.ToLower();
 (*ObjPtr)->TryGetStringField(TEXT("eos_puid"), E.EosPUID);
+(*ObjPtr)->TryGetStringField(TEXT("group"), E.Group);
 FString ExpiresStr;
 (*ObjPtr)->TryGetStringField(TEXT("expires_at"), ExpiresStr);
 if (ExpiresStr.IsEmpty())
@@ -165,6 +166,7 @@ for (const FWhitelistEntry& E : Entries)
 TSharedPtr<FJsonObject> EntryObj = MakeShared<FJsonObject>();
 EntryObj->SetStringField(TEXT("name"), E.Name);
 EntryObj->SetStringField(TEXT("eos_puid"), E.EosPUID);
+EntryObj->SetStringField(TEXT("group"), E.Group);
 FString ExpiresStr;
 if (E.ExpiresAt.GetTicks() > 0)
 {
@@ -244,7 +246,8 @@ return false;
 bool FWhitelistManager::AddPlayer(const FString& PlayerName,
                                    const FString& EosPUID,
                                    const FString& AdminName,
-                                   FDateTime      ExpiresAt)
+                                   FDateTime      ExpiresAt,
+                                   const FString& Group)
 {
 // Capacity check
 if (MaxSlots > 0 && Entries.Num() >= MaxSlots)
@@ -265,6 +268,7 @@ FWhitelistEntry NewEntry;
 NewEntry.Name      = LowerName;
 NewEntry.EosPUID   = EosPUID;
 NewEntry.ExpiresAt = ExpiresAt;
+NewEntry.Group     = Group;
 Entries.Add(NewEntry);
 
 LogAudit(AdminName, TEXT("add"), PlayerName);
@@ -407,4 +411,19 @@ Entries.RemoveAt(ToRemove[i]);
 }
 Save();
 }
+}
+
+TArray<FWhitelistEntry> FWhitelistManager::Search(const FString& PartialName)
+{
+TArray<FWhitelistEntry> Result;
+if (PartialName.IsEmpty()) return Result;
+const FString Lower = PartialName.ToLower();
+for (const FWhitelistEntry& E : Entries)
+{
+if (E.Name.Contains(Lower, ESearchCase::IgnoreCase))
+{
+Result.Add(E);
+}
+}
+return Result;
 }

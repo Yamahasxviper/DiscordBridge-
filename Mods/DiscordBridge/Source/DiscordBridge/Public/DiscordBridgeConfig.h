@@ -276,6 +276,52 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 */
 	bool bSyncWhitelistWithRole{ false };
 
+	/**
+	 * Snowflake ID of the Discord channel where `!whitelist apply` application embeds are posted.
+	 * Leave empty to disable the application flow entirely.
+	 */
+	FString WhitelistApplicationChannelId;
+
+	/**
+	 * When true, any Discord user may run `!whitelist apply <InGameName>` to submit a
+	 * whitelist application, which is posted as an embed with Approve/Deny buttons to
+	 * WhitelistApplicationChannelId.
+	 * Default: false.
+	 */
+	bool bWhitelistApplyEnabled{ false };
+
+	/**
+	 * DM message sent to the Discord user whose whitelist application is approved (via
+	 * the Approve button or `wl_approve` interaction).  Leave empty to disable DMs.
+	 *
+	 * Placeholder: %PlayerName% — the in-game name that was approved.
+	 *
+	 * Example: WhitelistApprovedDmMessage=✅ Your whitelist application for **%PlayerName%** was approved!
+	 */
+	FString WhitelistApprovedDmMessage;
+
+	/**
+	 * How many hours before a timed whitelist entry expires to post a warning to
+	 * WhitelistEventsChannelId (falls back to ChannelId).
+	 * Set to 0 to disable expiry warnings.
+	 * Default: 24.0 (warn 24 hours before expiry).
+	 */
+	float WhitelistExpiryWarningHours{ 24.0f };
+
+	/**
+	 * When true, enables the `!whitelist link <InGameName>` Discord command that lets
+	 * Discord users link their in-game account via a one-time 6-digit verification code
+	 * typed in-game with `!verify <code>`.
+	 * Default: false.
+	 */
+	bool bWhitelistVerificationEnabled{ false };
+
+	/**
+	 * Snowflake ID of the Discord channel where `!whitelist link` commands are accepted.
+	 * Leave empty to allow the command in any channel.
+	 */
+	FString WhitelistVerificationChannelId;
+
 	// ── Chat relay filter ─────────────────────────────────────────────────────
 
 	/**

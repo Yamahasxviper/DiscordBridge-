@@ -338,6 +338,12 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.WhitelistEventsChannelId    = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistEventsChannelId"),    Config.WhitelistEventsChannelId);
 		Config.MaxWhitelistSlots           = GetIniIntOrDefault   (ConfigFile, TEXT("MaxWhitelistSlots"),           Config.MaxWhitelistSlots);
 		Config.bSyncWhitelistWithRole      = GetIniBoolOrDefault  (ConfigFile, TEXT("SyncWhitelistWithRole"),      Config.bSyncWhitelistWithRole);
+		Config.WhitelistApplicationChannelId = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistApplicationChannelId"), Config.WhitelistApplicationChannelId);
+		Config.bWhitelistApplyEnabled        = GetIniBoolOrDefault  (ConfigFile, TEXT("WhitelistApplyEnabled"),        Config.bWhitelistApplyEnabled);
+		Config.WhitelistApprovedDmMessage    = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistApprovedDmMessage"),   Config.WhitelistApprovedDmMessage);
+		Config.WhitelistExpiryWarningHours   = GetIniFloatOrDefault (ConfigFile, TEXT("WhitelistExpiryWarningHours"),  Config.WhitelistExpiryWarningHours);
+		Config.bWhitelistVerificationEnabled = GetIniBoolOrDefault  (ConfigFile, TEXT("WhitelistVerificationEnabled"), Config.bWhitelistVerificationEnabled);
+		Config.WhitelistVerificationChannelId = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistVerificationChannelId"), Config.WhitelistVerificationChannelId);
 
 		// Player event notification settings
 		Config.bPlayerEventsEnabled   = GetIniBoolOrDefault  (ConfigFile, TEXT("PlayerEventsEnabled"),   Config.bPlayerEventsEnabled);
@@ -719,6 +725,28 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("SyncWhitelistWithRole=False\n");
 				}
 
+				if (bFileHasWhitelist &&
+				    !ConfigFile.GetString(ConfigSection, TEXT("WhitelistApplicationChannelId"), TmpVal))
+				{
+					AppendContent2 +=
+						TEXT("\n")
+						TEXT("# WhitelistApplicationChannelId (added by mod update) ----------------\n")
+						TEXT("# Channel where whitelist application embeds (Approve/Deny) are posted.\n")
+						TEXT("# Leave empty to disable the application flow.\n")
+						TEXT("WhitelistApplicationChannelId=\n")
+						TEXT("# WhitelistApplyEnabled: when True, any Discord user can run !whitelist apply.\n")
+						TEXT("WhitelistApplyEnabled=False\n")
+						TEXT("# DM message sent to the Discord user when their application is approved.\n")
+						TEXT("# Placeholder: %PlayerName%. Leave empty to disable DMs.\n")
+						TEXT("WhitelistApprovedDmMessage=\n")
+						TEXT("# Hours before expiry to post a warning embed. 0 = disabled. Default: 24\n")
+						TEXT("WhitelistExpiryWarningHours=24\n")
+						TEXT("# When True, enables !whitelist link / in-game !verify account linking.\n")
+						TEXT("WhitelistVerificationEnabled=False\n")
+						TEXT("# Channel where !whitelist link commands are accepted. Empty = any channel.\n")
+						TEXT("WhitelistVerificationChannelId=\n");
+				}
+
 				if (!ConfigFile.GetString(ConfigSection, TEXT("ServerStatusMessagesEnabled"), TmpVal))
 				{
 					AppendContent2 +=
@@ -943,6 +971,18 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("MaxWhitelistSlots=0\n")
 			TEXT("# When True, auto-add/remove players based on Discord WhitelistRoleId membership.\n")
 			TEXT("SyncWhitelistWithRole=False\n")
+			TEXT("# Channel where whitelist application embeds (Approve/Deny) are posted. Leave empty to disable.\n")
+			TEXT("WhitelistApplicationChannelId=\n")
+			TEXT("# When True, any Discord user can run !whitelist apply <InGameName>. Default: False\n")
+			TEXT("WhitelistApplyEnabled=False\n")
+			TEXT("# DM sent to user when approved. %PlayerName% placeholder. Leave empty to disable.\n")
+			TEXT("WhitelistApprovedDmMessage=\n")
+			TEXT("# Hours before expiry to post a warning. 0 = disabled. Default: 24\n")
+			TEXT("WhitelistExpiryWarningHours=24\n")
+			TEXT("# When True, enables !whitelist link / in-game !verify account linking. Default: False\n")
+			TEXT("WhitelistVerificationEnabled=False\n")
+			TEXT("# Channel where !whitelist link commands are accepted. Empty = any channel.\n")
+			TEXT("WhitelistVerificationChannelId=\n")
 			TEXT("# -- PLAYER NOTIFICATIONS -----------------------------------------------------\n")
 			TEXT("# When True, posts a Discord message whenever a player joins, leaves, or times out.\n")
 			TEXT("# Default: False (disabled). Set to True to enable.\n")
@@ -1078,6 +1118,12 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.WhitelistEventsChannelId    = GetRawStringOrDefault(BackupValues, TEXT("WhitelistEventsChannelId"),    Config.WhitelistEventsChannelId);
 		Config.MaxWhitelistSlots           = GetRawIntOrDefault   (BackupValues, TEXT("MaxWhitelistSlots"),           Config.MaxWhitelistSlots);
 		Config.bSyncWhitelistWithRole      = GetRawBoolOrDefault  (BackupValues, TEXT("SyncWhitelistWithRole"),      Config.bSyncWhitelistWithRole);
+		Config.WhitelistApplicationChannelId = GetRawStringOrDefault(BackupValues, TEXT("WhitelistApplicationChannelId"), Config.WhitelistApplicationChannelId);
+		Config.bWhitelistApplyEnabled        = GetRawBoolOrDefault  (BackupValues, TEXT("WhitelistApplyEnabled"),        Config.bWhitelistApplyEnabled);
+		Config.WhitelistApprovedDmMessage    = GetRawStringOrDefault(BackupValues, TEXT("WhitelistApprovedDmMessage"),   Config.WhitelistApprovedDmMessage);
+		Config.WhitelistExpiryWarningHours   = GetRawFloatOrDefault (BackupValues, TEXT("WhitelistExpiryWarningHours"),  Config.WhitelistExpiryWarningHours);
+		Config.bWhitelistVerificationEnabled = GetRawBoolOrDefault  (BackupValues, TEXT("WhitelistVerificationEnabled"), Config.bWhitelistVerificationEnabled);
+		Config.WhitelistVerificationChannelId = GetRawStringOrDefault(BackupValues, TEXT("WhitelistVerificationChannelId"), Config.WhitelistVerificationChannelId);
 
 
 		// Player event notification settings
@@ -1230,6 +1276,12 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("WhitelistEventsChannelId"),      Config.WhitelistEventsChannelId);
 				PatchLine(TEXT("MaxWhitelistSlots"),             *FString::FromInt(Config.MaxWhitelistSlots));
 				PatchLine(TEXT("SyncWhitelistWithRole"),         Config.bSyncWhitelistWithRole ? TEXT("True") : TEXT("False"));
+				PatchLine(TEXT("WhitelistApplicationChannelId"), Config.WhitelistApplicationChannelId);
+				PatchLine(TEXT("WhitelistApplyEnabled"),         Config.bWhitelistApplyEnabled ? TEXT("True") : TEXT("False"));
+				PatchLine(TEXT("WhitelistApprovedDmMessage"),    Config.WhitelistApprovedDmMessage);
+				PatchLine(TEXT("WhitelistExpiryWarningHours"),   *FString::SanitizeFloat(Config.WhitelistExpiryWarningHours));
+				PatchLine(TEXT("WhitelistVerificationEnabled"),  Config.bWhitelistVerificationEnabled ? TEXT("True") : TEXT("False"));
+				PatchLine(TEXT("WhitelistVerificationChannelId"), Config.WhitelistVerificationChannelId);
 				PatchLine(TEXT("PlayerEventsEnabled"),           Config.bPlayerEventsEnabled ? TEXT("True") : TEXT("False"));
 				PatchLine(TEXT("PlayerEventsChannelId"),         Config.PlayerEventsChannelId);
 				PatchLine(TEXT("PlayerJoinMessage"),             Config.PlayerJoinMessage);
@@ -1351,6 +1403,12 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			+ TEXT("WhitelistKickDiscordMessage=") + Config.WhitelistKickDiscordMessage + TEXT("\n")
 			+ TEXT("WhitelistKickReason=") + Config.WhitelistKickReason + TEXT("\n")
 			+ TEXT("InGameWhitelistCommandPrefix=") + Config.InGameWhitelistCommandPrefix + TEXT("\n")
+			+ TEXT("WhitelistApplicationChannelId=") + Config.WhitelistApplicationChannelId + TEXT("\n")
+			+ TEXT("WhitelistApplyEnabled=") + (Config.bWhitelistApplyEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
+			+ TEXT("WhitelistApprovedDmMessage=") + Config.WhitelistApprovedDmMessage + TEXT("\n")
+			+ TEXT("WhitelistExpiryWarningHours=") + FString::SanitizeFloat(Config.WhitelistExpiryWarningHours) + TEXT("\n")
+			+ TEXT("WhitelistVerificationEnabled=") + (Config.bWhitelistVerificationEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
+			+ TEXT("WhitelistVerificationChannelId=") + Config.WhitelistVerificationChannelId + TEXT("\n")
 			+ TEXT("PlayerEventsEnabled=") + (Config.bPlayerEventsEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
 			+ TEXT("PlayerEventsChannelId=") + Config.PlayerEventsChannelId + TEXT("\n")
 			+ TEXT("PlayerJoinMessage=") + Config.PlayerJoinMessage + TEXT("\n")

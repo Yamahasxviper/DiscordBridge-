@@ -3,12 +3,14 @@
 #pragma once
 #include "CoreMinimal.h"
 
-/** A single whitelist entry with optional EOS PUID and expiry. */
+/** A single whitelist entry with optional EOS PUID, expiry, and group. */
 struct DISCORDBRIDGE_API FWhitelistEntry
 {
 FString   Name;
 FString   EosPUID;
 FDateTime ExpiresAt; // FDateTime(0) = permanent
+/** Optional group/tier tag (e.g. "VIP", "Staff"). Empty = default group. */
+FString   Group;
 };
 
 /** A single audit log entry. */
@@ -41,11 +43,13 @@ static bool IsWhitelistedByPUID(const FString& EosPUID);
 /**
  * Adds a player and saves. Returns false if already listed or capacity full.
  * ExpiresAt == FDateTime(0) means permanent.
+ * Group is optional; empty string = no group.
  */
 static bool AddPlayer(const FString& PlayerName,
                       const FString& EosPUID    = TEXT(""),
                       const FString& AdminName  = TEXT(""),
-                      FDateTime      ExpiresAt  = FDateTime(0));
+                      FDateTime      ExpiresAt  = FDateTime(0),
+                      const FString& Group      = TEXT(""));
 
 /**
  * Removes a player and saves. Returns false if not found.
@@ -58,6 +62,9 @@ static TArray<FString> GetAll();
 
 /** Returns all entries. */
 static TArray<FWhitelistEntry> GetAllEntries();
+
+/** Returns entries whose Name contains PartialName (case-insensitive). */
+static TArray<FWhitelistEntry> Search(const FString& PartialName);
 
 // ── Audit log ─────────────────────────────────────────────────────────────
 
