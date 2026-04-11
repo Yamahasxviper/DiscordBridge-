@@ -78,6 +78,12 @@ struct DISCORDBRIDGE_API FBanBridgeConfig
 	/** Load settings from DefaultBanBridge.ini (+ backup) and return a populated config. */
 	static FBanBridgeConfig Load();
 
+	/**
+	 * Creates DefaultBanBridge.ini with an annotated template if the file is absent
+	 * or comment-free (Alpakit-stripped).  Call once at subsystem start before Load().
+	 */
+	static void RestoreDefaultConfigIfNeeded();
+
 	/** Returns the absolute path to the primary config file (DefaultBanBridge.ini). */
 	static FString GetConfigFilePath();
 

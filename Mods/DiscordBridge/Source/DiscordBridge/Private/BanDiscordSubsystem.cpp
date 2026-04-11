@@ -114,6 +114,7 @@ bool UBanDiscordSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+	FBanBridgeConfig::RestoreDefaultConfigIfNeeded();
 	Config = FBanBridgeConfig::Load();
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: Initialized. Waiting for Discord provider via SetProvider()."));

@@ -264,6 +264,12 @@ void FBanChatCommandsModule::BackupConfigIfNeeded()
     Content += FString::Printf(TEXT("ModBanDurationMinutes=%d\n"), Cfg->ModBanDurationMinutes);
     Content += FString::Printf(TEXT("MaxModMuteDurationMinutes=%d\n"), Cfg->MaxModMuteDurationMinutes);
     Content += FString::Printf(TEXT("bAllowModNotes=%s\n"), Cfg->bAllowModNotes ? TEXT("True") : TEXT("False"));
+    Content += FString::Printf(TEXT("bCreateWarnOnKick=%s\n"), Cfg->bCreateWarnOnKick ? TEXT("True") : TEXT("False"));
+    Content += FString::Printf(TEXT("WarningCheckCooldownSeconds=%d\n"), Cfg->WarningCheckCooldownSeconds);
+    Content += FString::Printf(TEXT("AdminBanRateLimitCount=%d\n"), Cfg->AdminBanRateLimitCount);
+    Content += FString::Printf(TEXT("AdminBanRateLimitMinutes=%d\n"), Cfg->AdminBanRateLimitMinutes);
+    Content += TEXT("ReloadConfigWebhookUrl=") + Cfg->ReloadConfigWebhookUrl + TEXT("\n");
+    Content += TEXT("ReportWebhookUrl=") + Cfg->ReportWebhookUrl + TEXT("\n");
 
     IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
     PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupPath));

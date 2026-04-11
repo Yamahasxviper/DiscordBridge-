@@ -254,8 +254,149 @@ FTicketConfig FTicketConfig::Load()
 		}
 
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
-		FFileHelper::SaveStringToFile(BackupContent, *BackupPath);
+		if (FFileHelper::SaveStringToFile(BackupContent, *BackupPath))
+		{
+			UE_LOG(LogTicketSystem, Log,
+			       TEXT("TicketSystem: Updated backup config at '%s'."), *BackupPath);
+		}
+		else
+		{
+			UE_LOG(LogTicketSystem, Warning,
+			       TEXT("TicketSystem: Could not write backup config to '%s'."), *BackupPath);
+		}
 	}
 
 	return Config;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Template restoration
+// ─────────────────────────────────────────────────────────────────────────────
+
+void FTicketConfig::RestoreDefaultConfigIfNeeded()
+{
+	const FString PrimaryPath = GetConfigFilePath();
+	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+
+	// Leave the file as-is if it already contains comment lines — that means
+	// it was either hand-edited or previously written by this function.
+	if (PlatformFile.FileExists(*PrimaryPath))
+	{
+		FString Existing;
+		FFileHelper::LoadFileToString(Existing, *PrimaryPath);
+		if (Existing.Contains(TEXT(";")))
+			return;
+	}
+
+	// File is missing or was stripped of comments by Alpakit — write the
+	// annotated template so operators can see setting descriptions.
+	// This content mirrors DefaultTickets.ini shipped in the repository.
+	const FString Template =
+		TEXT("[TicketSystem]\n")
+		TEXT("; ==============================================================================\n")
+		TEXT("; TicketSystem – Configuration\n")
+		TEXT("; ==============================================================================\n")
+		TEXT(";\n")
+		TEXT("; NOTE: this file is NOT overwritten by mod updates. Your settings persist\n")
+		TEXT("; across version upgrades. A backup is also written automatically to\n")
+		TEXT(";   <ServerRoot>/FactoryGame/Saved/DiscordBridge/TicketSystem.ini\n")
+		TEXT("; on every server start so settings survive primary file deletion.\n")
+		TEXT(";\n")
+		TEXT("; STANDALONE MODE: set BotToken to run without DiscordBridge.\n")
+		TEXT("; PAIRED MODE: leave BotToken empty — DiscordBridge will power the tickets.\n")
+		TEXT(";\n")
+		TEXT("; ------------------------------------------------------------------------------\n")
+		TEXT("; STANDALONE DISCORD BOT (leave empty when using DiscordBridge)\n")
+		TEXT("; ------------------------------------------------------------------------------\n")
+		TEXT("BotToken=\n")
+		TEXT("GuildId=\n")
+		TEXT("\n")
+		TEXT("; ------------------------------------------------------------------------------\n")
+		TEXT("; TICKET CHANNEL\n")
+		TEXT("; ------------------------------------------------------------------------------\n")
+		TEXT("; Discord channel ID(s) where ticket notifications are posted (comma-separated).\n")
+		TEXT("TicketChannelId=\n")
+		TEXT("\n")
+		TEXT("; Discord channel ID for closed-ticket transcripts. Leave empty to disable.\n")
+		TEXT("TicketLogChannelId=\n")
+		TEXT("\n")
+		TEXT("; ------------------------------------------------------------------------------\n")
+		TEXT("; TICKET TYPE TOGGLES\n")
+		TEXT("; ------------------------------------------------------------------------------\n")
+		TEXT("TicketWhitelistEnabled=True\n")
+		TEXT("TicketHelpEnabled=True\n")
+		TEXT("TicketReportEnabled=True\n")
+		TEXT("BanAppealEnabled=True\n")
+		TEXT("\n")
+		TEXT("; ------------------------------------------------------------------------------\n")
+		TEXT("; ADMIN NOTIFICATIONS\n")
+		TEXT("; ------------------------------------------------------------------------------\n")
+		TEXT("; Discord role ID to @mention when a new ticket is created.\n")
+		TEXT("; Members of this role also get access to every ticket channel.\n")
+		TEXT("; Members holding this role can run !ticket-panel to post the panel.\n")
+		TEXT("TicketNotifyRoleId=\n")
+		TEXT("\n")
+		TEXT("; ------------------------------------------------------------------------------\n")
+		TEXT("; BUTTON-BASED TICKET PANEL\n")
+		TEXT("; ------------------------------------------------------------------------------\n")
+		TEXT("; Discord channel ID where the bot posts the ticket selection panel.\n")
+		TEXT("TicketPanelChannelId=\n")
+		TEXT("\n")
+		TEXT("; Optional Discord category ID to place created ticket channels under.\n")
+		TEXT("TicketCategoryId=\n")
+		TEXT("\n")
+		TEXT("; Per-type category IDs (optional — leave empty to use TicketCategoryId).\n")
+		TEXT("WhitelistCategoryId=\n")
+		TEXT("HelpCategoryId=\n")
+		TEXT("ReportCategoryId=\n")
+		TEXT("AppealCategoryId=\n")
+		TEXT("\n")
+		TEXT("; ------------------------------------------------------------------------------\n")
+		TEXT("; CUSTOM TICKET REASONS\n")
+		TEXT("; ------------------------------------------------------------------------------\n")
+		TEXT("; Add one line per custom button: TicketReason=Label|Description\n")
+		TEXT("; Example:\n")
+		TEXT(";   TicketReason=Bug Report|Report a bug or technical issue\n")
+		TEXT("\n")
+		TEXT("; ------------------------------------------------------------------------------\n")
+		TEXT("; INACTIVE TICKET AUTO-CLOSE\n")
+		TEXT("; ------------------------------------------------------------------------------\n")
+		TEXT("; Hours of inactivity before an open ticket is automatically closed. 0 = disabled.\n")
+		TEXT("InactiveTicketTimeoutHours=0\n")
+		TEXT("\n")
+		TEXT("; ------------------------------------------------------------------------------\n")
+		TEXT("; ADVANCED OPTIONS\n")
+		TEXT("; ------------------------------------------------------------------------------\n")
+		TEXT("; Enable post-close feedback prompt. Default: False\n")
+		TEXT("TicketFeedbackEnabled=False\n")
+		TEXT("; Cooldown in minutes between ticket opens per user. 0 = disabled.\n")
+		TEXT("TicketCooldownMinutes=0\n")
+		TEXT("; Grace period in minutes for re-opening a recently closed ticket. 0 = disabled.\n")
+		TEXT("TicketReopenGracePeriodMinutes=0\n")
+		TEXT("; Allow a user to have multiple open tickets of different types. Default: False\n")
+		TEXT("AllowMultipleTicketTypes=False\n")
+		TEXT("; Auto-refresh the panel embed on each server start. Default: False\n")
+		TEXT("AutoRefreshPanel=False\n")
+		TEXT("; DM the ticket opener when a staff member replies. Default: False\n")
+		TEXT("DmOpenerOnStaffReply=False\n")
+		TEXT("; Minutes before SLA warning is posted (0 = disabled).\n")
+		TEXT("TicketSlaWarningMinutes=0\n")
+		TEXT("; Role to @mention on SLA escalation. Leave empty to disable.\n")
+		TEXT("TicketEscalationRoleId=\n")
+		TEXT("; Category to move escalated tickets to. Leave empty to keep in place.\n")
+		TEXT("TicketEscalationCategoryId=\n");
+
+	PlatformFile.CreateDirectoryTree(*FPaths::GetPath(PrimaryPath));
+	if (FFileHelper::SaveStringToFile(Template, *PrimaryPath))
+	{
+		UE_LOG(LogTicketSystem, Log,
+		       TEXT("TicketSystem: Created annotated config template at '%s'. "
+		            "Set TicketPanelChannelId and TicketNotifyRoleId to enable the ticket panel."),
+		       *PrimaryPath);
+	}
+	else
+	{
+		UE_LOG(LogTicketSystem, Warning,
+		       TEXT("TicketSystem: Could not write config template to '%s'."), *PrimaryPath);
+	}
 }

@@ -39,6 +39,7 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Super::Initialize(Collection);
 
 	// Load ticket configuration.
+	FTicketConfig::RestoreDefaultConfigIfNeeded();
 	Config = FTicketConfig::Load();
 
 	// Restore any active tickets from the previous session so the duplicate-ticket

@@ -198,6 +198,11 @@ void FBanSystemModule::BackupConfigIfNeeded()
         + TEXT("; Number of days to retain player session records (default: 0 = keep forever).\n")
         + TEXT("SessionRetentionDays=") + FString::FromInt(Cfg->SessionRetentionDays) + TEXT("\n")
         + TEXT("\n")
+        + TEXT("; -- Warning Decay -----------------------------------------------------------\n")
+        + TEXT(";\n")
+        + TEXT("; Number of days after which warnings are excluded from escalation (0 = never decay).\n")
+        + TEXT("WarnDecayDays=") + FString::FromInt(Cfg->WarnDecayDays) + TEXT("\n")
+        + TEXT("\n")
         + TEXT("; -- Scheduled Backup --------------------------------------------------------\n")
         + TEXT(";\n")
         + TEXT("; Interval in hours between automatic database backups (default: 0 = disabled).\n")
@@ -217,12 +222,84 @@ void FBanSystemModule::BackupConfigIfNeeded()
         + TEXT(";\n")
         + TEXT("; When true, BanSystem pushes live JSON events to WebSocketPushUrl via SMLWebSocket.\n")
         + TEXT("bPushEventsToWebSocket=") + (Cfg->bPushEventsToWebSocket ? TEXT("true") : TEXT("false")) + TEXT("\n")
-        + TEXT("WebSocketPushUrl=") + Cfg->WebSocketPushUrl + TEXT("\n");
+        + TEXT("WebSocketPushUrl=") + Cfg->WebSocketPushUrl + TEXT("\n")
+        + TEXT("\n")
+        + TEXT("; -- Kick Message Templates --------------------------------------------------\n")
+        + TEXT(";\n")
+        + TEXT("; Custom message for permanently banned players. Supports {reason}, {appeal_url}.\n")
+        + TEXT("BanKickMessageTemplate=") + Cfg->BanKickMessageTemplate + TEXT("\n")
+        + TEXT("; Custom message for temporarily banned players. Supports {reason}, {expiry}, {appeal_url}.\n")
+        + TEXT("TempBanKickMessageTemplate=") + Cfg->TempBanKickMessageTemplate + TEXT("\n")
+        + TEXT("; URL included as {appeal_url} in ban kick messages.\n")
+        + TEXT("AppealUrl=") + Cfg->AppealUrl + TEXT("\n")
+        + TEXT("\n")
+        + TEXT("; -- Admin Action Rate Limiting ----------------------------------------------\n")
+        + TEXT(";\n")
+        + TEXT("; Maximum ban actions an admin may issue within AdminBanRateLimitMinutes (0 = disabled).\n")
+        + TEXT("AdminBanRateLimitCount=") + FString::FromInt(Cfg->AdminBanRateLimitCount) + TEXT("\n")
+        + TEXT("; Rolling window in minutes for the ban rate limiter (default: 5).\n")
+        + TEXT("AdminBanRateLimitMinutes=") + FString::FromInt(Cfg->AdminBanRateLimitMinutes) + TEXT("\n")
+        + TEXT("\n")
+        + TEXT("; -- Chat-Pattern Auto-Warn / Auto-Mute -------------------------------------\n")
+        + TEXT(";\n")
+        + TEXT("; Chat-filter hits within ChatFilterAutoWarnWindowMinutes that auto-warn a player (0 = disabled).\n")
+        + TEXT("ChatFilterAutoWarnThreshold=") + FString::FromInt(Cfg->ChatFilterAutoWarnThreshold) + TEXT("\n")
+        + TEXT("; Rolling window in minutes for the chat-filter auto-warn counter (default: 10).\n")
+        + TEXT("ChatFilterAutoWarnWindowMinutes=") + FString::FromInt(Cfg->ChatFilterAutoWarnWindowMinutes) + TEXT("\n")
+        + TEXT("\n")
+        + TEXT("; -- Geo-IP Region Blocking --------------------------------------------------\n")
+        + TEXT(";\n")
+        + TEXT("; When true, GeoIP lookups are performed at player login.\n")
+        + TEXT("bGeoIpEnabled=") + (Cfg->bGeoIpEnabled ? TEXT("true") : TEXT("false")) + TEXT("\n")
+        + TEXT("; GeoIP API URL. {ip} is replaced with the connecting player's IP address.\n")
+        + TEXT("GeoIpApiUrl=") + Cfg->GeoIpApiUrl + TEXT("\n")
+        + TEXT("; Message shown to players kicked by the Geo-IP filter. Supports {country}.\n")
+        + TEXT("GeoIpKickMessage=") + Cfg->GeoIpKickMessage + TEXT("\n");
+
+    // WarnEscalationTiers array — one entry per line
+    FString TiersContent;
+    for (const FWarnEscalationTier& Tier : Cfg->WarnEscalationTiers)
+    {
+        TiersContent += FString::Printf(
+            TEXT("+WarnEscalationTiers=(WarnCount=%d,PointThreshold=%d,DurationMinutes=%d)\n"),
+            Tier.WarnCount, Tier.PointThreshold, Tier.DurationMinutes);
+    }
+
+    // BanTemplates array — one entry per line
+    FString BanTemplatesContent;
+    for (const FString& BanTemplate : Cfg->BanTemplates)
+    {
+        BanTemplatesContent += TEXT("+BanTemplates=") + BanTemplate + TEXT("\n");
+    }
+
+    // PeerWebSocketUrls array — one entry per line
+    FString PeerUrlsContent;
+    for (const FString& PeerUrl : Cfg->PeerWebSocketUrls)
+    {
+        PeerUrlsContent += TEXT("+PeerWebSocketUrls=") + PeerUrl + TEXT("\n");
+    }
+
+    // AllowedCountryCodes array — one entry per line
+    FString AllowedCountriesContent;
+    for (const FString& Code : Cfg->AllowedCountryCodes)
+    {
+        AllowedCountriesContent += TEXT("+AllowedCountryCodes=") + Code + TEXT("\n");
+    }
+
+    // BlockedCountryCodes array — one entry per line
+    FString BlockedCountriesContent;
+    for (const FString& Code : Cfg->BlockedCountryCodes)
+    {
+        BlockedCountriesContent += TEXT("+BlockedCountryCodes=") + Code + TEXT("\n");
+    }
+
+    const FString FullContent = Content + TiersContent + BanTemplatesContent
+        + PeerUrlsContent + AllowedCountriesContent + BlockedCountriesContent;
 
     IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
     PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
 
-    if (FFileHelper::SaveStringToFile(Content, *BackupPath))
+    if (FFileHelper::SaveStringToFile(FullContent, *BackupPath))
     {
         UE_LOG(LogBanSystem, Log,
             TEXT("BanSystem: Updated backup config at '%s'."), *BackupPath);

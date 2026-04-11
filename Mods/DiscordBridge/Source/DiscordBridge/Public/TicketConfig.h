@@ -215,6 +215,12 @@ struct DISCORDBRIDGE_API FTicketConfig
 	/** Load settings from DefaultTickets.ini (+ backup) and return a populated config. */
 	static FTicketConfig Load();
 
+	/**
+	 * Creates DefaultTickets.ini with an annotated template if the file is absent
+	 * or comment-free (Alpakit-stripped).  Call once at subsystem start before Load().
+	 */
+	static void RestoreDefaultConfigIfNeeded();
+
 	/** Returns the absolute path to the primary config file (DefaultTickets.ini). */
 	static FString GetConfigFilePath();
 
