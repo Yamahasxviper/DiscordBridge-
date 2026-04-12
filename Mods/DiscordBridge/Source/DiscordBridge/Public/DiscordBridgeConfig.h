@@ -192,8 +192,6 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	/**
 	 * Discord invite link shown to players when they type /discord in the
 	 * Satisfactory in-game chat.
-	 */
-	 * in the Satisfactory in-game chat.
 	 * Leave empty to disable the /discord in-game command.
 	 * Example: https://discord.gg/yourserver
 	 */
