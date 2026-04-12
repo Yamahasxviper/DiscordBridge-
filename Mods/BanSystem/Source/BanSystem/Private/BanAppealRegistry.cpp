@@ -261,7 +261,8 @@ bool UBanAppealRegistry::SaveToFile() const
         return false;
     }
 
-    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath))
+    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath,
+        FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
         UE_LOG(LogBanAppealRegistry, Error,
             TEXT("BanAppealRegistry: failed to write %s"), *FilePath);

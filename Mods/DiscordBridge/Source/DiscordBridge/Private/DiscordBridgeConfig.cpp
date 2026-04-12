@@ -15,6 +15,39 @@ namespace
 {
 	static const TCHAR* ConfigSection = TEXT("DiscordBridge");
 
+	// Strip a leading UTF-8 BOM character (U+FEFF) from an FString in-place.
+	// This handles the case where LoadFileToString preserves the BOM character
+	// in the FString content, or where external tools have written the file
+	// with a BOM that was round-tripped into the string.
+	void StripBOM(FString& Str)
+	{
+		if (!Str.IsEmpty() && Str[0] == 0xFEFF)
+		{
+			Str.RemoveAt(0, 1, /*bAllowShrinking=*/false);
+		}
+	}
+
+	// Check whether a file on disk starts with a UTF-8 BOM (bytes EF BB BF).
+	// If so, strip the BOM and rewrite the file without it.  This is called
+	// once at the start of LoadOrCreate to proactively clean up BOM corruption
+	// regardless of the source (UE4 config hierarchy, text editors, etc.).
+	void CleanFileBOM(const FString& FilePath)
+	{
+		TArray<uint8> RawBytes;
+		if (!FFileHelper::LoadFileToArray(RawBytes, *FilePath))
+			return;
+		if (RawBytes.Num() >= 3 &&
+		    RawBytes[0] == 0xEF &&
+		    RawBytes[1] == 0xBB &&
+		    RawBytes[2] == 0xBF)
+		{
+			RawBytes.RemoveAt(0, 3, /*bAllowShrinking=*/false);
+			FFileHelper::SaveArrayToFile(RawBytes, *FilePath);
+			UE_LOG(LogTemp, Log,
+			       TEXT("DiscordBridge: Stripped UTF-8 BOM from '%s'."), *FilePath);
+		}
+	}
+
 	// Returns the INI value when the key exists (including empty string values).
 	// Use for optional settings where an empty value intentionally disables the feature.
 	FString GetIniStringOrDefault(const FConfigFile& Cfg,
@@ -281,6 +314,19 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 
 	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
 
+	// ── Step 0: proactively strip any UTF-8 BOM from the config files ───────
+	// External tools (text editors, UE4 config hierarchy, etc.) may write a
+	// UTF-8 BOM (EF BB BF) to the file, producing garbled characters (e.g.
+	// "��[DiscordBridge]") when viewed.  Strip it before any further processing.
+	if (PlatformFile.FileExists(*ModFilePath))
+	{
+		CleanFileBOM(ModFilePath);
+	}
+	if (PlatformFile.FileExists(*BackupFilePath))
+	{
+		CleanFileBOM(BackupFilePath);
+	}
+
 	// ── Step 1: load the primary config (mod folder) ─────────────────────────
 	// [BACKUP-SYNC] When adding a new FDiscordBridgeConfig field, add a read
 	// line here AND update Steps 2 (restore + PatchLine) and 3 (backup write).
@@ -359,6 +405,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		{
 			FString RawPrimary;
 			FFileHelper::LoadFileToString(RawPrimary, *ModFilePath);
+			StripBOM(RawPrimary);
 			Config.ChatRelayBlocklist = ParseRawIniArray(RawPrimary, TEXT("DiscordBridge"), TEXT("ChatRelayBlocklist"));
 
 			// Parse ChatRelayBlocklistReplacements array entries.
@@ -451,6 +498,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		{
 			FString PrimaryRawForRoles;
 			FFileHelper::LoadFileToString(PrimaryRawForRoles, *ModFilePath);
+			StripBOM(PrimaryRawForRoles);
 			Config.DiscordRoleLabels = ParseRawIniArray(PrimaryRawForRoles, TEXT("DiscordBridge"), TEXT("DiscordRoleLabels"));
 		}
 
@@ -458,6 +506,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		{
 			FString PrimaryRaw;
 			FFileHelper::LoadFileToString(PrimaryRaw, *ModFilePath);
+			StripBOM(PrimaryRaw);
 			const TArray<FString> SALines = ParseRawIniArray(PrimaryRaw, TEXT("DiscordBridge"), TEXT("ScheduledAnnouncements"));
 			for (const FString& Line : SALines)
 			{
@@ -528,6 +577,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		{
 			FString ModFileRaw;
 			FFileHelper::LoadFileToString(ModFileRaw, *ModFilePath);
+			StripBOM(ModFileRaw);
 			if (!ModFileRaw.Contains(TEXT("#")))
 			{
 				UE_LOG(LogTemp, Log,
@@ -564,6 +614,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 
 				FString ExistingContent;
 				FFileHelper::LoadFileToString(ExistingContent, *ModFilePath);
+				StripBOM(ExistingContent);
 
 				FString AppendContent;
 
@@ -821,6 +872,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 					// Check for its presence in the raw file rather than via FConfigFile.
 					FString UpgradeRaw;
 					FFileHelper::LoadFileToString(UpgradeRaw, *ModFilePath);
+					StripBOM(UpgradeRaw);
 					if (!UpgradeRaw.Contains(TEXT("ChatRelayBlocklist")))
 					{
 						AppendContent2 +=
@@ -859,6 +911,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 
 					FString ExistingContent2;
 					FFileHelper::LoadFileToString(ExistingContent2, *ModFilePath);
+					StripBOM(ExistingContent2);
 
 					if (FFileHelper::SaveStringToFile(ExistingContent2 + AppendContent2, *ModFilePath,
 					    FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
@@ -1078,6 +1131,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 	{
 		FString BackupFileContent;
 		FFileHelper::LoadFileToString(BackupFileContent, *BackupFilePath);
+		StripBOM(BackupFileContent);
 		const TMap<FString, FString> BackupValues =
 			ParseRawIniSection(BackupFileContent, TEXT("DiscordBridge"));
 
@@ -1219,6 +1273,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			FString PrimaryContent;
 			if (FFileHelper::LoadFileToString(PrimaryContent, *ModFilePath))
 			{
+				StripBOM(PrimaryContent);
 				// Replace the line "Key=<current>\n" (at the start of a line) with
 				// "Key=Value\n", preserving \r\n vs \n line endings.
 				auto PatchLine = [&](const TCHAR* Key, const FString& Value)

@@ -211,7 +211,8 @@ bool UBanAuditLog::SaveToFile() const
         return false;
     }
 
-    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath))
+    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath,
+        FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
         UE_LOG(LogBanAuditLog, Error,
             TEXT("BanAuditLog: failed to write %s"), *FilePath);
