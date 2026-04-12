@@ -678,6 +678,26 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	FString JoinHintMessage;
 
 	/**
+	 * In-game chat message broadcast to ALL connected players when a new player
+	 * joins the server.  Unlike JoinHintMessage (which is a private hint only
+	 * the joining player sees), this message appears in the shared game chat so
+	 * everyone can see who just joined.
+	 *
+	 * This field is completely independent of the whitelist — it fires for every
+	 * player that passes the join check regardless of whether the whitelist is
+	 * enabled or disabled.  Sent via AFGChatManager::BroadcastChatMessage so it
+	 * does not require the SML Remote Call Object to be available.
+	 *
+	 * Leave empty (default) to disable the broadcast.
+	 *
+	 * Placeholder: %PlayerName% – the in-game name of the joining player.
+	 *
+	 * Example:
+	 *   InGameJoinBroadcast=🎮 Welcome to the server, %PlayerName%!
+	 */
+	FString InGameJoinBroadcast;
+
+	/**
 	 * Loads configuration from the primary mod-folder INI, falling back to the
 	 * Saved/Config backup when credentials are missing.  If the primary file does
 	 * not exist it is created with default values.  On every server start, an

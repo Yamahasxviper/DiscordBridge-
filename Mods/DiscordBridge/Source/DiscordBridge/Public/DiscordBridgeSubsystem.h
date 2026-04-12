@@ -656,6 +656,16 @@ private:
 	void SendJoinHintToPlayer(APlayerController* Controller, const FString& PlayerName);
 
 	/**
+	 * Broadcast the on-join message (InGameJoinBroadcast config key) to ALL
+	 * connected players via AFGChatManager::BroadcastChatMessage.
+	 * No-op when InGameJoinBroadcast is empty.
+	 * Completely independent of the whitelist setting.
+	 *
+	 * @param PlayerName  In-game display name used for %PlayerName% substitution.
+	 */
+	void SendInGameJoinBroadcast(const FString& PlayerName);
+
+	/**
 	 * Posts a colour-coded Discord embed to TargetChannelId for a player event.
 	 * Called by SendPlayerJoinNotification and OnLogout when bUseEmbedsForPlayerEvents
 	 * is true.

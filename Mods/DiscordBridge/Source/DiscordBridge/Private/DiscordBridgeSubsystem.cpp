@@ -2527,6 +2527,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 	{
 		SendPlayerJoinNotification(PlayerName, ResolvedEOSProductUserId, ResolvedIpAddress);
 		SendJoinHintToPlayer(Controller, PlayerName);
+		SendInGameJoinBroadcast(PlayerName);
 		return;
 	}
 
@@ -2534,6 +2535,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 	{
 		SendPlayerJoinNotification(PlayerName, ResolvedEOSProductUserId, ResolvedIpAddress);
 		SendJoinHintToPlayer(Controller, PlayerName);
+		SendInGameJoinBroadcast(PlayerName);
 		return;
 	}
 
@@ -2550,6 +2552,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 		       *PlayerName);
 		SendPlayerJoinNotification(PlayerName, ResolvedEOSProductUserId, ResolvedIpAddress);
 		SendJoinHintToPlayer(Controller, PlayerName);
+		SendInGameJoinBroadcast(PlayerName);
 		return;
 	}
 
@@ -3765,6 +3768,19 @@ void UDiscordBridgeSubsystem::SendJoinHintToPlayer(APlayerController* Controller
 	HintText = HintText.Replace(TEXT("%PlayerName%"), *PlayerName);
 
 	RCO->SendChatMessage(HintText, FLinearColor::White);
+}
+
+void UDiscordBridgeSubsystem::SendInGameJoinBroadcast(const FString& PlayerName)
+{
+	if (Config.InGameJoinBroadcast.IsEmpty())
+	{
+		return;
+	}
+
+	FString BroadcastText = Config.InGameJoinBroadcast;
+	BroadcastText = BroadcastText.Replace(TEXT("%PlayerName%"), *PlayerName);
+
+	SendGameChatStatusMessage(BroadcastText);
 }
 
 void UDiscordBridgeSubsystem::HandleInGameVerify(const FString& PlayerName, const FString& Code)
