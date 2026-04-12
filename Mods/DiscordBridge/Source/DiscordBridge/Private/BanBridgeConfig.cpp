@@ -14,7 +14,7 @@ DEFINE_LOG_CATEGORY(LogBanDiscord);
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Strip a leading UTF-8 BOM (EF BB BF) from a file on disk. */
-static void CleanFileBOM(const FString& FilePath)
+static void CleanBanBridgeConfigBOM(const FString& FilePath)
 {
 	TArray<uint8> RawBytes;
 	if (!FFileHelper::LoadFileToArray(RawBytes, *FilePath))
@@ -79,9 +79,9 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 
 	// Proactively strip UTF-8 BOM if present.
 	if (PF.FileExists(*PrimaryPath))
-		CleanFileBOM(PrimaryPath);
+		CleanBanBridgeConfigBOM(PrimaryPath);
 	if (PF.FileExists(*BackupPath))
-		CleanFileBOM(BackupPath);
+		CleanBanBridgeConfigBOM(BackupPath);
 
 	FConfigFile Cfg;
 	bool bLoaded = false;

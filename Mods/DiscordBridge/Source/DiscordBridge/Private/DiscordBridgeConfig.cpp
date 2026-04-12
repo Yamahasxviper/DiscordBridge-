@@ -31,7 +31,7 @@ namespace
 	// If so, strip the BOM and rewrite the file without it.  This is called
 	// once at the start of LoadOrCreate to proactively clean up BOM corruption
 	// regardless of the source (UE4 config hierarchy, text editors, etc.).
-	void CleanFileBOM(const FString& FilePath)
+	void CleanDiscordConfigBOM(const FString& FilePath)
 	{
 		TArray<uint8> RawBytes;
 		if (!FFileHelper::LoadFileToArray(RawBytes, *FilePath))
@@ -320,11 +320,11 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 	// "��[DiscordBridge]") when viewed.  Strip it before any further processing.
 	if (PlatformFile.FileExists(*ModFilePath))
 	{
-		CleanFileBOM(ModFilePath);
+		CleanDiscordConfigBOM(ModFilePath);
 	}
 	if (PlatformFile.FileExists(*BackupFilePath))
 	{
-		CleanFileBOM(BackupFilePath);
+		CleanDiscordConfigBOM(BackupFilePath);
 	}
 
 	// ── Step 1: load the primary config (mod folder) ─────────────────────────

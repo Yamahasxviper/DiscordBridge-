@@ -46,7 +46,7 @@ static float GetIniFloat(const FConfigFile& Cfg, const FString& Key, float Defau
 }
 
 /** Strip a leading UTF-8 BOM (EF BB BF) from a file on disk. */
-static void CleanFileBOM(const FString& FilePath)
+static void CleanTicketConfigBOM(const FString& FilePath)
 {
 	TArray<uint8> RawBytes;
 	if (!FFileHelper::LoadFileToArray(RawBytes, *FilePath))
@@ -126,9 +126,9 @@ FTicketConfig FTicketConfig::Load()
 
 	// Proactively strip UTF-8 BOM if present.
 	if (PlatformFile.FileExists(*PrimaryPath))
-		CleanFileBOM(PrimaryPath);
+		CleanTicketConfigBOM(PrimaryPath);
 	if (PlatformFile.FileExists(*BackupPath))
-		CleanFileBOM(BackupPath);
+		CleanTicketConfigBOM(BackupPath);
 
 	// ── Try to load the primary config file ───────────────────────────────────
 	const bool bPrimaryExists = PlatformFile.FileExists(*PrimaryPath);
