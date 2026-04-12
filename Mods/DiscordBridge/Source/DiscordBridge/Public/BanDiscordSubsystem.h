@@ -103,6 +103,11 @@ private:
 	/** Subscribed to the provider's raw MESSAGE_CREATE stream via SetProvider(). */
 	void OnRawDiscordMessage(const TSharedPtr<FJsonObject>& MessageObj);
 
+	/** Subscribed to the provider's INTERACTION_CREATE stream via SetProvider().
+	 *  Handles APPLICATION_COMMAND (type 2) slash command interactions for the
+	 *  ban/mod/warn/player/appeal/admin command groups. */
+	void OnDiscordInteraction(const TSharedPtr<FJsonObject>& InteractionObj);
+
 	// ── Authorisation / extraction helpers ───────────────────────────────────
 
 	/** Extract the list of Discord role snowflakes from the message's member object. */
@@ -370,6 +375,9 @@ private:
 
 	/** Handle for the raw-message subscription; valid while CachedProvider is set. */
 	FDelegateHandle RawMessageDelegateHandle;
+
+	/** Handle for the INTERACTION_CREATE subscription; valid while CachedProvider is set. */
+	FDelegateHandle InteractionDelegateHandle;
 
 	/** Handle for the UBanAppealRegistry::OnBanAppealSubmitted subscription. */
 	FDelegateHandle AppealSubmittedDelegateHandle;

@@ -681,6 +681,17 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 	}
 	else if (EventType == TEXT("INTERACTION_CREATE"))
 	{
+		// Handle slash command interactions (type 2 = APPLICATION_COMMAND) first.
+		{
+			int32 InteractionType = 0;
+			DataObj->TryGetNumberField(TEXT("type"), InteractionType);
+			if (InteractionType == 2)
+			{
+				HandleSlashCommandInteraction(DataObj);
+				return;
+			}
+		}
+
 		// Handle whitelist application button interactions before broadcasting.
 		{
 			const TSharedPtr<FJsonObject>* InteractionDataPtr = nullptr;
@@ -4954,58 +4965,520 @@ SendMessageBodyToChannel(Target, Body);
 void UDiscordBridgeSubsystem::RegisterSlashCommands()
 {
 // The Discord bulk-overwrite endpoint replaces ALL guild application commands
-// atomically.  We register three commands: /players, /stats, /server.
+// atomically.  We register all command groups here.
 const FString Url = FString::Printf(
 TEXT("https://discord.com/api/v10/applications/%s/guilds/%s/commands"),
 *BotUserId, *GuildId);
 
-// Build the commands array.
-auto MakeCmd = [](const FString& Name, const FString& Desc) -> TSharedPtr<FJsonValue>
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+// Build a command option JSON value.  Type: 3=STRING, 4=INTEGER, 5=BOOLEAN.
+auto MakeOpt = [](const FString& Name, const FString& Desc, int32 Type, bool bRequired)
+	-> TSharedPtr<FJsonValue>
 {
-TSharedPtr<FJsonObject> Cmd = MakeShared<FJsonObject>();
-Cmd->SetNumberField(TEXT("type"),        1); // CHAT_INPUT
-Cmd->SetStringField(TEXT("name"),        Name);
-Cmd->SetStringField(TEXT("description"), Desc);
-return MakeShared<FJsonValueObject>(Cmd);
+	TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+	O->SetStringField(TEXT("name"),        Name);
+	O->SetStringField(TEXT("description"), Desc);
+	O->SetNumberField(TEXT("type"),        Type);
+	if (bRequired) O->SetBoolField(TEXT("required"), true);
+	return MakeShared<FJsonValueObject>(O);
 };
 
+// Build a SUB_COMMAND JSON value (type 1).
+auto MakeSub = [](const FString& Name, const FString& Desc,
+                  TArray<TSharedPtr<FJsonValue>> Opts = {}) -> TSharedPtr<FJsonValue>
+{
+	TSharedPtr<FJsonObject> S = MakeShared<FJsonObject>();
+	S->SetNumberField(TEXT("type"),        1); // SUB_COMMAND
+	S->SetStringField(TEXT("name"),        Name);
+	S->SetStringField(TEXT("description"), Desc);
+	if (!Opts.IsEmpty())
+		S->SetArrayField(TEXT("options"), Opts);
+	return MakeShared<FJsonValueObject>(S);
+};
+
+// Build a top-level CHAT_INPUT (type 1) command.
+auto MakeCmd = [](const FString& Name, const FString& Desc,
+                  TArray<TSharedPtr<FJsonValue>> Opts = {}) -> TSharedPtr<FJsonValue>
+{
+	TSharedPtr<FJsonObject> C = MakeShared<FJsonObject>();
+	C->SetNumberField(TEXT("type"),        1); // CHAT_INPUT
+	C->SetStringField(TEXT("name"),        Name);
+	C->SetStringField(TEXT("description"), Desc);
+	if (!Opts.IsEmpty())
+		C->SetArrayField(TEXT("options"), Opts);
+	return MakeShared<FJsonValueObject>(C);
+};
+
+// Shorthand lambdas for common option types.
+auto Str  = [&](const FString& N, const FString& D) { return MakeOpt(N, D, 3, true);  };
+auto StrO = [&](const FString& N, const FString& D) { return MakeOpt(N, D, 3, false); };
+auto Int  = [&](const FString& N, const FString& D) { return MakeOpt(N, D, 4, true);  };
+auto IntO = [&](const FString& N, const FString& D) { return MakeOpt(N, D, 4, false); };
+
 TArray<TSharedPtr<FJsonValue>> Commands;
+
+// ── Standalone public commands ─────────────────────────────────────────────
 Commands.Add(MakeCmd(TEXT("players"), TEXT("Show the list of online players.")));
 Commands.Add(MakeCmd(TEXT("stats"),   TEXT("Show server statistics.")));
 Commands.Add(MakeCmd(TEXT("server"),  TEXT("Show server info embed.")));
+Commands.Add(MakeCmd(TEXT("online"),  TEXT("Show online players as a rich embed.")));
+Commands.Add(MakeCmd(TEXT("help"),    TEXT("Show the bot command reference.")));
 
-TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
-Body->SetArrayField(TEXT("commands_ignored_placeholder"), Commands);
+// ── /ban – ban management (admin) ─────────────────────────────────────────
+Commands.Add(MakeCmd(TEXT("ban"), TEXT("Ban management commands."),
+{
+	MakeSub(TEXT("add"),        TEXT("Permanently ban a player."),
+		{ Str(TEXT("player"), TEXT("Player name or EOS PUID")), StrO(TEXT("reason"), TEXT("Ban reason")) }),
+	MakeSub(TEXT("temp"),       TEXT("Temporarily ban a player."),
+		{ Str(TEXT("player"), TEXT("Player name or EOS PUID")), Str(TEXT("duration"), TEXT("Duration: 30m 2h 1d 1w")), StrO(TEXT("reason"), TEXT("Ban reason")) }),
+	MakeSub(TEXT("remove"),     TEXT("Remove a ban by player UID."),
+		{ Str(TEXT("uid"),    TEXT("Player compound UID")) }),
+	MakeSub(TEXT("removename"), TEXT("Remove a ban by display name."),
+		{ Str(TEXT("name"),   TEXT("Player display name")) }),
+	MakeSub(TEXT("byname"),     TEXT("Ban a player by display name."),
+		{ Str(TEXT("name"),   TEXT("Player display name")), StrO(TEXT("reason"), TEXT("Ban reason")) }),
+	MakeSub(TEXT("check"),      TEXT("Check a player's ban status."),
+		{ Str(TEXT("player"), TEXT("Player name or EOS PUID")) }),
+	MakeSub(TEXT("reason"),     TEXT("Edit the reason on an active ban."),
+		{ Str(TEXT("player"),     TEXT("Player name or EOS PUID")), Str(TEXT("new_reason"), TEXT("New ban reason")) }),
+	MakeSub(TEXT("list"),       TEXT("List all active bans (10 per page)."),
+		{ IntO(TEXT("page"),  TEXT("Page number (default 1)")) }),
+	MakeSub(TEXT("extend"),     TEXT("Extend a temporary ban."),
+		{ Str(TEXT("player"), TEXT("Player name or EOS PUID")), Str(TEXT("duration"), TEXT("Extra time: 30m 2h 1d")) }),
+	MakeSub(TEXT("duration"),   TEXT("Show remaining time on a temp ban."),
+		{ Str(TEXT("player"), TEXT("Player name or EOS PUID")) }),
+	MakeSub(TEXT("link"),       TEXT("Link two UIDs so a ban blocks both."),
+		{ Str(TEXT("uid1"),   TEXT("First compound UID")), Str(TEXT("uid2"), TEXT("Second compound UID")) }),
+	MakeSub(TEXT("unlink"),     TEXT("Remove a link between two UIDs."),
+		{ Str(TEXT("uid1"),   TEXT("First compound UID")), Str(TEXT("uid2"), TEXT("Second compound UID")) }),
+	MakeSub(TEXT("schedule"),   TEXT("Schedule a delayed ban."),
+		{ Str(TEXT("player"),       TEXT("Player name or EOS PUID")),
+		  Str(TEXT("delay"),        TEXT("Delay before ban: 30m 2h")),
+		  StrO(TEXT("ban_duration"),TEXT("Ban length (omit for permanent)")),
+		  StrO(TEXT("reason"),      TEXT("Ban reason")) }),
+	MakeSub(TEXT("quick"),      TEXT("Apply a pre-defined ban template."),
+		{ Str(TEXT("template"), TEXT("Template slug")), Str(TEXT("player"), TEXT("Player name or EOS PUID")) }),
+	MakeSub(TEXT("bulk"),       TEXT("Ban multiple players at once."),
+		{ Str(TEXT("players"), TEXT("Space-separated UIDs")), Str(TEXT("reason"), TEXT("Reason for all targets")) }),
+}));
 
-// Bulk overwrite (PUT): send commands array directly.
+// ── /warn – warning management (admin) ────────────────────────────────────
+Commands.Add(MakeCmd(TEXT("warn"), TEXT("Warning management commands."),
+{
+	MakeSub(TEXT("add"),      TEXT("Issue a formal warning."),
+		{ Str(TEXT("player"),     TEXT("Player name or EOS PUID")), Str(TEXT("reason"), TEXT("Warning reason")) }),
+	MakeSub(TEXT("list"),     TEXT("List all warnings for a player."),
+		{ Str(TEXT("player"),     TEXT("Player name or EOS PUID")) }),
+	MakeSub(TEXT("clearall"), TEXT("Remove all warnings for a player."),
+		{ Str(TEXT("player"),     TEXT("Player name or EOS PUID")) }),
+	MakeSub(TEXT("clearone"), TEXT("Remove a single warning by ID."),
+		{ Int(TEXT("warning_id"), TEXT("Warning integer ID")) }),
+}));
+
+// ── /mod – moderator commands (mod or admin) ──────────────────────────────
+Commands.Add(MakeCmd(TEXT("mod"), TEXT("Moderation commands (moderator or admin)."),
+{
+	MakeSub(TEXT("kick"),       TEXT("Kick a connected player."),
+		{ Str(TEXT("player"),     TEXT("Player name or EOS PUID")), StrO(TEXT("reason"), TEXT("Kick reason")) }),
+	MakeSub(TEXT("modban"),     TEXT("Temporarily ban a player (mod action)."),
+		{ Str(TEXT("player"),     TEXT("Player name or EOS PUID")), StrO(TEXT("reason"), TEXT("Ban reason")) }),
+	MakeSub(TEXT("mute"),       TEXT("Mute a player's in-game chat."),
+		{ Str(TEXT("player"),     TEXT("Player name or EOS PUID")),
+		  IntO(TEXT("minutes"),   TEXT("Duration in minutes (0=indefinite)")),
+		  StrO(TEXT("reason"),    TEXT("Mute reason")) }),
+	MakeSub(TEXT("unmute"),     TEXT("Lift a mute from a player."),
+		{ Str(TEXT("player"),     TEXT("Player name or EOS PUID")) }),
+	MakeSub(TEXT("tempmute"),   TEXT("Apply a timed mute."),
+		{ Str(TEXT("player"),     TEXT("Player name or EOS PUID")), Int(TEXT("minutes"), TEXT("Duration in minutes")) }),
+	MakeSub(TEXT("tempunmute"), TEXT("Lift a timed mute."),
+		{ Str(TEXT("player"),     TEXT("Player name or EOS PUID")) }),
+	MakeSub(TEXT("mutecheck"),  TEXT("Check mute status and expiry."),
+		{ Str(TEXT("player"),     TEXT("Player name or EOS PUID")) }),
+	MakeSub(TEXT("mutelist"),   TEXT("List all currently muted players.")),
+	MakeSub(TEXT("mutereason"), TEXT("Update the reason on an active mute."),
+		{ Str(TEXT("player"),     TEXT("Player name or EOS PUID")), Str(TEXT("new_reason"), TEXT("New mute reason")) }),
+	MakeSub(TEXT("announce"),   TEXT("Broadcast a message to in-game players."),
+		{ Str(TEXT("message"),    TEXT("Message to broadcast")) }),
+	MakeSub(TEXT("stafflist"),  TEXT("Show online staff members.")),
+	MakeSub(TEXT("staffchat"),  TEXT("Send a message to online staff only."),
+		{ Str(TEXT("message"),    TEXT("Staff-only message")) }),
+}));
+
+// ── /player – player information commands (admin) ─────────────────────────
+Commands.Add(MakeCmd(TEXT("player"), TEXT("Player information and note commands."),
+{
+	MakeSub(TEXT("history"),    TEXT("Show known session records for a player."),
+		{ Str(TEXT("query"),   TEXT("Player name, EOS PUID, or IP address")) }),
+	MakeSub(TEXT("note"),       TEXT("Add a private admin note."),
+		{ Str(TEXT("player"),  TEXT("Player name or EOS PUID")), Str(TEXT("text"), TEXT("Note text")) }),
+	MakeSub(TEXT("notes"),      TEXT("List all admin notes for a player."),
+		{ Str(TEXT("player"),  TEXT("Player name or EOS PUID")) }),
+	MakeSub(TEXT("reason"),     TEXT("Show the ban reason for a UID."),
+		{ Str(TEXT("uid"),     TEXT("Player compound UID")) }),
+	MakeSub(TEXT("playtime"),   TEXT("Show a player's server playtime."),
+		{ Str(TEXT("player"),  TEXT("Player name or EOS PUID")) }),
+	MakeSub(TEXT("stats"),      TEXT("Show per-player build and item stats."),
+		{ Str(TEXT("name"),    TEXT("Player display name")) }),
+	MakeSub(TEXT("reputation"), TEXT("Show a player's reputation score."),
+		{ Str(TEXT("player"),  TEXT("Player name or EOS PUID")) }),
+}));
+
+// ── /appeal – ban appeal management (admin) ───────────────────────────────
+Commands.Add(MakeCmd(TEXT("appeal"), TEXT("Ban appeal management commands."),
+{
+	MakeSub(TEXT("list"),    TEXT("List pending ban appeals.")),
+	MakeSub(TEXT("dismiss"), TEXT("Delete a ban appeal."),
+		{ Int(TEXT("id"), TEXT("Appeal integer ID")) }),
+	MakeSub(TEXT("approve"), TEXT("Approve an appeal and unban the player."),
+		{ Int(TEXT("id"), TEXT("Appeal integer ID")) }),
+	MakeSub(TEXT("deny"),    TEXT("Deny an appeal without unbanning."),
+		{ Int(TEXT("id"), TEXT("Appeal integer ID")) }),
+}));
+
+// ── /admin – admin utility commands ──────────────────────────────────────
+Commands.Add(MakeCmd(TEXT("admin"), TEXT("Admin utility commands."),
+{
+	MakeSub(TEXT("say"),          TEXT("Broadcast an admin message in-game."),
+		{ Str(TEXT("message"),  TEXT("Message to broadcast")) }),
+	MakeSub(TEXT("poll"),         TEXT("Create a poll in this channel."),
+		{ Str(TEXT("question"), TEXT("Poll question")),
+		  Str(TEXT("options"),  TEXT("Pipe-separated options: Yes|No|Maybe")) }),
+	MakeSub(TEXT("reloadconfig"), TEXT("Reload the bridge configuration from disk.")),
+}));
+
+// ── /whitelist – whitelist management (role-restricted) ──────────────────
+Commands.Add(MakeCmd(TEXT("whitelist"), TEXT("Whitelist management commands."),
+{
+	MakeSub(TEXT("on"),     TEXT("Enable the server whitelist.")),
+	MakeSub(TEXT("off"),    TEXT("Disable the server whitelist.")),
+	MakeSub(TEXT("add"),    TEXT("Add a player to the whitelist."),
+		{ Str(TEXT("name"),       TEXT("In-game player name")),
+		  StrO(TEXT("group"),     TEXT("Group name (optional)")),
+		  StrO(TEXT("duration"),  TEXT("Expiry duration: 7d 1w (optional)")) }),
+	MakeSub(TEXT("remove"), TEXT("Remove a player from the whitelist."),
+		{ Str(TEXT("name"),       TEXT("In-game player name")) }),
+	MakeSub(TEXT("list"),   TEXT("Show all whitelisted players."),
+		{ StrO(TEXT("group"),     TEXT("Filter by group (optional)")) }),
+	MakeSub(TEXT("status"), TEXT("Show whether the whitelist is active.")),
+	MakeSub(TEXT("apply"),  TEXT("Submit a whitelist application."),
+		{ Str(TEXT("name"),       TEXT("Your in-game player name")) }),
+	MakeSub(TEXT("link"),   TEXT("Link your Discord account via a verification code."),
+		{ Str(TEXT("code"),       TEXT("Verification code")) }),
+	MakeSub(TEXT("search"), TEXT("Search the whitelist by name."),
+		{ Str(TEXT("query"),      TEXT("Partial name to search for")) }),
+}));
+
+// Serialize the commands array and send to Discord.
 FString BodyStr;
 {
-TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&BodyStr);
-FJsonSerializer::Serialize(Commands, W);
+	TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&BodyStr);
+	FJsonSerializer::Serialize(Commands, W);
 }
 
 TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
-FHttpModule::Get().CreateRequest();
+	FHttpModule::Get().CreateRequest();
 Request->SetURL(Url);
 Request->SetVerb(TEXT("PUT"));
 Request->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bot %s"), *Config.BotToken));
 Request->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
 Request->SetContentAsString(BodyStr);
 Request->OnProcessRequestComplete().BindLambda(
-[](FHttpRequestPtr, FHttpResponsePtr Resp, bool bSuccess)
+	[](FHttpRequestPtr, FHttpResponsePtr Resp, bool bSuccess)
+	{
+		if (bSuccess && Resp.IsValid() &&
+			(Resp->GetResponseCode() == 200 || Resp->GetResponseCode() == 201))
+		{
+			UE_LOG(LogDiscordBridge, Log,
+				TEXT("DiscordBridge: Slash commands registered successfully (%d commands)."),
+				12); // 5 standalone + 7 groups
+		}
+		else
+		{
+			UE_LOG(LogDiscordBridge, Warning,
+				TEXT("DiscordBridge: Slash command registration failed (HTTP %d): %s"),
+				Resp.IsValid() ? Resp->GetResponseCode() : 0,
+				Resp.IsValid() ? *Resp->GetContentAsString() : TEXT("no response"));
+		}
+	});
+Request->ProcessRequest();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Slash command helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+FString UDiscordBridgeSubsystem::GetSlashOptionString(
+const TArray<TSharedPtr<FJsonValue>>* Options,
+const FString& Name)
 {
-if (bSuccess && Resp.IsValid() &&
-(Resp->GetResponseCode() == 200 || Resp->GetResponseCode() == 201))
+if (!Options) return FString();
+for (const TSharedPtr<FJsonValue>& Opt : *Options)
 {
-UE_LOG(LogDiscordBridge, Log,
-TEXT("DiscordBridge: Slash commands registered successfully."));
+const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+if (!Opt->TryGetObject(ObjPtr) || !ObjPtr) continue;
+FString OptName;
+if (!(*ObjPtr)->TryGetStringField(TEXT("name"), OptName) ||
+    !OptName.Equals(Name, ESearchCase::IgnoreCase)) continue;
+// Try string value first (Discord sends INTEGER values as numbers).
+FString StrVal;
+if ((*ObjPtr)->TryGetStringField(TEXT("value"), StrVal)) return StrVal;
+double NumVal = 0.0;
+if ((*ObjPtr)->TryGetNumberField(TEXT("value"), NumVal))
+return FString::Printf(TEXT("%lld"), static_cast<int64>(NumVal));
+return FString();
+}
+return FString();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Slash command interaction handler
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::HandleSlashCommandInteraction(const TSharedPtr<FJsonObject>& DataObj)
+{
+// Extract common interaction fields.
+FString InteractionId, InteractionToken, InteractionChannelId;
+DataObj->TryGetStringField(TEXT("id"),         InteractionId);
+DataObj->TryGetStringField(TEXT("token"),      InteractionToken);
+DataObj->TryGetStringField(TEXT("channel_id"), InteractionChannelId);
+
+// Extract member identity and role list.
+FString AuthorId, AuthorName;
+TArray<TSharedPtr<FJsonValue>> AuthorRolesArray;
+const TSharedPtr<FJsonObject>* MemberObjPtr = nullptr;
+if (DataObj->TryGetObjectField(TEXT("member"), MemberObjPtr) && MemberObjPtr)
+{
+(*MemberObjPtr)->TryGetStringField(TEXT("nick"), AuthorName);
+const TSharedPtr<FJsonObject>* UserPtr = nullptr;
+if ((*MemberObjPtr)->TryGetObjectField(TEXT("user"), UserPtr) && UserPtr)
+{
+(*UserPtr)->TryGetStringField(TEXT("id"), AuthorId);
+if (AuthorName.IsEmpty())
+(*UserPtr)->TryGetStringField(TEXT("global_name"), AuthorName);
+if (AuthorName.IsEmpty())
+(*UserPtr)->TryGetStringField(TEXT("username"), AuthorName);
+}
+const TArray<TSharedPtr<FJsonValue>>* RolesArr = nullptr;
+if ((*MemberObjPtr)->TryGetArrayField(TEXT("roles"), RolesArr) && RolesArr)
+AuthorRolesArray = *RolesArr;
+}
+if (AuthorName.IsEmpty()) AuthorName = TEXT("Discord User");
+
+// Extract the top-level command name and its options array.
+const TSharedPtr<FJsonObject>* CmdDataPtr = nullptr;
+if (!DataObj->TryGetObjectField(TEXT("data"), CmdDataPtr) || !CmdDataPtr) return;
+
+FString CmdName;
+(*CmdDataPtr)->TryGetStringField(TEXT("name"), CmdName);
+CmdName = CmdName.ToLower();
+
+const TArray<TSharedPtr<FJsonValue>>* TopOptions = nullptr;
+(*CmdDataPtr)->TryGetArrayField(TEXT("options"), TopOptions);
+
+// ── Standalone public commands ─────────────────────────────────────────────
+// These are handled inline and respond directly to the interaction.
+
+if (CmdName == TEXT("players"))
+{
+FString Reply;
+if (UWorld* World = GetWorld())
+{
+if (AGameStateBase* GS = World->GetGameState<AGameStateBase>())
+{
+TArray<FString> Names;
+for (APlayerState* PS : GS->PlayerArray)
+if (PS) Names.Add(PS->GetPlayerName());
+Reply = Names.Num() == 0
+? TEXT("No players currently online.")
+: FString::Printf(TEXT("**Online players (%d):** %s"),
+    Names.Num(), *FString::Join(Names, TEXT(", ")));
+}
+}
+if (Reply.IsEmpty()) Reply = TEXT("No players currently online.");
+RespondToInteraction(InteractionId, InteractionToken, 4, Reply, false);
+return;
+}
+
+if (CmdName == TEXT("stats"))
+{
+UWorld* World = GetWorld();
+AGameStateBase* GS = World ? World->GetGameState<AGameStateBase>() : nullptr;
+const int32 PlayerCount = GS ? GS->PlayerArray.Num() : 0;
+const FString Reply = FString::Printf(
+TEXT("**📊 Server Statistics — %s**\nPlayers Online: **%d**\nTime (UTC): %s"),
+Config.ServerName.IsEmpty() ? TEXT("(unnamed)") : *Config.ServerName,
+PlayerCount,
+*FDateTime::UtcNow().ToString(TEXT("%Y-%m-%d %H:%M:%S")));
+RespondToInteraction(InteractionId, InteractionToken, 4, Reply, false);
+return;
+}
+
+if (CmdName == TEXT("server"))
+{
+UWorld* World = GetWorld();
+AGameStateBase* GS = World ? World->GetGameState<AGameStateBase>() : nullptr;
+const int32 PlayerCount = GS ? GS->PlayerArray.Num() : 0;
+const FString Reply = FString::Printf(
+TEXT("**🖥️ Server: %s**\nStatus: ✅ Online\nPlayers: **%d**\nTime (UTC): %s"),
+Config.ServerName.IsEmpty() ? TEXT("(unnamed)") : *Config.ServerName,
+PlayerCount,
+*FDateTime::UtcNow().ToString(TEXT("%Y-%m-%d %H:%M:%S")));
+RespondToInteraction(InteractionId, InteractionToken, 4, Reply, false);
+return;
+}
+
+if (CmdName == TEXT("online"))
+{
+UWorld* World = GetWorld();
+AGameStateBase* GS = World ? World->GetGameState<AGameStateBase>() : nullptr;
+FString Reply;
+if (!GS || GS->PlayerArray.Num() == 0)
+{
+Reply = TEXT("�� No players are currently online.");
 }
 else
 {
-UE_LOG(LogDiscordBridge, Warning,
-TEXT("DiscordBridge: Slash command registration failed (HTTP %d)."),
-Resp.IsValid() ? Resp->GetResponseCode() : 0);
+Reply = FString::Printf(TEXT("**👥 Online Players (%d):**\n"), GS->PlayerArray.Num());
+int32 Idx = 1;
+for (APlayerState* PS : GS->PlayerArray)
+if (PS) Reply += FString::Printf(TEXT("%d. **%s**\n"), Idx++, *PS->GetPlayerName());
 }
-});
-Request->ProcessRequest();
+RespondToInteraction(InteractionId, InteractionToken, 4, Reply, false);
+return;
+}
+
+if (CmdName == TEXT("help"))
+{
+const FString Reply =
+TEXT("**📖 DiscordBridge Commands**\n")
+TEXT("`/players` — Online player list\n")
+TEXT("`/stats` — Server statistics\n")
+TEXT("`/server` — Server info\n")
+TEXT("`/online` — Online players embed\n")
+TEXT("`/whitelist on|off|add|remove|list|status|apply|link|search` — Whitelist\n")
+TEXT("`/ban add|temp|remove|check|list|extend|…` — Ban management (admin)\n")
+TEXT("`/warn add|list|clearall|clearone` — Warning management (admin)\n")
+TEXT("`/mod kick|mute|unmute|announce|…` — Moderation (moderator)\n")
+TEXT("`/player history|note|notes|playtime|…` — Player info (admin)\n")
+TEXT("`/appeal list|approve|deny|dismiss` — Appeal management (admin)\n")
+TEXT("`/admin say|poll|reloadconfig` — Admin utilities (admin)");
+RespondToInteraction(InteractionId, InteractionToken, 4, Reply, false);
+return;
+}
+
+// ── /whitelist – handled within DiscordBridgeSubsystem ────────────────────
+if (CmdName == TEXT("whitelist"))
+{
+// Acknowledge the interaction immediately.
+RespondToInteraction(InteractionId, InteractionToken, 4,
+    TEXT("✅ Processing whitelist command…"), true);
+
+if (!TopOptions || TopOptions->IsEmpty()) return;
+const TSharedPtr<FJsonObject>* SubObjPtr = nullptr;
+if (!(*TopOptions)[0]->TryGetObject(SubObjPtr) || !SubObjPtr) return;
+
+FString SubName;
+(*SubObjPtr)->TryGetStringField(TEXT("name"), SubName);
+const TArray<TSharedPtr<FJsonValue>>* SubOpts = nullptr;
+(*SubObjPtr)->TryGetArrayField(TEXT("options"), SubOpts);
+
+// Check whitelist role permission (same logic as HandleMessageCreate).
+const bool bIsPublicVerb = (SubName == TEXT("apply") || SubName == TEXT("link"));
+bool bHasRole = (!GuildOwnerId.IsEmpty() && AuthorId == GuildOwnerId) || bIsPublicVerb;
+if (!bHasRole && !Config.WhitelistCommandRoleId.IsEmpty())
+{
+for (const TSharedPtr<FJsonValue>& RV : AuthorRolesArray)
+{
+FString RId;
+if (RV->TryGetString(RId) && RId == Config.WhitelistCommandRoleId)
+{
+bHasRole = true;
+break;
+}
+}
+}
+if (!bHasRole)
+{
+if (!Config.ChannelId.IsEmpty())
+SendMessageToChannel(Config.ChannelId,
+    TEXT(":no_entry: You do not have permission to use whitelist commands."));
+return;
+}
+
+// Build the sub-command string matching HandleWhitelistCommand's expected format.
+FString SubCmd = SubName;
+if (SubName == TEXT("add"))
+{
+const FString Name     = GetSlashOptionString(SubOpts, TEXT("name"));
+const FString Group    = GetSlashOptionString(SubOpts, TEXT("group"));
+const FString Duration = GetSlashOptionString(SubOpts, TEXT("duration"));
+if (!Name.IsEmpty())
+{
+SubCmd += TEXT(" ") + Name;
+if (!Group.IsEmpty())    SubCmd += TEXT(" group:") + Group;
+if (!Duration.IsEmpty()) SubCmd += TEXT(" ") + Duration;
+}
+}
+else if (SubName == TEXT("remove") || SubName == TEXT("apply"))
+{
+const FString Name = GetSlashOptionString(SubOpts, TEXT("name"));
+if (!Name.IsEmpty()) SubCmd += TEXT(" ") + Name;
+}
+else if (SubName == TEXT("list"))
+{
+const FString Group = GetSlashOptionString(SubOpts, TEXT("group"));
+if (!Group.IsEmpty()) SubCmd += TEXT(" ") + Group;
+}
+else if (SubName == TEXT("link"))
+{
+const FString Code = GetSlashOptionString(SubOpts, TEXT("code"));
+if (!Code.IsEmpty()) SubCmd += TEXT(" ") + Code;
+}
+else if (SubName == TEXT("search"))
+{
+const FString Query = GetSlashOptionString(SubOpts, TEXT("query"));
+if (!Query.IsEmpty()) SubCmd += TEXT(" ") + Query;
+}
+// "on", "off", "status" carry no extra arguments.
+
+HandleWhitelistCommand(SubCmd, AuthorName, Config.ChannelId, AuthorId);
+return;
+}
+
+// ── /player stats – handled here since HandlePlayerStatsCommand lives here ─
+if (CmdName == TEXT("player") && TopOptions && !TopOptions->IsEmpty())
+{
+const TSharedPtr<FJsonObject>* SubCheck = nullptr;
+FString SubNameCheck;
+if ((*TopOptions)[0]->TryGetObject(SubCheck) && SubCheck)
+(*SubCheck)->TryGetStringField(TEXT("name"), SubNameCheck);
+
+if (SubNameCheck == TEXT("stats"))
+{
+RespondToInteraction(InteractionId, InteractionToken, 4,
+    TEXT("✅ Fetching player stats…"), true);
+const TArray<TSharedPtr<FJsonValue>>* StatsOpts = nullptr;
+(*SubCheck)->TryGetArrayField(TEXT("options"), StatsOpts);
+HandlePlayerStatsCommand(InteractionChannelId, GetSlashOptionString(StatsOpts, TEXT("name")));
+return;
+}
+}
+
+// ── Ban / mod / warn / player / appeal / admin ─────────────────────────────
+// These are delegated to UBanDiscordSubsystem via the interaction delegate.
+// Acknowledge first so Discord does not show "interaction failed"; the real
+// response is posted to the channel by the existing command handler.
+static const TArray<FString> BanGroups = {
+TEXT("ban"), TEXT("warn"), TEXT("mod"),
+TEXT("player"), TEXT("appeal"), TEXT("admin"),
+};
+if (BanGroups.Contains(CmdName))
+{
+RespondToInteraction(InteractionId, InteractionToken, 4,
+    TEXT("✅ Processing command…"), true);
+// Re-broadcast so UBanDiscordSubsystem (subscribed via SubscribeInteraction) handles it.
+if (OnDiscordInteractionReceived.IsBound())
+OnDiscordInteractionReceived.Broadcast(DataObj);
+}
 }
