@@ -17,8 +17,19 @@ A server-only Alpakit C++ mod that provides a persistent, EOS-based ban system f
 | Login-time enforcement | ✅ PostLogin hook + 20 s identity polling |
 | IP ban enforcement | ✅ PreLogin hook caches remote IP; checked at every login |
 | UID linking | ✅ Link multiple EOS UIDs (or EOS + IP) for the same player |
-| REST management API | ✅ HTTP on configurable port (default 3000) |
+| REST management API | ✅ 42 endpoints on configurable port (default 3000) |
 | Player session registry | ✅ Audit log of all known UIDs, names, and IP addresses |
+| Warning system | ✅ Configurable auto-ban escalation tiers |
+| Scheduled bans | ✅ Deferred ban enforcement at a future timestamp |
+| Ban appeals | ✅ Self-service portal and Discord notifications |
+| Discord webhook notifications | ✅ Bans, warnings, kicks, appeals, auto-escalation, geo-IP blocks |
+| Multi-server ban sync | ✅ WebSocket-based peer synchronisation |
+| Player reputation scoring | ✅ Composite score based on warnings, bans, and session history |
+| Prometheus metrics export | ✅ `/metrics/prometheus` endpoint |
+| CSV export | ✅ Bans, warnings, sessions, and audit logs |
+| Admin dashboard | ✅ Unified SPA at `/dashboard` |
+| Appeals portal | ✅ HTML self-service form at `/appeals/portal` |
+| Automatic scheduled backups | ✅ Configurable interval |
 | Blueprint-accessible API | ✅ Full UE Blueprint support |
 | Thread-safe | ✅ Game thread + REST API thread safe |
 
@@ -26,7 +37,7 @@ A server-only Alpakit C++ mod that provides a persistent, EOS-based ban system f
 
 ## In-Game Commands (via BanChatCommands mod)
 
-Install the optional **BanChatCommands** mod to get the full set of in-game chat commands. Admin access is controlled by player platform ID in `BanChatCommands.ini`.
+Install the optional **BanChatCommands** mod to get the full set of 43 in-game chat commands. Admin access is controlled by player platform ID in `BanChatCommands.ini`.
 
 | Command | Role | Description |
 |---------|------|-------------|
@@ -44,13 +55,33 @@ Install the optional **BanChatCommands** mod to get the full set of in-game chat
 | `/warn <player\|UID> <reason...>` | Admin | Issue a formal warning |
 | `/warnings <player\|UID>` | Admin | List all warnings for a player |
 | `/clearwarns <player\|UID>` | Admin | Remove all warnings for a player |
+| `/clearwarn <player\|UID> <id>` | Admin | Remove a specific warning by ID |
 | `/reason <UID>` | Admin | Show the ban reason for a UID |
+| `/banreason <UID> <new reason>` | Admin | Edit the ban reason for a UID |
 | `/announce <message...>` | Admin | Server-wide broadcast (also posts to Discord) |
 | `/stafflist` | Admin | Show currently-online admins and moderators |
+| `/note <player\|UID> <text>` | Admin | Add an admin note to a player |
+| `/notes <player\|UID>` | Admin | List all admin notes for a player |
+| `/duration <UID>` | Admin | Show remaining tempban duration |
+| `/extend <UID> <minutes>` | Admin | Extend a temporary ban duration |
+| `/appeal <UID>` | Admin | Manage ban appeals |
+| `/scheduleban <player\|UID> <timestamp> [reason]` | Admin | Schedule a future ban |
+| `/qban <template> <player\|UID>` | Admin | Apply a quick-ban template |
+| `/reputation <player\|UID>` | Admin | Show player reputation score |
+| `/bulkban <UID1> <UID2> ... [reason]` | Admin | Ban multiple players at once |
+| `/staffchat <message...>` | Admin | Staff-only message |
 | `/kick <player\|UID> [reason...]` | Moderator | Disconnect without banning |
 | `/modban <player\|UID> [reason...]` | Moderator | 30-minute temporary ban |
-| `/mute <player\|UID> [minutes] [reason...]` | Moderator | Silence in-game chat (in-memory) |
+| `/mute <player\|UID> [minutes] [reason...]` | Moderator | Silence in-game chat |
 | `/unmute <player\|UID>` | Moderator | Remove a chat mute |
+| `/tempmute <player\|UID> <minutes> [reason...]` | Moderator | Timed mute |
+| `/tempunmute <player\|UID>` | Moderator | Remove a timed mute |
+| `/mutecheck <player\|UID>` | Moderator | Check mute status |
+| `/mutelist` | Moderator | List all active mutes |
+| `/mutereason <player\|UID> <reason>` | Moderator | Edit mute reason |
+| `/freeze <player\|UID>` | Moderator | Immobilise a player (toggle) |
+| `/clearchat` | Moderator | Flush chat history |
+| `/report <player\|UID> <reason>` | Moderator | Submit a player report |
 | `/history` | All | Show your own session and warning history |
 | `/whoami` | All | Show your own compound UID *(no admin required)* |
 
@@ -60,20 +91,49 @@ Install the optional **BanChatCommands** mod to get the full set of in-game chat
 
 ## REST API
 
-The mod starts a local HTTP server (default port **3000**) with the same endpoints as the original Node.js Tools/BanSystem:
+The mod starts a local HTTP server (default port **3000**) with a comprehensive REST API:
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Liveness probe |
 | `GET` | `/bans` | Active bans |
 | `GET` | `/bans/all` | All bans including expired |
+| `GET` | `/bans/search?name=` | Search bans by name |
 | `GET` | `/bans/check/:uid` | Check if a UID is banned |
+| `GET` | `/bans/export-csv` | Export bans as CSV |
 | `POST` | `/bans` | Create a ban |
+| `POST` | `/bans/ip` | Create an IP ban |
+| `POST` | `/bans/bulk` | Bulk ban operations |
 | `PATCH` | `/bans/:uid` | Update an existing ban (reason, duration, make permanent) |
 | `DELETE` | `/bans/:uid` | Remove by compound UID |
 | `DELETE` | `/bans/id/:id` | Remove by row ID |
+| `DELETE` | `/bans/ip/:ip` | Remove an IP ban |
 | `POST` | `/bans/prune` | Delete expired bans |
 | `POST` | `/bans/backup` | Create a database backup |
+| `GET` | `/players` | List player sessions |
+| `GET` | `/players/search?name=` | Search players by name |
+| `GET` | `/players/export-csv` | Export players as CSV |
+| `POST` | `/players/prune` | Prune old session records |
+| `GET` | `/warnings` | List warnings (optional `?uid=` filter) |
+| `GET` | `/warnings/export-csv` | Export warnings as CSV |
+| `POST` | `/warnings` | Issue a warning |
+| `DELETE` | `/warnings/:uid` | Clear all warnings for a UID |
+| `DELETE` | `/warnings/id/:id` | Remove a single warning |
+| `GET` | `/audit` | View audit log |
+| `GET` | `/audit/export-csv` | Export audit log as CSV |
+| `GET` | `/metrics` | Server statistics |
+| `GET` | `/metrics/prometheus` | Prometheus text format |
+| `GET` | `/reputation/:uid` | Player reputation score |
+| `POST` | `/appeals` | Submit a ban appeal |
+| `GET` | `/appeals` | List appeals |
+| `GET` | `/appeals/:id` | Get a single appeal |
+| `DELETE` | `/appeals/:id` | Dismiss an appeal |
+| `GET` | `/appeals/portal` | Self-service appeals HTML form |
+| `GET` | `/dashboard` | Unified admin dashboard SPA |
+| `GET` | `/scheduled` | List scheduled bans |
+| `POST` | `/scheduled` | Schedule a future ban |
+| `DELETE` | `/scheduled/:id` | Delete a scheduled ban |
+| `POST` | `/notes` | Add admin notes |
 
 Set `RestApiPort=0` in `DefaultBanSystem.ini` to disable the REST API entirely.
 Set `RestApiKey` to require an `X-Api-Key` header on all mutating requests.
@@ -110,11 +170,18 @@ RestApiPort=3000           ; HTTP REST port; set 0 to disable
 MaxBackups=5               ; max backup file count
 RestApiKey=                ; optional API key for mutating REST requests
 DiscordWebhookUrl=         ; optional Discord webhook for ban/warn/kick notifications
+bNotifyBanExpired=False    ; notify Discord when a temp ban expires
 AutoBanWarnCount=0         ; warnings before auto-ban (0 = disabled)
 AutoBanWarnMinutes=0       ; auto-ban duration in minutes (0 = permanent)
+WarnEscalationTiers=       ; multi-tier auto-ban thresholds
 SessionRetentionDays=0     ; session record age limit (0 = keep forever)
 BackupIntervalHours=0      ; recurring auto-backup interval (0 = disabled)
-bNotifyBanExpired=False    ; notify Discord when a temp ban expires
+PruneIntervalHours=0       ; auto-prune expired bans interval (0 = disabled)
+bPushEventsToWebSocket=False ; push ban events to WebSocket endpoint
+BanTemplates=              ; quick-ban presets
+AdminBanRateLimitCount=0   ; rate limit count (0 = disabled)
+AdminBanRateLimitMinutes=0 ; rate limit window
+ChatFilterAutoWarnThreshold=0 ; auto-warn on chat filter hits (0 = disabled)
 ```
 
 → See [Configuration](Docs/02-Configuration.md) for the full reference.

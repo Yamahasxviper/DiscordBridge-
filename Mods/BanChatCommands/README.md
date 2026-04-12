@@ -2,7 +2,7 @@
 
 **Version 1.1.0** | Server-only | Requires SML `^3.11.3` + BanSystem `^1.0.0` | Game build `>=416835`
 
-A server-only Satisfactory mod that adds a full set of ban and moderation commands to the in-game chat. Commands work from the Satisfactory in-game chat (for admin/moderator players) and from the server console.
+A server-only Satisfactory mod that adds 43 in-game chat commands for ban management, moderation, warnings, mutes, notes, freeze, reporting, scheduled bans, and more. Commands work from the Satisfactory in-game chat (for admin/moderator players) and from the server console.
 
 Requires the **BanSystem** mod.
 
@@ -23,17 +23,37 @@ Requires the **BanSystem** mod.
 | `/playerhistory <name\|UID>` | Admin | Search the session audit log |
 | `/banname <name> [reason...]` | Admin | Ban offline player by name + IP from session history |
 | `/reloadconfig` | Admin | Hot-reload admin/moderator config without restarting |
-| `/kick <player\|UID> [reason...]` | Moderator | Disconnect a player without banning them |
-| `/modban <player\|UID> [reason...]` | Moderator | 30-minute temporary ban (moderator shortcut) |
 | `/warn <player\|UID> <reason...>` | Admin | Issue a formal warning to a player |
 | `/warnings <player\|UID>` | Admin | List all recorded warnings for a player |
 | `/clearwarns <player\|UID>` | Admin | Remove all warnings for a player |
+| `/clearwarn <player\|UID> <id>` | Admin | Remove a specific warning by ID |
 | `/announce <message...>` | Admin | Broadcast a server-wide message (also posts to Discord) |
 | `/stafflist` | Admin | Show currently-online admins and moderators |
 | `/reason <UID>` | Admin | Show the ban reason for a UID |
-| `/history` | All | Show your own session and warning history |
-| `/mute <player\|UID> [minutes] [reason...]` | Moderator | Silence a player's chat (in-memory, clears on restart) |
+| `/banreason <UID> <new reason>` | Admin | Edit the ban reason for a UID |
+| `/note <player\|UID> <text>` | Admin | Add an admin note to a player |
+| `/notes <player\|UID>` | Admin | List all admin notes for a player |
+| `/duration <UID>` | Admin | Show remaining tempban duration |
+| `/extend <UID> <minutes>` | Admin | Extend a temporary ban duration |
+| `/appeal <UID>` | Admin | Manage ban appeals |
+| `/staffchat <message...>` | Admin | Staff-only message |
+| `/scheduleban <player\|UID> <timestamp> [reason]` | Admin | Schedule a future ban |
+| `/qban <template> <player\|UID>` | Admin | Apply a quick-ban template |
+| `/reputation <player\|UID>` | Admin | Show player reputation score |
+| `/bulkban <UID1> <UID2> ... [reason]` | Admin | Ban multiple players at once |
+| `/kick <player\|UID> [reason...]` | Moderator | Disconnect a player without banning them |
+| `/modban <player\|UID> [reason...]` | Moderator | 30-minute temporary ban (moderator shortcut) |
+| `/mute <player\|UID> [minutes] [reason...]` | Moderator | Silence a player's chat |
 | `/unmute <player\|UID>` | Moderator | Remove a chat mute |
+| `/tempmute <player\|UID> <minutes> [reason...]` | Moderator | Timed mute |
+| `/tempunmute <player\|UID>` | Moderator | Remove a timed mute |
+| `/mutecheck <player\|UID>` | Moderator | Check mute status |
+| `/mutelist` | Moderator | List all active mutes |
+| `/mutereason <player\|UID> <reason>` | Moderator | Edit mute reason |
+| `/freeze <player\|UID>` | Moderator | Immobilise a player (toggle) |
+| `/clearchat` | Moderator | Flush chat history (posts Discord embed) |
+| `/report <player\|UID> <reason>` | Moderator | Submit a player report |
+| `/history` | All | Show your own session and warning history |
 | `/whoami` | All | Show your own compound UID |
 
 ---
@@ -124,6 +144,48 @@ If a display name matches more than one connected player, the command lists all 
 
 ; Unmute a player
 /unmute SomePlayer
+
+; Staff-only message
+/staffchat Important mod meeting at 8pm
+
+; Freeze a player in place
+/freeze SomePlayer
+
+; Clear chat
+/clearchat
+
+; Report a player
+/report SomePlayer Suspected hacking
+
+; Schedule a ban for later
+/scheduleban SomePlayer 2025-06-01T12:00:00Z Repeated offender
+
+; Quick-ban using a template
+/qban griefing SomePlayer
+
+; Check player reputation
+/reputation SomePlayer
+
+; Bulk ban
+/bulkban EOS:aaa... EOS:bbb... Coordinated griefing
+
+; Show ban duration remaining
+/duration EOS:00020aed06f0a6958c3c067fb4b73d51
+
+; Extend a ban
+/extend EOS:00020aed06f0a6958c3c067fb4b73d51 1440
+
+; Add a note
+/note SomePlayer Previous verbal warning about language
+
+; List notes
+/notes SomePlayer
+
+; Clear a specific warning
+/clearwarn SomePlayer 3
+
+; Edit ban reason
+/banreason EOS:00020aed06f0a6958c3c067fb4b73d51 Updated: Griefing and harassment
 
 ; Server broadcast (also appears in Discord)
 /announce Server restarting in 5 minutes!

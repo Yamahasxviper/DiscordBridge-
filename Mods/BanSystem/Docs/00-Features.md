@@ -36,7 +36,10 @@ All bans are stored in a single JSON file (`bans.json`) that survives server res
 
 ## REST management API
 
-A local HTTP server (default port 3000) provides the same management endpoints as the original Node.js Tools/BanSystem. Use it to integrate with external tools, dashboards, or scripts without needing in-game access.
+A local HTTP server (default port 3000) provides 42 REST endpoints for
+comprehensive ban, warning, session, appeal, and audit management.
+Includes Prometheus metrics export, CSV exports, a self-service appeals portal,
+and a unified admin dashboard.
 
 → See [REST API](04-RestApi.md)
 
@@ -64,12 +67,15 @@ In addition to EOS PUID bans, BanSystem supports **IP address bans**. IP UIDs us
 
 ## In-game chat commands (BanChatCommands mod)
 
-The optional **BanChatCommands** mod provides a full set of in-game chat commands
+The optional **BanChatCommands** mod provides 43 in-game chat commands
 including `/ban`, `/tempban`, `/unban`, `/bancheck`, `/banlist`, `/linkbans`,
 `/unlinkbans`, `/playerhistory`, `/banname`, `/reloadconfig`, `/kick`, `/modban`,
-`/warn`, `/warnings`, `/clearwarns`, `/announce`, `/stafflist`, `/reason`,
-`/history`, `/mute`, `/unmute`, and `/whoami` directly from the Satisfactory
-in-game chat.
+`/warn`, `/warnings`, `/clearwarns`, `/clearwarn`, `/announce`, `/stafflist`,
+`/reason`, `/banreason`, `/history`, `/mute`, `/unmute`, `/tempmute`,
+`/tempunmute`, `/mutecheck`, `/mutelist`, `/mutereason`, `/note`, `/notes`,
+`/duration`, `/extend`, `/appeal`, `/staffchat`, `/freeze`, `/clearchat`,
+`/report`, `/scheduleban`, `/qban`, `/reputation`, `/bulkban`, and `/whoami`
+directly from the Satisfactory in-game chat.
 
 → See [In-Game Commands](03-ChatCommands.md)
 
@@ -100,6 +106,44 @@ configured Discord webhook whenever:
 - A **warning** is issued
 - A player is **kicked**
 - A temporary ban **expires** (opt-in via `bNotifyBanExpired=True`)
+- An **auto-escalation ban** is triggered by the warning system
+- A **ban appeal** is submitted or reviewed
+- A player is **blocked by geo-IP** filtering
+
+---
+
+## Scheduled bans
+
+The `ScheduledBanRegistry` subsystem allows scheduling bans for a future UTC
+timestamp. Scheduled bans are persisted to `scheduled_bans.json` and checked
+every 30 seconds. When the scheduled time arrives, the ban is automatically
+applied. Manage via `/scheduleban` in-game or `POST /scheduled` REST API.
+
+---
+
+## Ban appeals
+
+Players can submit ban appeals via the REST API (`POST /appeals`) or the
+self-service HTML portal at `/appeals/portal`. Appeals are tracked with
+submission timestamps and review status. Discord notifications are sent when
+an appeal is submitted or reviewed.
+
+---
+
+## Multi-server ban synchronisation
+
+`BanSyncClient` enables real-time ban synchronisation across multiple
+dedicated servers via WebSocket connections. Configure peer server URLs with
+`+PeerWebSocketUrls` in `DefaultBanSystem.ini`. Bans and unbans are
+automatically pushed to all connected peers.
+
+---
+
+## Player reputation scoring
+
+A composite reputation score is calculated for each player based on their
+warning count, ban history, and session behaviour. Query via `/reputation`
+in-game or `GET /reputation/:uid` REST API.
 
 ---
 

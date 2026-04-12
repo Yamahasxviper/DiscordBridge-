@@ -6,7 +6,7 @@ BanChatCommands is a server-only Satisfactory mod that adds a full set of ban ma
 
 ---
 
-## Twenty-three built-in commands
+## Forty-three built-in commands
 
 | Command | Role | Purpose |
 |---------|:----:|---------|
@@ -24,13 +24,33 @@ BanChatCommands is a server-only Satisfactory mod that adds a full set of ban ma
 | `/warn` | Admin | Issue a formal warning to a player |
 | `/warnings` | Admin | List all recorded warnings for a player |
 | `/clearwarns` | Admin | Remove all warnings for a player |
+| `/clearwarn` | Admin | Remove a specific warning by ID |
 | `/reason` | Admin | Show the ban reason for a UID |
+| `/banreason` | Admin | Edit the ban reason for a UID |
 | `/announce` | Admin | Broadcast a server-wide message (also posts to Discord) |
 | `/stafflist` | Admin | Show currently-online admins and moderators |
+| `/note` | Admin | Add an admin note to a player |
+| `/notes` | Admin | List all admin notes for a player |
+| `/duration` | Admin | Show remaining tempban duration |
+| `/extend` | Admin | Extend a temporary ban duration |
+| `/appeal` | Admin | Manage ban appeals |
+| `/staffchat` | Admin | Staff-only message |
+| `/scheduleban` | Admin | Schedule a future ban |
+| `/qban` | Admin | Apply a quick-ban template |
+| `/reputation` | Admin | Show player reputation score |
+| `/bulkban` | Admin | Ban multiple players at once |
 | `/kick` | Moderator | Disconnect a player without banning them |
 | `/modban` | Moderator | 30-minute temporary ban (moderator shortcut) |
-| `/mute` | Moderator | Silence a player's chat (in-memory, clears on restart) |
+| `/mute` | Moderator | Silence a player's chat |
 | `/unmute` | Moderator | Remove a chat mute |
+| `/tempmute` | Moderator | Timed mute |
+| `/tempunmute` | Moderator | Remove a timed mute |
+| `/mutecheck` | Moderator | Check mute status |
+| `/mutelist` | Moderator | List all active mutes |
+| `/mutereason` | Moderator | Edit mute reason |
+| `/freeze` | Moderator | Immobilise a player (toggle on/off) |
+| `/clearchat` | Moderator | Flush chat history (posts Discord embed) |
+| `/report` | Moderator | Submit a player report |
 | `/history` | All | Show your own session and warning history |
 | `/whoami` | All | Show your own compound UID — open to all players |
 
@@ -85,8 +105,10 @@ The `/playerhistory` command queries the **player session registry** provided by
 ## Moderator role
 
 In addition to full admins (`AdminEosPUIDs`), you can define a **moderator** tier
-(`ModeratorEosPUIDs`). Moderators can run `/kick`, `/modban`, `/mute`, and `/unmute`,
-but cannot run full admin commands like `/ban`, `/unban`, or `/warn`.
+(`ModeratorEosPUIDs`). Moderators can run `/kick`, `/modban`, `/mute`, `/unmute`,
+`/tempmute`, `/tempunmute`, `/mutecheck`, `/mutelist`, `/mutereason`, `/freeze`,
+`/clearchat`, and `/report`, but cannot run full admin commands like `/ban`, `/unban`,
+or `/warn`.
 
 ---
 
@@ -142,6 +164,88 @@ Requires admin.
 
 `/reason <UID>` shows the ban reason stored for a given compound UID. Useful when
 reviewing a ban list entry to recall why a player was banned. Requires admin.
+
+---
+
+## Player freeze with `/freeze`
+
+`/freeze <player>` toggles movement lock on a player. When frozen, the player
+cannot move but can still chat. Moderators can use this to temporarily hold a
+player while investigating an issue.
+
+---
+
+## Chat management with `/clearchat`
+
+`/clearchat` flushes the in-game chat history for all players and posts a
+notification embed to the bridged Discord channel. Requires moderator.
+
+---
+
+## Player reports with `/report`
+
+`/report <player> <reason>` submits a player report to the configured
+`ReportWebhookUrl` Discord webhook. Requires moderator.
+
+---
+
+## Scheduled bans with `/scheduleban`
+
+`/scheduleban <player> <timestamp> [reason]` schedules a ban to take effect
+at a future UTC timestamp. Uses BanSystem's `ScheduledBanRegistry`.
+
+---
+
+## Quick-ban templates with `/qban`
+
+`/qban <template> <player>` applies a pre-configured ban template.
+Templates are defined in BanSystem's config via `BanTemplates=`.
+
+---
+
+## Admin notes with `/note` / `/notes`
+
+`/note <player> <text>` adds a persistent admin note to a player's record.
+`/notes <player>` lists all notes. Useful for tracking previous interactions
+and warnings without issuing formal warnings.
+
+---
+
+## Ban duration management
+
+| Command | Purpose |
+|---------|---------|
+| `/duration <UID>` | Show remaining tempban time |
+| `/extend <UID> <minutes>` | Add time to a tempban |
+| `/banreason <UID> <reason>` | Edit ban reason |
+
+---
+
+## Mute management
+
+| Command | Purpose |
+|---------|---------|
+| `/mute <player> [minutes] [reason]` | Silence chat |
+| `/unmute <player>` | Remove mute |
+| `/tempmute <player> <minutes> [reason]` | Timed mute |
+| `/tempunmute <player>` | Remove timed mute |
+| `/mutecheck <player>` | Check mute status |
+| `/mutelist` | List all mutes |
+| `/mutereason <player> <reason>` | Edit mute reason |
+
+---
+
+## Player reputation with `/reputation`
+
+`/reputation <player>` shows a composite reputation score based on warnings,
+bans, and session behaviour.
+
+---
+
+## Bulk banning with `/bulkban`
+
+`/bulkban <UID1> <UID2> ... [reason]` bans multiple players in a single
+command. Useful for coordinated enforcement actions.
 
 ---
 
