@@ -137,11 +137,6 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 		return;
 
 	// Unsubscribe from the old provider.
-	if (CachedProvider && RawMessageDelegateHandle.IsValid())
-	{
-		CachedProvider->UnsubscribeRawMessage(RawMessageDelegateHandle);
-		RawMessageDelegateHandle.Reset();
-	}
 	if (CachedProvider && InteractionDelegateHandle.IsValid())
 	{
 		CachedProvider->UnsubscribeInteraction(InteractionDelegateHandle);
@@ -161,12 +156,6 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 	if (CachedProvider)
 	{
 		TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
-		RawMessageDelegateHandle = CachedProvider->SubscribeRawMessage(
-			[WeakThis](const TSharedPtr<FJsonObject>& MsgObj)
-			{
-				if (UBanDiscordSubsystem* Self = WeakThis.Get())
-					Self->OnRawDiscordMessage(MsgObj);
-			});
 
 		InteractionDelegateHandle = CachedProvider->SubscribeInteraction(
 			[WeakThis](const TSharedPtr<FJsonObject>& InteractionObj)
@@ -199,7 +188,7 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 					TEXT("**Submitted:** %s\n")
 					TEXT("**Reason:** %s\n\n")
 					TEXT("React with ✅ to approve (unban) or ❌ to deny (dismiss).\n")
-					TEXT("Use `!appealapprove %lld` or `!appealdeny %lld` to act."),
+					TEXT("Use `/appeal approve %lld` or `/appeal deny %lld` to act."),
 					Entry.Id, *Entry.Uid, *Contact, *SubmittedStr, *Reason,
 					Entry.Id, Entry.Id);
 
@@ -213,185 +202,6 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 		           ? TEXT("DISABLED (neither AdminRoleId nor ModeratorRoleId is set)")
 		           : TEXT("enabled"));
 	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Message routing
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UBanDiscordSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& MessageObj)
-{
-	if (!MessageObj.IsValid())
-		return;
-
-	// Commands are disabled when neither AdminRoleId nor ModeratorRoleId is configured.
-	if (Config.AdminRoleId.IsEmpty() && Config.ModeratorRoleId.IsEmpty())
-		return;
-
-	// All ban commands start with "!".
-	FString Content;
-	MessageObj->TryGetStringField(TEXT("content"), Content);
-	Content.TrimStartAndEndInline();
-	if (!Content.StartsWith(TEXT("!")))
-		return;
-
-	// Optional: restrict to a configured channel.
-	FString ChannelId;
-	MessageObj->TryGetStringField(TEXT("channel_id"), ChannelId);
-	if (!Config.BanCommandChannelId.IsEmpty() && ChannelId != Config.BanCommandChannelId)
-		return;
-
-	// Parse command token + arguments.
-	TArray<FString> Tokens;
-	Content.ParseIntoArrayWS(Tokens);
-	if (Tokens.IsEmpty())
-		return;
-
-	const FString Command = Tokens[0].ToLower();
-
-	// Only handle ban-related commands; let other commands pass through silently.
-	static const TArray<FString> KnownCommands = {
-		// ── Admin-only ────────────────────────────────────────────────────────
-		TEXT("!ban"), TEXT("!tempban"), TEXT("!unban"), TEXT("!unbanname"),
-		TEXT("!banname"), TEXT("!bancheck"), TEXT("!banreason"), TEXT("!banlist"),
-		TEXT("!linkbans"), TEXT("!unlinkbans"), TEXT("!extend"), TEXT("!duration"),
-		TEXT("!playerhistory"), TEXT("!warn"), TEXT("!warnings"),
-		TEXT("!clearwarns"), TEXT("!clearwarn"), TEXT("!note"), TEXT("!notes"),
-		TEXT("!reason"), TEXT("!mutereason"), TEXT("!reloadconfig"), TEXT("!appeals"),
-		TEXT("!dismissappeal"), TEXT("!appealapprove"), TEXT("!appealdeny"),
-		TEXT("!playtime"), TEXT("!say"), TEXT("!poll"),
-		// ── Moderator-or-admin ────────────────────────────────────────────────
-		TEXT("!kick"), TEXT("!modban"),
-		TEXT("!mute"), TEXT("!unmute"), TEXT("!tempmute"), TEXT("!tempunmute"),
-		TEXT("!mutecheck"), TEXT("!mutelist"),
-		TEXT("!announce"), TEXT("!stafflist"), TEXT("!staffchat"),
-	};
-	if (!KnownCommands.Contains(Command))
-		return;
-
-	// Determine the required permission level for this command.
-	// Moderator-level commands only need ModeratorRoleId; all others require AdminRoleId.
-	static const TArray<FString> ModeratorCommands = {
-		TEXT("!kick"), TEXT("!modban"),
-		TEXT("!mute"), TEXT("!unmute"), TEXT("!tempmute"), TEXT("!tempunmute"),
-		TEXT("!mutecheck"), TEXT("!mutelist"),
-		TEXT("!announce"), TEXT("!stafflist"), TEXT("!staffchat"),
-	};
-	const bool bNeedsAdminOnly = !ModeratorCommands.Contains(Command);
-
-	// Verify the sender holds the required role.
-	TArray<FString> MemberRoles = ExtractMemberRoles(MessageObj);
-	const bool bAuthorised = bNeedsAdminOnly
-		? IsAdminMember(MemberRoles)
-		: IsModeratorMember(MemberRoles);
-
-	if (!bAuthorised)
-	{
-		if (CachedProvider)
-		{
-			Respond(ChannelId,
-				bNeedsAdminOnly
-				? TEXT("❌ You do not have permission to use that command. Admin role required.")
-				: TEXT("❌ You do not have permission to use that command. Moderator role required."));
-		}
-		return;
-	}
-
-	// Build the argument list (everything after the command token).
-	TArray<FString> Args;
-	for (int32 i = 1; i < Tokens.Num(); ++i)
-		Args.Add(Tokens[i]);
-
-	const FString SenderName = ExtractSenderName(MessageObj);
-
-	if (Command == TEXT("!ban"))
-		HandleBanCommand(Args, ChannelId, SenderName, /*bTemporary=*/false);
-	else if (Command == TEXT("!tempban"))
-		HandleBanCommand(Args, ChannelId, SenderName, /*bTemporary=*/true);
-	else if (Command == TEXT("!unban"))
-		HandleUnbanCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!unbanname"))
-		HandleUnbanNameCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!banname"))
-		HandleBanNameCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!bancheck"))
-		HandleBanCheckCommand(Args, ChannelId);
-	else if (Command == TEXT("!banreason"))
-		HandleBanReasonCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!banlist"))
-		HandleBanListCommand(Args, ChannelId);
-	else if (Command == TEXT("!linkbans"))
-		HandleLinkBansCommand(Args, ChannelId, SenderName, /*bLink=*/true);
-	else if (Command == TEXT("!unlinkbans"))
-		HandleLinkBansCommand(Args, ChannelId, SenderName, /*bLink=*/false);
-	else if (Command == TEXT("!extend"))
-		HandleExtendBanCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!duration"))
-		HandleDurationCommand(Args, ChannelId);
-	else if (Command == TEXT("!playerhistory"))
-		HandlePlayerHistoryCommand(Args, ChannelId);
-	else if (Command == TEXT("!warn"))
-		HandleWarnCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!warnings"))
-		HandleWarningsCommand(Args, ChannelId);
-	else if (Command == TEXT("!clearwarns"))
-		HandleClearWarnsCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!clearwarn"))
-		HandleClearWarnByIdCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!note"))
-		HandleNoteCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!notes"))
-		HandleNotesCommand(Args, ChannelId);
-	else if (Command == TEXT("!reason"))
-		HandleReasonCommand(Args, ChannelId);
-	else if (Command == TEXT("!mutereason"))
-		HandleMuteReasonCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!reloadconfig"))
-		HandleReloadConfigCommand(ChannelId, SenderName);
-	else if (Command == TEXT("!appeals"))
-		HandleAppealsCommand(ChannelId);
-	else if (Command == TEXT("!dismissappeal"))
-		HandleDismissAppealCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!appealapprove"))
-		HandleAppealApproveCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!appealdeny"))
-		HandleAppealDenyCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!kick"))
-		HandleKickCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!modban"))
-		HandleModBanCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!mute"))
-		HandleMuteCommand(Args, ChannelId, SenderName, /*bMute=*/true);
-	else if (Command == TEXT("!unmute"))
-		HandleMuteCommand(Args, ChannelId, SenderName, /*bMute=*/false);
-	else if (Command == TEXT("!tempmute"))
-		HandleTempMuteCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!tempunmute"))
-		HandleTempUnmuteCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!mutecheck"))
-		HandleMuteCheckCommand(Args, ChannelId);
-	else if (Command == TEXT("!mutelist"))
-		HandleMuteListCommand(ChannelId);
-	else if (Command == TEXT("!announce"))
-		HandleAnnounceCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!stafflist"))
-		HandleStaffListCommand(ChannelId);
-	else if (Command == TEXT("!staffchat"))
-		HandleStaffChatCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!playtime"))
-		HandlePlaytimeCommand(Args, ChannelId);
-	else if (Command == TEXT("!say"))
-		HandleSayCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!poll"))
-		HandlePollCommand(Args, ChannelId);
-	else if (Command == TEXT("!scheduleban"))
-		HandleScheduleBanCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!qban"))
-		HandleQBanCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!reputation"))
-		HandleReputationCommand(Args, ChannelId);
-	else if (Command == TEXT("!bulkban"))
-		HandleBulkBanCommand(Args, ChannelId, SenderName);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
