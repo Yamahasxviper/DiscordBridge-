@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/CriticalSection.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "BanTypes.h"
 #include "PlayerWarningRegistry.generated.h"
