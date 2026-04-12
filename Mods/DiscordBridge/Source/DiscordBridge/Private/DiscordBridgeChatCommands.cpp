@@ -126,3 +126,46 @@ EExecutionStatus AInGameWhitelistChatCommand::ExecuteCommand_Implementation(
 	Bridge->HandleInGameWhitelistCommand(SubCommand);
 	return EExecutionStatus::COMPLETED;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADiscordCommandsListChatCommand  /commands
+// ─────────────────────────────────────────────────────────────────────────────
+
+ADiscordCommandsListChatCommand::ADiscordCommandsListChatCommand()
+{
+	CommandName          = TEXT("commands");
+	MinNumberOfArguments = 0;
+	bOnlyUsableByPlayer  = true;
+	Usage = NSLOCTEXT("DiscordBridge", "CommandsListUsage",
+		"/commands  — List all available DiscordBridge in-game commands");
+}
+
+EExecutionStatus ADiscordCommandsListChatCommand::ExecuteCommand_Implementation(
+	UCommandSender* Sender,
+	const TArray<FString>& Arguments,
+	const FString& Label)
+{
+	UDiscordBridgeSubsystem* Bridge = GetBridge(this);
+
+	Sender->SendChatMessage(
+		TEXT("[DiscordBridge] Available commands:"),
+		FLinearColor::White);
+
+	Sender->SendChatMessage(
+		TEXT("  /discord           — Show the Discord server invite link"),
+		FLinearColor::White);
+
+	// Only advertise /verify when verification is enabled on this server.
+	if (Bridge && Bridge->IsVerificationEnabled())
+	{
+		Sender->SendChatMessage(
+			TEXT("  /verify <code>     — Link your Discord account (use /whitelist link in Discord first)"),
+			FLinearColor::White);
+	}
+
+	Sender->SendChatMessage(
+		TEXT("  /commands          — Show this command list"),
+		FLinearColor::White);
+
+	return EExecutionStatus::COMPLETED;
+}

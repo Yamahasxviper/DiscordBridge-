@@ -660,6 +660,24 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	FString WelcomeMessageDM;
 
 	/**
+	 * In-game chat message sent privately to each player when they successfully
+	 * join the server (after whitelist check passes).  Use this to advertise the
+	 * available in-game commands such as /discord and /verify.
+	 *
+	 * The message is sent only to the joining player (not broadcast to all).
+	 * If the SML Remote Call Object is not yet available for the player the
+	 * message is silently skipped rather than broadcast to everyone.
+	 *
+	 * Leave empty (default) to disable the on-join hint.
+	 *
+	 * Placeholder: %PlayerName% – the in-game name of the joining player.
+	 *
+	 * Example:
+	 *   JoinHintMessage=Welcome %PlayerName%! Type /discord for our Discord link. Type /commands to see available commands.
+	 */
+	FString JoinHintMessage;
+
+	/**
 	 * Loads configuration from the primary mod-folder INI, falling back to the
 	 * Saved/Config backup when credentials are missing.  If the primary file does
 	 * not exist it is created with default values.  On every server start, an

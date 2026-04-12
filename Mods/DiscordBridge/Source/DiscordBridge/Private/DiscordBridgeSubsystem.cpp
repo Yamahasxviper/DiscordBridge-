@@ -9,6 +9,9 @@
 #include "BanDiscordNotifier.h"
 #include "PlayerWarningRegistry.h"
 
+#include "Player/SMLRemoteCallObject.h"
+#include "FGPlayerController.h"
+
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
@@ -2523,12 +2526,14 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 	if (!FWhitelistManager::IsEnabled())
 	{
 		SendPlayerJoinNotification(PlayerName, ResolvedEOSProductUserId, ResolvedIpAddress);
+		SendJoinHintToPlayer(Controller, PlayerName);
 		return;
 	}
 
 	if (FWhitelistManager::IsWhitelisted(PlayerName))
 	{
 		SendPlayerJoinNotification(PlayerName, ResolvedEOSProductUserId, ResolvedIpAddress);
+		SendJoinHintToPlayer(Controller, PlayerName);
 		return;
 	}
 
@@ -2544,6 +2549,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 		       TEXT("DiscordBridge Whitelist: allowing '%s' – matches a Discord member with WhitelistRoleId."),
 		       *PlayerName);
 		SendPlayerJoinNotification(PlayerName, ResolvedEOSProductUserId, ResolvedIpAddress);
+		SendJoinHintToPlayer(Controller, PlayerName);
 		return;
 	}
 
@@ -3725,6 +3731,40 @@ void UDiscordBridgeSubsystem::SendGameChatStatusMessage(const FString& Message)
 	ChatMsg.MessageText   = FText::FromString(Message);
 
 	ChatManager->BroadcastChatMessage(ChatMsg);
+}
+
+bool UDiscordBridgeSubsystem::IsVerificationEnabled() const
+{
+	return Config.bWhitelistVerificationEnabled;
+}
+
+void UDiscordBridgeSubsystem::SendJoinHintToPlayer(APlayerController* Controller,
+                                                    const FString& PlayerName)
+{
+	if (!Controller || Config.JoinHintMessage.IsEmpty())
+	{
+		return;
+	}
+
+	AFGPlayerController* FGController = Cast<AFGPlayerController>(Controller);
+	if (!FGController)
+	{
+		return;
+	}
+
+	USMLRemoteCallObject* RCO =
+		FGController->GetRemoteCallObjectOfClass<USMLRemoteCallObject>();
+	if (!RCO)
+	{
+		// RCO not yet available (can happen if called before the controller fully
+		// initialises). Silently skip rather than broadcasting to all players.
+		return;
+	}
+
+	FString HintText = Config.JoinHintMessage;
+	HintText = HintText.Replace(TEXT("%PlayerName%"), *PlayerName);
+
+	RCO->SendChatMessage(HintText, FLinearColor::White);
 }
 
 void UDiscordBridgeSubsystem::HandleInGameVerify(const FString& PlayerName, const FString& Code)
