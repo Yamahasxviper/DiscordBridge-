@@ -203,7 +203,7 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 					Entry.Id, *Entry.Uid, *Contact, *SubmittedStr, *Reason,
 					Entry.Id, Entry.Id);
 
-				Self->CachedProvider->SendDiscordChannelMessage(ChannelId, Message);
+				Self->Respond(ChannelId, Message);
 			});
 
 		UE_LOG(LogBanDiscord, Log,
@@ -289,8 +289,7 @@ void UBanDiscordSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Me
 	{
 		if (CachedProvider)
 		{
-			CachedProvider->SendDiscordChannelMessage(
-				ChannelId,
+			Respond(ChannelId,
 				bNeedsAdminOnly
 				? TEXT("❌ You do not have permission to use that command. Admin role required.")
 				: TEXT("❌ You do not have permission to use that command. Moderator role required."));
@@ -450,6 +449,18 @@ bool UBanDiscordSubsystem::IsModeratorMember(const TArray<FString>& Roles) const
 	return Config.IsModeratorRole(Roles);
 }
 
+void UBanDiscordSubsystem::Respond(const FString& ChannelId, const FString& Message)
+{
+	if (!CachedProvider) return;
+	// Always post to the command channel so the result is visible to all mods.
+	if (!ChannelId.IsEmpty())
+		Respond(ChannelId, Message);
+	// Also send as an ephemeral follow-up to the slash command interaction so
+	// the admin sees the result inline even if they missed the channel message.
+	if (!PendingInteractionToken.IsEmpty())
+		CachedProvider->FollowUpInteraction(PendingInteractionToken, Message, /*bEphemeral=*/true);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Target resolution
 // ─────────────────────────────────────────────────────────────────────────────
@@ -564,10 +575,27 @@ bool UBanDiscordSubsystem::ResolveTarget(const FString& Arg,
 
 	if (Matches.IsEmpty())
 	{
-		OutErrorMsg = FString::Printf(
-			TEXT("❌ No player found matching `%s`. "
-			     "Use an EOS PUID (32-char hex or `EOS:<puid>`) to target this player."),
-			*Arg);
+		const int32 TotalRecords = Registry->GetCount();
+		if (TotalRecords == 0)
+		{
+			OutErrorMsg = FString::Printf(
+				TEXT("❌ No player found matching `%s`.\n"
+				     "⚠️ The session registry is **empty** — no players have connected to the server "
+				     "since BanSystem was installed.\n"
+				     "💡 To ban a player who has not yet connected, use their EOS PUID directly:\n"
+				     "`/ban add player:<32-char-hex-PUID>`\n"
+				     "Find the PUID in the server log (`BanEnforcer: cached EOS PUID …`) or your "
+				     "server admin panel."),
+				*Arg);
+		}
+		else
+		{
+			OutErrorMsg = FString::Printf(
+				TEXT("❌ No player found matching `%s` in the session registry (%d record(s)).\n"
+				     "Check the spelling or use the player's EOS PUID directly:\n"
+				     "`/ban add player:<32-char-hex-PUID>`"),
+				*Arg, TotalRecords);
+		}
 		return false;
 	}
 
@@ -612,8 +640,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
 	if (!DB)
 	{
-		CachedProvider->SendDiscordChannelMessage(
-			ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ BanSystem is not available on this server."));
 		return;
 	}
@@ -627,7 +654,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 		const FString Usage = bTemporary
 			? TEXT("Usage: `!tempban <PUID|name> <minutes> [reason]`")
 			: TEXT("Usage: `!ban <PUID|name> [reason]`");
-		CachedProvider->SendDiscordChannelMessage(ChannelId, Usage);
+		Respond(ChannelId, Usage);
 		return;
 	}
 
@@ -635,7 +662,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
@@ -646,8 +673,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 	{
 		if (!FDefaultValueHelper::ParseInt(Args[1], DurationMinutes) || DurationMinutes <= 0)
 		{
-			CachedProvider->SendDiscordChannelMessage(
-				ChannelId,
+			Respond(ChannelId,
 				TEXT("❌ `<minutes>` must be a positive integer.\n"
 				     "Usage: `!tempban <PUID|name> <minutes> [reason]`"));
 			return;
@@ -679,8 +705,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 
 	if (!DB->AddBan(Entry))
 	{
-		CachedProvider->SendDiscordChannelMessage(
-			ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ Failed to write the ban to the database. Check server logs."));
 		return;
 	}
@@ -712,7 +737,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 	UE_LOG(LogBanDiscord, Log, TEXT("BanDiscordSubsystem: %s banned %s (%s). Reason: %s"),
 	       *SenderName, *DisplayName, *Uid, *Entry.Reason);
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
 }
 
@@ -729,16 +754,14 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
 	if (!DB)
 	{
-		CachedProvider->SendDiscordChannelMessage(
-			ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ BanSystem is not available on this server."));
 		return;
 	}
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(
-			ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!unban <PUID>`\nPUID can be a 32-char hex string or `EOS:<puid>`."));
 		return;
 	}
@@ -747,7 +770,7 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
@@ -765,7 +788,7 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 		       TEXT("BanDiscordSubsystem: %s issued !unban for %s (%s) — no record in DB (already clear)."),
 		       *SenderName, *DisplayName, *Uid);
 
-		CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+		Respond(ChannelId, Msg);
 		PostModerationLog(Msg);
 		return;
 	}
@@ -778,7 +801,7 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 	       TEXT("BanDiscordSubsystem: %s unbanned %s (%s)."),
 	       *SenderName, *DisplayName, *Uid);
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
 }
 
@@ -794,16 +817,14 @@ void UBanDiscordSubsystem::HandleBanCheckCommand(const TArray<FString>& Args,
 	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
 	if (!DB)
 	{
-		CachedProvider->SendDiscordChannelMessage(
-			ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ BanSystem is not available on this server."));
 		return;
 	}
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(
-			ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!bancheck <PUID|name>`"));
 		return;
 	}
@@ -811,7 +832,7 @@ void UBanDiscordSubsystem::HandleBanCheckCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
@@ -863,7 +884,7 @@ void UBanDiscordSubsystem::HandleBanCheckCommand(const TArray<FString>& Args,
 		}
 	}
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -878,8 +899,7 @@ void UBanDiscordSubsystem::HandleBanListCommand(const TArray<FString>& Args,
 	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
 	if (!DB)
 	{
-		CachedProvider->SendDiscordChannelMessage(
-			ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ BanSystem is not available on this server."));
 		return;
 	}
@@ -889,7 +909,7 @@ void UBanDiscordSubsystem::HandleBanListCommand(const TArray<FString>& Args,
 
 	if (ActiveBans.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, TEXT("✅ No active bans."));
+		Respond(ChannelId, TEXT("✅ No active bans."));
 		return;
 	}
 
@@ -947,7 +967,7 @@ void UBanDiscordSubsystem::HandleBanListCommand(const TArray<FString>& Args,
 		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
 	}
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -961,8 +981,7 @@ void UBanDiscordSubsystem::HandlePlayerHistoryCommand(const TArray<FString>& Arg
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(
-			ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!playerhistory <name|PUID|IP>`"));
 		return;
 	}
@@ -970,8 +989,7 @@ void UBanDiscordSubsystem::HandlePlayerHistoryCommand(const TArray<FString>& Arg
 	UPlayerSessionRegistry* Registry = BanDiscordHelpers::GetRegistry(this);
 	if (!Registry)
 	{
-		CachedProvider->SendDiscordChannelMessage(
-			ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ PlayerSessionRegistry is not available on this server."));
 		return;
 	}
@@ -1007,8 +1025,7 @@ void UBanDiscordSubsystem::HandlePlayerHistoryCommand(const TArray<FString>& Arg
 
 	if (Results.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(
-			ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("⚠️ No session records found for `%s`."), *Query));
 		return;
 	}
@@ -1049,7 +1066,7 @@ void UBanDiscordSubsystem::HandlePlayerHistoryCommand(const TArray<FString>& Arg
 	if (Msg.Len() > 1990)
 		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1064,14 +1081,14 @@ void UBanDiscordSubsystem::HandleKickCommand(const TArray<FString>& Args,
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, TEXT("Usage: `!kick <PUID|name> [reason]`"));
+		Respond(ChannelId, TEXT("Usage: `!kick <PUID|name> [reason]`"));
 		return;
 	}
 
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
@@ -1081,7 +1098,7 @@ void UBanDiscordSubsystem::HandleKickCommand(const TArray<FString>& Args,
 	UWorld* World = GI ? GI->GetWorld() : nullptr;
 	if (!World)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ No active game world found. Is the server running?"));
 		return;
 	}
@@ -1093,12 +1110,12 @@ void UBanDiscordSubsystem::HandleKickCommand(const TArray<FString>& Args,
 		const FString KickMsg = FString::Printf(
 			TEXT("✅ Kicked **%s** (`%s`).\nReason: %s\nKicked by: %s"),
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *Reason, *SenderName);
-		CachedProvider->SendDiscordChannelMessage(ChannelId, KickMsg);
+		Respond(ChannelId, KickMsg);
 		PostModerationLog(KickMsg);
 	}
 	else
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("⚠️ Player **%s** (`%s`) is not currently connected."),
 				*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
 	}
@@ -1117,7 +1134,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			bMute
 			? TEXT("Usage: `!mute <PUID|name> [minutes] [reason]`")
 			: TEXT("Usage: `!unmute <PUID|name>`"));
@@ -1127,7 +1144,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
@@ -1135,7 +1152,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 	UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
 	if (!MuteReg)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ Mute commands require the BanChatCommands mod to be installed."));
 		return;
 	}
@@ -1144,7 +1161,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 	{
 		if (!MuteReg->UnmutePlayer(Uid))
 		{
-			CachedProvider->SendDiscordChannelMessage(ChannelId,
+			Respond(ChannelId,
 				FString::Printf(TEXT("⚠️ **%s** (`%s`) is not currently muted."),
 					*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
 			return;
@@ -1152,7 +1169,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 		const FString UnmuteMsg = FString::Printf(
 			TEXT("✅ Unmuted **%s** (`%s`).\nUnmuted by: %s"),
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
-		CachedProvider->SendDiscordChannelMessage(ChannelId, UnmuteMsg);
+		Respond(ChannelId, UnmuteMsg);
 		PostModerationLog(UnmuteMsg);
 		return;
 	}
@@ -1182,7 +1199,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 	const FString MuteMsg = FString::Printf(
 		TEXT("🔇 Muted **%s** (`%s`)%s.\nReason: %s\nMuted by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *DurStr, *Reason, *SenderName);
-	CachedProvider->SendDiscordChannelMessage(ChannelId, MuteMsg);
+	Respond(ChannelId, MuteMsg);
 	PostModerationLog(MuteMsg);
 }
 
@@ -1198,14 +1215,14 @@ void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
 
 	if (Args.Num() < 2)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, TEXT("Usage: `!warn <PUID|name> <reason...>`"));
+		Respond(ChannelId, TEXT("Usage: `!warn <PUID|name> <reason...>`"));
 		return;
 	}
 
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
@@ -1215,7 +1232,7 @@ void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
 	UPlayerWarningRegistry* WarnReg = GI ? GI->GetSubsystem<UPlayerWarningRegistry>() : nullptr;
 	if (!WarnReg)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ The warn command requires the BanSystem mod to be installed."));
 		return;
 	}
@@ -1228,7 +1245,7 @@ void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
 	const FString WarnMsg = FString::Printf(
 		TEXT("⚠️ Warned **%s** (`%s`).\nReason: %s\nTotal warnings: **%d**\nWarned by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *Reason, WarnCount, *SenderName);
-	CachedProvider->SendDiscordChannelMessage(ChannelId, WarnMsg);
+	Respond(ChannelId, WarnMsg);
 	PostModerationLog(WarnMsg);
 }
 
@@ -1244,7 +1261,7 @@ void UBanDiscordSubsystem::HandleAnnounceCommand(const TArray<FString>& Args,
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, TEXT("Usage: `!announce <message...>`"));
+		Respond(ChannelId, TEXT("Usage: `!announce <message...>`"));
 		return;
 	}
 
@@ -1254,7 +1271,7 @@ void UBanDiscordSubsystem::HandleAnnounceCommand(const TArray<FString>& Args,
 	UWorld* World = GI ? GI->GetWorld() : nullptr;
 	if (!World)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ No active game world found. Is the server running?"));
 		return;
 	}
@@ -1268,7 +1285,7 @@ void UBanDiscordSubsystem::HandleAnnounceCommand(const TArray<FString>& Args,
 	const FString AnnounceConfirm = FString::Printf(
 		TEXT("📢 Announcement sent to all in-game players:\n> %s\nSent by: %s"),
 		*Message, *SenderName);
-	CachedProvider->SendDiscordChannelMessage(ChannelId, AnnounceConfirm);
+	Respond(ChannelId, AnnounceConfirm);
 	PostModerationLog(AnnounceConfirm);
 }
 
@@ -1285,14 +1302,14 @@ void UBanDiscordSubsystem::HandleUnbanNameCommand(const TArray<FString>& Args,
 	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
 	if (!DB)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ BanSystem is not available on this server."));
 		return;
 	}
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!unbanname <name_substring>`"));
 		return;
 	}
@@ -1300,7 +1317,7 @@ void UBanDiscordSubsystem::HandleUnbanNameCommand(const TArray<FString>& Args,
 	UPlayerSessionRegistry* Registry = BanDiscordHelpers::GetRegistry(this);
 	if (!Registry)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ PlayerSessionRegistry is not available."));
 		return;
 	}
@@ -1310,7 +1327,7 @@ void UBanDiscordSubsystem::HandleUnbanNameCommand(const TArray<FString>& Args,
 
 	if (Matches.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("❌ No session record found for name `%s`."), *NameQuery));
 		return;
 	}
@@ -1325,7 +1342,7 @@ void UBanDiscordSubsystem::HandleUnbanNameCommand(const TArray<FString>& Args,
 		}
 		if (Matches.Num() > Show)
 			List += FString::Printf(TEXT(", +%d more"), Matches.Num() - Show);
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("❌ Ambiguous name `%s` — %d matches: %s. Use `!unban <PUID>` instead."),
 				*NameQuery, Matches.Num(), *List));
 		return;
@@ -1348,7 +1365,7 @@ void UBanDiscordSubsystem::HandleUnbanNameCommand(const TArray<FString>& Args,
 
 	if (Removed == 0)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("⚠️ No active ban found for **%s** (`%s`)."),
 				*BanDiscordHelpers::EscapeMarkdown(Record.DisplayName), *Record.Uid));
 		return;
@@ -1362,7 +1379,7 @@ void UBanDiscordSubsystem::HandleUnbanNameCommand(const TArray<FString>& Args,
 		*SenderName);
 	UE_LOG(LogBanDiscord, Log, TEXT("BanDiscordSubsystem: %s unbanname %s (%s)."),
 		*SenderName, *Record.DisplayName, *Record.Uid);
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
 }
 
@@ -1379,14 +1396,14 @@ void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
 	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
 	if (!DB)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ BanSystem is not available on this server."));
 		return;
 	}
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!banname <name_substring> [reason]`"));
 		return;
 	}
@@ -1394,7 +1411,7 @@ void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
 	UPlayerSessionRegistry* Registry = BanDiscordHelpers::GetRegistry(this);
 	if (!Registry)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ PlayerSessionRegistry is not available."));
 		return;
 	}
@@ -1402,7 +1419,7 @@ void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
 	TArray<FPlayerSessionRecord> Matches = Registry->FindByName(Args[0]);
 	if (Matches.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("❌ No session record found for name `%s`."), *Args[0]));
 		return;
 	}
@@ -1417,7 +1434,7 @@ void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
 		}
 		if (Matches.Num() > Show)
 			List += FString::Printf(TEXT(", +%d more"), Matches.Num() - Show);
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("❌ Ambiguous name `%s` — %d matches: %s. Use `!ban <PUID>` instead."),
 				*Args[0], Matches.Num(), *List));
 		return;
@@ -1481,7 +1498,7 @@ void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
 
 	UE_LOG(LogBanDiscord, Log, TEXT("BanDiscordSubsystem: %s banname %s (%s). Reason: %s"),
 		*SenderName, *Record.DisplayName, *Record.Uid, *Reason);
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
 }
 
@@ -1498,14 +1515,14 @@ void UBanDiscordSubsystem::HandleBanReasonCommand(const TArray<FString>& Args,
 	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
 	if (!DB)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ BanSystem is not available on this server."));
 		return;
 	}
 
 	if (Args.Num() < 2)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!banreason <PUID|name> <new reason...>`"));
 		return;
 	}
@@ -1513,14 +1530,14 @@ void UBanDiscordSubsystem::HandleBanReasonCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
 	FBanEntry Entry;
 	if (!DB->GetBanByUid(Uid, Entry))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("⚠️ No ban record found for **%s** (`%s`)."),
 				*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
 		return;
@@ -1534,7 +1551,7 @@ void UBanDiscordSubsystem::HandleBanReasonCommand(const TArray<FString>& Args,
 		TEXT("✅ Ban reason updated for **%s** (`%s`).\nOld reason: %s\nNew reason: %s\nUpdated by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid,
 		*OldReason, *Entry.Reason, *SenderName);
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
 }
 
@@ -1552,7 +1569,7 @@ void UBanDiscordSubsystem::HandleLinkBansCommand(const TArray<FString>& Args,
 	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
 	if (!DB)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ BanSystem is not available on this server."));
 		return;
 	}
@@ -1560,7 +1577,7 @@ void UBanDiscordSubsystem::HandleLinkBansCommand(const TArray<FString>& Args,
 	const FString CmdName = bLink ? TEXT("!linkbans") : TEXT("!unlinkbans");
 	if (Args.Num() < 2)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("Usage: `%s <UID1> <UID2>`"), *CmdName));
 		return;
 	}
@@ -1570,18 +1587,18 @@ void UBanDiscordSubsystem::HandleLinkBansCommand(const TArray<FString>& Args,
 	FString Uid2, Name2, Err2;
 	if (!ResolveTarget(Args[0], Uid1, Name1, Err1))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, Err1);
+		Respond(ChannelId, Err1);
 		return;
 	}
 	if (!ResolveTarget(Args[1], Uid2, Name2, Err2))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, Err2);
+		Respond(ChannelId, Err2);
 		return;
 	}
 
 	if (Uid1.Equals(Uid2, ESearchCase::IgnoreCase))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ Both UIDs are the same; no change made."));
 		return;
 	}
@@ -1589,7 +1606,7 @@ void UBanDiscordSubsystem::HandleLinkBansCommand(const TArray<FString>& Args,
 	const bool bOk = bLink ? DB->LinkBans(Uid1, Uid2) : DB->UnlinkBans(Uid1, Uid2);
 	if (!bOk)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			bLink
 			? TEXT("⚠️ Could not link bans. Ensure both UIDs have ban records.")
 			: TEXT("⚠️ No link found between those UIDs."));
@@ -1600,7 +1617,7 @@ void UBanDiscordSubsystem::HandleLinkBansCommand(const TArray<FString>& Args,
 	const FString Msg = FString::Printf(
 		TEXT("✅ Successfully %s `%s` and `%s`.\nBy: %s"),
 		*Verb, *Uid1, *Uid2, *SenderName);
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
 }
 
@@ -1617,14 +1634,14 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
 	if (!DB)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ BanSystem is not available on this server."));
 		return;
 	}
 
 	if (Args.Num() < 2)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!extend <PUID|name> <minutes>`"));
 		return;
 	}
@@ -1632,14 +1649,14 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
 	int32 Minutes = 0;
 	if (!FDefaultValueHelper::ParseInt(Args[1], Minutes) || Minutes <= 0)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ `<minutes>` must be a positive integer."));
 		return;
 	}
@@ -1647,7 +1664,7 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 	FBanEntry Entry;
 	if (!DB->IsCurrentlyBannedByAnyId(Uid, Entry))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("⚠️ **%s** (`%s`) is not currently banned."),
 				*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
 		return;
@@ -1655,7 +1672,7 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 
 	if (Entry.bIsPermanent)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("⚠️ **%s** has a **permanent** ban — cannot extend."),
 				*BanDiscordHelpers::EscapeMarkdown(DisplayName)));
 		return;
@@ -1669,7 +1686,7 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, Minutes,
 		*Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")),
 		*SenderName);
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
 }
 
@@ -1685,14 +1702,14 @@ void UBanDiscordSubsystem::HandleDurationCommand(const TArray<FString>& Args,
 	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
 	if (!DB)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ BanSystem is not available on this server."));
 		return;
 	}
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!duration <PUID|name>`"));
 		return;
 	}
@@ -1700,14 +1717,14 @@ void UBanDiscordSubsystem::HandleDurationCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
 	FBanEntry Entry;
 	if (!DB->IsCurrentlyBannedByAnyId(Uid, Entry))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("✅ **%s** (`%s`) is not currently banned."),
 				*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
 		return;
@@ -1737,7 +1754,7 @@ void UBanDiscordSubsystem::HandleDurationCommand(const TArray<FString>& Args,
 		}
 	}
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId,
+	Respond(ChannelId,
 		FString::Printf(TEXT("⏱️ **%s** (`%s`) — ban duration: %s"),
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *DurStr));
 }
@@ -1753,7 +1770,7 @@ void UBanDiscordSubsystem::HandleWarningsCommand(const TArray<FString>& Args,
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!warnings <PUID|name>`"));
 		return;
 	}
@@ -1761,7 +1778,7 @@ void UBanDiscordSubsystem::HandleWarningsCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
@@ -1769,7 +1786,7 @@ void UBanDiscordSubsystem::HandleWarningsCommand(const TArray<FString>& Args,
 	UPlayerWarningRegistry* WarnReg = GI ? GI->GetSubsystem<UPlayerWarningRegistry>() : nullptr;
 	if (!WarnReg)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ The warnings system requires the BanSystem mod to be installed."));
 		return;
 	}
@@ -1777,7 +1794,7 @@ void UBanDiscordSubsystem::HandleWarningsCommand(const TArray<FString>& Args,
 	TArray<FWarningEntry> Warnings = WarnReg->GetWarningsForUid(Uid);
 	if (Warnings.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("✅ No warnings on record for **%s** (`%s`)."),
 				*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
 		return;
@@ -1811,7 +1828,7 @@ void UBanDiscordSubsystem::HandleWarningsCommand(const TArray<FString>& Args,
 	FString Msg = Header + Body;
 	if (Msg.Len() > 1990)
 		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1826,7 +1843,7 @@ void UBanDiscordSubsystem::HandleClearWarnsCommand(const TArray<FString>& Args,
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!clearwarns <PUID|name>`"));
 		return;
 	}
@@ -1834,7 +1851,7 @@ void UBanDiscordSubsystem::HandleClearWarnsCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
@@ -1842,7 +1859,7 @@ void UBanDiscordSubsystem::HandleClearWarnsCommand(const TArray<FString>& Args,
 	UPlayerWarningRegistry* WarnReg = GI ? GI->GetSubsystem<UPlayerWarningRegistry>() : nullptr;
 	if (!WarnReg)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ The warnings system requires the BanSystem mod to be installed."));
 		return;
 	}
@@ -1852,7 +1869,7 @@ void UBanDiscordSubsystem::HandleClearWarnsCommand(const TArray<FString>& Args,
 		TEXT("✅ Cleared **%d** warning(s) for **%s** (`%s`).\nBy: %s"),
 		Removed,
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
 }
 
@@ -1868,7 +1885,7 @@ void UBanDiscordSubsystem::HandleClearWarnByIdCommand(const TArray<FString>& Arg
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!clearwarn <warning_id>`\nSee warning IDs with `!warnings <player>`."));
 		return;
 	}
@@ -1880,7 +1897,7 @@ void UBanDiscordSubsystem::HandleClearWarnByIdCommand(const TArray<FString>& Arg
 		WarnId = static_cast<int64>(FCString::Strtoi64(*Args[0], &End, 10));
 		if (WarnId <= 0)
 		{
-			CachedProvider->SendDiscordChannelMessage(ChannelId,
+			Respond(ChannelId,
 				TEXT("❌ `<warning_id>` must be a positive integer."));
 			return;
 		}
@@ -1890,21 +1907,21 @@ void UBanDiscordSubsystem::HandleClearWarnByIdCommand(const TArray<FString>& Arg
 	UPlayerWarningRegistry* WarnReg = GI ? GI->GetSubsystem<UPlayerWarningRegistry>() : nullptr;
 	if (!WarnReg)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ The warnings system requires the BanSystem mod to be installed."));
 		return;
 	}
 
 	if (!WarnReg->DeleteWarningById(WarnId))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("⚠️ No warning found with ID `%lld`."), WarnId));
 		return;
 	}
 
 	const FString Msg = FString::Printf(
 		TEXT("✅ Deleted warning #%lld.\nBy: %s"), WarnId, *SenderName);
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
 }
 
@@ -1920,7 +1937,7 @@ void UBanDiscordSubsystem::HandleNoteCommand(const TArray<FString>& Args,
 
 	if (Args.Num() < 2)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!note <PUID|name> <text...>`"));
 		return;
 	}
@@ -1928,7 +1945,7 @@ void UBanDiscordSubsystem::HandleNoteCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
@@ -1936,7 +1953,7 @@ void UBanDiscordSubsystem::HandleNoteCommand(const TArray<FString>& Args,
 	UPlayerNoteRegistry* NoteReg = GI ? GI->GetSubsystem<UPlayerNoteRegistry>() : nullptr;
 	if (!NoteReg)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ Player notes require the BanChatCommands mod to be installed."));
 		return;
 	}
@@ -1944,7 +1961,7 @@ void UBanDiscordSubsystem::HandleNoteCommand(const TArray<FString>& Args,
 	const FString NoteText = BanDiscordHelpers::JoinArgs(Args, 1);
 	NoteReg->AddNote(Uid, DisplayName, NoteText, SenderName);
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId,
+	Respond(ChannelId,
 		FString::Printf(TEXT("📝 Note added for **%s** (`%s`).\nNote: %s\nAdded by: %s"),
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *NoteText, *SenderName));
 }
@@ -1960,7 +1977,7 @@ void UBanDiscordSubsystem::HandleNotesCommand(const TArray<FString>& Args,
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!notes <PUID|name>`"));
 		return;
 	}
@@ -1968,7 +1985,7 @@ void UBanDiscordSubsystem::HandleNotesCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
@@ -1976,7 +1993,7 @@ void UBanDiscordSubsystem::HandleNotesCommand(const TArray<FString>& Args,
 	UPlayerNoteRegistry* NoteReg = GI ? GI->GetSubsystem<UPlayerNoteRegistry>() : nullptr;
 	if (!NoteReg)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ Player notes require the BanChatCommands mod to be installed."));
 		return;
 	}
@@ -1984,7 +2001,7 @@ void UBanDiscordSubsystem::HandleNotesCommand(const TArray<FString>& Args,
 	TArray<FPlayerNoteEntry> Notes = NoteReg->GetNotesForUid(Uid);
 	if (Notes.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("📝 No notes on record for **%s** (`%s`)."),
 				*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
 		return;
@@ -2013,7 +2030,7 @@ void UBanDiscordSubsystem::HandleNotesCommand(const TArray<FString>& Args,
 	FString Msg = Header + Body;
 	if (Msg.Len() > 1990)
 		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2028,14 +2045,14 @@ void UBanDiscordSubsystem::HandleReasonCommand(const TArray<FString>& Args,
 	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
 	if (!DB)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ BanSystem is not available on this server."));
 		return;
 	}
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!reason <UID>`"));
 		return;
 	}
@@ -2043,19 +2060,19 @@ void UBanDiscordSubsystem::HandleReasonCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
 	FBanEntry Entry;
 	if (!DB->GetBanByUid(Uid, Entry))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("✅ No ban record found for `%s`."), *Uid));
 		return;
 	}
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId,
+	Respond(ChannelId,
 		FString::Printf(TEXT("🔨 **%s** (`%s`) — ban reason: %s\n(Banned by: %s on %s UTC)"),
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid,
 			*Entry.Reason, *Entry.BannedBy,
@@ -2076,7 +2093,7 @@ void UBanDiscordSubsystem::HandleReloadConfigCommand(const FString& ChannelId,
 	UE_LOG(LogBanDiscord, Log,
 		TEXT("BanDiscordSubsystem: Config reloaded by %s."), *SenderName);
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId,
+	Respond(ChannelId,
 		TEXT(":white_check_mark: BanBridge config reloaded."));
 }
 
@@ -2093,14 +2110,14 @@ void UBanDiscordSubsystem::HandleModBanCommand(const TArray<FString>& Args,
 	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
 	if (!DB)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ BanSystem is not available on this server."));
 		return;
 	}
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!modban <PUID|name> [reason]`"));
 		return;
 	}
@@ -2108,7 +2125,7 @@ void UBanDiscordSubsystem::HandleModBanCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
@@ -2134,7 +2151,7 @@ void UBanDiscordSubsystem::HandleModBanCommand(const TArray<FString>& Args,
 
 	if (!DB->AddBan(Entry))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ Failed to write the ban to the database."));
 		return;
 	}
@@ -2152,7 +2169,7 @@ void UBanDiscordSubsystem::HandleModBanCommand(const TArray<FString>& Args,
 	UE_LOG(LogBanDiscord, Log,
 		TEXT("BanDiscordSubsystem: %s modban %s (%s) for %d min. Reason: %s"),
 		*SenderName, *DisplayName, *Uid, DurationMinutes, *Reason);
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
 }
 
@@ -2168,7 +2185,7 @@ void UBanDiscordSubsystem::HandleTempMuteCommand(const TArray<FString>& Args,
 
 	if (Args.Num() < 2)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!tempmute <PUID|name> <minutes>`"));
 		return;
 	}
@@ -2176,14 +2193,14 @@ void UBanDiscordSubsystem::HandleTempMuteCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
 	int32 Minutes = 0;
 	if (!FDefaultValueHelper::ParseInt(Args[1], Minutes) || Minutes <= 0)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ `<minutes>` must be a positive integer."));
 		return;
 	}
@@ -2192,7 +2209,7 @@ void UBanDiscordSubsystem::HandleTempMuteCommand(const TArray<FString>& Args,
 	UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
 	if (!MuteReg)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ Mute commands require the BanChatCommands mod to be installed."));
 		return;
 	}
@@ -2202,7 +2219,7 @@ void UBanDiscordSubsystem::HandleTempMuteCommand(const TArray<FString>& Args,
 	const FString Msg = FString::Printf(
 		TEXT("🔇 Timed mute applied to **%s** (`%s`) for **%d minute(s)**.\nMuted by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, Minutes, *SenderName);
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
 }
 
@@ -2217,7 +2234,7 @@ void UBanDiscordSubsystem::HandleMuteCheckCommand(const TArray<FString>& Args,
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!mutecheck <PUID|name>`"));
 		return;
 	}
@@ -2225,7 +2242,7 @@ void UBanDiscordSubsystem::HandleMuteCheckCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
@@ -2233,7 +2250,7 @@ void UBanDiscordSubsystem::HandleMuteCheckCommand(const TArray<FString>& Args,
 	UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
 	if (!MuteReg)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ Mute commands require the BanChatCommands mod to be installed."));
 		return;
 	}
@@ -2241,7 +2258,7 @@ void UBanDiscordSubsystem::HandleMuteCheckCommand(const TArray<FString>& Args,
 	FMuteEntry Entry;
 	if (!MuteReg->GetMuteEntry(Uid, Entry))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("🔊 **%s** (`%s`) is **not currently muted**."),
 				*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
 		return;
@@ -2261,7 +2278,7 @@ void UBanDiscordSubsystem::HandleMuteCheckCommand(const TArray<FString>& Args,
 			*Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")));
 	}
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId,
+	Respond(ChannelId,
 		FString::Printf(TEXT("🔇 **%s** (`%s`) is muted %s.\nReason: %s\nMuted by: %s"),
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid,
 			*ExpiryStr, *Entry.Reason, *Entry.MutedBy));
@@ -2279,7 +2296,7 @@ void UBanDiscordSubsystem::HandleMuteListCommand(const FString& ChannelId)
 	UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
 	if (!MuteReg)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ Mute commands require the BanChatCommands mod to be installed."));
 		return;
 	}
@@ -2287,7 +2304,7 @@ void UBanDiscordSubsystem::HandleMuteListCommand(const FString& ChannelId)
 	TArray<FMuteEntry> Mutes = MuteReg->GetAllMutes();
 	if (Mutes.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, TEXT("🔊 No players are currently muted."));
+		Respond(ChannelId, TEXT("🔊 No players are currently muted."));
 		return;
 	}
 
@@ -2320,7 +2337,7 @@ void UBanDiscordSubsystem::HandleMuteListCommand(const FString& ChannelId)
 	FString Msg = Header + Body;
 	if (Msg.Len() > 1990)
 		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2335,7 +2352,7 @@ void UBanDiscordSubsystem::HandleTempUnmuteCommand(const TArray<FString>& Args,
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!tempunmute <PUID|name>`"));
 		return;
 	}
@@ -2343,7 +2360,7 @@ void UBanDiscordSubsystem::HandleTempUnmuteCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
@@ -2351,7 +2368,7 @@ void UBanDiscordSubsystem::HandleTempUnmuteCommand(const TArray<FString>& Args,
 	UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
 	if (!MuteReg)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ Mute commands require the BanChatCommands mod to be installed."));
 		return;
 	}
@@ -2359,7 +2376,7 @@ void UBanDiscordSubsystem::HandleTempUnmuteCommand(const TArray<FString>& Args,
 	FMuteEntry Entry;
 	if (!MuteReg->GetMuteEntry(Uid, Entry))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("⚠️ **%s** (`%s`) is not currently muted."),
 				*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
 		return;
@@ -2367,7 +2384,7 @@ void UBanDiscordSubsystem::HandleTempUnmuteCommand(const TArray<FString>& Args,
 
 	if (Entry.bIsIndefinite)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(
 				TEXT("❌ **%s** has an indefinite mute, not a timed one. Use `!unmute` instead."),
 				*BanDiscordHelpers::EscapeMarkdown(DisplayName)));
@@ -2379,7 +2396,7 @@ void UBanDiscordSubsystem::HandleTempUnmuteCommand(const TArray<FString>& Args,
 	const FString UnmuteMsg = FString::Printf(
 		TEXT("🔊 Timed mute lifted from **%s** (`%s`) early.\nUnmuted by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
-	CachedProvider->SendDiscordChannelMessage(ChannelId, UnmuteMsg);
+	Respond(ChannelId, UnmuteMsg);
 	PostModerationLog(UnmuteMsg);
 }
 
@@ -2395,7 +2412,7 @@ void UBanDiscordSubsystem::HandleMuteReasonCommand(const TArray<FString>& Args,
 
 	if (Args.Num() < 2)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!mutereason <PUID|name> <new reason...>`"));
 		return;
 	}
@@ -2403,7 +2420,7 @@ void UBanDiscordSubsystem::HandleMuteReasonCommand(const TArray<FString>& Args,
 	FString Uid, DisplayName, ErrorMsg;
 	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId, ErrorMsg);
+		Respond(ChannelId, ErrorMsg);
 		return;
 	}
 
@@ -2411,7 +2428,7 @@ void UBanDiscordSubsystem::HandleMuteReasonCommand(const TArray<FString>& Args,
 	UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
 	if (!MuteReg)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ Mute commands require the BanChatCommands mod to be installed."));
 		return;
 	}
@@ -2420,7 +2437,7 @@ void UBanDiscordSubsystem::HandleMuteReasonCommand(const TArray<FString>& Args,
 
 	if (!MuteReg->UpdateMuteReason(Uid, NewReason))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT("⚠️ **%s** (`%s`) is not currently muted."),
 				*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
 		return;
@@ -2429,7 +2446,7 @@ void UBanDiscordSubsystem::HandleMuteReasonCommand(const TArray<FString>& Args,
 	const FString Msg = FString::Printf(
 		TEXT("✏️ Mute reason updated for **%s** (`%s`).\nNew reason: %s\nUpdated by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *NewReason, *SenderName);
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
 }
 
@@ -2444,7 +2461,7 @@ void UBanDiscordSubsystem::HandleStaffListCommand(const FString& ChannelId)
 	const UBanChatCommandsConfig* BccCfg = UBanChatCommandsConfig::Get();
 	if (!BccCfg)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ Staff list requires the BanChatCommands mod to be installed."));
 		return;
 	}
@@ -2453,7 +2470,7 @@ void UBanDiscordSubsystem::HandleStaffListCommand(const FString& ChannelId)
 	UWorld* World = GI ? GI->GetWorld() : nullptr;
 	if (!World)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ No active game world found."));
 		return;
 	}
@@ -2491,7 +2508,7 @@ void UBanDiscordSubsystem::HandleStaffListCommand(const FString& ChannelId)
 
 	if (Admins.IsEmpty() && Mods.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("📋 No staff are currently online."));
 		return;
 	}
@@ -2502,7 +2519,7 @@ void UBanDiscordSubsystem::HandleStaffListCommand(const FString& ChannelId)
 	if (!Mods.IsEmpty())
 		Msg += FString::Printf(TEXT("🔧 **Moderators:** %s\n"), *FString::Join(Mods, TEXT(", ")));
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2517,7 +2534,7 @@ void UBanDiscordSubsystem::HandleStaffChatCommand(const TArray<FString>& Args,
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!staffchat <message...>`"));
 		return;
 	}
@@ -2525,7 +2542,7 @@ void UBanDiscordSubsystem::HandleStaffChatCommand(const TArray<FString>& Args,
 	const UBanChatCommandsConfig* BccCfg = UBanChatCommandsConfig::Get();
 	if (!BccCfg)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ Staff chat requires the BanChatCommands mod to be installed."));
 		return;
 	}
@@ -2534,7 +2551,7 @@ void UBanDiscordSubsystem::HandleStaffChatCommand(const TArray<FString>& Args,
 	UWorld* World = GI ? GI->GetWorld() : nullptr;
 	if (!World)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("❌ No active game world found."));
 		return;
 	}
@@ -2568,7 +2585,7 @@ void UBanDiscordSubsystem::HandleStaffChatCommand(const TArray<FString>& Args,
 		}
 	}
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId,
+	Respond(ChannelId,
 		FString::Printf(TEXT("📨 Staff message delivered to **%d** online staff member(s)."), DeliveredTo));
 }
 
@@ -2598,7 +2615,7 @@ void UBanDiscordSubsystem::HandleAppealsCommand(const FString& ChannelId)
 
 	if (!Registry)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT(":x: BanAppealRegistry is not available (BanSystem may not be installed)."));
 		return;
 	}
@@ -2607,7 +2624,7 @@ void UBanDiscordSubsystem::HandleAppealsCommand(const FString& ChannelId)
 
 	if (Appeals.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT(":white_check_mark: No pending ban appeals."));
 		return;
 	}
@@ -2636,7 +2653,7 @@ void UBanDiscordSubsystem::HandleAppealsCommand(const FString& ChannelId)
 		Reply += FString::Printf(TEXT("*(+%d more)*"), TotalCount - MaxShow);
 	}
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Reply.TrimEnd());
+	Respond(ChannelId, Reply.TrimEnd());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2651,7 +2668,7 @@ void UBanDiscordSubsystem::HandleDismissAppealCommand(const TArray<FString>& Arg
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!dismissappeal <id>`"));
 		return;
 	}
@@ -2659,7 +2676,7 @@ void UBanDiscordSubsystem::HandleDismissAppealCommand(const TArray<FString>& Arg
 	const int64 AppealId = FCString::Atoi64(*Args[0]);
 	if (AppealId <= 0)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT(":x: Invalid appeal ID. Must be a positive integer."));
 		return;
 	}
@@ -2669,7 +2686,7 @@ void UBanDiscordSubsystem::HandleDismissAppealCommand(const TArray<FString>& Arg
 
 	if (!Registry)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT(":x: BanAppealRegistry is not available (BanSystem may not be installed)."));
 		return;
 	}
@@ -2680,12 +2697,12 @@ void UBanDiscordSubsystem::HandleDismissAppealCommand(const TArray<FString>& Arg
 		       TEXT("BanDiscordSubsystem: Appeal #%lld dismissed by '%s'."),
 		       AppealId, *SenderName);
 
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT(":white_check_mark: Appeal `#%lld` dismissed."), AppealId));
 	}
 	else
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT(":x: No appeal found with ID `%lld`."), AppealId));
 	}
 }
@@ -2702,7 +2719,7 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!appealapprove <id> [note...]`"));
 		return;
 	}
@@ -2710,7 +2727,7 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 	const int64 AppealId = FCString::Atoi64(*Args[0]);
 	if (AppealId <= 0)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT(":x: Invalid appeal ID. Must be a positive integer."));
 		return;
 	}
@@ -2726,7 +2743,7 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 	UBanAppealRegistry* Registry = GI ? GI->GetSubsystem<UBanAppealRegistry>() : nullptr;
 	if (!Registry)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT(":x: BanAppealRegistry is not available (BanSystem may not be installed)."));
 		return;
 	}
@@ -2734,7 +2751,7 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 	// Use the new ReviewAppeal workflow to record the decision with status/note.
 	if (!Registry->ReviewAppeal(AppealId, EAppealStatus::Approved, SenderName, ReviewNote))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT(":x: No appeal found with ID `%lld`."), AppealId));
 		return;
 	}
@@ -2752,7 +2769,7 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 		? FString::Printf(TEXT(":white_check_mark: Appeal `#%lld` **approved** — ban for `%s` removed.%s"), AppealId, *Entry.Uid, *NoteStr)
 		: FString::Printf(TEXT(":white_check_mark: Appeal `#%lld` **approved** — no active ban found for `%s`.%s"), AppealId, *Entry.Uid, *NoteStr);
 
-	CachedProvider->SendDiscordChannelMessage(ChannelId, Msg);
+	Respond(ChannelId, Msg);
 	PostModerationLog(FString::Printf(TEXT("%s approved appeal #%lld (uid=%s)%s"), *SenderName, AppealId, *Entry.Uid, *NoteStr));
 
 	FBanDiscordNotifier::NotifyAppealReviewed(Entry);
@@ -2774,7 +2791,7 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 
 	if (Args.IsEmpty())
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT("Usage: `!appealdeny <id> [note...]`"));
 		return;
 	}
@@ -2782,7 +2799,7 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 	const int64 AppealId = FCString::Atoi64(*Args[0]);
 	if (AppealId <= 0)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT(":x: Invalid appeal ID. Must be a positive integer."));
 		return;
 	}
@@ -2798,7 +2815,7 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 	UBanAppealRegistry* Registry = GI ? GI->GetSubsystem<UBanAppealRegistry>() : nullptr;
 	if (!Registry)
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			TEXT(":x: BanAppealRegistry is not available (BanSystem may not be installed)."));
 		return;
 	}
@@ -2806,14 +2823,14 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 	// Use ReviewAppeal to record the denial with status/note.
 	if (!Registry->ReviewAppeal(AppealId, EAppealStatus::Denied, SenderName, ReviewNote))
 	{
-		CachedProvider->SendDiscordChannelMessage(ChannelId,
+		Respond(ChannelId,
 			FString::Printf(TEXT(":x: No appeal found with ID `%lld`."), AppealId));
 		return;
 	}
 
 	const FBanAppealEntry Entry = Registry->GetAppealById(AppealId);
 	const FString NoteStr = ReviewNote.IsEmpty() ? TEXT("") : FString::Printf(TEXT(" Note: %s"), *ReviewNote);
-	CachedProvider->SendDiscordChannelMessage(ChannelId,
+	Respond(ChannelId,
 		FString::Printf(TEXT(":x: Appeal `#%lld` **denied**.%s"), AppealId, *NoteStr));
 	PostModerationLog(FString::Printf(TEXT("%s denied appeal #%lld (uid=%s)%s"), *SenderName, AppealId, *Entry.Uid, *NoteStr));
 
@@ -2834,7 +2851,7 @@ if (!CachedProvider) return;
 
 if (Args.IsEmpty())
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 TEXT("Usage: `!playtime <player|PUID>`"));
 return;
 }
@@ -2842,7 +2859,7 @@ return;
 FString Uid, DisplayName, ErrorMsg;
 if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 FString::Printf(TEXT(":x: %s"), *ErrorMsg));
 return;
 }
@@ -2851,7 +2868,7 @@ UGameInstance* GI = GetGameInstance();
 UPlayerSessionRegistry* Registry = GI ? GI->GetSubsystem<UPlayerSessionRegistry>() : nullptr;
 if (!Registry)
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 TEXT(":x: PlayerSessionRegistry is not available (BanSystem may not be installed)."));
 return;
 }
@@ -2889,7 +2906,7 @@ TEXT(":clock3: **%s** (`%s`)\n• **Last Seen:** %s UTC\n• **Status:** %s"),
 bOnline ? TEXT("🟢 Online") : TEXT("🔴 Offline"));
 }
 
-CachedProvider->SendDiscordChannelMessage(ChannelId, Reply);
+Respond(ChannelId, Reply);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2904,7 +2921,7 @@ if (!CachedProvider) return;
 
 if (Args.IsEmpty())
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 TEXT("Usage: `!say <message...>` — broadcasts as [ADMIN] in-game"));
 return;
 }
@@ -2913,7 +2930,7 @@ UGameInstance* GI = GetGameInstance();
 UWorld* World = GI ? GI->GetWorld() : nullptr;
 if (!World)
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 TEXT(":x: No active game world found."));
 return;
 }
@@ -2931,7 +2948,7 @@ PC->ClientMessage(Formatted);
 }
 }
 
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 FString::Printf(TEXT("📢 Admin broadcast delivered to **%d** player(s): *%s*"),
 Delivered, *BanDiscordHelpers::EscapeMarkdown(Message)));
 
@@ -2955,7 +2972,7 @@ for (FString& P : Parts) P.TrimStartAndEndInline();
 
 if (Parts.Num() < 3)
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 TEXT("Usage: `!poll <question> | <optionA> | <optionB> [| <optionC> ...]`\n"
  "Example: `!poll Restart tonight? | Yes | No | Maybe`"));
 return;
@@ -2966,7 +2983,7 @@ const TArray<FString> Options(Parts.GetData() + 1, Parts.Num() - 1);
 
 if (Options.Num() < 2 || Options.Num() > 10)
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 TEXT(":x: A poll requires between 2 and 10 options."));
 return;
 }
@@ -2999,7 +3016,7 @@ TEXT("{\"embeds\":[{\"title\":\"📊 %s\",\"color\":5793266,\"fields\":[%s],"
 *FDateTime::UtcNow().ToIso8601());
 
 // Send via the provider's body helper (bypasses text escaping).
-CachedProvider->SendDiscordChannelMessage(ChannelId, EmbedJson);
+Respond(ChannelId, EmbedJson);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3064,7 +3081,7 @@ if (!CachedProvider) return;
 
 if (Args.Num() < 2)
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 TEXT("Usage: `!scheduleban <player|PUID> <delay> [banDuration] [reason...]`\n"
      "Example: `!scheduleban BadPlayer 2h 1d Griefing`"));
 return;
@@ -3074,7 +3091,7 @@ UGameInstance* GI = GetGameInstance();
 UScheduledBanRegistry* SchReg = GI ? GI->GetSubsystem<UScheduledBanRegistry>() : nullptr;
 if (!SchReg)
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 TEXT(":x: ScheduledBanRegistry unavailable."));
 return;
 }
@@ -3090,7 +3107,7 @@ DisplayName = Args[0];
 const int32 DelayMinutes = UBanDiscordSubsystem::ParseDurationMinutes(Args[1]);
 if (DelayMinutes <= 0)
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 FString::Printf(TEXT(":x: Invalid delay `%s`. Use format like `30m`, `2h`, `1d`."), *Args[1]));
 return;
 }
@@ -3120,7 +3137,7 @@ const FDateTime EffectiveAt = FDateTime::UtcNow() + FTimespan::FromMinutes(Delay
 FScheduledBanEntry Entry = SchReg->AddScheduled(Uid, DisplayName, Reason, SenderName, EffectiveAt, BanDurationMinutes);
 
 const FString DurStr = BanDurationMinutes == 0 ? TEXT("permanent") : FString::Printf(TEXT("%d min"), BanDurationMinutes);
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 FString::Printf(TEXT(":calendar: Scheduled ban **#%lld** for `%s` in **%d min** (effective %s). Duration: %s. Reason: %s"),
 Entry.Id, *DisplayName, DelayMinutes, *EffectiveAt.ToString(TEXT("%Y-%m-%d %H:%M:%S")), *DurStr, *Reason));
 }
@@ -3138,7 +3155,7 @@ if (!CachedProvider) return;
 const UBanSystemConfig* SysCfg = UBanSystemConfig::Get();
 if (!SysCfg || SysCfg->BanTemplates.IsEmpty())
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 TEXT(":x: No ban templates configured (`BanTemplates=` in DefaultBanSystem.ini)."));
 return;
 }
@@ -3154,13 +3171,13 @@ for (const FBanTemplate& T : Templates)
 const FString DurStr = T.DurationMinutes == 0 ? TEXT("permanent") : FString::Printf(TEXT("%dmin"), T.DurationMinutes);
 List += FString::Printf(TEXT("`%s` — %s — %s\n"), *T.Slug, *DurStr, *T.Reason);
 }
-CachedProvider->SendDiscordChannelMessage(ChannelId, List);
+Respond(ChannelId, List);
 return;
 }
 
 if (Args.Num() < 2)
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 TEXT("Usage: `!qban <templateSlug> <player|PUID>`"));
 return;
 }
@@ -3173,7 +3190,7 @@ if (T.Slug.ToLower() == Slug) { Template = &T; break; }
 }
 if (!Template)
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 FString::Printf(TEXT(":x: Unknown template `%s`. Use `!qban` to list templates."), *Slug));
 return;
 }
@@ -3188,7 +3205,7 @@ DisplayName = Args[1];
 UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
 if (!DB)
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId, TEXT(":x: Database unavailable."));
+Respond(ChannelId, TEXT(":x: Database unavailable."));
 return;
 }
 
@@ -3207,7 +3224,7 @@ Ban.ExpireDate      = Ban.bIsPermanent
 
 if (!DB->AddBan(Ban))
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId, TEXT(":x: Failed to apply ban."));
+Respond(ChannelId, TEXT(":x: Failed to apply ban."));
 return;
 }
 
@@ -3218,7 +3235,7 @@ UBanEnforcer::KickConnectedPlayer(W, Uid, Ban.GetKickMessage());
 FBanDiscordNotifier::NotifyBanCreated(Ban);
 
 const FString DurStr = Ban.bIsPermanent ? TEXT("permanent") : FString::Printf(TEXT("%dmin"), Template->DurationMinutes);
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 FString::Printf(TEXT(":hammer: [%s] Banned **%s** (%s). Reason: %s. Duration: %s."),
 *Slug, *DisplayName, *Uid, *Template->Reason, *DurStr));
 }
@@ -3234,7 +3251,7 @@ if (!CachedProvider) return;
 
 if (Args.IsEmpty())
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 TEXT("Usage: `!reputation <player|PUID>`"));
 return;
 }
@@ -3314,7 +3331,7 @@ Color,
 *Fields,
 *FDateTime::UtcNow().ToIso8601());
 
-CachedProvider->SendDiscordChannelMessage(ChannelId, EmbedJson);
+Respond(ChannelId, EmbedJson);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3329,7 +3346,7 @@ if (!CachedProvider) return;
 
 if (Args.IsEmpty())
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 TEXT("Usage: `!bulkban <PUID1> <PUID2> ... -- <reason>`"));
 return;
 }
@@ -3337,7 +3354,7 @@ return;
 UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
 if (!DB)
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId, TEXT(":x: Database unavailable."));
+Respond(ChannelId, TEXT(":x: Database unavailable."));
 return;
 }
 
@@ -3369,7 +3386,7 @@ Uids = Args;
 
 if (Uids.IsEmpty())
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 TEXT(":x: No UIDs provided."));
 return;
 }
@@ -3400,7 +3417,7 @@ FBanDiscordNotifier::NotifyBanCreated(Ban);
 }
 }
 
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 FString::Printf(TEXT(":hammer: Bulk ban complete: **%d/%d** players banned. Reason: %s"),
 BannedCount, Uids.Num(), *Reason));
 PostModerationLog(FString::Printf(TEXT("%s bulk-banned %d player(s). Reason: %s"), *SenderName, BannedCount, *Reason));
@@ -3427,6 +3444,23 @@ int32 InteractionType = 0;
 InteractionObj->TryGetNumberField(TEXT("type"), InteractionType);
 if (InteractionType != 2) return;
 
+// Extract the interaction token and set up a guard that clears
+// PendingInteractionToken when OnDiscordInteraction returns, ensuring
+// the member field is never stale between calls.
+{
+FString ExtractedToken;
+InteractionObj->TryGetStringField(TEXT("token"), ExtractedToken);
+PendingInteractionToken = ExtractedToken;
+}
+
+// RAII guard: clears PendingInteractionToken on any return path.
+struct FInteractionTokenGuard
+{
+    FString& TokenRef;
+    explicit FInteractionTokenGuard(FString& T) : TokenRef(T) {}
+    ~FInteractionTokenGuard() { TokenRef = FString(); }
+} TokenGuard(PendingInteractionToken);
+
 // Extract channel_id early so error messages can be posted.
 FString ChannelId;
 InteractionObj->TryGetStringField(TEXT("channel_id"), ChannelId);
@@ -3439,7 +3473,7 @@ UE_LOG(LogBanDiscord, Warning,
             "neither AdminRoleId nor ModeratorRoleId is set in DefaultBanBridge.ini."));
 if (!ChannelId.IsEmpty())
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
     TEXT("❌ Ban commands are disabled — `AdminRoleId` is not configured.\n"
          "Set `AdminRoleId` in `DefaultBanBridge.ini` and restart the server."));
 }
@@ -3476,7 +3510,7 @@ UE_LOG(LogBanDiscord, Warning,
        TEXT("BanDiscordSubsystem: /%s interaction has no subcommand options."),
        *CmdGroupName);
 if (!ChannelId.IsEmpty())
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
     TEXT("❌ Could not parse the subcommand. Please try the command again."));
 return;
 }
@@ -3488,7 +3522,7 @@ UE_LOG(LogBanDiscord, Warning,
        TEXT("BanDiscordSubsystem: /%s interaction subcommand object is malformed."),
        *CmdGroupName);
 if (!ChannelId.IsEmpty())
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
     TEXT("❌ Could not parse the subcommand. Please try the command again."));
 return;
 }
@@ -3571,7 +3605,7 @@ const bool bAuthorised     = bNeedsAdminOnly
 
 if (!bAuthorised)
 {
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
 bNeedsAdminOnly
 ? TEXT("❌ Admin role required for that command.")
 : TEXT("❌ Moderator role required for that command."));
@@ -3872,7 +3906,7 @@ if (!bHandled)
 UE_LOG(LogBanDiscord, Warning,
        TEXT("BanDiscordSubsystem: Unrecognised slash command /%s %s — no handler matched."),
        *CmdGroupName, *SubCmdName);
-CachedProvider->SendDiscordChannelMessage(ChannelId,
+Respond(ChannelId,
     FString::Printf(TEXT("❌ Unknown subcommand `/%s %s`."), *CmdGroupName, *SubCmdName));
 }
 }

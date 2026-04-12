@@ -1663,14 +1663,16 @@ void UDiscordBridgeSubsystem::RespondToInteraction(const FString& InteractionId,
 	}
 
 	TSharedPtr<FJsonObject> ResponseData = MakeShared<FJsonObject>();
+	if ((ResponseType == 4 || ResponseType == 5) && bEphemeral)
+	{
+		// Discord flags bitmask: 64 = EPHEMERAL.
+		// For type 5 (DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE) the flag must be set
+		// in the data object so that the eventual follow-up is also ephemeral.
+		ResponseData->SetNumberField(TEXT("flags"), 64);
+	}
 	if (ResponseType == 4 && !Content.IsEmpty())
 	{
 		ResponseData->SetStringField(TEXT("content"), Content);
-		if (bEphemeral)
-		{
-			// Discord flags bitmask: 64 = EPHEMERAL
-			ResponseData->SetNumberField(TEXT("flags"), 64);
-		}
 	}
 
 	TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
@@ -1716,6 +1718,49 @@ void UDiscordBridgeSubsystem::RespondToInteraction(const FString& InteractionId,
 			}
 		});
 
+	Request->ProcessRequest();
+}
+
+void UDiscordBridgeSubsystem::FollowUpInteraction(const FString& InteractionToken,
+                                                  const FString& Message,
+                                                  bool bEphemeral)
+{
+	if (Config.BotToken.IsEmpty() || BotUserId.IsEmpty() || InteractionToken.IsEmpty())
+		return;
+
+	TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetStringField(TEXT("content"), Message);
+	if (bEphemeral)
+		Body->SetNumberField(TEXT("flags"), 64);
+
+	FString BodyString;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
+	FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+
+	// POST /webhooks/{application_id}/{token} — creates a follow-up message.
+	const FString Url = FString::Printf(
+		TEXT("https://discord.com/api/v10/webhooks/%s/%s"),
+		*BotUserId, *InteractionToken);
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
+		FHttpModule::Get().CreateRequest();
+	Request->SetURL(Url);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+	Request->SetHeader(TEXT("Authorization"),
+	                   FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+	Request->SetContentAsString(BodyString);
+	Request->OnProcessRequestComplete().BindLambda(
+		[](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
+		{
+			if (!bConnected || !Resp.IsValid() ||
+			    Resp->GetResponseCode() < 200 || Resp->GetResponseCode() >= 300)
+			{
+				UE_LOG(LogDiscordBridge, Warning,
+				       TEXT("DiscordBridge: FollowUpInteraction request failed (HTTP %d)."),
+				       Resp.IsValid() ? Resp->GetResponseCode() : 0);
+			}
+		});
 	Request->ProcessRequest();
 }
 
@@ -5490,8 +5535,7 @@ RespondToInteraction(InteractionId, InteractionToken, 4,
 return;
 }
 
-RespondToInteraction(InteractionId, InteractionToken, 4,
-    TEXT("✅ Processing command…"), true);
+RespondToInteraction(InteractionId, InteractionToken, 5, FString(), true);
 OnDiscordInteractionReceived.Broadcast(DataObj);
 }
 }

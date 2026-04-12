@@ -388,4 +388,22 @@ private:
 	 * Not persisted across restarts (threads are reused by name-search when missing).
 	 */
 	TMap<FString, FString> PlayerThreadIdCache;
+
+	/**
+	 * Interaction token for the slash command currently being processed.
+	 * Set at the start of OnDiscordInteraction and cleared at the end.
+	 * Used by Respond() to send an ephemeral follow-up directly to the admin
+	 * in addition to the public channel message.
+	 * Empty when handling chat (!) commands — Respond() skips the follow-up.
+	 */
+	FString PendingInteractionToken;
+
+	/**
+	 * Send a command result to the Discord channel AND, if a slash command is
+	 * currently being handled (PendingInteractionToken is set), also send the
+	 * same message as an ephemeral follow-up to the interaction so the admin
+	 * sees the result inline with their /command even if they missed the channel
+	 * message.
+	 */
+	void Respond(const FString& ChannelId, const FString& Message);
 };

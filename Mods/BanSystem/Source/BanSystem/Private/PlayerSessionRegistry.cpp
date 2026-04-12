@@ -145,6 +145,12 @@ TArray<FPlayerSessionRecord> UPlayerSessionRegistry::GetAllRecords() const
     return Records;
 }
 
+int32 UPlayerSessionRegistry::GetCount() const
+{
+    FScopeLock Lock(&Mutex);
+    return Records.Num();
+}
+
 int32 UPlayerSessionRegistry::PruneOldRecords(int32 DaysToKeep)
 {
     if (DaysToKeep <= 0) return 0;

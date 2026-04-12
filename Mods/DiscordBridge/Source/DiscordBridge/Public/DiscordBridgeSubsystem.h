@@ -285,6 +285,10 @@ public:
 	                              const FString& Placeholder,
 	                              const FString& ComponentCustomId = TEXT("ticket_reason")) override;
 
+	virtual void FollowUpInteraction(const FString& InteractionToken,
+	                                 const FString& Message,
+	                                 bool bEphemeral) override;
+
 	/**
 	 * Send a pre-built JSON message body (content + optional components) to a
 	 * Discord channel via the REST API.  Use this when the message includes

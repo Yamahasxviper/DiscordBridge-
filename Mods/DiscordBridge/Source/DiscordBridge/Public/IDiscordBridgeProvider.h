@@ -123,6 +123,20 @@ public:
 	                                       const FString& Message) = 0;
 
 	/**
+	 * Post a follow-up message to a Discord slash-command interaction.
+	 * The initial interaction response (type 4 or 5) must already have been sent.
+	 * Uses POST /webhooks/{app_id}/{token} so the reply appears inline with the
+	 * slash command and is dismissable when bEphemeral is true.
+	 *
+	 * @param InteractionToken  The "token" field from the original interaction payload.
+	 * @param Message           Plain-text content (Discord markdown supported).
+	 * @param bEphemeral        When true the message is only visible to the invoker.
+	 */
+	virtual void FollowUpInteraction(const FString& InteractionToken,
+	                                 const FString& Message,
+	                                 bool bEphemeral) = 0;
+
+	/**
 	 * Send a pre-built JSON message body (content + optional components) to a
 	 * Discord channel via the REST API.
 	 *
