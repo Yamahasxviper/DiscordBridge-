@@ -1762,7 +1762,8 @@ void UTicketSubsystem::HandleSlashTicketCommand(const TSharedPtr<FJsonObject>& D
 	IDiscordBridgeProvider* Bridge = GetBridge();
 	if (!Bridge) return;
 
-	// Synthesize a "!ticket-<subcmd> <args>" content string and construct a
+	// Synthesize an internal "!ticket-<subcmd> <args>" routing string (never
+	// shown to users) and construct a
 	// minimal message JSON that OnRawDiscordMessage can process directly.
 	// This approach reuses all existing command logic without duplication.
 	FString SynthContent;
@@ -1907,6 +1908,20 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	}
 
 	IDiscordBridgeProvider* Bridge = GetBridge();
+
+	// All ticket commands are now handled exclusively via Discord slash commands
+	// (/ticket subcommand).  HandleSlashTicketCommand synthesises an internal
+	// message object (without a Discord snowflake "id" field) and calls this
+	// method directly.  Any real Discord message that still starts with "!ticket-"
+	// (typed manually by a user) is ignored here, so ! prefix commands no longer
+	// work from Discord.
+	FString SyntheticCheckId;
+	const bool bIsSyntheticMessage = !MessageObj->TryGetStringField(TEXT("id"), SyntheticCheckId)
+	                                  || SyntheticCheckId.IsEmpty();
+	if (Content.StartsWith(TEXT("!ticket-"), ESearchCase::IgnoreCase) && !bIsSyntheticMessage)
+	{
+		return; // Real Discord !ticket-* message — ignore, use /ticket slash commands.
+	}
 
 	// ── !ticket-assign <@userId> ──────────────────────────────────────────────
 	if (Content.StartsWith(TEXT("!ticket-assign"), ESearchCase::IgnoreCase))

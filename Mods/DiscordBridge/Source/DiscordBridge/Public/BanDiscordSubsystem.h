@@ -271,7 +271,7 @@ private:
 	/**
 	 * Handle /mod tempunmute.
 	 * Lifts a *timed* mute from a player.  Fails with an error when the mute
-	 * is indefinite (use !unmute for those).
+	 * is indefinite (use /mod unmute for those).
 	 * Usage: !tempunmute <PUID|name>
 	 */
 	void HandleTempUnmuteCommand(const TArray<FString>& Args,

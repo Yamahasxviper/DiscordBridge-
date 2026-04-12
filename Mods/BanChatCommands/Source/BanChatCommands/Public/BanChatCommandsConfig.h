@@ -102,7 +102,7 @@ public:
     bool bAllowModNotes = false;
 
     /**
-     * Cooldown in seconds between uses of !warnings and !bancheck for non-admin
+     * Cooldown in seconds between uses of /warnings and /bancheck for non-admin
      * player senders.  Set to 0 to disable the cooldown (default).
      * Admin senders are never subject to this cooldown.
      */
@@ -110,8 +110,8 @@ public:
     int32 WarningCheckCooldownSeconds = 0;
 
     /**
-     * Discord webhook URL that !report notifications are sent to.
-     * When empty, !report stores the report internally and acknowledges the sender
+     * Discord webhook URL that /report notifications are sent to.
+     * When empty, /report stores the report internally and acknowledges the sender
      * but does not post to Discord.
      * Leave empty to disable Discord delivery.
      */

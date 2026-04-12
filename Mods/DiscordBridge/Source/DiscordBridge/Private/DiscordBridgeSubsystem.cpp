@@ -1269,37 +1269,6 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 		return false;
 	};
 
-	// Check whether this message is a whitelist management command.
-	// The !whitelist prefix commands are deprecated — use /whitelist slash commands instead.
-	// We still silently consume messages that start with the old prefix to avoid
-	// echoing them to in-game chat, but direct users to use slash commands.
-	if (!Config.WhitelistCommandPrefix.IsEmpty() &&
-	    Content.StartsWith(Config.WhitelistCommandPrefix, ESearchCase::IgnoreCase))
-	{
-		SendMessageToChannel(MsgChannelId,
-			TEXT(":information_source: The `!whitelist` prefix command has been removed. ")
-			TEXT("Please use `/whitelist` slash commands instead."));
-		return;
-	}
-
-	// Consume deprecated ! prefix commands and redirect to slash commands.
-	if ((!Config.PlayersCommandPrefix.IsEmpty() &&
-	     Content.Equals(Config.PlayersCommandPrefix, ESearchCase::IgnoreCase)) ||
-	    (!Config.StatsCommandPrefix.IsEmpty() &&
-	     Content.Equals(Config.StatsCommandPrefix, ESearchCase::IgnoreCase)) ||
-	    (!Config.PlayerStatsCommandPrefix.IsEmpty() &&
-	     Content.StartsWith(Config.PlayerStatsCommandPrefix + TEXT(" "), ESearchCase::IgnoreCase)) ||
-	    Content.Equals(TEXT("!server"), ESearchCase::IgnoreCase) ||
-	    Content.Equals(TEXT("!online"), ESearchCase::IgnoreCase) ||
-	    Content.Equals(TEXT("!help"), ESearchCase::IgnoreCase) ||
-	    Content.Equals(TEXT("!commands"), ESearchCase::IgnoreCase))
-	{
-		SendMessageToChannel(MsgChannelId,
-			TEXT(":information_source: Prefix (`!`) commands have been removed. ")
-			TEXT("Please use `/` slash commands instead (e.g. `/players`, `/stats`, `/help`)."));
-		return;
-	}
-
 	// ── Resolve %Role% label for the DiscordToGameFormat placeholder ──────────
 	// Iterate DiscordRoleLabels in config order; use the first matching entry.
 	CurrentMessageRoleLabel.Empty();
@@ -2131,40 +2100,6 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 	       TEXT("DiscordBridge: Player message detected. Sender: '%s', Text: '%s'"),
 	       *PlayerName, *MessageText);
 
-	// In-game whitelist, verify, and discord commands are now registered as
-	// proper SML slash commands (/whitelist, /verify, /discord) via
-	// AChatCommandSubsystem. They are no longer detected here.
-	// Legacy !-prefix check kept only for backward compatibility during transition.
-	if (!Config.InGameWhitelistCommandPrefix.IsEmpty() &&
-	    MessageText.StartsWith(Config.InGameWhitelistCommandPrefix, ESearchCase::IgnoreCase) &&
-	    !Config.InGameWhitelistCommandPrefix.StartsWith(TEXT("/"), ESearchCase::IgnoreCase))
-	{
-		const FString SubCommand = MessageText.Mid(Config.InGameWhitelistCommandPrefix.Len()).TrimStartAndEnd();
-		HandleInGameWhitelistCommand(SubCommand);
-		return; // Do not forward commands to Discord.
-	}
-
-	// Legacy !verify fallback — handled by /verify SML command, kept for safety.
-	if (Config.bWhitelistVerificationEnabled &&
-	    MessageText.StartsWith(TEXT("!verify "), ESearchCase::IgnoreCase))
-	{
-		const FString Code = MessageText.Mid(8).TrimStartAndEnd();
-		HandleInGameVerify(PlayerName, Code);
-		return;
-	}
-
-	// Feature 3: /discord in-game command is now handled by the SML /discord
-	// command actor. Legacy !discord fallback kept so existing users are not broken.
-	if (MessageText.Equals(TEXT("!discord"), ESearchCase::IgnoreCase))
-	{
-		if (!Config.DiscordInviteUrl.IsEmpty())
-		{
-			SendGameChatStatusMessage(
-				FString::Printf(TEXT("[DiscordBridge] Join our Discord: %s"), *Config.DiscordInviteUrl));
-		}
-		return; // Do not relay this command to Discord.
-	}
-
 	// Feature 1a: Chat relay find/replace — replace matched patterns with *** before forwarding.
 	// Feature 1b: Chat relay blocklist — silently drop messages that contain a blocked keyword.
 	FString FilteredMessage = MessageText;
@@ -2920,7 +2855,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 	{
 		if (Arg.IsEmpty())
 		{
-			Response = TEXT(":warning: Usage: `!whitelist add <PlayerName> [puid:<PUID>] [group:<Group>] [duration]`");
+			Response = TEXT(":warning: Usage: `/whitelist add <PlayerName> [puid:<PUID>] [group:<Group>] [duration]`");
 		}
 		else
 		{
@@ -3013,7 +2948,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 	{
 		if (Arg.IsEmpty())
 		{
-			Response = TEXT(":warning: Usage: `!whitelist remove <PlayerName>`");
+			Response = TEXT(":warning: Usage: `/whitelist remove <PlayerName>`");
 		}
 		else if (FWhitelistManager::RemovePlayer(Arg, TEXT(""), DiscordUsername))
 		{
@@ -3107,7 +3042,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 	{
 		if (Arg.IsEmpty())
 		{
-			Response = TEXT(":warning: Usage: `!whitelist import <json-array>`");
+			Response = TEXT(":warning: Usage: `/whitelist import <json-array>`");
 		}
 		else
 		{
@@ -3193,8 +3128,8 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 		}
 		else if (TargetUserId.IsEmpty())
 		{
-			Response = TEXT(":warning: Usage: `!whitelist role add <discord_user_id>` "
-			                "or `!whitelist role remove <discord_user_id>`");
+			Response = TEXT(":warning: Usage: `/whitelist role add <discord_user_id>` "
+			                "or `/whitelist role remove <discord_user_id>`");
 		}
 		else if (RoleVerb == TEXT("add"))
 		{
@@ -3210,15 +3145,15 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 		}
 		else
 		{
-			Response = TEXT(":question: Usage: `!whitelist role add <discord_user_id>` "
-			                "or `!whitelist role remove <discord_user_id>`");
+			Response = TEXT(":question: Usage: `/whitelist role add <discord_user_id>` "
+			                "or `/whitelist role remove <discord_user_id>`");
 		}
 	}
 	else if (Verb == TEXT("search"))
 	{
 		if (Arg.IsEmpty())
 		{
-			Response = TEXT(":warning: Usage: `!whitelist search <partial-name>`");
+			Response = TEXT(":warning: Usage: `/whitelist search <partial-name>`");
 		}
 		else
 		{
@@ -3284,7 +3219,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 		}
 		else if (Arg.IsEmpty())
 		{
-			Response = TEXT(":warning: Usage: `!whitelist apply <YourInGameName>`");
+			Response = TEXT(":warning: Usage: `/whitelist apply <YourInGameName>`");
 		}
 		else if (AuthorDiscordId.IsEmpty())
 		{
@@ -3350,7 +3285,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 		}
 		else if (Arg.IsEmpty())
 		{
-			Response = TEXT(":warning: Usage: `!whitelist link <YourInGameName>`");
+			Response = TEXT(":warning: Usage: `/whitelist link <YourInGameName>`");
 		}
 		else if (AuthorDiscordId.IsEmpty())
 		{
@@ -3374,7 +3309,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 			PendingVerificationExpiry.Add(CodeStr, FDateTime::UtcNow() + FTimespan::FromMinutes(10.0));
 
 			Response = FString::Printf(
-				TEXT(":key: Type `!verify %s` in-game within **10 minutes** to link your account **%s** to the whitelist."),
+				TEXT(":key: Type `/verify %s` in-game within **10 minutes** to link your account **%s** to the whitelist."),
 				*CodeStr, *Arg);
 		}
 	}
@@ -3913,7 +3848,7 @@ void UDiscordBridgeSubsystem::HandleInGameWhitelistCommand(const FString& SubCom
 	{
 		if (Arg.IsEmpty())
 		{
-			Response = TEXT("Usage: !whitelist add <PlayerName>");
+			Response = TEXT("Usage: /ingamewhitelist add <PlayerName>");
 		}
 		else if (FWhitelistManager::GetMaxSlots() > 0 &&
 		         FWhitelistManager::GetAllEntries().Num() >= FWhitelistManager::GetMaxSlots())
@@ -3937,7 +3872,7 @@ void UDiscordBridgeSubsystem::HandleInGameWhitelistCommand(const FString& SubCom
 	{
 		if (Arg.IsEmpty())
 		{
-			Response = TEXT("Usage: !whitelist remove <PlayerName>");
+			Response = TEXT("Usage: /ingamewhitelist remove <PlayerName>");
 		}
 		else if (FWhitelistManager::RemovePlayer(Arg, TEXT(""), TEXT("[server]")))
 		{
@@ -4136,7 +4071,7 @@ void UDiscordBridgeSubsystem::HandlePlayerStatsCommand(const FString& ResponseCh
 
 	if (TargetPlayerName.IsEmpty())
 	{
-		SendMessageToChannel(TargetChannel, TEXT("Usage: !playerstats <player name>"));
+		SendMessageToChannel(TargetChannel, TEXT("Usage: /playerstats <player name>"));
 		return;
 	}
 

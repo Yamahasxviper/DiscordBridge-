@@ -374,13 +374,11 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.PlayerCountUpdateIntervalSeconds = GetIniFloatOrDefault (ConfigFile, TEXT("PlayerCountUpdateIntervalSeconds"), Config.PlayerCountUpdateIntervalSeconds);
 		Config.PlayerCountActivityType         = GetIniIntOrDefault   (ConfigFile, TEXT("PlayerCountActivityType"),         Config.PlayerCountActivityType);
 		Config.WhitelistCommandRoleId          = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistCommandRoleId"),          Config.WhitelistCommandRoleId);
-		Config.WhitelistCommandPrefix          = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistCommandPrefix"),          Config.WhitelistCommandPrefix);
 		Config.WhitelistRoleId                 = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistRoleId"),                 Config.WhitelistRoleId);
 		Config.WhitelistChannelId              = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistChannelId"),              Config.WhitelistChannelId);
 		Config.WhitelistKickDiscordMessage     = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistKickDiscordMessage"),     Config.WhitelistKickDiscordMessage);
 		Config.WhitelistKickReason             = GetIniStringOrFallback(ConfigFile, TEXT("WhitelistKickReason"),             Config.WhitelistKickReason);
 		Config.bWhitelistEnabled               = GetIniBoolOrDefault  (ConfigFile, TEXT("WhitelistEnabled"),               Config.bWhitelistEnabled);
-		Config.InGameWhitelistCommandPrefix    = GetIniStringOrDefault(ConfigFile, TEXT("InGameWhitelistCommandPrefix"),    Config.InGameWhitelistCommandPrefix);
 		Config.WhitelistEventsChannelId    = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistEventsChannelId"),    Config.WhitelistEventsChannelId);
 		Config.MaxWhitelistSlots           = GetIniIntOrDefault   (ConfigFile, TEXT("MaxWhitelistSlots"),           Config.MaxWhitelistSlots);
 		Config.bSyncWhitelistWithRole      = GetIniBoolOrDefault  (ConfigFile, TEXT("SyncWhitelistWithRole"),      Config.bSyncWhitelistWithRole);
@@ -444,13 +442,10 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		}
 
 		// Bot commands
-		Config.PlayersCommandPrefix    = GetIniStringOrFallback(ConfigFile, TEXT("PlayersCommandPrefix"),    Config.PlayersCommandPrefix);
 		Config.PlayersCommandChannelId = GetIniStringOrDefault (ConfigFile, TEXT("PlayersCommandChannelId"), Config.PlayersCommandChannelId);
 		Config.DiscordInviteUrl        = GetIniStringOrDefault (ConfigFile, TEXT("DiscordInviteUrl"),        Config.DiscordInviteUrl);
 
 		// New commands
-		Config.StatsCommandPrefix       = GetIniStringOrFallback(ConfigFile, TEXT("StatsCommandPrefix"),       Config.StatsCommandPrefix);
-		Config.PlayerStatsCommandPrefix = GetIniStringOrFallback(ConfigFile, TEXT("PlayerStatsCommandPrefix"), Config.PlayerStatsCommandPrefix);
 
 		// Per-event channel routing
 		Config.PhaseEventsChannelId    = GetIniStringOrDefault(ConfigFile, TEXT("PhaseEventsChannelId"),    Config.PhaseEventsChannelId);
@@ -633,9 +628,6 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("# Leave empty (default) to disable /whitelist commands for all Discord users.\n")
 						TEXT("WhitelistCommandRoleId=\n")
 						TEXT("#\n")
-						TEXT("# Prefix that triggers whitelist commands in the bridged Discord channel.\n")
-						TEXT("# Set to empty to disable Discord-based whitelist management entirely.\n")
-						TEXT("WhitelistCommandPrefix=!whitelist\n")
 						TEXT("#\n")
 						TEXT("# Snowflake ID of the Discord role assigned to whitelisted members.\n")
 						TEXT("# Leave empty to disable Discord role integration.\n")
@@ -653,9 +645,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("# Reason shown in-game to the player when they are kicked for not being whitelisted.\n")
 						TEXT("WhitelistKickReason=You are not on this server's whitelist. Contact the server admin to be added.\n")
 						TEXT("#\n")
-						TEXT("# Prefix that triggers whitelist commands in the in-game chat.\n")
-						TEXT("# Set to empty to disable in-game whitelist commands.\n")
-						TEXT("InGameWhitelistCommandPrefix=!whitelist\n");
+;
 				}
 
 				if (FFileHelper::SaveStringToFile(ExistingContent + AppendContent, *ModFilePath,
@@ -736,17 +726,6 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				}
 
 				if (bFileHasWhitelist &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("InGameWhitelistCommandPrefix"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# InGameWhitelistCommandPrefix (added by mod update) -------------------\n")
-						TEXT("# Prefix that triggers whitelist commands when typed in the in-game chat.\n")
-						TEXT("# Set to empty to disable in-game whitelist commands.\n")
-						TEXT("InGameWhitelistCommandPrefix=!whitelist\n");
-				}
-
-				if (bFileHasWhitelist &&
 				    !ConfigFile.GetString(ConfigSection, TEXT("WhitelistEventsChannelId"), TmpVal))
 				{
 					AppendContent2 +=
@@ -793,7 +772,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("WhitelistApprovedDmMessage=\n")
 						TEXT("# Hours before expiry to post a warning embed. 0 = disabled. Default: 24\n")
 						TEXT("WhitelistExpiryWarningHours=24\n")
-						TEXT("# When True, enables /whitelist link / in-game !verify account linking.\n")
+						TEXT("# When True, enables /whitelist link / in-game /verify account linking.\n")
 						TEXT("WhitelistVerificationEnabled=False\n")
 						TEXT("# Channel where /whitelist link commands are accepted. Empty = any channel.\n")
 						TEXT("WhitelistVerificationChannelId=\n");
@@ -891,8 +870,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 					AppendContent2 +=
 						TEXT("\n")
 						TEXT("# -- BOT COMMANDS (added by mod update) --------------------------------\n")
-						TEXT("# Prefix for the !players Discord command (deprecated, use /players). Default: !players\n")
-						TEXT("PlayersCommandPrefix=!players\n")
+						TEXT("# Channel for /players responses. Leave empty to use ChannelId.\n")
 						TEXT("#\n")
 						TEXT("# Channel for /players responses. Leave empty to use ChannelId.\n")
 						TEXT("PlayersCommandChannelId=\n")
@@ -1008,8 +986,6 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("WhitelistEnabled=False\n")
 			TEXT("# Snowflake ID of the Discord role whose members may run /whitelist commands.\n")
 			TEXT("WhitelistCommandRoleId=\n")
-			TEXT("# Prefix for whitelist commands in Discord (deprecated, use /whitelist). Default: !whitelist\n")
-			TEXT("WhitelistCommandPrefix=!whitelist\n")
 			TEXT("# Snowflake ID of the Discord role assigned to whitelisted members.\n")
 			TEXT("WhitelistRoleId=\n")
 			TEXT("# Snowflake ID of a dedicated Discord channel for whitelisted members.\n")
@@ -1018,8 +994,6 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("WhitelistKickDiscordMessage=:boot: **%PlayerName%** tried to join but is not on the whitelist and was kicked.\n")
 			TEXT("# Reason shown in-game to the player when kicked for not being whitelisted.\n")
 			TEXT("WhitelistKickReason=\n")
-			TEXT("# Prefix for whitelist commands in the in-game chat. Default: !whitelist\n")
-			TEXT("InGameWhitelistCommandPrefix=!whitelist\n")
 			TEXT("# Snowflake ID of a Discord channel where whitelist events are posted. Leave empty to disable.\n")
 			TEXT("WhitelistEventsChannelId=\n")
 			TEXT("# Maximum whitelist slots. 0 = unlimited.\n")
@@ -1034,7 +1008,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("WhitelistApprovedDmMessage=\n")
 			TEXT("# Hours before expiry to post a warning. 0 = disabled. Default: 24\n")
 			TEXT("WhitelistExpiryWarningHours=24\n")
-			TEXT("# When True, enables /whitelist link / in-game !verify account linking. Default: False\n")
+			TEXT("# When True, enables /whitelist link / in-game /verify account linking. Default: False\n")
 			TEXT("WhitelistVerificationEnabled=False\n")
 			TEXT("# Channel where /whitelist link commands are accepted. Empty = any channel.\n")
 			TEXT("WhitelistVerificationChannelId=\n")
@@ -1067,8 +1041,6 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("# +ChatRelayBlocklist=spam\n")
 			TEXT("\n")
 			TEXT("# -- BOT COMMANDS -------------------------------------------------------------\n")
-			TEXT("# Prefix for the !players Discord command (deprecated, use /players). Default: !players\n")
-			TEXT("PlayersCommandPrefix=!players\n")
 			TEXT("# Channel for /players responses. Leave empty to use ChannelId.\n")
 			TEXT("PlayersCommandChannelId=\n")
 			TEXT("# Discord invite link shown to players who type /discord in-game.\n")
@@ -1165,13 +1137,11 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.PlayerCountUpdateIntervalSeconds = GetRawFloatOrDefault (BackupValues, TEXT("PlayerCountUpdateIntervalSeconds"), Config.PlayerCountUpdateIntervalSeconds);
 		Config.PlayerCountActivityType          = GetRawIntOrDefault   (BackupValues, TEXT("PlayerCountActivityType"),          Config.PlayerCountActivityType);
 		Config.WhitelistCommandRoleId           = GetRawStringOrDefault(BackupValues, TEXT("WhitelistCommandRoleId"),           Config.WhitelistCommandRoleId);
-		Config.WhitelistCommandPrefix           = GetRawStringOrDefault(BackupValues, TEXT("WhitelistCommandPrefix"),           Config.WhitelistCommandPrefix);
 		Config.WhitelistRoleId                  = GetRawStringOrDefault(BackupValues, TEXT("WhitelistRoleId"),                  Config.WhitelistRoleId);
 		Config.WhitelistChannelId               = GetRawStringOrDefault(BackupValues, TEXT("WhitelistChannelId"),               Config.WhitelistChannelId);
 		Config.WhitelistKickDiscordMessage      = GetRawStringOrDefault(BackupValues, TEXT("WhitelistKickDiscordMessage"),      Config.WhitelistKickDiscordMessage);
 		Config.WhitelistKickReason              = GetRawStringOrFallback(BackupValues, TEXT("WhitelistKickReason"),              Config.WhitelistKickReason);
 		Config.bWhitelistEnabled                = GetRawBoolOrDefault  (BackupValues, TEXT("WhitelistEnabled"),                Config.bWhitelistEnabled);
-		Config.InGameWhitelistCommandPrefix     = GetRawStringOrDefault(BackupValues, TEXT("InGameWhitelistCommandPrefix"),     Config.InGameWhitelistCommandPrefix);
 		Config.WhitelistEventsChannelId    = GetRawStringOrDefault(BackupValues, TEXT("WhitelistEventsChannelId"),    Config.WhitelistEventsChannelId);
 		Config.MaxWhitelistSlots           = GetRawIntOrDefault   (BackupValues, TEXT("MaxWhitelistSlots"),           Config.MaxWhitelistSlots);
 		Config.bSyncWhitelistWithRole      = GetRawBoolOrDefault  (BackupValues, TEXT("SyncWhitelistWithRole"),      Config.bSyncWhitelistWithRole);
@@ -1197,13 +1167,10 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.ChatRelayBlocklist = ParseRawIniArray(BackupFileContent, TEXT("DiscordBridge"), TEXT("ChatRelayBlocklist"));
 
 		// Bot commands
-		Config.PlayersCommandPrefix    = GetRawStringOrFallback(BackupValues, TEXT("PlayersCommandPrefix"),    Config.PlayersCommandPrefix);
 		Config.PlayersCommandChannelId = GetRawStringOrDefault (BackupValues, TEXT("PlayersCommandChannelId"), Config.PlayersCommandChannelId);
 		Config.DiscordInviteUrl        = GetRawStringOrDefault (BackupValues, TEXT("DiscordInviteUrl"),        Config.DiscordInviteUrl);
 
 		// New fields
-		Config.StatsCommandPrefix       = GetRawStringOrFallback(BackupValues, TEXT("StatsCommandPrefix"),       Config.StatsCommandPrefix);
-		Config.PlayerStatsCommandPrefix = GetRawStringOrFallback(BackupValues, TEXT("PlayerStatsCommandPrefix"), Config.PlayerStatsCommandPrefix);
 		Config.PhaseEventsChannelId     = GetRawStringOrDefault (BackupValues, TEXT("PhaseEventsChannelId"),     Config.PhaseEventsChannelId);
 		Config.SchematicEventsChannelId = GetRawStringOrDefault (BackupValues, TEXT("SchematicEventsChannelId"), Config.SchematicEventsChannelId);
 		Config.BanEventsChannelId       = GetRawStringOrDefault (BackupValues, TEXT("BanEventsChannelId"),       Config.BanEventsChannelId);
@@ -1456,12 +1423,10 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			+ TEXT("PlayerCountActivityType=") + FString::FromInt(Config.PlayerCountActivityType) + TEXT("\n")
 			+ TEXT("WhitelistEnabled=") + (Config.bWhitelistEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
 			+ TEXT("WhitelistCommandRoleId=") + Config.WhitelistCommandRoleId + TEXT("\n")
-			+ TEXT("WhitelistCommandPrefix=") + Config.WhitelistCommandPrefix + TEXT("\n")
 			+ TEXT("WhitelistRoleId=") + Config.WhitelistRoleId + TEXT("\n")
 			+ TEXT("WhitelistChannelId=") + Config.WhitelistChannelId + TEXT("\n")
 			+ TEXT("WhitelistKickDiscordMessage=") + Config.WhitelistKickDiscordMessage + TEXT("\n")
 			+ TEXT("WhitelistKickReason=") + Config.WhitelistKickReason + TEXT("\n")
-			+ TEXT("InGameWhitelistCommandPrefix=") + Config.InGameWhitelistCommandPrefix + TEXT("\n")
 			+ TEXT("WhitelistEventsChannelId=") + Config.WhitelistEventsChannelId + TEXT("\n")
 			+ TEXT("MaxWhitelistSlots=") + FString::FromInt(Config.MaxWhitelistSlots) + TEXT("\n")
 			+ TEXT("SyncWhitelistWithRole=") + (Config.bSyncWhitelistWithRole ? TEXT("True") : TEXT("False")) + TEXT("\n")
@@ -1479,7 +1444,6 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			+ TEXT("PlayerLeaveMessage=") + Config.PlayerLeaveMessage + TEXT("\n")
 			+ TEXT("PlayerTimeoutMessage=") + Config.PlayerTimeoutMessage + TEXT("\n")
 			+ TEXT("UseEmbedsForPlayerEvents=") + (Config.bUseEmbedsForPlayerEvents ? TEXT("True") : TEXT("False")) + TEXT("\n")
-			+ TEXT("PlayersCommandPrefix=") + Config.PlayersCommandPrefix + TEXT("\n")
 			+ TEXT("PlayersCommandChannelId=") + Config.PlayersCommandChannelId + TEXT("\n")
 			+ TEXT("DiscordInviteUrl=") + Config.DiscordInviteUrl + TEXT("\n");
 
@@ -1499,8 +1463,6 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 
 		// New config fields for the backup
 		const FString NewFieldLines =
-			TEXT("StatsCommandPrefix=") + Config.StatsCommandPrefix + TEXT("\n")
-			+ TEXT("PlayerStatsCommandPrefix=") + Config.PlayerStatsCommandPrefix + TEXT("\n")
 			+ TEXT("PhaseEventsChannelId=") + Config.PhaseEventsChannelId + TEXT("\n")
 			+ TEXT("SchematicEventsChannelId=") + Config.SchematicEventsChannelId + TEXT("\n")
 			+ TEXT("BanEventsChannelId=") + Config.BanEventsChannelId + TEXT("\n")

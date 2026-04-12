@@ -729,10 +729,10 @@ private:
 
 	// ── !stats / !playerstats ─────────────────────────────────────────────────
 
-	/** Handle the !stats Discord command — send a server-stats embed. */
+	/** Handle the /stats Discord command — send a server-stats embed. */
 	void HandleStatsCommand(const FString& ResponseChannelId);
 
-	/** Handle the !playerstats <name> Discord command — send per-player stats embed. */
+	/** Handle the /playerstats <name> Discord command — send per-player stats embed. */
 	void HandlePlayerStatsCommand(const FString& ResponseChannelId,
 	                              const FString& TargetPlayerName);
 
@@ -836,10 +836,10 @@ private:
 
 	// ── !server / !online commands ────────────────────────────────────────────
 
-	/** Handle the !server Discord command — post a server info embed. */
+	/** Handle the /server Discord command — post a server info embed. */
 	void HandleServerCommand(const FString& ResponseChannelId);
 
-	/** Handle the !online Discord command — post a list of online players with session times. */
+	/** Handle the /online Discord command — post a list of online players with session times. */
 	void HandleOnlineCommand(const FString& ResponseChannelId);
 
 	// ── !help / bot info command ──────────────────────────────────────────────
@@ -847,7 +847,7 @@ private:
 	/**
 	 * Post a comprehensive feature/command-reference embed to ResponseChannelId.
 	 * Called automatically on the first Gateway READY when BotInfoChannelId is
-	 * configured, and in response to the !help command in the bridged channel.
+	 * configured, and in response to the /help command in the bridged channel.
 	 *
 	 * @param ResponseChannelId  Snowflake ID of the channel to post the embed to.
 	 */
