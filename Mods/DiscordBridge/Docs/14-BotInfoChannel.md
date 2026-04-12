@@ -1,4 +1,4 @@
-# DiscordBridge – Bot Info Channel & `!help` Command
+# DiscordBridge – Bot Info Channel & `/help` Command
 
 ← [Back to index](README.md)
 
@@ -8,14 +8,14 @@
 
 The **Bot Info Channel** feature lets the bot automatically post a comprehensive
 feature and command reference to a dedicated Discord channel every time the server
-starts.  Discord members can also type `!help` (or `!commands`) at any time in the
-main bridged channel to retrieve the same reference on demand.
+starts.  Discord members can also type `/help` (or `/commands`) at any time to
+retrieve the same reference on demand.
 
 The reference is posted as two rich Discord embeds:
 
 | Embed | Contents |
 |-------|----------|
-| 📖 **DiscordBridge — Features & Commands** | Chat bridge, server/player commands, whitelist commands, `!help` itself |
+| 📖 **DiscordBridge — Features & Commands** | Chat bridge, server/player commands, whitelist commands, `/help` itself |
 | 🛡️ **Moderation Commands (BanSystem)** | Admin ban/history/warn/note commands; moderator kick/mute/announce commands |
 
 The second embed only appears when **BanSystem** and **BanChatCommands** are
@@ -31,8 +31,8 @@ connection after the server launches).
 
 **Default:** *(empty — automatic post is disabled)*
 
-When **empty**, the automatic post on server start is skipped.  The `!help`
-command still works in the main bridged channel at any time.
+When **empty**, the automatic post on server start is skipped.  The `/help`
+command still works at any time.
 
 ### Recommended setup
 
@@ -56,14 +56,14 @@ BotInfoChannelId=111222333444555666777
 
 ---
 
-## `!help` and `!commands` — on-demand reference
+## `/help` and `/commands` — on-demand reference
 
-Any Discord user can type either of these in the **main bridged channel** at any
-time to trigger the same pair of embeds on demand:
+Any Discord user can type either of these slash commands at any time to trigger the
+same pair of embeds on demand:
 
 ```
-!help
-!commands
+/help
+/commands
 ```
 
 The response is always posted to the channel where the command was typed.
@@ -81,18 +81,18 @@ The response is always posted to the channel where the command was typed.
 | Field | Commands covered |
 |-------|-----------------|
 | 💬 **Chat Bridge** | Description of how two-way relay works |
-| 🖥️ **Server & Player Commands** | `!server`, `!online`, `!players` / player-count prefix, `!stats`, `!playerstats` |
-| 🔒 **Whitelist Commands** | `!whitelist on/off/add/remove/list/status` *(only shown when `WhitelistCommandPrefix` is set)* |
-| ℹ️ **Help** | How to re-trigger the reference with `!help` or `!commands` |
+| 🖥️ **Server & Player Commands** | `/players`, `/stats`, `/playerstats` |
+| 🔒 **Whitelist Commands** | `/whitelist on/off/add/remove/list/status/role/apply/link/search/groups` |
+| ℹ️ **Help** | How to re-trigger the reference with `/help` or `/commands` |
 
 ### Embed 2 — Moderation commands *(BanSystem)*
 
 | Field | Commands covered |
 |-------|-----------------|
-| ⚔️ **Admin — Ban Management** | `!ban`, `!tempban`, `!unban`, `!unbanname`, `!banname`, `!bancheck`, `!banreason`, `!banlist`, `!extend`, `!duration` |
-| 📋 **Admin — History, Warnings & Notes** | `!playerhistory`, `!warn`, `!warnings`, `!clearwarns`, `!clearwarn`, `!note`, `!notes`, `!reason` |
-| ⚙️ **Admin — Server Links & Config** | `!linkbans`, `!unlinkbans`, `!reloadconfig` |
-| 👮 **Moderator Commands** | `!kick`, `!modban`, `!mute`, `!unmute`, `!tempmute`, `!mutecheck`, `!mutelist`, `!announce`, `!stafflist`, `!staffchat` |
+| ⚔️ **Admin — Ban Management** | `/ban add/temp/remove/removename/byname/check/reason/list/extend/duration/schedule/quick/bulk` |
+| 📋 **Admin — History, Warnings & Notes** | `/player history`, `/warn add/list/clearall/clearone`, `/player note/notes/reason` |
+| ⚙️ **Admin — Server Links & Config** | `/ban link/unlink`, `/admin reloadconfig` |
+| 👮 **Moderator Commands** | `/mod kick/modban/mute/unmute/tempmute/tempunmute/mutecheck/mutelist/mutereason/announce/stafflist/staffchat` |
 
 Admin and moderator commands require the respective Discord role IDs to be
 configured in `DefaultBanBridge.ini` (`AdminRoleId` / `ModeratorRoleId`).  See
@@ -105,9 +105,9 @@ the [BanSystem documentation](../../BanSystem/Docs/README.md) for details.
 | Detail | Description |
 |--------|-------------|
 | **Posted once per restart** | The embed is only posted on the very first Gateway connection after the server process starts.  Gateway reconnects (network drops, Discord maintenance) do **not** trigger a repeat post. |
-| **Fallback when `BotInfoChannelId` is empty** | The automatic post is skipped entirely.  `!help` in the bridged channel is the only way to retrieve the reference. |
-| **Dynamic content** | Command prefixes (e.g. `!players`) are populated from the live config, so the embed always reflects your current settings. |
-| **Whitelist section** | The whitelist command block is omitted from the embed when `WhitelistCommandPrefix` is empty or not set. |
+| **Fallback when `BotInfoChannelId` is empty** | The automatic post is skipped entirely.  `/help` is the only way to retrieve the reference. |
+| **Dynamic content** | Slash command names are shown in the embed as registered with Discord. |
+| **Whitelist section** | The whitelist command block is always shown since `/whitelist` is a registered slash command. |
 
 ---
 
@@ -132,7 +132,7 @@ BotInfoChannelId=111222333444555666777
 
 With this config, every time the server starts the bot will post the full
 feature and command reference into the `#bot-commands` channel.  Members can
-also type `!help` in the main bridged channel to retrieve the reference at
+also type `/help` to retrieve the reference at
 any time.
 
 ---

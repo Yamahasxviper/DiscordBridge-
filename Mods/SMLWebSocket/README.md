@@ -1,8 +1,8 @@
-# SMLWebSocket – RFC 6455 WebSocket Client for Satisfactory Mods
+# SMLWebSocket – RFC 6455 WebSocket Client & Server for Satisfactory Mods
 
 **Version 1.1.0** | Server-only | Requires SML `^3.11.3` | Game build `>=416835`
 
-A standalone C++ mod that provides a **custom WebSocket client with SSL/OpenSSL support** for Satisfactory dedicated server mods built with Alpakit. It implements the full WebSocket protocol (RFC 6455) over TCP with optional TLS encryption, without requiring Unreal Engine's built-in WebSocket module (which is unavailable in Alpakit-packaged mods).
+A standalone C++ mod that provides a **custom WebSocket client and server with SSL/OpenSSL support** for Satisfactory dedicated server mods built with Alpakit. It implements the full WebSocket protocol (RFC 6455) over TCP with optional TLS encryption, without requiring Unreal Engine's built-in WebSocket module (which is unavailable in Alpakit-packaged mods).
 
 ---
 
@@ -25,15 +25,18 @@ Mods that require a live WebSocket connection (such as DiscordBridge, BanSystem,
 |---------|---------|
 | `ws://` and `wss://` | Plain TCP and TLS (OpenSSL) connections |
 | RFC 6455 framing | Text frames, binary frames, ping/pong, close handshake |
-| Auto-reconnect | Exponential back-off with configurable initial delay, max delay, and max attempts |
+| Auto-reconnect | Exponential back-off with configurable initial delay, max delay, and max attempts; ±20 % jitter to prevent thundering herd |
+| **WebSocket server** | Accept incoming WebSocket connections with subscription-filtered event broadcasting |
+| **Named client registry** | Register and retrieve WebSocket clients by name for cross-mod sharing |
 | Blueprint API | Full Blueprint exposure – `CreateWebSocketClient`, `Connect`, `SendText`, `SendBinary`, `Close`, `IsConnected` |
 | C++ API | Inherit from or hold a `USMLWebSocketClient*`; bind delegates in C++ |
-| Thread-safe callbacks | All delegate callbacks (`OnConnected`, `OnMessage`, `OnBinaryMessage`, `OnClosed`, `OnError`, `OnReconnecting`) are fired on the **game thread** |
+| Thread-safe callbacks | All delegate callbacks are fired on the **game thread** |
+| Connection statistics | Track bytes/messages sent/received and connection duration |
 | Alpakit-compatible | No dependency on engine modules absent from Satisfactory's custom UE build |
 
 ---
 
-## Delegates
+## Client delegates
 
 | Delegate | Signature | When it fires |
 |----------|-----------|---------------|
@@ -43,6 +46,9 @@ Mods that require a live WebSocket connection (such as DiscordBridge, BanSystem,
 | `OnClosed` | `(int32 StatusCode, FString Reason)` | Connection closed (either side) |
 | `OnError` | `(FString ErrorMessage)` | Connection or protocol error |
 | `OnReconnecting` | `(int32 AttemptNumber, float DelaySeconds)` | About to retry after a non-user-initiated disconnect |
+| `OnReconnected` | `()` | Reconnection succeeded (distinct from initial `OnConnected`) |
+| `OnStateChanged` | `(EWebSocketState OldState, EWebSocketState NewState)` | State transition (Disconnected ↔ Connecting ↔ Connected ↔ Closing) |
+| `OnJsonMessage` | `(FString JsonString)` | JSON text message received |
 
 ---
 
@@ -104,6 +110,71 @@ if (WebSocket)
 4. Call **Connect** with your `ws://` or `wss://` URL, optional sub-protocols, and optional headers.
 5. Call **SendText** / **SendBinary** to exchange messages after `OnConnected` fires.
 6. Call **Close** when done.
+
+---
+
+## WebSocket server
+
+SMLWebSocket also provides a `USMLWebSocketServer` class for accepting incoming
+WebSocket connections. This is used by BanSystem for real-time event pushing.
+
+| Feature | Details |
+|---------|---------|
+| `Listen(Port)` | Start accepting connections on a TCP port |
+| `StopListening()` | Shut down the server |
+| `BroadcastText(Message)` | Send a message to all connected clients |
+| `BroadcastEventText(EventType, Message)` | Send to clients subscribed to a specific event type |
+| `SendTextToClient(ClientId, Message)` | Send to a specific client |
+| Optional `ApiToken` | Authenticate connecting clients |
+
+### Client subscriptions
+
+Clients can send a subscription message to filter which events they receive:
+
+```json
+{"op": "subscribe", "events": ["ban", "chat", "warn"]}
+```
+
+Only events matching the subscription list are delivered via `BroadcastEventText`.
+Clients that never subscribe receive all events.
+
+### Server delegates
+
+| Delegate | When it fires |
+|----------|---------------|
+| `OnClientConnected` | A new client connected |
+| `OnClientDisconnected` | A client disconnected |
+| `OnClientMessage` | A message received from a client |
+| `OnError` | Server error |
+
+---
+
+## Named client registry
+
+`USMLWebSocketRegistry` provides a named registry for sharing WebSocket clients
+across mods:
+
+| Method | Description |
+|--------|-------------|
+| `RegisterClient(Name, Client)` | Register a client by name |
+| `GetClient(Name)` | Retrieve a client by name |
+| `UnregisterClient(Name)` | Remove from registry |
+| `HasClient(Name)` | Check if a name is registered |
+| `GetRegisteredNames()` | List all registered names |
+
+---
+
+## Connection statistics
+
+`GetConnectionStats()` returns an `FSMLWebSocketStats` struct with:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `BytesSent` | `int64` | Total bytes sent |
+| `BytesReceived` | `int64` | Total bytes received |
+| `MessagesSent` | `int32` | Total messages sent |
+| `MessagesReceived` | `int32` | Total messages received |
+| `ConnectedForSeconds` | `float` | Duration of current connection |
 
 ---
 

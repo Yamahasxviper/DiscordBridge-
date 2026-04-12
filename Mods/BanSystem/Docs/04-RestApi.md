@@ -267,4 +267,74 @@ curl -X POST http://localhost:3000/bans/backup
 
 ---
 
+## Additional endpoints (v1.1.0)
+
+The following endpoints were added in v1.1.0:
+
+### Player sessions
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/players` | List all player sessions |
+| `GET` | `/players/search?name=<query>` | Search players by name |
+| `GET` | `/players/export-csv` | Export players as CSV |
+| `POST` | `/players/prune` | Prune old session records |
+
+### Warnings
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/warnings` | List all warnings (optional `?uid=UID` filter) |
+| `GET` | `/warnings/export-csv` | Export warnings as CSV |
+| `POST` | `/warnings` | Issue a warning |
+| `DELETE` | `/warnings/:uid` | Clear all warnings for a UID |
+| `DELETE` | `/warnings/id/:id` | Remove a single warning by ID |
+
+### Audit log
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/audit` | View audit log |
+| `GET` | `/audit/export-csv` | Export audit log as CSV |
+
+### Analytics & metrics
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/metrics` | Server statistics JSON |
+| `GET` | `/metrics/prometheus` | Prometheus text format metrics |
+| `GET` | `/reputation/:uid` | Player reputation score |
+
+### Ban appeals
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/appeals` | Submit a ban appeal |
+| `GET` | `/appeals` | List all appeals |
+| `GET` | `/appeals/:id` | Get a single appeal |
+| `DELETE` | `/appeals/:id` | Dismiss an appeal |
+| `GET` | `/appeals/portal` | Self-service HTML appeals form |
+
+### Scheduled bans
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/scheduled` | List scheduled bans |
+| `POST` | `/scheduled` | Schedule a future ban |
+| `DELETE` | `/scheduled/:id` | Delete a scheduled ban |
+
+### Admin tools
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/dashboard` | Unified admin dashboard SPA |
+| `GET` | `/bans/search?name=<query>` | Search bans by name |
+| `GET` | `/bans/export-csv` | Export bans as CSV |
+| `POST` | `/bans/ip` | Create an IP ban |
+| `DELETE` | `/bans/ip/:ip` | Remove an IP ban |
+| `POST` | `/bans/bulk` | Bulk ban operations |
+| `POST` | `/notes` | Add admin notes |
+
+---
+
 *For further help visit the Satisfactory Modding Discord: <https://discord.gg/xkVJ73E>*

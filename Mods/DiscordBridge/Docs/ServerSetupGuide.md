@@ -127,7 +127,7 @@ Controls the built-in server whitelist that can be managed from Discord.
 Controls whether the whitelist is active when the server starts.
 This setting is applied on **every** server restart — change it and restart the server to enable or disable the whitelist.
 
-`!whitelist on` / `!whitelist off` Discord commands update the in-memory state for the current session only; the config setting takes effect again on the next restart.
+`/whitelist on` / `/whitelist off` Discord slash commands update the in-memory state for the current session only; the config setting takes effect again on the next restart.
 
 **Default:** `False` (all players can join)
 
@@ -135,11 +135,11 @@ This setting is applied on **every** server restart — change it and restart th
 
 #### `WhitelistCommandRoleId`
 
-The snowflake ID of the Discord role whose members are allowed to run `!whitelist` management commands.
+The snowflake ID of the Discord role whose members are allowed to run `/whitelist` management commands.
 
-**Default:** *(empty — !whitelist commands are disabled for all Discord users)*
+**Default:** *(empty — /whitelist commands are disabled for all Discord users)*
 
-When set, **only members who hold this role** can run `!whitelist` commands. When left empty, `!whitelist` commands are fully disabled (deny-by-default).
+When set, **only members who hold this role** can run `/whitelist` commands. When left empty, `/whitelist` commands are fully disabled (deny-by-default).
 
 **Example:**
 ```ini
@@ -148,25 +148,26 @@ WhitelistCommandRoleId=123456789012345678
 
 ---
 
-#### `WhitelistCommandPrefix`
+#### Discord `/whitelist` slash commands
 
-The prefix that triggers whitelist management commands when typed in the bridged Discord channel.
-Set to an **empty string** to disable Discord-based whitelist management entirely.
+All whitelist commands are now Discord slash commands. The old `WhitelistCommandPrefix` config field has been removed.
 
-**Default:** `!whitelist`
-
-**Supported commands** (type these in the bridged Discord channel):
+**Supported commands** (use these as Discord slash commands):
 
 | Command | Effect |
 |---------|--------|
-| `!whitelist on` | Enable the whitelist (only whitelisted players can join) |
-| `!whitelist off` | Disable the whitelist (all players can join) |
-| `!whitelist add <name>` | Add a player by in-game name |
-| `!whitelist remove <name>` | Remove a player by in-game name |
-| `!whitelist list` | List all whitelisted players and current enabled/disabled state |
-| `!whitelist status` | Show the current enabled/disabled state of the whitelist |
-| `!whitelist role add <discord_id>` | Grant the `WhitelistRoleId` Discord role to a user |
-| `!whitelist role remove <discord_id>` | Revoke the `WhitelistRoleId` Discord role from a user |
+| `/whitelist on` | Enable the whitelist (only whitelisted players can join) |
+| `/whitelist off` | Disable the whitelist (all players can join) |
+| `/whitelist add <name>` | Add a player by in-game name |
+| `/whitelist remove <name>` | Remove a player by in-game name |
+| `/whitelist list` | List all whitelisted players and current enabled/disabled state |
+| `/whitelist status` | Show the current enabled/disabled state of the whitelist |
+| `/whitelist role add <discord_id>` | Grant the `WhitelistRoleId` Discord role to a user |
+| `/whitelist role remove <discord_id>` | Revoke the `WhitelistRoleId` Discord role from a user |
+| `/whitelist apply` | Player-initiated whitelist application |
+| `/whitelist link` | Link Discord account to in-game player |
+| `/whitelist search <partial>` | Search whitelist by partial name |
+| `/whitelist groups` | List whitelist groups |
 
 ---
 
@@ -179,7 +180,7 @@ Leave **empty** to disable Discord role integration.
 
 When set:
 - Discord messages sent to `WhitelistChannelId` are relayed to the game **only when the sender holds this role**.
-- The `!whitelist role add/remove <discord_id>` commands assign or revoke this role via the Discord REST API (the bot must have the **Manage Roles** permission on your server).
+- The `/whitelist role add/remove <discord_id>` commands assign or revoke this role via the Discord REST API (the bot must have the **Manage Roles** permission on your server).
 
 **How to get the role ID:**
 Enable Developer Mode in Discord (User Settings → Advanced → Developer Mode), then right-click the role in Server Settings → Roles and choose **Copy Role ID**.
@@ -239,25 +240,22 @@ WhitelistKickReason=You are not whitelisted. DM an admin on Discord to request a
 
 These settings control commands that server admins can type directly in the **Satisfactory in-game chat** to manage the whitelist without using Discord.
 
-#### `InGameWhitelistCommandPrefix`
+#### In-game `/ingamewhitelist` commands
 
-The prefix that triggers whitelist management commands in the in-game chat.
-Set to an **empty string** to disable in-game whitelist commands.
-
-**Default:** `!whitelist`
+In-game whitelist commands are now SML registered commands using `/ingamewhitelist`. The old `InGameWhitelistCommandPrefix` config field has been removed.
 
 **Supported commands** (type these in the Satisfactory in-game chat):
 
 | Command | Effect |
 |---------|--------|
-| `!whitelist on` | Enable the whitelist |
-| `!whitelist off` | Disable the whitelist (all players can join) |
-| `!whitelist add <name>` | Add a player by in-game name |
-| `!whitelist remove <name>` | Remove a player by in-game name |
-| `!whitelist list` | List all whitelisted players and current enabled/disabled state |
-| `!whitelist status` | Show the current enabled/disabled state of the whitelist |
+| `/ingamewhitelist on` | Enable the whitelist |
+| `/ingamewhitelist off` | Disable the whitelist (all players can join) |
+| `/ingamewhitelist add <name>` | Add a player by in-game name |
+| `/ingamewhitelist remove <name>` | Remove a player by in-game name |
+| `/ingamewhitelist list` | List all whitelisted players and current enabled/disabled state |
+| `/ingamewhitelist status` | Show the current enabled/disabled state of the whitelist |
 
-> **Note:** In-game whitelist commands do not support `!whitelist role add/remove` (that is Discord-only).
+> **Note:** In-game whitelist commands do not support role management, application, link, search, or groups — those are Discord-only.
 
 ---
 
@@ -413,8 +411,8 @@ PlayerTimeoutMessage=
 
 ### Whitelist commands are not recognised / players are not being kicked
 
-1. Make sure `WhitelistCommandPrefix` is set (default is `!whitelist`) and not empty.
-2. Confirm the whitelist is **enabled** (`!whitelist status` in the Discord channel).
+1. Whitelist commands are now Discord slash commands (`/whitelist`). Make sure your bot has registered slash commands with Discord.
+2. Confirm the whitelist is **enabled** (`/whitelist status` in Discord).
 3. If using `WhitelistRoleId`, verify the bot has the **Manage Roles** permission on your Discord server.
 4. Players are only kicked on **join** – the whitelist is checked when a player connects, not while they are already in the game.
 

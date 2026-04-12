@@ -2,14 +2,43 @@
 
 ← [Back to index](README.md)
 
-The **TicketSystem** mod adds a button-based Discord support-ticket panel to
-your Satisfactory dedicated server.  It is a **fully standalone mod** – it can
-run with its own dedicated Discord bot, or pair with DiscordBridge to use
-DiscordBridge's existing bot connection.
+The **TicketSystem** subsystem adds a button-based Discord support-ticket panel to
+your Satisfactory dedicated server with 23 slash commands for comprehensive ticket management.
 
 Members click a button to open a **private ticket channel** visible only to
 them and a configured admin/support role.  No commands are required for regular
 members – everything is driven by button clicks and a short reason modal.
+
+---
+
+## Slash commands
+
+All ticket management is performed via `/ticket` slash commands:
+
+| Command | Description |
+|---------|-------------|
+| `/ticket panel` | Post the ticket panel to a channel |
+| `/ticket list` | List open tickets |
+| `/ticket assign <@user>` | Assign ticket to staff member |
+| `/ticket claim` | Claim ticket for yourself |
+| `/ticket unclaim` | Release a claimed ticket |
+| `/ticket transfer <@user>` | Transfer ticket to another staff member |
+| `/ticket priority <level>` | Set priority (low/normal/high/urgent) |
+| `/ticket macro <name>` | Apply a response template |
+| `/ticket macros` | List available templates |
+| `/ticket stats` | Show ticket statistics |
+| `/ticket report <text>` | Submit a report |
+| `/ticket tag <tag>` | Add a tag to the current ticket |
+| `/ticket untag <tag>` | Remove a tag from the current ticket |
+| `/ticket tags` | List all tags on the current ticket |
+| `/ticket note <text>` | Add a private staff note |
+| `/ticket notes` | List all staff notes |
+| `/ticket escalate` | Escalate to escalation role/category |
+| `/ticket remind <text>` | Set a follow-up reminder |
+| `/ticket blacklist <user>` | Blacklist a user from creating tickets |
+| `/ticket unblacklist <user>` | Remove from the ticket blacklist |
+| `/ticket blacklistlist` | List all blacklisted users |
+| `/ticket merge <ticket_id>` | Merge two tickets together |
 
 ---
 
@@ -53,7 +82,7 @@ For **standalone mode**, the following Gateway intents must be enabled in the
 | Intent | Why |
 |--------|-----|
 | Server Members Intent | Role info in MESSAGE_CREATE |
-| Message Content Intent | Read the `!ticket-panel` command |
+| Message Content Intent | Read slash commands and interactions |
 
 ---
 
@@ -61,13 +90,13 @@ For **standalone mode**, the following Gateway intents must be enabled in the
 
 ### Paired mode (DiscordBridge)
 
-1. Install both DiscordBridge and TicketSystem on the dedicated server.
-2. Open `<ServerRoot>/FactoryGame/Mods/TicketSystem/Config/DefaultTickets.ini`.
+1. Install DiscordBridge (TicketSystem is built-in) on the dedicated server.
+2. Open `<ServerRoot>/FactoryGame/Mods/DiscordBridge/Config/DefaultTickets.ini`.
 3. Set **`TicketNotifyRoleId`** to your admin/support role ID.
 4. Set **`TicketPanelChannelId`** to the "open-a-ticket" channel ID.
 5. *(Optional)* Set `TicketCategoryId` and add `TicketReason=` entries.
 6. Restart the server.
-7. Type `!ticket-panel` in Discord while holding `TicketNotifyRoleId`.
+7. Use `/ticket panel` in Discord while holding `TicketNotifyRoleId`.
 
 ### Standalone mode
 
@@ -130,10 +159,15 @@ combined count of enabled built-in types and custom reasons must not exceed 25.
 | `TicketWhitelistEnabled` | `True` | Show Whitelist Request button. |
 | `TicketHelpEnabled` | `True` | Show Help / Support button. |
 | `TicketReportEnabled` | `True` | Show Report a Player button. |
-| `TicketNotifyRoleId` | *(empty)* | Role @mentioned in every new ticket; also authorises `!ticket-panel`. |
+| `TicketNotifyRoleId` | *(empty)* | Role @mentioned in every new ticket; also authorises `/ticket panel`. |
 | `TicketPanelChannelId` | *(empty)* | Channel where the button panel is posted. |
 | `TicketCategoryId` | *(empty)* | Category under which ticket channels are created. |
 | `TicketReason=Label\|Desc` | *(none)* | Custom ticket reason buttons. |
+| `TicketSlaWarningMinutes` | `0` | SLA warning threshold in minutes. `0` disables. |
+| `TicketEscalationRoleId` | *(empty)* | Discord role pinged on `/ticket escalate`. |
+| `TicketEscalationCategoryId` | *(empty)* | Category to move escalated tickets into. |
+| `TicketTemplate` | *(none)* | Ticket templates (`TypeSlug\|Field1\|...`). |
+| `TicketAutoResponse` | *(none)* | Auto-response on ticket creation (`TypeSlug\|message`). |
 
 ---
 
@@ -151,7 +185,7 @@ connection.  TicketSystem has no direct knowledge of DiscordBridge internals.
 | Method | Event | Purpose |
 |--------|-------|---------|
 | `SubscribeInteraction()` | `INTERACTION_CREATE` | Receives button clicks and modal submits |
-| `SubscribeRawMessage()` | `MESSAGE_CREATE` | Receives all messages so `!ticket-panel` is seen regardless of channel |
+| `SubscribeRawMessage()` | `MESSAGE_CREATE` | Receives all messages for interaction routing |
 
 **REST helpers DiscordBridge provides through the interface:**
 

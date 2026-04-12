@@ -76,27 +76,36 @@ is configured through a single INI file with no external service or dashboard re
 ## Whitelist
 
 - Restrict which players can join and manage the list from Discord or in-game using
-  `!whitelist` commands.
+  `/whitelist` slash commands.
 - Optional Discord role integration (`WhitelistRoleId`): members holding the whitelist
   role are automatically allowed by display-name matching, without a manual
-  `!whitelist add` entry.
+  `/whitelist add` entry.
 - A dedicated whitelist channel (`WhitelistChannelId`) mirrors in-game messages from
   whitelisted players and accepts Discord messages only from role holders.
 - Configurable kick reason (`WhitelistKickReason`) and Discord kick notification
   (`WhitelistKickDiscordMessage`).
+- **Group/tier support**: assign players to whitelist groups with `/whitelist add <name> group:GroupName`.
+- **Search**: `/whitelist search <partial>` finds players by partial name match.
+- **Application workflow**: players can request whitelist access with `/whitelist apply`.
+- **Verification workflow**: link Discord account to in-game identity.
+- **Expiry warnings**: configurable advance notice before whitelist entries expire.
 
-**Discord & in-game `!whitelist` commands**
+**Discord `/whitelist` slash commands**
 
 | Command | Effect |
 |---------|--------|
-| `!whitelist on` | Enable the whitelist |
-| `!whitelist off` | Disable the whitelist |
-| `!whitelist add <name>` | Add a player by in-game name |
-| `!whitelist remove <name>` | Remove a player by in-game name |
-| `!whitelist list` | List all whitelisted players |
-| `!whitelist status` | Show the state of the whitelist and ban system |
-| `!whitelist role add <discord_id>` | Grant the whitelist role *(Discord only)* |
-| `!whitelist role remove <discord_id>` | Revoke the whitelist role *(Discord only)* |
+| `/whitelist on` | Enable the whitelist |
+| `/whitelist off` | Disable the whitelist |
+| `/whitelist add <name>` | Add a player by in-game name (supports `group:GroupName` token) |
+| `/whitelist remove <name>` | Remove a player by in-game name |
+| `/whitelist list` | List all whitelisted players (supports optional group filter) |
+| `/whitelist status` | Show the state of the whitelist |
+| `/whitelist role add <discord_id>` | Grant the whitelist role *(Discord only)* |
+| `/whitelist role remove <discord_id>` | Revoke the whitelist role *(Discord only)* |
+| `/whitelist apply` | Player-initiated whitelist application |
+| `/whitelist link` | Link Discord account to in-game player |
+| `/whitelist search <partial>` | Search whitelist by partial name |
+| `/whitelist groups` | List all whitelist groups |
 
 → See [Whitelist](05-Whitelist.md)
 
@@ -116,21 +125,24 @@ is configured through a single INI file with no external service or dashboard re
 
 ## Discord stats commands
 
-- **`!stats`** — any Discord user can type this in the bridged channel to get a live
+- **`/stats`** — any Discord user can type this slash command to get a live
   server summary (player count, uptime, and aggregate session counters).
-- **`!playerstats <PlayerName>`** — retrieves per-player session counters (time online,
+- **`/playerstats <PlayerName>`** — retrieves per-player session counters (time online,
   messages sent, etc.) for any player who has been seen on the server.
-- Both command prefixes are configurable and can be disabled by clearing the value.
+
+> **Note:** These are now slash commands. The old `StatsCommandPrefix` and
+> `PlayerStatsCommandPrefix` config fields have been removed.
 
 → See [Stats Commands](11-StatsCommands.md)
 
 ---
 
-## `!players` command
+## `/players` command
 
-- Typing `!players` in the bridged channel returns the current online player list.
-- The response can be routed to a dedicated channel (`PlayersCommandChannelId`) or
-  sent to the originating channel.
+- Typing `/players` in the bridged channel returns the current online player list.
+
+> **Note:** This is now a slash command. The old `PlayersCommandPrefix` config
+> field has been removed.
 
 ---
 
@@ -156,20 +168,19 @@ is configured through a single INI file with no external service or dashboard re
 
 ---
 
-## Bot info channel & `!help` command
+## Bot info channel & `/help` command
 
 - On the **first server start** the bot automatically posts a full feature and
   command reference as rich Discord embeds into a configurable dedicated channel
   (`BotInfoChannelId`).
-- Discord members can type **`!help`** or **`!commands`** in the main bridged
-  channel at any time to re-post the same reference on demand.
+- Discord members can type **`/help`** or **`/commands`** at any time to retrieve
+  the same reference on demand.
 - The reference is split into two embeds: one for general / server commands
-  (chat bridge, `!server`, `!online`, `!stats`, `!playerstats`, whitelist) and
+  (chat bridge, `/stats`, `/playerstats`, whitelist) and
   one for admin/moderator BanSystem commands (only shown when BanSystem is active).
-- Command prefixes (e.g. `!players`) in the embed reflect live config values.
-- Leave `BotInfoChannelId` empty to skip the automatic post; `!help` still works.
+- Leave `BotInfoChannelId` empty to skip the automatic post; `/help` still works.
 
-→ See [Bot Info Channel & !help](14-BotInfoChannel.md)
+→ See [Bot Info Channel & /help](14-BotInfoChannel.md)
 
 ---
 
@@ -201,20 +212,29 @@ is configured through a single INI file with no external service or dashboard re
 
 ---
 
-## TicketSystem (optional add-on mod)
+## TicketSystem (integrated subsystem)
 
-The **TicketSystem** mod extends DiscordBridge with a button-based Discord
-support-ticket panel.
+The **TicketSystem** subsystem provides a button-based Discord
+support-ticket panel with 23 slash commands for comprehensive ticket management.
 
 - Members click a button to open a **private ticket channel** visible only to
   them and an admin/support role.
 - A reason modal (popup) collects context before the channel is created.
 - Built-in ticket types: Whitelist Request, Help / Support, Report a Player.
 - Unlimited custom ticket reasons configurable via `TicketReason=Label|Desc`.
-- Admins post the panel by typing `!ticket-panel` in any Discord channel.
+- Admins post the panel using `/ticket panel`.
 - Either party can click **Close Ticket** to delete the channel when done.
-- No changes to `DefaultDiscordBridge.ini` are needed; TicketSystem reads its
-  own `DefaultTickets.ini`.
+
+**Advanced features:**
+- **Tags** — categorise tickets with `/ticket tag`, `/ticket untag`, `/ticket tags`
+- **Staff notes** — private notes with `/ticket note`, `/ticket notes`
+- **Escalation** — `/ticket escalate` pings escalation role and moves to escalation category
+- **Reminders** — `/ticket remind` sets follow-up reminders
+- **Blacklist** — `/ticket blacklist`, `/ticket unblacklist`, `/ticket blacklistlist`
+- **Merge** — `/ticket merge <ticket_id>` combines two tickets
+- **SLA tracking** — configurable SLA warning threshold
+- **Templates** — ticket templates with auto-responses
+- **Statistics** — `/ticket stats` and `/ticket report`
 
 → See [TicketSystem](09-TicketSystem.md)
 
@@ -231,7 +251,7 @@ support-ticket panel.
 The Discord bot must have **Server Members Intent** and **Message Content Intent**
 enabled in the Discord Developer Portal, plus **Send Messages** and **Read Message
 History** permissions in the target channel.  The **Manage Roles** permission is also
-required when using `!whitelist role` commands.
+required when using `/whitelist role` commands.
 
 ---
 

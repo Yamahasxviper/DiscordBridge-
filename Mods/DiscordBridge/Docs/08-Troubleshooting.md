@@ -69,8 +69,8 @@ LogDiscordBridge: Error: Failed to create WebSocket – SMLWebSocket module not 
 
 ## Whitelist commands are not recognised / players are not being kicked
 
-1. Make sure `WhitelistCommandPrefix` is set (default is `!whitelist`) and not empty.
-2. Confirm the whitelist is **enabled** (`!whitelist status` in the Discord channel).
+1. Whitelist commands are now Discord slash commands (`/whitelist`). Make sure your bot has registered slash commands with Discord.
+2. Confirm the whitelist is **enabled** (`/whitelist status` in Discord).
 3. If using `WhitelistRoleId`, verify the bot has the **Manage Roles** permission on your Discord server.
 4. Players are only kicked on **join** – the whitelist is checked when a player connects, not while they are already in the game.
 
@@ -78,9 +78,9 @@ LogDiscordBridge: Error: Failed to create WebSocket – SMLWebSocket module not 
 
 ## In-game commands are not recognised
 
-1. Make sure `InGameWhitelistCommandPrefix` is set (defaults to `!whitelist`) and not empty in the config file.
+1. In-game whitelist commands use the SML registered command `/ingamewhitelist`.
 2. In-game commands can only be typed in the **Satisfactory in-game chat** by players who are already connected to the server.
-3. In-game whitelist commands do not include `!whitelist role add/remove` — that is Discord-only.
+3. In-game whitelist commands do not include role management, application, link, search, or groups — those are Discord-only.
 4. If the command appears to do nothing, check the server log (`FactoryGame.log`) for `LogDiscordBridge` or `LogWhitelistManager` lines that may explain why it was rejected.
 
 ---

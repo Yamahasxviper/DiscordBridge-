@@ -261,6 +261,168 @@ If more than one connected player matches the name, the command lists all ambigu
 
 ---
 
+### `/clearwarn`
+
+Remove a specific warning by ID.
+
+```
+/clearwarn <player|UID> <warning_id>
+```
+
+### `/banreason`
+
+Edit the ban reason for an existing ban.
+
+```
+/banreason <UID> <new reason...>
+```
+
+### `/note`
+
+Add an admin note to a player's record.
+
+```
+/note <player|UID> <text...>
+```
+
+### `/notes`
+
+List all admin notes for a player.
+
+```
+/notes <player|UID>
+```
+
+### `/duration`
+
+Show remaining time on a temporary ban.
+
+```
+/duration <UID>
+```
+
+### `/extend`
+
+Extend the duration of an existing temporary ban.
+
+```
+/extend <UID> <minutes>
+```
+
+### `/appeal`
+
+Manage ban appeals for a player.
+
+```
+/appeal <UID>
+```
+
+### `/staffchat`
+
+Send a message visible only to online admins and moderators.
+
+```
+/staffchat <message...>
+```
+
+### `/tempmute`
+
+Temporarily mute a player for a specified duration.
+
+```
+/tempmute <player|UID> <minutes> [reason...]
+```
+
+### `/tempunmute`
+
+Remove a timed mute.
+
+```
+/tempunmute <player|UID>
+```
+
+### `/mutecheck`
+
+Check if a player is currently muted.
+
+```
+/mutecheck <player|UID>
+```
+
+### `/mutelist`
+
+List all currently active mutes.
+
+```
+/mutelist
+```
+
+### `/mutereason`
+
+Edit the reason for an existing mute.
+
+```
+/mutereason <player|UID> <reason...>
+```
+
+### `/freeze`
+
+Immobilise a player (toggle on/off).
+
+```
+/freeze <player|UID>
+```
+
+### `/clearchat`
+
+Flush the in-game chat history and post a notification embed to Discord.
+
+```
+/clearchat
+```
+
+### `/report`
+
+Submit a player report to the configured Discord webhook.
+
+```
+/report <player|UID> <reason...>
+```
+
+### `/scheduleban`
+
+Schedule a ban to take effect at a future time.
+
+```
+/scheduleban <player|UID> <timestamp> [reason...]
+```
+
+### `/qban`
+
+Apply a quick-ban template to a player.
+
+```
+/qban <template_name> <player|UID>
+```
+
+### `/reputation`
+
+Show a player's reputation score.
+
+```
+/reputation <player|UID>
+```
+
+### `/bulkban`
+
+Ban multiple players at once.
+
+```
+/bulkban <UID1> <UID2> ... [reason...]
+```
+
+---
+
 ## IP address banning
 
 All commands that accept a `UID` also accept an **IP address** in the form `IP:<address>` (IPv4 or IPv6). IP bans are enforced at connection time — the player's remote IP is captured at `PreLogin` and checked against every `IP:` ban record before the player enters the game.

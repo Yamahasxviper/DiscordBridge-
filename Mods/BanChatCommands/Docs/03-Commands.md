@@ -602,3 +602,315 @@ Removes an in-memory mute immediately.
 /unmute SpamBot
 /unmute 00020aed06f0a6958c3c067fb4b73d51
 ```
+
+---
+
+## /clearwarn
+
+```
+/clearwarn <player|UID> <warning_id>
+```
+
+Remove a specific warning by its numeric ID. Use `/warnings` first to find the ID.
+
+**Requires admin.**
+
+```
+/clearwarn SomePlayer 3
+/clearwarn EOS:00020aed06f0a6958c3c067fb4b73d51 1
+```
+
+---
+
+## /banreason
+
+```
+/banreason <UID> <new reason...>
+```
+
+Edit the ban reason for an existing ban record.
+
+**Requires admin.**
+
+```
+/banreason EOS:00020aed06f0a6958c3c067fb4b73d51 Updated: Griefing and harassment
+```
+
+---
+
+## /note
+
+```
+/note <player|UID> <text...>
+```
+
+Add a persistent admin note to a player's record. Notes are stored alongside warnings
+and session data.
+
+**Requires admin.**
+
+```
+/note SomePlayer Verbal warning about language in chat
+/note EOS:00020aed06f0a6958c3c067fb4b73d51 Contacted about base placement
+```
+
+---
+
+## /notes
+
+```
+/notes <player|UID>
+```
+
+List all admin notes for a player.
+
+**Requires admin.**
+
+```
+/notes SomePlayer
+```
+
+---
+
+## /duration
+
+```
+/duration <UID>
+```
+
+Show the remaining time on a temporary ban.
+
+**Requires admin.**
+
+```
+/duration EOS:00020aed06f0a6958c3c067fb4b73d51
+```
+
+---
+
+## /extend
+
+```
+/extend <UID> <minutes>
+```
+
+Add time to an existing temporary ban.
+
+**Requires admin.**
+
+```
+/extend EOS:00020aed06f0a6958c3c067fb4b73d51 1440
+```
+
+---
+
+## /appeal
+
+```
+/appeal <UID>
+```
+
+Manage ban appeals for a player.
+
+**Requires admin.**
+
+---
+
+## /staffchat
+
+```
+/staffchat <message...>
+```
+
+Send a message visible only to online admins and moderators. Not relayed to Discord.
+
+**Requires admin.**
+
+```
+/staffchat Let's keep an eye on the new player
+```
+
+---
+
+## /tempmute
+
+```
+/tempmute <player|UID> <minutes> [reason...]
+```
+
+Temporarily mute a player for a specified duration.
+
+**Requires moderator or admin.**
+
+```
+/tempmute SomePlayer 15 Calm down
+```
+
+---
+
+## /tempunmute
+
+```
+/tempunmute <player|UID>
+```
+
+Remove a timed mute immediately.
+
+**Requires moderator or admin.**
+
+---
+
+## /mutecheck
+
+```
+/mutecheck <player|UID>
+```
+
+Check if a player is currently muted and show remaining duration.
+
+**Requires moderator or admin.**
+
+```
+/mutecheck SomePlayer
+```
+
+---
+
+## /mutelist
+
+```
+/mutelist
+```
+
+List all currently active mutes.
+
+**Requires moderator or admin.**
+
+---
+
+## /mutereason
+
+```
+/mutereason <player|UID> <reason...>
+```
+
+Edit the reason for an existing mute.
+
+**Requires moderator or admin.**
+
+```
+/mutereason SomePlayer Updated: Continued spam after warning
+```
+
+---
+
+## /freeze
+
+```
+/freeze <player|UID>
+```
+
+Toggle movement lock on a player. When frozen, the player cannot move but can
+still chat. Run again to unfreeze.
+
+**Requires moderator or admin.**
+
+```
+/freeze SomePlayer
+```
+
+---
+
+## /clearchat
+
+```
+/clearchat
+```
+
+Flush the in-game chat history for all players and post a notification embed
+to the bridged Discord channel.
+
+**Requires moderator or admin.**
+
+---
+
+## /report
+
+```
+/report <player|UID> <reason...>
+```
+
+Submit a player report to the configured `ReportWebhookUrl` Discord webhook.
+
+**Requires moderator or admin.**
+
+```
+/report SomePlayer Suspected speed hacking
+```
+
+---
+
+## /scheduleban
+
+```
+/scheduleban <player|UID> <timestamp> [reason...]
+```
+
+Schedule a ban to take effect at a future UTC timestamp (ISO 8601 format).
+
+**Requires admin.**
+
+```
+/scheduleban SomePlayer 2025-06-01T12:00:00Z Repeated rule violations
+```
+
+---
+
+## /qban
+
+```
+/qban <template_name> <player|UID>
+```
+
+Apply a pre-configured quick-ban template. Templates are defined in BanSystem's
+config via `BanTemplates=`.
+
+**Requires admin.**
+
+```
+/qban griefing SomePlayer
+/qban cheating EOS:00020aed06f0a6958c3c067fb4b73d51
+```
+
+---
+
+## /reputation
+
+```
+/reputation <player|UID>
+```
+
+Show a composite reputation score for a player based on their warning count,
+ban history, and session behaviour.
+
+**Requires admin.**
+
+```
+/reputation SomePlayer
+```
+
+---
+
+## /bulkban
+
+```
+/bulkban <UID1> <UID2> ... [reason...]
+```
+
+Ban multiple players at once. All provided UIDs are banned with the same reason.
+
+**Requires admin.**
+
+```
+/bulkban EOS:aaa... EOS:bbb... EOS:ccc... Coordinated griefing
+```

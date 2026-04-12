@@ -21,15 +21,17 @@ server's in-game chat and a Discord text channel. Features include:
 - Server status announcements (online/offline) and dedicated status channel
 - Live player-count Discord presence
 - Player join/leave/timeout notifications with embed mode and admin-log channel
-- Whitelist management from Discord or in-game
+- Whitelist management from Discord (`/whitelist`) or in-game (`/ingamewhitelist`) with group/tier support, search, and application/verification workflows
 - Game phase and schematic-unlock announcements
-- `!stats`, `!playerstats`, and `!players` Discord commands
+- `/stats`, `/playerstats`, and `/players` Discord slash commands
 - Reaction-based vote-kick on player join
 - AFK auto-kick
-- Ban events channel (when used with BanSystem)
-- TicketSystem integration (optional add-on)
+- Ban events channel and 42 Discord slash commands for moderation (when used with BanSystem)
+- TicketSystem with 23 slash commands — tags, notes, escalation, SLA tracking, reminders, blacklist, and merge
+- Scheduled announcements
+- Discord invite URL broadcast
 
-Requires **SMLWebSocket** and optionally **BanSystem**.
+Requires **SMLWebSocket** and optionally **BanSystem** + **BanChatCommands**.
 
 → [DiscordBridge Release Notes](Mods/DiscordBridge/RELEASE_NOTES.md)
 → [DiscordBridge Documentation](Mods/DiscordBridge/Docs/README.md)
@@ -47,8 +49,15 @@ dedicated servers. Features include:
 - Persistent JSON storage (`bans.json`)
 - Warning system with configurable auto-ban escalation tiers
 - Player session registry with IP logging
-- Local HTTP REST management API (default port 3000) with optional API key auth
-- Discord webhook notifications via `BanDiscordNotifier`
+- Scheduled bans for deferred enforcement
+- Ban appeals system with Discord notifications
+- Local HTTP REST management API (42 endpoints, default port 3000) with optional API key auth
+- Prometheus metrics export (`/metrics/prometheus`)
+- Self-service appeals portal (`/appeals/portal`) and admin dashboard (`/dashboard`)
+- CSV export for bans, warnings, sessions, and audit logs
+- Discord webhook notifications via `BanDiscordNotifier` (bans, warns, kicks, appeals, auto-escalation, geo-IP blocks)
+- Multi-server ban synchronisation via WebSocket (`BanSyncClient`)
+- Player reputation scoring
 - Automatic scheduled backups
 
 → [BanSystem README](Mods/BanSystem/README.md)
@@ -58,15 +67,19 @@ dedicated servers. Features include:
 
 ### [BanChatCommands](Mods/BanChatCommands) — v1.1.0
 
-A server-only mod that adds 23 in-game chat commands for ban and moderation
+A server-only mod that adds 43 in-game chat commands for ban and moderation
 management. Requires **BanSystem**.
 
 Commands split across three permission levels:
 
 - **Admin:** `/ban`, `/tempban`, `/unban`, `/unbanname`, `/bancheck`, `/banlist`,
   `/linkbans`, `/unlinkbans`, `/playerhistory`, `/banname`, `/reloadconfig`,
-  `/warn`, `/warnings`, `/clearwarns`, `/reason`, `/announce`, `/stafflist`
-- **Moderator:** `/kick`, `/modban`, `/mute`, `/unmute`
+  `/warn`, `/warnings`, `/clearwarns`, `/clearwarn`, `/reason`, `/banreason`,
+  `/announce`, `/stafflist`, `/note`, `/notes`, `/duration`, `/extend`,
+  `/appeal`, `/scheduleban`, `/qban`, `/reputation`, `/bulkban`, `/staffchat`
+- **Moderator:** `/kick`, `/modban`, `/mute`, `/unmute`, `/tempmute`,
+  `/tempunmute`, `/mutecheck`, `/mutelist`, `/mutereason`, `/freeze`,
+  `/clearchat`, `/report`
 - **All players:** `/history`, `/whoami`
 
 → [BanChatCommands README](Mods/BanChatCommands/README.md)
@@ -76,10 +89,20 @@ Commands split across three permission levels:
 
 ### [SMLWebSocket](Mods/SMLWebSocket) — v1.1.0
 
-A standalone C++ mod providing a custom RFC 6455 WebSocket client with
+A standalone C++ mod providing a custom RFC 6455 WebSocket client and server with
 SSL/OpenSSL support for Satisfactory dedicated server mods. Required by
 DiscordBridge and any other mod that needs a persistent WebSocket connection
 on a CSS Dedicated Server.
+
+Features include:
+
+- `ws://` and `wss://` connections with TLS via OpenSSL
+- WebSocket server with subscription-filtered event broadcasting
+- Auto-reconnect with exponential back-off and ±20 % jitter
+- Named client registry for cross-mod sharing
+- Connection statistics (bytes/messages sent/received)
+- 9 delegates: `OnConnected`, `OnMessage`, `OnBinaryMessage`, `OnClosed`, `OnError`, `OnReconnecting`, `OnReconnected`, `OnStateChanged`, `OnJsonMessage`
+- Full Blueprint and C++ API
 
 → [SMLWebSocket README](Mods/SMLWebSocket/README.md)
 

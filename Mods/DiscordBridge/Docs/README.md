@@ -15,10 +15,10 @@ Welcome to the DiscordBridge documentation. Use the links below to jump straight
 | [Troubleshooting](08-Troubleshooting.md) | Fixes for common problems |
 | [TicketSystem](09-TicketSystem.md) | Optional button-based Discord support-ticket panel |
 | [Game Events](10-GameEvents.md) | Game-phase and schematic-unlock announcements |
-| [Stats Commands](11-StatsCommands.md) | `!stats` and `!playerstats` Discord commands |
+| [Stats Commands](11-StatsCommands.md) | `/stats` and `/playerstats` Discord slash commands |
 | [Reaction Voting](12-ReactionVoting.md) | Reaction-based vote-kick on player join |
 | [AFK Kick](13-AfkKick.md) | Automatic AFK kick after configurable idle time |
-| [Bot Info Channel & !help](14-BotInfoChannel.md) | Automatic feature/command reference on startup; `!help` / `!commands` on demand |
+| [Bot Info Channel & /help](14-BotInfoChannel.md) | Automatic feature/command reference on startup; `/help` / `/commands` on demand |
 
 ---
 
