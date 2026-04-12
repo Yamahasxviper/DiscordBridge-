@@ -3772,7 +3772,7 @@ void UDiscordBridgeSubsystem::SendJoinHintToPlayer(APlayerController* Controller
 
 void UDiscordBridgeSubsystem::SendInGameJoinBroadcast(const FString& PlayerName)
 {
-	if (Config.InGameJoinBroadcast.IsEmpty())
+	if (!Config.bInGameJoinBroadcastEnabled || Config.InGameJoinBroadcast.IsEmpty())
 	{
 		return;
 	}

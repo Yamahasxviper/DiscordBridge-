@@ -493,6 +493,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.JoinHintMessage = GetIniStringOrDefault(ConfigFile, TEXT("JoinHintMessage"), Config.JoinHintMessage);
 
 		// On-join broadcast message (sent to all players in game chat)
+		Config.bInGameJoinBroadcastEnabled = GetIniBoolOrDefault(ConfigFile, TEXT("InGameJoinBroadcastEnabled"), Config.bInGameJoinBroadcastEnabled);
 		Config.InGameJoinBroadcast = GetIniStringOrDefault(ConfigFile, TEXT("InGameJoinBroadcast"), Config.InGameJoinBroadcast);
 
 		// DiscordRoleLabels array (used for %Role% placeholder in DiscordToGameFormat)
@@ -902,6 +903,8 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 					AppendContent2 +=
 						TEXT("\n")
 						TEXT("# -- ON-JOIN IN-GAME BROADCAST (added by mod update) ------------------\n")
+						TEXT("# Set to False to disable without clearing the message text.\n")
+						TEXT("InGameJoinBroadcastEnabled=True\n")
 						TEXT("# Message broadcast to ALL players in game chat when someone joins.\n")
 						TEXT("# Works with or without the whitelist. Leave empty to disable (default).\n")
 						TEXT("# Placeholder: %PlayerName%\n")
@@ -1095,6 +1098,9 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("JoinHintMessage=\n")
 			TEXT("\n")
 			TEXT("# -- ON-JOIN IN-GAME BROADCAST -----------------------------------------------\n")
+			TEXT("# Set to False to disable the broadcast without clearing the message text.\n")
+			TEXT("# Default: True (enabled)\n")
+			TEXT("InGameJoinBroadcastEnabled=True\n")
 			TEXT("# Message broadcast to ALL connected players in the game chat when someone joins.\n")
 			TEXT("# Completely independent of the whitelist — works whether whitelist is on or off.\n")
 			TEXT("# Leave empty to disable (default).\n")
@@ -1253,6 +1259,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.JoinHintMessage = GetRawStringOrDefault(BackupValues, TEXT("JoinHintMessage"), Config.JoinHintMessage);
 
 		// On-join broadcast message (all players)
+		Config.bInGameJoinBroadcastEnabled = GetRawBoolOrDefault(BackupValues, TEXT("InGameJoinBroadcastEnabled"), Config.bInGameJoinBroadcastEnabled);
 		Config.InGameJoinBroadcast = GetRawStringOrDefault(BackupValues, TEXT("InGameJoinBroadcast"), Config.InGameJoinBroadcast);
 
 		// DiscordRoleLabels array (restore from raw backup content)
@@ -1389,6 +1396,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("BotInfoChannelId"),              Config.BotInfoChannelId);
 				PatchLine(TEXT("WelcomeMessageDM"),              Config.WelcomeMessageDM);
 				PatchLine(TEXT("JoinHintMessage"),               Config.JoinHintMessage);
+				PatchLine(TEXT("InGameJoinBroadcastEnabled"),    Config.bInGameJoinBroadcastEnabled ? TEXT("True") : TEXT("False"));
 				PatchLine(TEXT("InGameJoinBroadcast"),           Config.InGameJoinBroadcast);
 
 				// ChatRelayBlocklist is a multi-value array field.  Remove all
@@ -1562,6 +1570,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			+ TEXT("; -- Discord Role Labels (for %Role% placeholder) --------------------------\n")
 			+ TEXT("WelcomeMessageDM=") + Config.WelcomeMessageDM + TEXT("\n")
 			+ TEXT("JoinHintMessage=") + Config.JoinHintMessage + TEXT("\n")
+			+ TEXT("InGameJoinBroadcastEnabled=") + (Config.bInGameJoinBroadcastEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
 			+ TEXT("InGameJoinBroadcast=") + Config.InGameJoinBroadcast + TEXT("\n");
 		for (const FString& Entry : Config.DiscordRoleLabels)
 		{

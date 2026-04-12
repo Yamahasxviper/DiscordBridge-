@@ -678,6 +678,16 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	FString JoinHintMessage;
 
 	/**
+	 * Master on/off switch for the in-game join broadcast.
+	 * Set to False to suppress the broadcast entirely without having to clear
+	 * the InGameJoinBroadcast message text.
+	 * Defaults to True (enabled).
+	 *
+	 * Example: InGameJoinBroadcastEnabled=False
+	 */
+	bool bInGameJoinBroadcastEnabled{ true };
+
+	/**
 	 * In-game chat message broadcast to ALL connected players when a new player
 	 * joins the server.  Unlike JoinHintMessage (which is a private hint only
 	 * the joining player sees), this message appears in the shared game chat so
@@ -688,6 +698,7 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 * enabled or disabled.  Sent via AFGChatManager::BroadcastChatMessage so it
 	 * does not require the SML Remote Call Object to be available.
 	 *
+	 * Only used when bInGameJoinBroadcastEnabled is True.
 	 * Leave empty (default) to disable the broadcast.
 	 *
 	 * Placeholder: %PlayerName% – the in-game name of the joining player.
