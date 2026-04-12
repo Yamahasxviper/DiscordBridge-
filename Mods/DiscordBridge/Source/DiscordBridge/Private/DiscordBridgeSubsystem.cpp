@@ -2566,7 +2566,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 	if (EffectiveGameMode && EffectiveGameMode->GameSession)
 	{
 		const FString KickReason = WhitelistConfig.WhitelistKickReason.IsEmpty()
-			? TEXT("You are not on this server's whitelist. Contact the server admin to be added.")
+			? TEXT("You are not on the server whitelist. Contact the server admin to be added.")
 			: WhitelistConfig.WhitelistKickReason;
 		EffectiveGameMode->GameSession->KickPlayer(
 			Controller,
