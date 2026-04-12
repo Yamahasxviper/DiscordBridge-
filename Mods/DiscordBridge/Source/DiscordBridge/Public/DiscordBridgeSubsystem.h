@@ -7,6 +7,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "SMLWebSocketClient.h"
 #include "DiscordBridgeConfig.h"
+#include "WhitelistConfig.h"
 #include "FGChatManager.h"
 #include "FGGamePhase.h"
 #include "GameFramework/GameModeBase.h"
@@ -506,6 +507,9 @@ private:
 
 	/** Loaded configuration (populated in Initialize()). */
 	FDiscordBridgeConfig Config;
+
+	/** Loaded whitelist configuration (populated in Initialize()). */
+	FWhitelistConfig WhitelistConfig;
 
 	/** Last sequence number received from Discord (used in heartbeats). */
 	int32 LastSequenceNumber{-1};
