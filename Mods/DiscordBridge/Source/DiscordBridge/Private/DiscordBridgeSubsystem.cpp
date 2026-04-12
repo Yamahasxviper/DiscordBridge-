@@ -1270,114 +1270,33 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 	};
 
 	// Check whether this message is a whitelist management command.
+	// The !whitelist prefix commands are deprecated — use /whitelist slash commands instead.
+	// We still silently consume messages that start with the old prefix to avoid
+	// echoing them to in-game chat, but direct users to use slash commands.
 	if (!Config.WhitelistCommandPrefix.IsEmpty() &&
 	    Content.StartsWith(Config.WhitelistCommandPrefix, ESearchCase::IgnoreCase))
 	{
-		const FString SubCommand = Content.Mid(Config.WhitelistCommandPrefix.Len()).TrimStartAndEnd();
-
-		// Determine the first word (verb) to decide if a role check is needed.
-		FString FirstVerb;
-		{
-			int32 SpaceIdx = INDEX_NONE;
-			SubCommand.FindChar(TEXT(' '), SpaceIdx);
-			FirstVerb = (SpaceIdx != INDEX_NONE)
-				? SubCommand.Left(SpaceIdx).ToLower()
-				: SubCommand.ToLower();
-		}
-
-		// "apply" and "link" are self-service commands that do not require
-		// WhitelistCommandRoleId.  All other verbs still require the role.
-		const bool bIsPublicVerb = (FirstVerb == TEXT("apply") || FirstVerb == TEXT("link"));
-
-		if (!bIsPublicVerb && !HasRequiredRole(Config.WhitelistCommandRoleId))
-		{
-			UE_LOG(LogDiscordBridge, Log,
-			       TEXT("DiscordBridge: Ignoring whitelist command from '%s' – sender lacks WhitelistCommandRoleId."),
-			       *Username);
-			SendMessageToChannel(MsgChannelId, TEXT(":no_entry: You do not have permission to use whitelist commands."));
-			return;
-		}
-		HandleWhitelistCommand(SubCommand, Username, MsgChannelId, AuthorId);
-		return; // Do not relay whitelist commands to in-game chat.
-	}
-
-	// Feature 2: !players command – reply with the list of online players.
-	if (!Config.PlayersCommandPrefix.IsEmpty() &&
-	    Content.Equals(Config.PlayersCommandPrefix, ESearchCase::IgnoreCase))
-	{
-		FString PlayersReply;
-		if (UWorld* World = GetWorld())
-		{
-			if (AGameStateBase* GS = World->GetGameState<AGameStateBase>())
-			{
-				TArray<FString> Names;
-				for (APlayerState* PS : GS->PlayerArray)
-				{
-					if (PS)
-					{
-						Names.Add(PS->GetPlayerName());
-					}
-				}
-				if (Names.Num() == 0)
-				{
-					PlayersReply = TEXT("No players currently online.");
-				}
-				else
-				{
-					PlayersReply = FString::Printf(
-						TEXT("**Online players (%d):** %s"),
-						Names.Num(), *FString::Join(Names, TEXT(", ")));
-				}
-			}
-		}
-		if (PlayersReply.IsEmpty())
-		{
-			PlayersReply = TEXT("No players currently online.");
-		}
-
-		const FString& PlayersChannel = Config.PlayersCommandChannelId.IsEmpty()
-			? Config.ChannelId
-			: Config.PlayersCommandChannelId;
-		SendMessageToChannel(PlayersChannel, PlayersReply);
-		return; // Do not relay the command itself to in-game chat.
-	}
-
-	// Feature 3: !stats command – reply with server statistics embed.
-	if (!Config.StatsCommandPrefix.IsEmpty() &&
-	    Content.Equals(Config.StatsCommandPrefix, ESearchCase::IgnoreCase))
-	{
-		HandleStatsCommand(MsgChannelId);
+		SendMessageToChannel(MsgChannelId,
+			TEXT(":information_source: The `!whitelist` prefix command has been removed. ")
+			TEXT("Please use `/whitelist` slash commands instead."));
 		return;
 	}
 
-	// Feature 4: !playerstats <name> command – reply with per-player stats.
-	if (!Config.PlayerStatsCommandPrefix.IsEmpty() &&
-	    Content.StartsWith(Config.PlayerStatsCommandPrefix + TEXT(" "), ESearchCase::IgnoreCase))
-	{
-		const FString TargetName = Content.Mid(Config.PlayerStatsCommandPrefix.Len()).TrimStartAndEnd();
-		HandlePlayerStatsCommand(MsgChannelId, TargetName);
-		return;
-	}
-
-	// !server command
-	if (Content.Equals(TEXT("!server"), ESearchCase::IgnoreCase))
-	{
-		HandleServerCommand(MsgChannelId);
-		return;
-	}
-
-	// !online command
-	if (Content.Equals(TEXT("!online"), ESearchCase::IgnoreCase))
-	{
-		HandleOnlineCommand(MsgChannelId);
-		return;
-	}
-
-	// !help command – post the bot feature/command reference to this channel.
-	if (Content.Equals(TEXT("!help"), ESearchCase::IgnoreCase) ||
+	// Consume deprecated ! prefix commands and redirect to slash commands.
+	if ((!Config.PlayersCommandPrefix.IsEmpty() &&
+	     Content.Equals(Config.PlayersCommandPrefix, ESearchCase::IgnoreCase)) ||
+	    (!Config.StatsCommandPrefix.IsEmpty() &&
+	     Content.Equals(Config.StatsCommandPrefix, ESearchCase::IgnoreCase)) ||
+	    (!Config.PlayerStatsCommandPrefix.IsEmpty() &&
+	     Content.StartsWith(Config.PlayerStatsCommandPrefix + TEXT(" "), ESearchCase::IgnoreCase)) ||
+	    Content.Equals(TEXT("!server"), ESearchCase::IgnoreCase) ||
+	    Content.Equals(TEXT("!online"), ESearchCase::IgnoreCase) ||
+	    Content.Equals(TEXT("!help"), ESearchCase::IgnoreCase) ||
 	    Content.Equals(TEXT("!commands"), ESearchCase::IgnoreCase))
 	{
-		HandleBotInfoCommand(MsgChannelId);
+		SendMessageToChannel(MsgChannelId,
+			TEXT(":information_source: Prefix (`!`) commands have been removed. ")
+			TEXT("Please use `/` slash commands instead (e.g. `/players`, `/stats`, `/help`)."));
 		return;
 	}
 
@@ -4743,7 +4662,7 @@ Embed->SetStringField(TEXT("title"), TEXT("📖 DiscordBridge — Features & Com
 Embed->SetNumberField(TEXT("color"), 3447003); // Discord blurple
 Embed->SetStringField(TEXT("description"),
 TEXT("This bot bridges **Satisfactory** in-game chat with Discord and provides ")
-TEXT("server management commands.  Type any command in this channel.\n\u200b"));
+TEXT("server management via **slash commands**.  Use `/` to see available commands.\n\u200b"));
 
 TArray<TSharedPtr<FJsonValue>> Fields;
 auto AddField = [&](const FString& Name, const FString& Value, bool bInline = false)
@@ -4763,36 +4682,24 @@ TEXT("Discord messages sent here are shown in-game.\n\u200b"));
 // Player / server commands
 const FString ServerName = Config.ServerName.IsEmpty() ? TEXT("this server") : Config.ServerName;
 AddField(TEXT("🖥️ Server & Player Commands"),
-FString::Printf(
-TEXT("`!server`  — Server info embed (name, player count, uptime)\n")
-TEXT("`!online`  — Online players list as a rich embed\n")
-TEXT("`%s`  — Online player count (plain text)\n")
-TEXT("`!stats`  — Server statistics (phases, schematics, buildings)\n")
-TEXT("`!playerstats <name>`  — Per-player build/item stats\n\u200b"),
-*Config.PlayersCommandPrefix));
+TEXT("`/server`  — Server info embed (name, player count, uptime)\n")
+TEXT("`/online`  — Online players list as a rich embed\n")
+TEXT("`/players`  — Online player count (plain text)\n")
+TEXT("`/stats`  — Server statistics (phases, schematics, buildings)\n")
+TEXT("`/player stats <name>`  — Per-player build/item stats\n\u200b"));
 
 // Whitelist
-if (!Config.WhitelistCommandPrefix.IsEmpty())
-{
 AddField(TEXT("🔒 Whitelist Commands"),
-FString::Printf(
-TEXT("`%s on`  — Enable the server whitelist\n")
-TEXT("`%s off`  — Disable the server whitelist\n")
-TEXT("`%s add <name>`  — Add a player to the whitelist\n")
-TEXT("`%s remove <name>`  — Remove a player from the whitelist\n")
-TEXT("`%s list`  — Show all whitelisted players\n")
-TEXT("`%s status`  — Show whether the whitelist is active\n\u200b"),
-*Config.WhitelistCommandPrefix,
-*Config.WhitelistCommandPrefix,
-*Config.WhitelistCommandPrefix,
-*Config.WhitelistCommandPrefix,
-*Config.WhitelistCommandPrefix,
-*Config.WhitelistCommandPrefix));
-}
+TEXT("`/whitelist on`  — Enable the server whitelist\n")
+TEXT("`/whitelist off`  — Disable the server whitelist\n")
+TEXT("`/whitelist add <name>`  — Add a player to the whitelist\n")
+TEXT("`/whitelist remove <name>`  — Remove a player from the whitelist\n")
+TEXT("`/whitelist list`  — Show all whitelisted players\n")
+TEXT("`/whitelist status`  — Show whether the whitelist is active\n\u200b"));
 
 // Help itself
 AddField(TEXT("ℹ️ Help"),
-TEXT("`!help` or `!commands`  — Show this feature/command reference again\n\u200b"));
+TEXT("`/help`  — Show this feature/command reference again\n\u200b"));
 
 Embed->SetArrayField(TEXT("fields"), Fields);
 Embed->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
@@ -4814,7 +4721,7 @@ TSharedPtr<FJsonObject> Embed = MakeShared<FJsonObject>();
 Embed->SetStringField(TEXT("title"), TEXT("🛡️ Moderation Commands (BanSystem)"));
 Embed->SetNumberField(TEXT("color"), 15158332); // red
 Embed->SetStringField(TEXT("description"),
-TEXT("The following commands require the **Admin** or **Moderator** Discord role ")
+TEXT("The following slash commands require the **Admin** or **Moderator** Discord role ")
 TEXT("configured in `DefaultBanBridge.ini`.\n\u200b"));
 
 TArray<TSharedPtr<FJsonValue>> Fields;
@@ -4829,51 +4736,51 @@ Fields.Add(MakeShared<FJsonValueObject>(F));
 
 // Admin — ban management
 AddField(TEXT("⚔️ Admin — Ban Management"),
-TEXT("`!ban <player> [reason]`  — Permanently ban a player\n")
-TEXT("`!tempban <player> <duration> [reason]`  — Temporary ban (e.g. `1d`, `2h`)\n")
-TEXT("`!unban <PUID>`  — Unban by EOS Product User ID\n")
-TEXT("`!unbanname <name>`  — Unban by last-seen in-game name\n")
-TEXT("`!banname <name> [reason]`  — Ban by in-game name\n")
-TEXT("`!bancheck <player>`  — Check if a player is currently banned\n")
-TEXT("`!banreason <PUID> <reason>`  — Update the reason for an active ban\n")
-TEXT("`!banlist [page]`  — List active bans (paginated)\n")
-TEXT("`!extend <PUID> <duration>`  — Extend a temporary ban\n")
-TEXT("`!duration <PUID>`  — Show remaining ban duration\n\u200b"),
+TEXT("`/ban add <player> [reason]`  — Permanently ban a player\n")
+TEXT("`/ban temp <player> <duration> [reason]`  — Temporary ban (e.g. `1d`, `2h`)\n")
+TEXT("`/ban remove <uid>`  — Unban by EOS Product User ID\n")
+TEXT("`/ban removename <name>`  — Unban by last-seen in-game name\n")
+TEXT("`/ban byname <name> [reason]`  — Ban by in-game name\n")
+TEXT("`/ban check <player>`  — Check if a player is currently banned\n")
+TEXT("`/ban reason <player> <reason>`  — Update the reason for an active ban\n")
+TEXT("`/ban list [page]`  — List active bans (paginated)\n")
+TEXT("`/ban extend <player> <duration>`  — Extend a temporary ban\n")
+TEXT("`/ban duration <player>`  — Show remaining ban duration\n\u200b"),
 false);
 
 // Admin — server links, history, warns, notes
 AddField(TEXT("📋 Admin — History, Warnings & Notes"),
-TEXT("`!playerhistory <player>`  — Full join/ban history for a player\n")
-TEXT("`!warn <player> [reason]`  — Issue a warning to a player\n")
-TEXT("`!warnings <player>`  — List all warnings for a player\n")
-TEXT("`!clearwarns <player>`  — Clear all warnings for a player\n")
-TEXT("`!clearwarn <id>`  — Remove a single warning by its ID\n")
-TEXT("`!note <player> <text>`  — Add a staff note to a player's record\n")
-TEXT("`!notes <player>`  — Show all staff notes for a player\n")
-TEXT("`!reason <PUID>`  — Show the ban reason for a player\n\u200b"),
+TEXT("`/player history <query>`  — Full join/ban history for a player\n")
+TEXT("`/warn add <player> <reason>`  — Issue a warning to a player\n")
+TEXT("`/warn list <player>`  — List all warnings for a player\n")
+TEXT("`/warn clearall <player>`  — Clear all warnings for a player\n")
+TEXT("`/warn clearone <id>`  — Remove a single warning by its ID\n")
+TEXT("`/player note <player> <text>`  — Add a staff note to a player's record\n")
+TEXT("`/player notes <player>`  — Show all staff notes for a player\n")
+TEXT("`/player reason <uid>`  — Show the ban reason for a player\n\u200b"),
 false);
 
 // Admin — server links, config
 AddField(TEXT("⚙️ Admin — Server Links & Config"),
-TEXT("`!linkbans <serverName>`  — Link ban lists with another server\n")
-TEXT("`!unlinkbans <serverName>`  — Remove a ban-list link\n")
-TEXT("`!mutereason <player> <reason>`  — Update the reason on an active mute\n")
-TEXT("`!reloadconfig`  — Hot-reload BanSystem / BanChatCommands config\n\u200b"),
+TEXT("`/ban link <uid1> <uid2>`  — Link two UIDs so a ban blocks both\n")
+TEXT("`/ban unlink <uid1> <uid2>`  — Remove a UID link\n")
+TEXT("`/mod mutereason <player> <reason>`  — Update the reason on an active mute\n")
+TEXT("`/admin reloadconfig`  — Hot-reload BanSystem / BanChatCommands config\n\u200b"),
 false);
 
 // Moderator commands
 AddField(TEXT("👮 Moderator Commands"),
-TEXT("`!kick <player> [reason]`  — Kick a player from the server\n")
-TEXT("`!modban <player> [reason]`  — Permanent ban (moderator-level)\n")
-TEXT("`!mute <player> [reason]`  — Mute a player in-game\n")
-TEXT("`!unmute <player>`  — Unmute a player (indefinite mute)\n")
-TEXT("`!tempmute <player> <duration> [reason]`  — Temporary mute\n")
-TEXT("`!tempunmute <player>`  — Lift a timed mute early\n")
-TEXT("`!mutecheck <player>`  — Check if a player is muted\n")
-TEXT("`!mutelist`  — List all currently muted players\n")
-TEXT("`!announce <message>`  — Broadcast a message to all in-game players\n")
-TEXT("`!stafflist`  — List configured admins and moderators\n")
-TEXT("`!staffchat <message>`  — Send a message to the staff Discord channel\n\u200b"),
+TEXT("`/mod kick <player> [reason]`  — Kick a player from the server\n")
+TEXT("`/mod modban <player> [reason]`  — Permanent ban (moderator-level)\n")
+TEXT("`/mod mute <player> [reason]`  — Mute a player in-game\n")
+TEXT("`/mod unmute <player>`  — Unmute a player (indefinite mute)\n")
+TEXT("`/mod tempmute <player> <duration> [reason]`  — Temporary mute\n")
+TEXT("`/mod tempunmute <player>`  — Lift a timed mute early\n")
+TEXT("`/mod mutecheck <player>`  — Check if a player is muted\n")
+TEXT("`/mod mutelist`  — List all currently muted players\n")
+TEXT("`/mod announce <message>`  — Broadcast a message to all in-game players\n")
+TEXT("`/mod stafflist`  — List configured admins and moderators\n")
+TEXT("`/mod staffchat <message>`  — Send a message to the staff Discord channel\n\u200b"),
 false);
 
 Embed->SetArrayField(TEXT("fields"), Fields);

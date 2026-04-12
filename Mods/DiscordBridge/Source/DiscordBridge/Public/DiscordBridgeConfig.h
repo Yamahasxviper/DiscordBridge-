@@ -637,11 +637,11 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 
 	/**
 	 * When true, DiscordBridge registers its built-in Discord application
-	 * slash commands (/players, /stats, /server) with the Discord API on startup.
+	 * slash commands (/players, /stats, /server, etc.) with the Discord API on startup.
 	 * Requires the bot to have "applications.commands" scope.
-	 * Default: false.
+	 * Default: true.
 	 */
-	bool bEnableSlashCommands{ false };
+	bool bEnableSlashCommands{ true };
 
 	// ── Mute notifications ────────────────────────────────────────────────────
 
