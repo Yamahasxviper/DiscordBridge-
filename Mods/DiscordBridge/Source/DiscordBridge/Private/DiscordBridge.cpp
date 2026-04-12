@@ -25,16 +25,17 @@ void FDiscordBridgeModule::StartupModule()
 			if (!CmdSys)
 			{
 				UE_LOG(LogTemp, Warning,
-					TEXT("DiscordBridge: AChatCommandSubsystem not available — /verify, /discord, /ingamewhitelist not registered."));
+					TEXT("DiscordBridge: AChatCommandSubsystem not available — /verify, /discord, /ingamewhitelist, /commands not registered."));
 				return;
 			}
 
 			CmdSys->RegisterCommand(TEXT("DiscordBridge"), AVerifyDiscordChatCommand::StaticClass());
 			CmdSys->RegisterCommand(TEXT("DiscordBridge"), ADiscordInviteChatCommand::StaticClass());
 			CmdSys->RegisterCommand(TEXT("DiscordBridge"), AInGameWhitelistChatCommand::StaticClass());
+			CmdSys->RegisterCommand(TEXT("DiscordBridge"), ADiscordCommandsListChatCommand::StaticClass());
 
 			UE_LOG(LogTemp, Log,
-				TEXT("DiscordBridge: Registered in-game slash commands: /verify, /discord, /ingamewhitelist."));
+				TEXT("DiscordBridge: Registered in-game slash commands: /verify, /discord, /ingamewhitelist, /commands."));
 		});
 }
 

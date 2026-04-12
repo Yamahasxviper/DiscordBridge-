@@ -91,3 +91,28 @@ public:
 		const TArray<FString>& Arguments,
 		const FString& Label) override;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  /commands  — list available DiscordBridge in-game commands
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * /commands
+ *
+ * Replies to the issuing player with a list of all DiscordBridge in-game
+ * commands they can use.  No arguments.  Accessible to all players.
+ *
+ * Example:
+ *   /commands
+ */
+UCLASS()
+class DISCORDBRIDGE_API ADiscordCommandsListChatCommand : public AChatCommandInstance
+{
+	GENERATED_BODY()
+public:
+	ADiscordCommandsListChatCommand();
+	virtual EExecutionStatus ExecuteCommand_Implementation(
+		UCommandSender* Sender,
+		const TArray<FString>& Arguments,
+		const FString& Label) override;
+};

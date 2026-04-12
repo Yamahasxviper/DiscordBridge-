@@ -363,6 +363,13 @@ public:
 	/** Return the configured Discord invite URL (empty string if not set). */
 	FString GetDiscordInviteUrl() const;
 
+	/**
+	 * Returns true when the Discord account verification feature is enabled
+	 * (bWhitelistVerificationEnabled=True in config).
+	 * Used by the /commands in-game command to conditionally advertise /verify.
+	 */
+	bool IsVerificationEnabled() const;
+
 private:
 	// ── WebSocket event handlers (called on the game thread) ──────────────────
 
@@ -637,6 +644,26 @@ private:
 
 	/** Broadcast a status/feedback message to all connected players via the game chat. */
 	void SendGameChatStatusMessage(const FString& Message);
+
+	/**
+	 * Send the on-join hint message (JoinHintMessage config key) privately to
+	 * the specified player controller via the SML Remote Call Object.
+	 * No-op when JoinHintMessage is empty or the RCO is not yet available.
+	 *
+	 * @param Controller  The player controller of the newly-joined player.
+	 * @param PlayerName  In-game display name used for %PlayerName% substitution.
+	 */
+	void SendJoinHintToPlayer(APlayerController* Controller, const FString& PlayerName);
+
+	/**
+	 * Broadcast the on-join message (InGameJoinBroadcast config key) to ALL
+	 * connected players via AFGChatManager::BroadcastChatMessage.
+	 * No-op when InGameJoinBroadcast is empty.
+	 * Completely independent of the whitelist setting.
+	 *
+	 * @param PlayerName  In-game display name used for %PlayerName% substitution.
+	 */
+	void SendInGameJoinBroadcast(const FString& PlayerName);
 
 	/**
 	 * Posts a colour-coded Discord embed to TargetChannelId for a player event.
