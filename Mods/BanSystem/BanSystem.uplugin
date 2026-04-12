@@ -5,7 +5,7 @@
 	"SemVersion": "1.1.0",
 	"GameVersion": ">=416835",
 	"FriendlyName": "Ban System",
-	"Description": "Persistent EOS-based ban system for Satisfactory dedicated servers. Features include login-time enforcement, permanent and temporary bans, UID linking, player session registry, REST management API, and JSON file storage.",
+	"Description": "Persistent EOS-based ban system for Satisfactory dedicated servers. Features include login-time enforcement, permanent and temporary bans, IP bans, UID linking, player session registry, warning system with auto-escalation, scheduled bans, ban appeals, REST management API (42 endpoints), Prometheus metrics, CSV exports, admin dashboard, multi-server sync, player reputation, Discord webhook notifications, and JSON file storage.",
 	"Category": "Modding",
 	"CreatedBy": "Yamahasxviper",
 	"CreatedByURL": "",
