@@ -100,6 +100,134 @@ namespace BanDiscordHelpers
 
 	// Number of bans shown per /ban list page.
 	static constexpr int32 BanListPageSize = 10;
+
+	/**
+	 * After a primary ban for PrimaryUid has been committed, look up the
+	 * player's other identifiers in the session registry and create matching
+	 * ban records:
+	 *  - EOS UID → also bans the IP address recorded for that UID.
+	 *  - IP UID  → also bans every EOS UID that has connected from that IP.
+	 * All newly created records are cross-linked via UBanDatabase::LinkBans().
+	 * Returns a list of additionally created UIDs (for confirmation messages).
+	 */
+	static TArray<FString> AddCounterpartBans(const UBanDiscordSubsystem* Self,
+	                                           UBanDatabase* DB,
+	                                           const FString& PrimaryUid,
+	                                           const FString& DisplayName,
+	                                           const FString& Reason,
+	                                           const FString& BannedBy,
+	                                           bool bIsPermanent,
+	                                           FDateTime ExpireDate)
+	{
+		TArray<FString> Added;
+		if (!DB) return Added;
+
+		UPlayerSessionRegistry* Registry = GetRegistry(Self);
+		if (!Registry) return Added;
+
+		FString Platform, RawId;
+		UBanDatabase::ParseUid(PrimaryUid, Platform, RawId);
+
+		auto MakeEntry = [&](const FString& Uid, const FString& Plat,
+		                     const FString& RawUid, const FString& Name) -> FBanEntry
+		{
+			FBanEntry E;
+			E.Uid        = Uid;
+			E.Platform   = Plat;
+			E.PlayerUID  = RawUid;
+			E.PlayerName = Name;
+			E.Reason     = Reason;
+			E.BannedBy   = BannedBy;
+			E.BanDate    = FDateTime::UtcNow();
+			E.bIsPermanent = bIsPermanent;
+			E.ExpireDate   = ExpireDate;
+			E.LinkedUids.Add(PrimaryUid);
+			return E;
+		};
+
+		if (Platform == TEXT("EOS"))
+		{
+			FPlayerSessionRecord Rec;
+			if (Registry->FindByUid(PrimaryUid, Rec) && !Rec.IpAddress.IsEmpty())
+			{
+				const FString IpUid = UBanDatabase::MakeUid(TEXT("IP"), Rec.IpAddress);
+				FBanEntry IpEntry = MakeEntry(IpUid, TEXT("IP"), Rec.IpAddress, DisplayName);
+				if (DB->AddBan(IpEntry))
+				{
+					DB->LinkBans(PrimaryUid, IpUid);
+					Added.Add(IpUid);
+				}
+			}
+		}
+		else if (Platform == TEXT("IP"))
+		{
+			TArray<FPlayerSessionRecord> Records = Registry->FindByIp(RawId);
+			for (const FPlayerSessionRecord& Rec : Records)
+			{
+				if (Rec.Uid.IsEmpty()) continue;
+				FString RecPlat, RecRawId;
+				UBanDatabase::ParseUid(Rec.Uid, RecPlat, RecRawId);
+				const FString RecName = Rec.DisplayName.IsEmpty() ? DisplayName : Rec.DisplayName;
+				FBanEntry EosEntry = MakeEntry(Rec.Uid, RecPlat, RecRawId, RecName);
+				if (DB->AddBan(EosEntry))
+				{
+					DB->LinkBans(PrimaryUid, Rec.Uid);
+					Added.Add(Rec.Uid);
+				}
+			}
+		}
+		return Added;
+	}
+
+	/**
+	 * After removing the ban for PrimaryUid, remove all linked bans so no
+	 * counterpart (IP or EOS) ban is left behind.
+	 * Uses the LinkedUids collected from the ban entry before deletion and also
+	 * checks the session registry for any unlinked counterparts.
+	 * Returns the number of additional records removed.
+	 */
+	static int32 RemoveCounterpartBans(const UBanDiscordSubsystem* Self,
+	                                    UBanDatabase* DB,
+	                                    const FString& PrimaryUid,
+	                                    const TArray<FString>& LinkedUids)
+	{
+		if (!DB) return 0;
+		int32 Removed = 0;
+
+		for (const FString& LinkedUid : LinkedUids)
+		{
+			if (DB->RemoveBanByUid(LinkedUid))
+				++Removed;
+		}
+
+		UPlayerSessionRegistry* Registry = GetRegistry(Self);
+		if (!Registry) return Removed;
+
+		FString Platform, RawId;
+		UBanDatabase::ParseUid(PrimaryUid, Platform, RawId);
+
+		if (Platform == TEXT("EOS"))
+		{
+			FPlayerSessionRecord Rec;
+			if (Registry->FindByUid(PrimaryUid, Rec) && !Rec.IpAddress.IsEmpty())
+			{
+				const FString IpUid = UBanDatabase::MakeUid(TEXT("IP"), Rec.IpAddress);
+				if (!LinkedUids.Contains(IpUid) && DB->RemoveBanByUid(IpUid))
+					++Removed;
+			}
+		}
+		else if (Platform == TEXT("IP"))
+		{
+			TArray<FPlayerSessionRecord> Records = Registry->FindByIp(RawId);
+			for (const FPlayerSessionRecord& Rec : Records)
+			{
+				if (Rec.Uid.IsEmpty()) continue;
+				if (!LinkedUids.Contains(Rec.Uid) && DB->RemoveBanByUid(Rec.Uid))
+					++Removed;
+			}
+		}
+		return Removed;
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -264,7 +392,7 @@ void UBanDiscordSubsystem::Respond(const FString& ChannelId, const FString& Mess
 	if (!CachedProvider) return;
 	// Always post to the command channel so the result is visible to all mods.
 	if (!ChannelId.IsEmpty())
-		Respond(ChannelId, Message);
+		CachedProvider->SendDiscordChannelMessage(ChannelId, Message);
 	// Also send as an ephemeral follow-up to the slash command interaction so
 	// the admin sees the result inline even if they missed the channel message.
 	if (!PendingInteractionToken.IsEmpty())
@@ -365,6 +493,14 @@ bool UBanDiscordSubsystem::ResolveTarget(const FString& Arg,
 				if (Registry->FindByUid(OutUid, Record) && !Record.DisplayName.IsEmpty())
 					OutDisplayName = Record.DisplayName;
 			}
+			return true;
+		}
+
+		// 2.5 IP UID: "IP:<address>" — used for explicit IP bans.
+		if (Platform == TEXT("IP") && !RawId.IsEmpty())
+		{
+			OutUid         = UBanDatabase::MakeUid(TEXT("IP"), RawId);
+			OutDisplayName = RawId;
 			return true;
 		}
 	}
@@ -524,6 +660,11 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 	if (UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr)
 		UBanEnforcer::KickConnectedPlayer(World, Uid, Entry.GetKickMessage());
 
+	// Also ban the counterpart identifier (IP↔EOS) so every identity is blocked.
+	const TArray<FString> ExtraUids = BanDiscordHelpers::AddCounterpartBans(
+		this, DB, Uid, DisplayName, Entry.Reason, SenderName,
+		Entry.bIsPermanent, Entry.ExpireDate);
+
 	// Format confirmation message.
 	const FString SafeName = BanDiscordHelpers::EscapeMarkdown(DisplayName);
 	FString Msg;
@@ -542,6 +683,12 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 			TEXT("✅ **%s** (`%s`) has been **permanently** banned.\n"
 			     "Reason: %s\nBanned by: %s"),
 			*SafeName, *Uid, *Entry.Reason, *SenderName);
+	}
+
+	if (ExtraUids.Num() > 0)
+	{
+		Msg += FString::Printf(TEXT("\nAlso banned: `%s`"),
+			*FString::Join(ExtraUids, TEXT("`, `")));
 	}
 
 	UE_LOG(LogBanDiscord, Log, TEXT("BanDiscordSubsystem: %s banned %s (%s). Reason: %s"),
@@ -584,6 +731,10 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 		return;
 	}
 
+	// Collect linked UIDs before removing the entry so we can clean up counterparts.
+	FBanEntry BanRecord;
+	const bool bHadRecord = DB->GetBanByUid(Uid, BanRecord);
+
 	if (!DB->RemoveBanByUid(Uid))
 	{
 		// No ban record was found in the database for this UID.  That means the
@@ -603,9 +754,17 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 		return;
 	}
 
-	const FString Msg = FString::Printf(
+	// Remove counterpart bans (linked UIDs + session registry lookup).
+	int32 ExtraRemoved = 0;
+	if (bHadRecord)
+		ExtraRemoved = BanDiscordHelpers::RemoveCounterpartBans(this, DB, Uid, BanRecord.LinkedUids);
+
+	FString Msg = FString::Printf(
 		TEXT("✅ Ban removed for **%s** (`%s`).\nUnbanned by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
+
+	if (ExtraRemoved > 0)
+		Msg += FString::Printf(TEXT("\nAlso removed %d linked ban(s)."), ExtraRemoved);
 
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: %s unbanned %s (%s)."),
@@ -1969,12 +2128,21 @@ void UBanDiscordSubsystem::HandleModBanCommand(const TArray<FString>& Args,
 	if (UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr)
 		UBanEnforcer::KickConnectedPlayer(World, Uid, Entry.GetKickMessage());
 
-	const FString Msg = FString::Printf(
+	// Also ban the counterpart identifier (IP↔EOS).
+	const TArray<FString> ExtraUids = BanDiscordHelpers::AddCounterpartBans(
+		this, DB, Uid, DisplayName, Entry.Reason, SenderName,
+		Entry.bIsPermanent, Entry.ExpireDate);
+
+	FString Msg = FString::Printf(
 		TEXT("🔨 **%s** (`%s`) has been banned for **%d minute(s)** (mod action).\n"
 		     "Expires: %s UTC\nReason: %s\nBanned by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, DurationMinutes,
 		*Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")),
 		*Reason, *SenderName);
+
+	if (ExtraUids.Num() > 0)
+		Msg += FString::Printf(TEXT("\nAlso banned: `%s`"),
+			*FString::Join(ExtraUids, TEXT("`, `")));
 
 	UE_LOG(LogBanDiscord, Log,
 		TEXT("BanDiscordSubsystem: %s modban %s (%s) for %d min. Reason: %s"),
@@ -3042,6 +3210,10 @@ UGameInstance* GI = GetGameInstance();
 if (UWorld* W = GI ? GI->GetWorld() : nullptr)
 UBanEnforcer::KickConnectedPlayer(W, Uid, Ban.GetKickMessage());
 
+// Also ban counterpart identifiers (IP↔EOS).
+BanDiscordHelpers::AddCounterpartBans(this, DB, Uid, DisplayName,
+	Template->Reason, SenderName, Ban.bIsPermanent, Ban.ExpireDate);
+
 FBanDiscordNotifier::NotifyBanCreated(Ban);
 
 const FString DurStr = Ban.bIsPermanent ? TEXT("permanent") : FString::Printf(TEXT("%dmin"), Template->DurationMinutes);
@@ -3223,6 +3395,9 @@ if (DB->AddBan(Ban))
 if (UWorld* W = GI ? GI->GetWorld() : nullptr)
 UBanEnforcer::KickConnectedPlayer(W, Uid, Ban.GetKickMessage());
 FBanDiscordNotifier::NotifyBanCreated(Ban);
+// Also ban counterpart identifiers (IP↔EOS).
+BanDiscordHelpers::AddCounterpartBans(this, DB, Uid, RawUid,
+	Reason, SenderName, true, FDateTime(0));
 ++BannedCount;
 }
 }
