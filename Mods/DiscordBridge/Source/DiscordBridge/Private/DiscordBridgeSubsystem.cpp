@@ -5121,6 +5121,45 @@ Commands.Add(MakeCmd(TEXT("whitelist"), TEXT("Whitelist management commands."),
 		{ Str(TEXT("query"),      TEXT("Partial name to search for")) }),
 }));
 
+// ── /ticket – ticket management (support role) ───────────────────────────
+Commands.Add(MakeCmd(TEXT("ticket"), TEXT("Support ticket management commands."),
+{
+	MakeSub(TEXT("panel"),    TEXT("Post the ticket selection panel to the configured channel.")),
+	MakeSub(TEXT("list"),     TEXT("List all open tickets.")),
+	MakeSub(TEXT("assign"),   TEXT("Claim/assign a ticket to a staff member."),
+		{ Str(TEXT("user"), TEXT("@mention of the staff member")) }),
+	MakeSub(TEXT("claim"),    TEXT("Claim this ticket for yourself.")),
+	MakeSub(TEXT("unclaim"),  TEXT("Release your claim on this ticket.")),
+	MakeSub(TEXT("transfer"), TEXT("Transfer this ticket to another staff member."),
+		{ Str(TEXT("user"), TEXT("@mention of the target staff member")) }),
+	MakeSub(TEXT("priority"), TEXT("Set the priority level of this ticket."),
+		{ Str(TEXT("level"), TEXT("Priority level (low, normal, high, urgent)")) }),
+	MakeSub(TEXT("macro"),    TEXT("Apply a saved macro/template response."),
+		{ Str(TEXT("name"), TEXT("Macro name")) }),
+	MakeSub(TEXT("macros"),   TEXT("List all available macros.")),
+	MakeSub(TEXT("stats"),    TEXT("Show ticket statistics.")),
+	MakeSub(TEXT("report"),   TEXT("Submit a ticket report/feedback."),
+		{ Str(TEXT("text"), TEXT("Report text")) }),
+	MakeSub(TEXT("tag"),      TEXT("Add a tag to this ticket."),
+		{ Str(TEXT("tag"), TEXT("Tag name")) }),
+	MakeSub(TEXT("untag"),    TEXT("Remove a tag from this ticket."),
+		{ Str(TEXT("tag"), TEXT("Tag name")) }),
+	MakeSub(TEXT("tags"),     TEXT("List all tags on this ticket.")),
+	MakeSub(TEXT("note"),     TEXT("Add a staff-only note to this ticket."),
+		{ Str(TEXT("text"), TEXT("Note text")) }),
+	MakeSub(TEXT("notes"),    TEXT("List all staff notes on this ticket.")),
+	MakeSub(TEXT("escalate"), TEXT("Escalate this ticket to a senior staff member.")),
+	MakeSub(TEXT("remind"),   TEXT("Set a reminder for this ticket."),
+		{ Str(TEXT("text"), TEXT("Reminder text")) }),
+	MakeSub(TEXT("blacklist"),     TEXT("Blacklist a user from creating tickets."),
+		{ Str(TEXT("user"), TEXT("User ID to blacklist")) }),
+	MakeSub(TEXT("unblacklist"),   TEXT("Remove a user from the ticket blacklist."),
+		{ Str(TEXT("user"), TEXT("User ID to unblacklist")) }),
+	MakeSub(TEXT("blacklistlist"), TEXT("List all blacklisted users.")),
+	MakeSub(TEXT("merge"),    TEXT("Merge another ticket into this one."),
+		{ Str(TEXT("ticket_id"), TEXT("Channel ID of the ticket to merge")) }),
+}));
+
 // Serialize the commands array and send to Discord.
 FString BodyStr;
 {
@@ -5143,7 +5182,7 @@ Request->OnProcessRequestComplete().BindLambda(
 		{
 			UE_LOG(LogDiscordBridge, Log,
 				TEXT("DiscordBridge: Slash commands registered successfully (%d commands)."),
-				12); // 5 standalone + 7 groups
+				13); // 5 standalone + 8 groups
 		}
 		else
 		{
@@ -5314,7 +5353,8 @@ TEXT("`/warn add|list|clearall|clearone` — Warning management (admin)\n")
 TEXT("`/mod kick|mute|unmute|announce|…` — Moderation (moderator)\n")
 TEXT("`/player history|note|notes|playtime|…` — Player info (admin)\n")
 TEXT("`/appeal list|approve|deny|dismiss` — Appeal management (admin)\n")
-TEXT("`/admin say|poll|reloadconfig` — Admin utilities (admin)");
+TEXT("`/admin say|poll|reloadconfig` — Admin utilities (admin)\n")
+TEXT("`/ticket panel|list|assign|claim|…` — Support ticket management");
 RespondToInteraction(InteractionId, InteractionToken, 4, Reply, false);
 return;
 }
@@ -5415,6 +5455,25 @@ const TArray<TSharedPtr<FJsonValue>>* StatsOpts = nullptr;
 HandlePlayerStatsCommand(InteractionChannelId, GetSlashOptionString(StatsOpts, TEXT("name")));
 return;
 }
+}
+
+// ── /ticket – delegated to TicketSubsystem via the interaction delegate ────
+if (CmdName == TEXT("ticket"))
+{
+if (!OnDiscordInteractionReceived.IsBound())
+{
+UE_LOG(LogDiscordBridge, Warning,
+       TEXT("DiscordBridge: /ticket slash command received but no interaction "
+            "subscriber is registered. TicketSubsystem may not be loaded."));
+RespondToInteraction(InteractionId, InteractionToken, 4,
+    TEXT("❌ Ticket system is not available — the TicketSubsystem module is not loaded."),
+    true);
+return;
+}
+
+RespondToInteraction(InteractionId, InteractionToken, 5, FString(), true);
+OnDiscordInteractionReceived.Broadcast(DataObj);
+return;
 }
 
 // ── Ban / mod / warn / player / appeal / admin ─────────────────────────────

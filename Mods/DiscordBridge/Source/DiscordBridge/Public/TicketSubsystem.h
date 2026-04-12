@@ -34,15 +34,31 @@
  *  5. When either the ticket opener or an admin clicks Close Ticket, the channel
  *     is deleted via the provider's DeleteDiscordChannel() method.
  *
- * Admin commands
- * ──────────────
- *  !ticket-panel               – Post the ticket selection panel to TicketPanelChannelId.
+ * Slash commands (/ticket)
+ * ========================
+ *  /ticket panel               – Post the ticket selection panel to TicketPanelChannelId.
  *                                Requires the sender to hold TicketNotifyRoleId.
- *  !ticket-assign <@userId>    – Claim an open ticket on behalf of the mentioning staff
- *                                member.  Can only be used inside an active ticket channel.
- *                                Updates the TicketChannelToAssignee state map and posts a
- *                                confirmation message to the channel.
- *  !ticket-list                – List all open tickets.  Requires TicketNotifyRoleId.
+ *  /ticket assign <@user>      – Assign a ticket to a staff member.
+ *  /ticket claim               – Claim this ticket for yourself.
+ *  /ticket unclaim             – Release your claim on this ticket.
+ *  /ticket list                – List all open tickets.  Requires TicketNotifyRoleId.
+ *  /ticket transfer <@user>    – Transfer this ticket to another staff member.
+ *  /ticket priority <level>    – Set ticket priority (low, normal, high, urgent).
+ *  /ticket macro <name>        – Apply a saved response template.
+ *  /ticket macros              – List available response macros.
+ *  /ticket stats               – Show ticket statistics.
+ *  /ticket report <text>       – Submit a ticket report.
+ *  /ticket tag <tag>           – Add a tag to this ticket.
+ *  /ticket untag <tag>         – Remove a tag from this ticket.
+ *  /ticket tags                – List tags on this ticket.
+ *  /ticket note <text>         – Add a staff-only note to this ticket.
+ *  /ticket notes               – List staff notes on this ticket.
+ *  /ticket escalate            – Escalate this ticket.
+ *  /ticket remind <text>       – Set a reminder for this ticket.
+ *  /ticket blacklist <user>    – Blacklist a user from creating tickets.
+ *  /ticket unblacklist <user>  – Remove a user from the blacklist.
+ *  /ticket blacklistlist       – List blacklisted users.
+ *  /ticket merge <ticket_id>   – Merge another ticket into this one.
  *
  * TicketAssignments
  * ─────────────────
@@ -86,6 +102,12 @@ private:
 	 * appropriate internal handler.
 	 */
 	void OnInteractionReceived(const TSharedPtr<FJsonObject>& DataObj);
+
+	/**
+	 * Handle APPLICATION_COMMAND (type 2) slash command interactions for the
+	 * /ticket command group.
+	 */
+	void HandleSlashTicketCommand(const TSharedPtr<FJsonObject>& DataObj);
 
 	/**
 	 * Handle a MESSAGE_COMPONENT interaction (button click, type 3).
@@ -148,7 +170,7 @@ private:
 	/**
 	 * Post the ticket panel (a message with clickable buttons) to the configured
 	 * TicketPanelChannelId channel.
-	 * Called when a member holding TicketNotifyRoleId types "!ticket-panel".
+	 * Called when a member holding TicketNotifyRoleId uses "/ticket panel".
 	 *
 	 * @param PanelChannelId     Destination channel for the panel message.
 	 * @param ResponseChannelId  Channel where the command confirmation is sent.
@@ -159,9 +181,9 @@ private:
 	// ── Message routing ───────────────────────────────────────────────────────
 
 	/**
-	 * Bound to the provider's raw-message event via SetProvider().
-	 * Checks whether the message content is the "!ticket-panel" command and,
-	 * if the sender holds TicketNotifyRoleId, posts the ticket panel.
+	 * Handles ticket commands from raw gateway messages.
+	 * Also invoked by HandleSlashTicketCommand via synthetic message construction
+	 * to reuse command logic. Tracks SLA and ticket channel activity.
 	 *
 	 * @param MessageObj  The full MESSAGE_CREATE data JSON object.
 	 */
