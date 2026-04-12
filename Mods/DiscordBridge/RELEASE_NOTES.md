@@ -1,8 +1,125 @@
 # DiscordBridge – Release Notes
 
-## v1.1.0 – Game Events, Stats Commands, AFK Kick, Reaction Voting & More
+## v1.1.0 – Slash Commands, Ticket System, BanDiscord Integration, Game Events & More
 
 *Compatible with Satisfactory build ≥ 416835 and SML ≥ 3.11.3*
+
+> **Breaking change:** All Discord commands now use **slash commands** (`/`).
+> The `!` prefix commands have been completely removed. Old config fields
+> such as `WhitelistCommandPrefix`, `InGameWhitelistCommandPrefix`,
+> `PlayersCommandPrefix`, `StatsCommandPrefix`, and `PlayerStatsCommandPrefix`
+> have been removed — the slash command names are fixed.
+
+---
+
+### New feature – all Discord commands are now slash commands
+
+Every Discord command has been migrated to native Discord slash commands
+(Application Commands). This provides auto-complete, validation, and a
+consistent user experience.
+
+**Discord Bridge slash commands:**
+- `/stats` — Live server summary
+- `/playerstats <player>` — Per-player session statistics
+- `/players` — Current online player list
+- `/whitelist on|off|add|remove|list|status|role` — Whitelist management (with new `apply`, `link`, `search`, `groups` subcommands)
+
+**BanDiscord slash commands (42 subcommands):**
+- `/ban add|temp|remove|removename|byname|check|reason|list|extend|duration|link|unlink|schedule|quick|bulk`
+- `/warn add|list|clearall|clearone`
+- `/mod kick|modban|mute|unmute|tempmute|tempunmute|mutecheck|mutelist|mutereason|announce|stafflist|staffchat`
+- `/player history|note|notes|reason|playtime|reputation`
+- `/appeal list|dismiss|approve|deny`
+- `/admin say|poll|reloadconfig`
+
+**Ticket slash commands (23 subcommands):**
+- `/ticket panel|list|assign|claim|unclaim|transfer|priority|macro|macros|stats|report|tag|untag|tags|note|notes|escalate|remind|blacklist|unblacklist|blacklistlist|merge`
+
+---
+
+### New feature – enhanced ticket system
+
+The ticket system has been significantly expanded with new management features:
+
+| Command | Description |
+|---------|-------------|
+| `/ticket tag <tag>` | Add a tag to the current ticket |
+| `/ticket untag <tag>` | Remove a tag from the current ticket |
+| `/ticket tags` | List all tags on the current ticket |
+| `/ticket note <text>` | Add a private staff note to the ticket |
+| `/ticket notes` | List all staff notes on the ticket |
+| `/ticket escalate` | Escalate the ticket to the escalation role/category |
+| `/ticket remind <text>` | Set a follow-up reminder on the ticket |
+| `/ticket blacklist <user>` | Blacklist a user from creating tickets |
+| `/ticket unblacklist <user>` | Remove a user from the ticket blacklist |
+| `/ticket blacklistlist` | Show all blacklisted users |
+| `/ticket merge <ticket_id>` | Merge two tickets together |
+
+**New settings**
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `TicketSlaWarningMinutes` | int | `0` | SLA warning threshold in minutes. `0` disables. |
+| `TicketEscalationRoleId` | string | *(empty)* | Discord role pinged on `/ticket escalate`. |
+| `TicketEscalationCategoryId` | string | *(empty)* | Category to move escalated tickets into. |
+| `TicketTemplate` | array | *(empty)* | Ticket templates (`TypeSlug\|Field1\|...`). |
+| `TicketAutoResponse` | array | *(empty)* | Auto-response on ticket creation (`TypeSlug\|message`). |
+
+→ See [TicketSystem](Docs/09-TicketSystem.md)
+
+---
+
+### New feature – enhanced whitelist system
+
+The whitelist now supports group/tier tagging, partial-name search, applications,
+and Discord verification.
+
+| Feature | Description |
+|---------|-------------|
+| Groups | Assign players to whitelist groups with `/whitelist add <name> group:GroupName` |
+| Search | `/whitelist search <partial>` finds players by partial name |
+| `/whitelist groups` | List all whitelist groups |
+| `/whitelist apply` | Player-initiated whitelist application (when enabled) |
+| `/whitelist link` | Link Discord account to in-game player |
+| Verification | Discord-side verification workflow |
+| Expiry warnings | Configurable advance notice before whitelist expiry |
+
+**New settings**
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `WhitelistApplicationChannelId` | string | *(empty)* | Channel for whitelist applications. |
+| `bWhitelistApplyEnabled` | bool | `False` | Enable `/whitelist apply` from Discord. |
+| `WhitelistApprovedDmMessage` | string | *(empty)* | DM sent when application is approved. |
+| `WhitelistExpiryWarningHours` | float | `24.0` | Hours before expiry to warn. |
+| `bWhitelistVerificationEnabled` | bool | `False` | Enable Discord verification workflow. |
+| `WhitelistVerificationChannelId` | string | *(empty)* | Channel for verification messages. |
+
+→ See [Whitelist](Docs/05-Whitelist.md)
+
+---
+
+### New feature – full BanDiscord integration (42 slash commands)
+
+When used alongside BanSystem and BanChatCommands, DiscordBridge now provides
+a comprehensive set of Discord slash commands for server moderation:
+
+- **Ban management** — `/ban add`, `/ban temp`, `/ban remove`, `/ban byname`, `/ban schedule`, `/ban quick`, `/ban bulk`, and more
+- **Warning system** — `/warn add`, `/warn list`, `/warn clearall`, `/warn clearone`
+- **Moderation** — `/mod kick`, `/mod modban`, `/mod mute/unmute/tempmute`, `/mod announce`, `/mod stafflist`, `/mod staffchat`
+- **Player info** — `/player history`, `/player note/notes`, `/player playtime`, `/player reputation`
+- **Appeals** — `/appeal list`, `/appeal approve`, `/appeal deny`, `/appeal dismiss`
+- **Admin** — `/admin say`, `/admin poll`, `/admin reloadconfig`
+- **Per-player moderation thread** — Ban/warn/kick actions are logged to per-player mod-log threads
+
+**New settings**
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `AdminRoleId` | string | *(empty)* | Discord role ID for admin slash commands. |
+| `ModeratorRoleId` | string | *(empty)* | Discord role ID for moderator slash commands. |
+| `BanCommandChannelId` | string | *(empty)* | Channel for ban command output. |
+| `ModerationLogChannelId` | string | *(empty)* | Channel for moderation log entries. |
 
 ---
 
@@ -23,17 +140,13 @@ a schematic (milestone).
 
 ---
 
-### New feature – `!stats` and `!playerstats` Discord commands
+### New feature – `/stats` and `/playerstats` Discord slash commands
 
-Discord users can now type `!stats` in the bridged channel to get a live server
-summary, or `!playerstats <PlayerName>` to retrieve per-player session counters.
+Discord users can now type `/stats` in the bridged channel to get a live server
+summary, or `/playerstats <PlayerName>` to retrieve per-player session counters.
 
-**New settings**
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `StatsCommandPrefix` | string | `!stats` | The trigger word for the global stats command. Clear to disable. |
-| `PlayerStatsCommandPrefix` | string | `!playerstats` | The trigger word for the per-player stats command. Clear to disable. |
+> **Note:** These are now slash commands. The old `StatsCommandPrefix` and
+> `PlayerStatsCommandPrefix` config fields have been removed.
 
 → See [Stats Commands](Docs/11-StatsCommands.md)
 
@@ -144,17 +257,12 @@ find-and-replace rules that substitute matched text with a replacement string
 
 ---
 
-### New feature – `!players` command
+### New feature – `/players` command
 
-Typing `!players` in the bridged channel now returns the current online player list.
-The response can be routed to a dedicated channel.
+Typing `/players` in the bridged channel now returns the current online player list.
 
-**New settings**
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `PlayersCommandPrefix` | string | `!players` | Trigger word. Clear to disable. |
-| `PlayersCommandChannelId` | string | *(empty)* | Optional channel to reply in. Falls back to the originating channel. |
+> **Note:** This is now a slash command. The old `PlayersCommandPrefix` config
+> field has been removed.
 
 ---
 
@@ -380,35 +488,41 @@ or dashboard required.
 #### Ban system
 
 > **Note:** The built-in ban system was removed from DiscordBridge in a subsequent
-> release.  There is no `!ban` command in the current version.  The whitelist
-> (`!whitelist`) remains fully functional.
+> release.  There is no `/ban` command in DiscordBridge itself.  Use the
+> **BanSystem** + **BanChatCommands** companion mods for full ban management,
+> with 42 Discord slash commands via the **BanDiscord** integration.
+> The `/whitelist` commands remain fully functional.
 
 #### Whitelist
 - Restrict which players can join the server and manage the list from Discord or
-  in-game using `!whitelist` commands.
+  in-game using `/whitelist` slash commands.
 - Optional Discord role integration (`WhitelistRoleId`): members holding the
   whitelist role are automatically allowed through the whitelist by display-name
-  matching, without needing a manual `!whitelist add` entry.
+  matching, without needing a manual `/whitelist add` entry.
 - Dedicated whitelist channel (`WhitelistChannelId`) mirrors in-game messages from
   whitelisted players and accepts Discord messages only from role holders.
 - Configurable kick reason (`WhitelistKickReason`) and Discord kick notification
   (`WhitelistKickDiscordMessage`).
 
-**Discord whitelist commands**
+**Discord whitelist slash commands**
 
 | Command | Effect |
 |---------|--------|
-| `!whitelist on` | Enable the whitelist |
-| `!whitelist off` | Disable the whitelist |
-| `!whitelist add <name>` | Add a player by in-game name |
-| `!whitelist remove <name>` | Remove a player by in-game name |
-| `!whitelist list` | List all whitelisted players |
-| `!whitelist status` | Show enabled/disabled state of the whitelist |
-| `!whitelist role add <discord_id>` | Grant the whitelist role to a Discord user |
-| `!whitelist role remove <discord_id>` | Revoke the whitelist role from a Discord user |
+| `/whitelist on` | Enable the whitelist |
+| `/whitelist off` | Disable the whitelist |
+| `/whitelist add <name>` | Add a player by in-game name |
+| `/whitelist remove <name>` | Remove a player by in-game name |
+| `/whitelist list` | List all whitelisted players |
+| `/whitelist status` | Show enabled/disabled state of the whitelist |
+| `/whitelist role add <discord_id>` | Grant the whitelist role to a Discord user |
+| `/whitelist role remove <discord_id>` | Revoke the whitelist role from a Discord user |
+| `/whitelist apply` | Player-initiated whitelist application |
+| `/whitelist link` | Link Discord account to in-game player |
+| `/whitelist search <partial>` | Search whitelist by partial name |
+| `/whitelist groups` | List whitelist groups |
 
-**In-game whitelist commands** (`!whitelist on/off/add/remove/list/status`) are also
-supported, excluding role management which is Discord-only.
+**In-game whitelist commands** (`/ingamewhitelist on/off/add/remove/list/status`) are also
+supported via the SML chat command system.
 
 #### Configuration
 - Single primary config file (`DefaultDiscordBridge.ini`) covers all settings.
@@ -446,7 +560,7 @@ Discord Developer Portal:
 
 The bot also needs **Send Messages** and **Read Message History** permissions in the
 target channel. The **Manage Roles** permission is required when using
-`!ban role` or `!whitelist role` commands.
+`/whitelist role` commands.
 
 ---
 
