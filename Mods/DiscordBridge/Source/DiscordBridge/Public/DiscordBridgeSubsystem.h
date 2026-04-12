@@ -345,6 +345,24 @@ public:
 		TFunction<void(const TSharedPtr<FJsonObject>&)> Callback) override;
 	virtual void UnsubscribeRawMessage(FDelegateHandle Handle) override;
 
+	// ── In-game slash command helpers (callable from SML command actors) ──────
+
+	/**
+	 * Process a `/verify <code>` command issued from in-game chat.
+	 * Looks up the code in the pending verification table, resolves the player's
+	 * EOS PUID, and adds them to the whitelist if the code is valid and unexpired.
+	 *
+	 * @param PlayerName  In-game display name of the player who typed the command.
+	 * @param Code        Verification code string (without the `/verify ` prefix).
+	 */
+	void HandleInGameVerify(const FString& PlayerName, const FString& Code);
+
+	/** Handle a whitelist management command typed in the Satisfactory in-game chat. */
+	void HandleInGameWhitelistCommand(const FString& SubCommand);
+
+	/** Return the configured Discord invite URL (empty string if not set). */
+	FString GetDiscordInviteUrl() const;
+
 private:
 	// ── WebSocket event handlers (called on the game thread) ──────────────────
 
@@ -616,9 +634,6 @@ private:
 	void HandleWhitelistCommand(const FString& SubCommand, const FString& DiscordUsername,
 	                            const FString& ResponseChannelId,
 	                            const FString& AuthorDiscordId = TEXT(""));
-
-	/** Handle a whitelist management command typed in the Satisfactory in-game chat. */
-	void HandleInGameWhitelistCommand(const FString& SubCommand);
 
 	/** Broadcast a status/feedback message to all connected players via the game chat. */
 	void SendGameChatStatusMessage(const FString& Message);

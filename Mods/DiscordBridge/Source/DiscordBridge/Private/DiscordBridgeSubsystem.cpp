@@ -2131,106 +2131,31 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 	       TEXT("DiscordBridge: Player message detected. Sender: '%s', Text: '%s'"),
 	       *PlayerName, *MessageText);
 
-	// Check whether this message is an in-game whitelist management command.
+	// In-game whitelist, verify, and discord commands are now registered as
+	// proper SML slash commands (/whitelist, /verify, /discord) via
+	// AChatCommandSubsystem. They are no longer detected here.
+	// Legacy !-prefix check kept only for backward compatibility during transition.
 	if (!Config.InGameWhitelistCommandPrefix.IsEmpty() &&
-	    MessageText.StartsWith(Config.InGameWhitelistCommandPrefix, ESearchCase::IgnoreCase))
+	    MessageText.StartsWith(Config.InGameWhitelistCommandPrefix, ESearchCase::IgnoreCase) &&
+	    !Config.InGameWhitelistCommandPrefix.StartsWith(TEXT("/"), ESearchCase::IgnoreCase))
 	{
 		const FString SubCommand = MessageText.Mid(Config.InGameWhitelistCommandPrefix.Len()).TrimStartAndEnd();
 		HandleInGameWhitelistCommand(SubCommand);
 		return; // Do not forward commands to Discord.
 	}
 
-	// Handle the in-game !verify <code> command for account linking (Feature 6).
+	// Legacy !verify fallback — handled by /verify SML command, kept for safety.
 	if (Config.bWhitelistVerificationEnabled &&
 	    MessageText.StartsWith(TEXT("!verify "), ESearchCase::IgnoreCase))
 	{
 		const FString Code = MessageText.Mid(8).TrimStartAndEnd();
-		const FString* DiscordUserIdPtr = PendingVerifications.Find(Code);
-		if (DiscordUserIdPtr && !DiscordUserIdPtr->IsEmpty())
-		{
-			const FDateTime* ExpiryPtr = PendingVerificationExpiry.Find(Code);
-			if (ExpiryPtr && *ExpiryPtr <= FDateTime::UtcNow())
-			{
-				// Code expired.
-				PendingVerifications.Remove(Code);
-				PendingVerificationNames.Remove(Code);
-				PendingVerificationExpiry.Remove(Code);
-				SendGameChatStatusMessage(TEXT("[DiscordBridge] Verification code has expired. Please request a new one with !whitelist link."));
-			}
-			else
-			{
-				const FString DiscordUserId  = *DiscordUserIdPtr;
-				const FString* NamePtr       = PendingVerificationNames.Find(Code);
-				// Always whitelist using the actual in-game PlayerName of the player who typed
-				// !verify. The Discord-submitted name is kept only for the audit log.
-				const FString  AuditName     = NamePtr && !NamePtr->IsEmpty() ? *NamePtr : PlayerName;
-
-				// Resolve EosPUID from the currently-connected player controller whose
-				// name matches PlayerName. Use the safe FUniqueNetIdRepl accessors
-				// (GetType/ToString) – never dereference via operator-> on CSS DS.
-				FString ResolvedEosPUID;
-				if (UWorld* VerWorld = GetWorld())
-				{
-					for (FConstPlayerControllerIterator It = VerWorld->GetPlayerControllerIterator(); It; ++It)
-					{
-						APlayerController* VerPC = It->Get();
-						if (!VerPC || !VerPC->PlayerState) continue;
-						if (VerPC->PlayerState->GetPlayerName() != PlayerName) continue;
-						const FUniqueNetIdRepl& NetId = VerPC->PlayerState->GetUniqueId();
-						if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
-						{
-							ResolvedEosPUID = NetId.ToString().ToLower();
-						}
-						break;
-					}
-				}
-
-				PendingVerifications.Remove(Code);
-				PendingVerificationNames.Remove(Code);
-				PendingVerificationExpiry.Remove(Code);
-
-				// Add using the real in-game player name and resolved EosPUID (may be empty).
-				if (FWhitelistManager::AddPlayer(PlayerName, ResolvedEosPUID, TEXT("[Verification]")))
-				{
-					SendGameChatStatusMessage(FString::Printf(
-						TEXT("[DiscordBridge] Account linked! **%s** has been added to the whitelist."),
-						*PlayerName));
-					PostWhitelistEvent(
-						FString::Printf(TEXT("**%s** added via in-game verification (Discord: %s)"),
-							*PlayerName, *AuditName),
-						PlayerName, TEXT("[Verification]"), 3066993);
-
-					// Confirm to the Discord user who initiated the link.
-					if (!Config.WhitelistApprovedDmMessage.IsEmpty())
-					{
-						const FString DmMsg = Config.WhitelistApprovedDmMessage
-							.Replace(TEXT("%PlayerName%"), *PlayerName);
-						SendDiscordDM(DiscordUserId, DmMsg);
-					}
-					else
-					{
-						SendDiscordDM(DiscordUserId, FString::Printf(
-							TEXT("✅ Your in-game account **%s** has been verified and added to the whitelist!"),
-							*PlayerName));
-					}
-				}
-				else
-				{
-					SendGameChatStatusMessage(FString::Printf(
-						TEXT("[DiscordBridge] **%s** is already on the whitelist."), *PlayerName));
-				}
-			}
-		}
-		else
-		{
-			SendGameChatStatusMessage(TEXT("[DiscordBridge] Unknown or expired verification code."));
-		}
+		HandleInGameVerify(PlayerName, Code);
 		return;
 	}
 
-	// Feature 3: /discord in-game command – reply with the invite link.
-	if (MessageText.Equals(TEXT("/discord"), ESearchCase::IgnoreCase) ||
-	    MessageText.Equals(TEXT("!discord"), ESearchCase::IgnoreCase))
+	// Feature 3: /discord in-game command is now handled by the SML /discord
+	// command actor. Legacy !discord fallback kept so existing users are not broken.
+	if (MessageText.Equals(TEXT("!discord"), ESearchCase::IgnoreCase))
 	{
 		if (!Config.DiscordInviteUrl.IsEmpty())
 		{
@@ -3865,6 +3790,95 @@ void UDiscordBridgeSubsystem::SendGameChatStatusMessage(const FString& Message)
 	ChatMsg.MessageText   = FText::FromString(Message);
 
 	ChatManager->BroadcastChatMessage(ChatMsg);
+}
+
+void UDiscordBridgeSubsystem::HandleInGameVerify(const FString& PlayerName, const FString& Code)
+{
+	const FString* DiscordUserIdPtr = PendingVerifications.Find(Code);
+	if (DiscordUserIdPtr && !DiscordUserIdPtr->IsEmpty())
+	{
+		const FDateTime* ExpiryPtr = PendingVerificationExpiry.Find(Code);
+		if (ExpiryPtr && *ExpiryPtr <= FDateTime::UtcNow())
+		{
+			// Code expired.
+			PendingVerifications.Remove(Code);
+			PendingVerificationNames.Remove(Code);
+			PendingVerificationExpiry.Remove(Code);
+			SendGameChatStatusMessage(TEXT("[DiscordBridge] Verification code has expired. Please request a new one with /whitelist link."));
+		}
+		else
+		{
+			const FString DiscordUserId  = *DiscordUserIdPtr;
+			const FString* NamePtr       = PendingVerificationNames.Find(Code);
+			// Always whitelist using the actual in-game PlayerName of the player who typed
+			// /verify. The Discord-submitted name is kept only for the audit log.
+			const FString  AuditName     = NamePtr && !NamePtr->IsEmpty() ? *NamePtr : PlayerName;
+
+			// Resolve EosPUID from the currently-connected player controller whose
+			// name matches PlayerName. Use the safe FUniqueNetIdRepl accessors
+			// (GetType/ToString) – never dereference via operator-> on CSS DS.
+			FString ResolvedEosPUID;
+			if (UWorld* VerWorld = GetWorld())
+			{
+				for (FConstPlayerControllerIterator It = VerWorld->GetPlayerControllerIterator(); It; ++It)
+				{
+					APlayerController* VerPC = It->Get();
+					if (!VerPC || !VerPC->PlayerState) continue;
+					if (VerPC->PlayerState->GetPlayerName() != PlayerName) continue;
+					const FUniqueNetIdRepl& NetId = VerPC->PlayerState->GetUniqueId();
+					if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
+					{
+						ResolvedEosPUID = NetId.ToString().ToLower();
+					}
+					break;
+				}
+			}
+
+			PendingVerifications.Remove(Code);
+			PendingVerificationNames.Remove(Code);
+			PendingVerificationExpiry.Remove(Code);
+
+			// Add using the real in-game player name and resolved EosPUID (may be empty).
+			if (FWhitelistManager::AddPlayer(PlayerName, ResolvedEosPUID, TEXT("[Verification]")))
+			{
+				SendGameChatStatusMessage(FString::Printf(
+					TEXT("[DiscordBridge] Account linked! **%s** has been added to the whitelist."),
+					*PlayerName));
+				PostWhitelistEvent(
+					FString::Printf(TEXT("**%s** added via in-game verification (Discord: %s)"),
+						*PlayerName, *AuditName),
+					PlayerName, TEXT("[Verification]"), 3066993);
+
+				// Confirm to the Discord user who initiated the link.
+				if (!Config.WhitelistApprovedDmMessage.IsEmpty())
+				{
+					const FString DmMsg = Config.WhitelistApprovedDmMessage
+						.Replace(TEXT("%PlayerName%"), *PlayerName);
+					SendDiscordDM(DiscordUserId, DmMsg);
+				}
+				else
+				{
+					SendDiscordDM(DiscordUserId, FString::Printf(
+						TEXT("✅ Your in-game account **%s** has been verified and added to the whitelist!"),
+						*PlayerName));
+				}
+			}
+			else
+			{
+				SendGameChatStatusMessage(FString::Printf(
+					TEXT("[DiscordBridge] **%s** is already on the whitelist."), *PlayerName));
+			}
+		}
+	}
+	else
+	{
+		SendGameChatStatusMessage(TEXT("[DiscordBridge] Unknown or expired verification code."));
+	}
+}
+
+FString UDiscordBridgeSubsystem::GetDiscordInviteUrl() const
+{
+	return Config.DiscordInviteUrl;
 }
 
 void UDiscordBridgeSubsystem::HandleInGameWhitelistCommand(const FString& SubCommand)
