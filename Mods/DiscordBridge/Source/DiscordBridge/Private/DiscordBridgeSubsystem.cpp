@@ -98,13 +98,17 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	// Load (or auto-create) the JSON config file from Configs/DiscordBridge.cfg.
 	Config = FDiscordBridgeConfig::LoadOrCreate();
 
+	// Load the separate whitelist config file (DefaultWhitelist.ini + backup).
+	FWhitelistConfig::RestoreDefaultConfigIfNeeded();
+	WhitelistConfig = FWhitelistConfig::Load();
+
 	// Load (or create) the whitelist JSON from disk, using the config value as
 	// the default only on the very first server start (when no JSON file exists).
 	// After the first start the enabled/disabled state is saved in the JSON and
 	// survives restarts, so runtime !whitelist on / !whitelist off changes persist.
 	// To force-reset to this config value: delete ServerWhitelist.json and restart.
-	FWhitelistManager::Load(Config.bWhitelistEnabled);
-	FWhitelistManager::SetMaxSlots(Config.MaxWhitelistSlots);
+	FWhitelistManager::Load(WhitelistConfig.bWhitelistEnabled);
+	FWhitelistManager::SetMaxSlots(WhitelistConfig.MaxWhitelistSlots);
 
 	// Start a 60-second ticker to remove expired whitelist entries and
 	// post expiry warnings when WhitelistExpiryWarningHours > 0.
@@ -118,8 +122,8 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 			{
 				const FString Msg = FString::Printf(
 					TEXT(":clock1: **%s** has been removed from the whitelist (entry expired)."), *Name);
-				const FString& NotifyChan = Config.WhitelistEventsChannelId.IsEmpty()
-					? Config.ChannelId : Config.WhitelistEventsChannelId;
+				const FString& NotifyChan = WhitelistConfig.WhitelistEventsChannelId.IsEmpty()
+					? Config.ChannelId : WhitelistConfig.WhitelistEventsChannelId;
 				if (!NotifyChan.IsEmpty())
 				{
 					SendMessageToChannel(NotifyChan, Msg);
@@ -128,10 +132,10 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 			}
 
 			// ── Post expiry warnings ─────────────────────────────────────────
-			if (Config.WhitelistExpiryWarningHours > 0.0f)
+			if (WhitelistConfig.WhitelistExpiryWarningHours > 0.0f)
 			{
 				const FDateTime Now       = FDateTime::UtcNow();
-				const FTimespan WarnWindow = FTimespan::FromHours(Config.WhitelistExpiryWarningHours);
+				const FTimespan WarnWindow = FTimespan::FromHours(WhitelistConfig.WhitelistExpiryWarningHours);
 				for (const FWhitelistEntry& E : FWhitelistManager::GetAllEntries())
 				{
 					if (E.ExpiresAt.GetTicks() == 0) continue;   // permanent
@@ -140,8 +144,8 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 					if (Remaining > FTimespan::Zero() && Remaining <= WarnWindow)
 					{
 						WarnedExpiryNames.Add(E.Name);
-						const FString WarnChan = Config.WhitelistEventsChannelId.IsEmpty()
-							? Config.ChannelId : Config.WhitelistEventsChannelId;
+						const FString WarnChan = WhitelistConfig.WhitelistEventsChannelId.IsEmpty()
+							? Config.ChannelId : WhitelistConfig.WhitelistEventsChannelId;
 						if (!WarnChan.IsEmpty())
 						{
 							const FString WarnMsg = FString::Printf(
@@ -180,7 +184,7 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Whitelist active = %s (WhitelistEnabled config = %s)"),
 	       FWhitelistManager::IsEnabled() ? TEXT("True") : TEXT("False"),
-	       Config.bWhitelistEnabled ? TEXT("True") : TEXT("False"));
+	       WhitelistConfig.bWhitelistEnabled ? TEXT("True") : TEXT("False"));
 
 	if (Config.BotToken.IsEmpty() || Config.ChannelId.IsEmpty())
 	{
@@ -712,7 +716,7 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 				DataObj->TryGetStringField(TEXT("token"), InteractionToken);
 
 				// Verify that the clicker holds WhitelistCommandRoleId.
-				bool bHasRole = Config.WhitelistCommandRoleId.IsEmpty();
+				bool bHasRole = WhitelistConfig.WhitelistCommandRoleId.IsEmpty();
 				const TSharedPtr<FJsonObject>* MemberObjPtr = nullptr;
 				if (DataObj->TryGetObjectField(TEXT("member"), MemberObjPtr) && MemberObjPtr)
 				{
@@ -727,7 +731,7 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 								bHasRole = true;
 						}
 					}
-					if (!bHasRole && !Config.WhitelistCommandRoleId.IsEmpty())
+					if (!bHasRole && !WhitelistConfig.WhitelistCommandRoleId.IsEmpty())
 					{
 						const TArray<TSharedPtr<FJsonValue>>* RolesArr = nullptr;
 						if ((*MemberObjPtr)->TryGetArrayField(TEXT("roles"), RolesArr) && RolesArr)
@@ -735,7 +739,7 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 							for (const TSharedPtr<FJsonValue>& RoleVal : *RolesArr)
 							{
 								FString RId;
-								if (RoleVal->TryGetString(RId) && RId == Config.WhitelistCommandRoleId)
+								if (RoleVal->TryGetString(RId) && RId == WhitelistConfig.WhitelistCommandRoleId)
 								{
 									bHasRole = true;
 									break;
@@ -770,9 +774,9 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 								FString::Printf(TEXT("**%s** approved via application"), *PlayerNameCopy),
 								PlayerNameCopy, TEXT("[Discord Approval]"), 3066993);
 
-							if (!Config.WhitelistApprovedDmMessage.IsEmpty())
+							if (!WhitelistConfig.WhitelistApprovedDmMessage.IsEmpty())
 							{
-								const FString DmMsg = Config.WhitelistApprovedDmMessage
+								const FString DmMsg = WhitelistConfig.WhitelistApprovedDmMessage
 									.Replace(TEXT("%PlayerName%"), *PlayerNameCopy);
 								SendDiscordDM(TargetDiscordId, DmMsg);
 							}
@@ -830,13 +834,13 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 	{
 		// Keep the Discord role member cache up to date so the whitelist
 		// check in OnPostLogin stays accurate without a full re-fetch.
-		if (!Config.WhitelistRoleId.IsEmpty())
+		if (!WhitelistConfig.WhitelistRoleId.IsEmpty())
 		{
 			UpdateWhitelistRoleMemberEntry(DataObj);
 		}
 
 		// Auto-sync whitelist with Discord role
-		if (Config.bSyncWhitelistWithRole && !Config.WhitelistRoleId.IsEmpty())
+		if (WhitelistConfig.bSyncWhitelistWithRole && !WhitelistConfig.WhitelistRoleId.IsEmpty())
 		{
 			const TSharedPtr<FJsonObject>* UserPtr = nullptr;
 			if (DataObj->TryGetObjectField(TEXT("user"), UserPtr) && UserPtr)
@@ -854,7 +858,7 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 					for (const TSharedPtr<FJsonValue>& RV : *RolesArr)
 					{
 						FString RId;
-						if (RV->TryGetString(RId) && RId == Config.WhitelistRoleId)
+						if (RV->TryGetString(RId) && RId == WhitelistConfig.WhitelistRoleId)
 						{
 							bHasRole = true;
 							break;
@@ -886,7 +890,7 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 	else if (EventType == TEXT("GUILD_MEMBER_REMOVE"))
 	{
 		// Member left the guild – remove from cache unconditionally.
-		if (!Config.WhitelistRoleId.IsEmpty())
+		if (!WhitelistConfig.WhitelistRoleId.IsEmpty())
 		{
 			UpdateWhitelistRoleMemberEntry(DataObj, /*bRemoved=*/true);
 		}
@@ -1082,7 +1086,7 @@ void UDiscordBridgeSubsystem::HandleReady(const TSharedPtr<FJsonObject>& DataObj
 	// Populate the Discord role member cache so that players who hold
 	// WhitelistRoleId are not kicked by the game-server whitelist even when
 	// they are not listed in ServerWhitelist.json.
-	if (!Config.WhitelistRoleId.IsEmpty())
+	if (!WhitelistConfig.WhitelistRoleId.IsEmpty())
 	{
 		FetchWhitelistRoleMembers();
 	}
@@ -1136,8 +1140,8 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 	}
 
 	const bool bIsMainChannel      = (MsgChannelId == Config.ChannelId);
-	const bool bIsWhitelistChannel = (!Config.WhitelistChannelId.IsEmpty() &&
-	                                  MsgChannelId == Config.WhitelistChannelId);
+	const bool bIsWhitelistChannel = (!WhitelistConfig.WhitelistChannelId.IsEmpty() &&
+	                                  MsgChannelId == WhitelistConfig.WhitelistChannelId);
 
 	if (!bIsMainChannel && !bIsWhitelistChannel)
 	{
@@ -1197,7 +1201,7 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 
 	// For the dedicated whitelist channel: only relay to game when the sender
 	// holds the configured whitelist role (if WhitelistRoleId is set).
-	if (bIsWhitelistChannel && !Config.WhitelistRoleId.IsEmpty())
+	if (bIsWhitelistChannel && !WhitelistConfig.WhitelistRoleId.IsEmpty())
 	{
 		bool bHasRole = false;
 		if (MemberPtr)
@@ -1208,7 +1212,7 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 				for (const TSharedPtr<FJsonValue>& RoleVal : *Roles)
 				{
 					FString RoleId;
-					if (RoleVal->TryGetString(RoleId) && RoleId == Config.WhitelistRoleId)
+					if (RoleVal->TryGetString(RoleId) && RoleId == WhitelistConfig.WhitelistRoleId)
 					{
 						bHasRole = true;
 						break;
@@ -2317,11 +2321,11 @@ void UDiscordBridgeSubsystem::SendGameMessageToDiscord(const FString& PlayerName
 	// When a dedicated whitelist channel is configured, also post there for
 	// players who are on the whitelist (so whitelisted members have their own
 	// channel view of whitelisted player activity).
-	if (!Config.WhitelistChannelId.IsEmpty() &&
-	    Config.WhitelistChannelId != Config.ChannelId &&
+	if (!WhitelistConfig.WhitelistChannelId.IsEmpty() &&
+	    WhitelistConfig.WhitelistChannelId != Config.ChannelId &&
 	    FWhitelistManager::IsWhitelisted(EffectivePlayerName))
 	{
-		PostToChannel(Config.WhitelistChannelId);
+		PostToChannel(WhitelistConfig.WhitelistChannelId);
 	}
 }
 
@@ -2544,7 +2548,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 	// username) of a guild member who holds the whitelist role.  The cache is
 	// populated asynchronously after the bot connects; players who join before
 	// it is ready follow the JSON-only path above.
-	if (!Config.WhitelistRoleId.IsEmpty() &&
+	if (!WhitelistConfig.WhitelistRoleId.IsEmpty() &&
 	    WhitelistRoleMemberNames.Contains(PlayerName.ToLower()))
 	{
 		UE_LOG(LogDiscordBridge, Log,
@@ -2561,18 +2565,18 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 
 	if (EffectiveGameMode && EffectiveGameMode->GameSession)
 	{
-		const FString KickReason = Config.WhitelistKickReason.IsEmpty()
+		const FString KickReason = WhitelistConfig.WhitelistKickReason.IsEmpty()
 			? TEXT("You are not on this server's whitelist. Contact the server admin to be added.")
-			: Config.WhitelistKickReason;
+			: WhitelistConfig.WhitelistKickReason;
 		EffectiveGameMode->GameSession->KickPlayer(
 			Controller,
 			FText::FromString(KickReason));
 	}
 
 	// Notify Discord so admins can see the kick in the bridge channel.
-	if (!Config.WhitelistKickDiscordMessage.IsEmpty())
+	if (!WhitelistConfig.WhitelistKickDiscordMessage.IsEmpty())
 	{
-		FString Notice = Config.WhitelistKickDiscordMessage;
+		FString Notice = WhitelistConfig.WhitelistKickDiscordMessage;
 		Notice = Notice.Replace(TEXT("%PlayerName%"), *PlayerName);
 		SendMessageToChannel(Config.ChannelId, Notice);
 	}
@@ -2941,7 +2945,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 					ParsedName, DiscordUsername, 3066993);
 
 				// DM on add when AuthorDiscordId is known and DM is configured.
-				if (!Config.WhitelistApprovedDmMessage.IsEmpty() && !AuthorDiscordId.IsEmpty())
+				if (!WhitelistConfig.WhitelistApprovedDmMessage.IsEmpty() && !AuthorDiscordId.IsEmpty())
 				{
 					// Only DM if the command was "add" and we have the target's Discord ID.
 					// For direct !whitelist add we don't know the target's Discord ID, so skip.
@@ -3126,7 +3130,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 		RoleVerb     = RoleVerb.TrimStartAndEnd().ToLower();
 		TargetUserId = TargetUserId.TrimStartAndEnd();
 
-		if (Config.WhitelistRoleId.IsEmpty())
+		if (WhitelistConfig.WhitelistRoleId.IsEmpty())
 		{
 			Response = TEXT(":warning: `WhitelistRoleId` is not configured in `DefaultDiscordBridge.ini`. "
 			                "Set it to the snowflake ID of the whitelist role.");
@@ -3142,13 +3146,13 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 		}
 		else if (RoleVerb == TEXT("add"))
 		{
-			ModifyDiscordRole(TargetUserId, Config.WhitelistRoleId, /*bGrant=*/true);
+			ModifyDiscordRole(TargetUserId, WhitelistConfig.WhitelistRoleId, /*bGrant=*/true);
 			Response = FString::Printf(
 				TEXT(":green_circle: Granting whitelist role to Discord user `%s`..."), *TargetUserId);
 		}
 		else if (RoleVerb == TEXT("remove"))
 		{
-			ModifyDiscordRole(TargetUserId, Config.WhitelistRoleId, /*bGrant=*/false);
+			ModifyDiscordRole(TargetUserId, WhitelistConfig.WhitelistRoleId, /*bGrant=*/false);
 			Response = FString::Printf(
 				TEXT(":red_circle: Revoking whitelist role from Discord user `%s`..."), *TargetUserId);
 		}
@@ -3218,11 +3222,11 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 	}
 	else if (Verb == TEXT("apply"))
 	{
-		if (!Config.bWhitelistApplyEnabled)
+		if (!WhitelistConfig.bWhitelistApplyEnabled)
 		{
 			Response = TEXT(":no_entry_sign: Whitelist applications are not enabled on this server.");
 		}
-		else if (Config.WhitelistApplicationChannelId.IsEmpty())
+		else if (WhitelistConfig.WhitelistApplicationChannelId.IsEmpty())
 		{
 			Response = TEXT(":warning: Whitelist application channel is not configured.");
 		}
@@ -3262,7 +3266,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 
 			const FString AppUrl = FString::Printf(
 				TEXT("https://discord.com/api/v10/channels/%s/messages"),
-				*Config.WhitelistApplicationChannelId);
+				*WhitelistConfig.WhitelistApplicationChannelId);
 
 			TSharedRef<IHttpRequest, ESPMode::ThreadSafe> AppReq = FHttpModule::Get().CreateRequest();
 			AppReq->SetURL(AppUrl);
@@ -3288,7 +3292,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 	}
 	else if (Verb == TEXT("link"))
 	{
-		if (!Config.bWhitelistVerificationEnabled)
+		if (!WhitelistConfig.bWhitelistVerificationEnabled)
 		{
 			Response = TEXT(":no_entry_sign: Account verification is not enabled on this server.");
 		}
@@ -3300,12 +3304,12 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 		{
 			Response = TEXT(":warning: Could not determine your Discord user ID. Please try again.");
 		}
-		else if (!Config.WhitelistVerificationChannelId.IsEmpty() &&
-		         ResponseChannelId != Config.WhitelistVerificationChannelId)
+		else if (!WhitelistConfig.WhitelistVerificationChannelId.IsEmpty() &&
+		         ResponseChannelId != WhitelistConfig.WhitelistVerificationChannelId)
 		{
 			Response = FString::Printf(
 				TEXT(":no_entry_sign: Please use this command in <#%s>."),
-				*Config.WhitelistVerificationChannelId);
+				*WhitelistConfig.WhitelistVerificationChannelId);
 		}
 		else
 		{
@@ -3499,7 +3503,7 @@ void UDiscordBridgeSubsystem::UpdateWhitelistRoleMemberEntry(
 		for (const TSharedPtr<FJsonValue>& RoleVal : *Roles)
 		{
 			FString RoleId;
-			if (RoleVal->TryGetString(RoleId) && RoleId == Config.WhitelistRoleId)
+			if (RoleVal->TryGetString(RoleId) && RoleId == WhitelistConfig.WhitelistRoleId)
 			{
 				bHasRole = true;
 				break;
@@ -3550,7 +3554,7 @@ void UDiscordBridgeSubsystem::UpdateWhitelistRoleMemberEntry(
 
 void UDiscordBridgeSubsystem::FetchWhitelistRoleMembers()
 {
-	if (Config.WhitelistRoleId.IsEmpty() || GuildId.IsEmpty() || Config.BotToken.IsEmpty())
+	if (WhitelistConfig.WhitelistRoleId.IsEmpty() || GuildId.IsEmpty() || Config.BotToken.IsEmpty())
 	{
 		return;
 	}
@@ -3738,7 +3742,7 @@ void UDiscordBridgeSubsystem::SendGameChatStatusMessage(const FString& Message)
 
 bool UDiscordBridgeSubsystem::IsVerificationEnabled() const
 {
-	return Config.bWhitelistVerificationEnabled;
+	return WhitelistConfig.bWhitelistVerificationEnabled;
 }
 
 void UDiscordBridgeSubsystem::SendJoinHintToPlayer(APlayerController* Controller,
@@ -3841,9 +3845,9 @@ void UDiscordBridgeSubsystem::HandleInGameVerify(const FString& PlayerName, cons
 					PlayerName, TEXT("[Verification]"), 3066993);
 
 				// Confirm to the Discord user who initiated the link.
-				if (!Config.WhitelistApprovedDmMessage.IsEmpty())
+				if (!WhitelistConfig.WhitelistApprovedDmMessage.IsEmpty())
 				{
-					const FString DmMsg = Config.WhitelistApprovedDmMessage
+					const FString DmMsg = WhitelistConfig.WhitelistApprovedDmMessage
 						.Replace(TEXT("%PlayerName%"), *PlayerName);
 					SendDiscordDM(DiscordUserId, DmMsg);
 				}
@@ -3998,7 +4002,7 @@ void UDiscordBridgeSubsystem::HandleInGameWhitelistCommand(const FString& SubCom
 void UDiscordBridgeSubsystem::PostWhitelistEvent(const FString& Action, const FString& Target,
                                                    const FString& AdminName, int32 Color)
 {
-	if (Config.WhitelistEventsChannelId.IsEmpty() || Config.BotToken.IsEmpty())
+	if (WhitelistConfig.WhitelistEventsChannelId.IsEmpty() || Config.BotToken.IsEmpty())
 	{
 		return;
 	}
@@ -4018,7 +4022,7 @@ void UDiscordBridgeSubsystem::PostWhitelistEvent(const FString& Action, const FS
 
 	const FString Url = FString::Printf(
 		TEXT("https://discord.com/api/v10/channels/%s/messages"),
-		*Config.WhitelistEventsChannelId);
+		*WhitelistConfig.WhitelistEventsChannelId);
 
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req = FHttpModule::Get().CreateRequest();
 	Req->SetURL(Url);
@@ -5383,12 +5387,12 @@ const TArray<TSharedPtr<FJsonValue>>* SubOpts = nullptr;
 // Check whitelist role permission (same logic as HandleMessageCreate).
 const bool bIsPublicVerb = (SubName == TEXT("apply") || SubName == TEXT("link"));
 bool bHasRole = (!GuildOwnerId.IsEmpty() && AuthorId == GuildOwnerId) || bIsPublicVerb;
-if (!bHasRole && !Config.WhitelistCommandRoleId.IsEmpty())
+if (!bHasRole && !WhitelistConfig.WhitelistCommandRoleId.IsEmpty())
 {
 for (const TSharedPtr<FJsonValue>& RV : AuthorRolesArray)
 {
 FString RId;
-if (RV->TryGetString(RId) && RId == Config.WhitelistCommandRoleId)
+if (RV->TryGetString(RId) && RId == WhitelistConfig.WhitelistCommandRoleId)
 {
 bHasRole = true;
 break;

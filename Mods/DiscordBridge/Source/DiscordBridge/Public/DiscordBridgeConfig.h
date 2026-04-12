@@ -42,8 +42,9 @@ struct DISCORDBRIDGE_API FChatRelayReplacement
  *   <ServerRoot>/FactoryGame/Mods/DiscordBridge/Config/DefaultDiscordBridge.ini
  * This file is NOT shipped in the mod package, so mod updates will never
  * overwrite it.  The mod creates this file automatically on the first server
- * start if it does not exist.  All settings – connection, chat, whitelist,
- * and ban system – are in this single file.
+ * start if it does not exist.  Connection, chat, presence, and player-event
+ * settings are in this file.  Whitelist settings have their own file:
+ *   <ServerRoot>/FactoryGame/Mods/DiscordBridge/Config/DefaultWhitelist.ini
  *
  * BACKUP config (auto-managed, extra safety net):
  *   <ServerRoot>/FactoryGame/Saved/DiscordBridge/DiscordBridge.ini
@@ -146,152 +147,11 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	/** Posted to Discord when the server shuts down. Leave empty to disable. */
 	FString ServerOfflineMessage{ TEXT(":red_circle: Server is now **offline**.") };
 
-	// ── Whitelist ─────────────────────────────────────────────────────────────
-
-	/**
-	 * When true, the whitelist is enabled on every server start, overriding any
-	 * runtime change made via /whitelist on / /whitelist off Discord commands.
-	 * Default: false (all players can join).
-	 */
-	bool bWhitelistEnabled{ false };
-
-	/**
-	 * Snowflake ID of the Discord role whose members are allowed to run
-	 * /whitelist management commands.
-	 * Leave empty (or unset) to disable /whitelist commands entirely – no
-	 * Discord user will be able to run them until a role ID is provided.
-	 *
-	 * IMPORTANT: holding this role does NOT grant automatic access to the game
-	 * server.  Discord members with this role are still subject to the whitelist
-	 * and ban checks when they join; they must be added to the whitelist separately.
-	 *
-	 * To get the role ID: Discord Settings → Advanced → Developer Mode, then
-	 * right-click the role in Server Settings → Roles and choose Copy Role ID.
-	 */
-	FString WhitelistCommandRoleId;
-
-	/**
-	 * Snowflake ID of the Discord role used to identify whitelisted members.
-	 * Leave empty to disable Discord role integration.
-	 *
-	 * When set:
-	 *  • Messages received on WhitelistChannelId are relayed to the game only
-	 *    when the sender holds this role.
-	 *  • The `/whitelist role add/remove <user_id>` commands assign or revoke
-	 *    this role via the Discord REST API (bot must have Manage Roles permission).
-	 *  • At bot startup the member list is fetched from Discord and cached.
-	 *    Any player whose in-game name matches a cached Discord display name
-	 *    (server nickname, global name, or username) is allowed through the
-	 *    whitelist check without needing an explicit entry in ServerWhitelist.json.
-	 *    The cache is kept up to date by GUILD_MEMBER_ADD/UPDATE/REMOVE events.
-	 */
-	FString WhitelistRoleId;
-
-	/**
-	 * Snowflake ID of a dedicated Discord channel for whitelisted members.
-	 * Leave empty to disable the whitelist-only channel.
-	 *
-	 * When set:
-	 *  • In-game messages from players on the server whitelist are posted to
-	 *    this channel in addition to the main ChannelId.
-	 *  • Discord messages sent to this channel are relayed to the game only
-	 *    when the sender holds WhitelistRoleId (if that field is non-empty).
-	 */
-	FString WhitelistChannelId;
-
-	/**
-	 * Message posted to the main Discord channel whenever the whitelist kicks
-	 * a player who tried to join.  Leave empty to disable the notification.
-	 *
-	 * Available placeholder:
-	 *   %PlayerName%  – in-game name of the player who was kicked.
-	 *
-	 * Example:
-	 *   WhitelistKickDiscordMessage=:boot: **%PlayerName%** is not whitelisted and was kicked.
-	 */
-	FString WhitelistKickDiscordMessage{
-		TEXT(":boot: **%PlayerName%** tried to join but is not on the whitelist and was kicked.")
-	};
-
-	/**
-	 * Reason shown in-game to the player when they are kicked because they are
-	 * not on the whitelist.  This is the text the player sees in the "Disconnected"
-	 * screen.
-	 * Default: "You are not on this server's whitelist. Contact the server admin to be added."
-	 */
-	FString WhitelistKickReason{
-		TEXT("You are not on this server's whitelist. Contact the server admin to be added.")
-	};
-
 	// ── In-game commands ──────────────────────────────────────────────────────
 	// In-game chat commands are now registered as SML slash commands:
 	//   /verify <code>              — link Discord account (account verification)
 	//   /discord                    — show the Discord invite link
 	//   /ingamewhitelist <subcmd>   — manage the whitelist from in-game chat
-
-	/**
-	 * Snowflake ID of a dedicated Discord channel where whitelist events (add/remove/enable/disable)
-	 * are posted as embeds. Leave empty to disable whitelist event notifications.
-	 */
-	FString WhitelistEventsChannelId;
-
-	/**
-	 * Maximum number of whitelist slots. 0 = unlimited.
-	 * When set, the /whitelist add command will refuse to add more players than this limit.
-	 */
-	int32 MaxWhitelistSlots{ 0 };
-
-	/**
-	 * When true, DiscordBridge automatically syncs the in-game whitelist with the WhitelistRoleId
-	 * Discord role. Members who receive the role are auto-added; members who lose it are auto-removed.
-	 */
-	bool bSyncWhitelistWithRole{ false };
-
-	/**
-	 * Snowflake ID of the Discord channel where `/whitelist apply` application embeds are posted.
-	 * Leave empty to disable the application flow entirely.
-	 */
-	FString WhitelistApplicationChannelId;
-
-	/**
-	 * When true, any Discord user may run `/whitelist apply <InGameName>` to submit a
-	 * whitelist application, which is posted as an embed with Approve/Deny buttons to
-	 * WhitelistApplicationChannelId.
-	 * Default: false.
-	 */
-	bool bWhitelistApplyEnabled{ false };
-
-	/**
-	 * DM message sent to the Discord user whose whitelist application is approved (via
-	 * the Approve button or `wl_approve` interaction).  Leave empty to disable DMs.
-	 *
-	 * Placeholder: %PlayerName% — the in-game name that was approved.
-	 *
-	 * Example: WhitelistApprovedDmMessage=✅ Your whitelist application for **%PlayerName%** was approved!
-	 */
-	FString WhitelistApprovedDmMessage;
-
-	/**
-	 * How many hours before a timed whitelist entry expires to post a warning to
-	 * WhitelistEventsChannelId (falls back to ChannelId).
-	 * Set to 0 to disable expiry warnings.
-	 * Default: 24.0 (warn 24 hours before expiry).
-	 */
-	float WhitelistExpiryWarningHours{ 24.0f };
-
-	/**
-	 * When true, enables the `/whitelist link <InGameName>` Discord command that lets
-	 * Discord users link their in-game account via a one-time 6-digit verification code
-	 * typed in-game with `/verify <code>`.
-	 * Default: false.
-	 */
-	bool bWhitelistVerificationEnabled{ false };
-
-	/**
-	 * Snowflake ID of the Discord channel where `/whitelist link` commands are accepted.
-	 * Leave empty to allow the command in any channel.
-	 */
-	FString WhitelistVerificationChannelId;
 
 	// ── Chat relay filter ─────────────────────────────────────────────────────
 
@@ -722,7 +582,7 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 *
 	 * A single backup file is written on every server start (located in
 	 * Saved/Config/, which Alpakit/SMM mod updates never touch):
-	 *   DiscordBridge.ini  – all settings (connection, chat, presence, whitelist)
+	 *   DiscordBridge.ini  – all settings (connection, chat, presence)
 	 *
 	 * IMPORTANT FOR FUTURE MAINTAINERS: when adding a new field to
 	 * FDiscordBridgeConfig, you must update DiscordBridgeConfig.cpp in ALL
