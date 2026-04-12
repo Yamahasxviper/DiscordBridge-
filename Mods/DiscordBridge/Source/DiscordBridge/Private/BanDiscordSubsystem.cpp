@@ -98,7 +98,7 @@ namespace BanDiscordHelpers
 		return Out;
 	}
 
-	// Number of bans shown per !banlist page.
+	// Number of bans shown per /ban list page.
 	static constexpr int32 BanListPageSize = 10;
 }
 
@@ -137,11 +137,6 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 		return;
 
 	// Unsubscribe from the old provider.
-	if (CachedProvider && RawMessageDelegateHandle.IsValid())
-	{
-		CachedProvider->UnsubscribeRawMessage(RawMessageDelegateHandle);
-		RawMessageDelegateHandle.Reset();
-	}
 	if (CachedProvider && InteractionDelegateHandle.IsValid())
 	{
 		CachedProvider->UnsubscribeInteraction(InteractionDelegateHandle);
@@ -161,12 +156,6 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 	if (CachedProvider)
 	{
 		TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
-		RawMessageDelegateHandle = CachedProvider->SubscribeRawMessage(
-			[WeakThis](const TSharedPtr<FJsonObject>& MsgObj)
-			{
-				if (UBanDiscordSubsystem* Self = WeakThis.Get())
-					Self->OnRawDiscordMessage(MsgObj);
-			});
 
 		InteractionDelegateHandle = CachedProvider->SubscribeInteraction(
 			[WeakThis](const TSharedPtr<FJsonObject>& InteractionObj)
@@ -199,7 +188,7 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 					TEXT("**Submitted:** %s\n")
 					TEXT("**Reason:** %s\n\n")
 					TEXT("React with ✅ to approve (unban) or ❌ to deny (dismiss).\n")
-					TEXT("Use `!appealapprove %lld` or `!appealdeny %lld` to act."),
+					TEXT("Use `/appeal approve %lld` or `/appeal deny %lld` to act."),
 					Entry.Id, *Entry.Uid, *Contact, *SubmittedStr, *Reason,
 					Entry.Id, Entry.Id);
 
@@ -213,185 +202,6 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 		           ? TEXT("DISABLED (neither AdminRoleId nor ModeratorRoleId is set)")
 		           : TEXT("enabled"));
 	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Message routing
-// ─────────────────────────────────────────────────────────────────────────────
-
-void UBanDiscordSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& MessageObj)
-{
-	if (!MessageObj.IsValid())
-		return;
-
-	// Commands are disabled when neither AdminRoleId nor ModeratorRoleId is configured.
-	if (Config.AdminRoleId.IsEmpty() && Config.ModeratorRoleId.IsEmpty())
-		return;
-
-	// All ban commands start with "!".
-	FString Content;
-	MessageObj->TryGetStringField(TEXT("content"), Content);
-	Content.TrimStartAndEndInline();
-	if (!Content.StartsWith(TEXT("!")))
-		return;
-
-	// Optional: restrict to a configured channel.
-	FString ChannelId;
-	MessageObj->TryGetStringField(TEXT("channel_id"), ChannelId);
-	if (!Config.BanCommandChannelId.IsEmpty() && ChannelId != Config.BanCommandChannelId)
-		return;
-
-	// Parse command token + arguments.
-	TArray<FString> Tokens;
-	Content.ParseIntoArrayWS(Tokens);
-	if (Tokens.IsEmpty())
-		return;
-
-	const FString Command = Tokens[0].ToLower();
-
-	// Only handle ban-related commands; let other commands pass through silently.
-	static const TArray<FString> KnownCommands = {
-		// ── Admin-only ────────────────────────────────────────────────────────
-		TEXT("!ban"), TEXT("!tempban"), TEXT("!unban"), TEXT("!unbanname"),
-		TEXT("!banname"), TEXT("!bancheck"), TEXT("!banreason"), TEXT("!banlist"),
-		TEXT("!linkbans"), TEXT("!unlinkbans"), TEXT("!extend"), TEXT("!duration"),
-		TEXT("!playerhistory"), TEXT("!warn"), TEXT("!warnings"),
-		TEXT("!clearwarns"), TEXT("!clearwarn"), TEXT("!note"), TEXT("!notes"),
-		TEXT("!reason"), TEXT("!mutereason"), TEXT("!reloadconfig"), TEXT("!appeals"),
-		TEXT("!dismissappeal"), TEXT("!appealapprove"), TEXT("!appealdeny"),
-		TEXT("!playtime"), TEXT("!say"), TEXT("!poll"),
-		// ── Moderator-or-admin ────────────────────────────────────────────────
-		TEXT("!kick"), TEXT("!modban"),
-		TEXT("!mute"), TEXT("!unmute"), TEXT("!tempmute"), TEXT("!tempunmute"),
-		TEXT("!mutecheck"), TEXT("!mutelist"),
-		TEXT("!announce"), TEXT("!stafflist"), TEXT("!staffchat"),
-	};
-	if (!KnownCommands.Contains(Command))
-		return;
-
-	// Determine the required permission level for this command.
-	// Moderator-level commands only need ModeratorRoleId; all others require AdminRoleId.
-	static const TArray<FString> ModeratorCommands = {
-		TEXT("!kick"), TEXT("!modban"),
-		TEXT("!mute"), TEXT("!unmute"), TEXT("!tempmute"), TEXT("!tempunmute"),
-		TEXT("!mutecheck"), TEXT("!mutelist"),
-		TEXT("!announce"), TEXT("!stafflist"), TEXT("!staffchat"),
-	};
-	const bool bNeedsAdminOnly = !ModeratorCommands.Contains(Command);
-
-	// Verify the sender holds the required role.
-	TArray<FString> MemberRoles = ExtractMemberRoles(MessageObj);
-	const bool bAuthorised = bNeedsAdminOnly
-		? IsAdminMember(MemberRoles)
-		: IsModeratorMember(MemberRoles);
-
-	if (!bAuthorised)
-	{
-		if (CachedProvider)
-		{
-			Respond(ChannelId,
-				bNeedsAdminOnly
-				? TEXT("❌ You do not have permission to use that command. Admin role required.")
-				: TEXT("❌ You do not have permission to use that command. Moderator role required."));
-		}
-		return;
-	}
-
-	// Build the argument list (everything after the command token).
-	TArray<FString> Args;
-	for (int32 i = 1; i < Tokens.Num(); ++i)
-		Args.Add(Tokens[i]);
-
-	const FString SenderName = ExtractSenderName(MessageObj);
-
-	if (Command == TEXT("!ban"))
-		HandleBanCommand(Args, ChannelId, SenderName, /*bTemporary=*/false);
-	else if (Command == TEXT("!tempban"))
-		HandleBanCommand(Args, ChannelId, SenderName, /*bTemporary=*/true);
-	else if (Command == TEXT("!unban"))
-		HandleUnbanCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!unbanname"))
-		HandleUnbanNameCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!banname"))
-		HandleBanNameCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!bancheck"))
-		HandleBanCheckCommand(Args, ChannelId);
-	else if (Command == TEXT("!banreason"))
-		HandleBanReasonCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!banlist"))
-		HandleBanListCommand(Args, ChannelId);
-	else if (Command == TEXT("!linkbans"))
-		HandleLinkBansCommand(Args, ChannelId, SenderName, /*bLink=*/true);
-	else if (Command == TEXT("!unlinkbans"))
-		HandleLinkBansCommand(Args, ChannelId, SenderName, /*bLink=*/false);
-	else if (Command == TEXT("!extend"))
-		HandleExtendBanCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!duration"))
-		HandleDurationCommand(Args, ChannelId);
-	else if (Command == TEXT("!playerhistory"))
-		HandlePlayerHistoryCommand(Args, ChannelId);
-	else if (Command == TEXT("!warn"))
-		HandleWarnCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!warnings"))
-		HandleWarningsCommand(Args, ChannelId);
-	else if (Command == TEXT("!clearwarns"))
-		HandleClearWarnsCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!clearwarn"))
-		HandleClearWarnByIdCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!note"))
-		HandleNoteCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!notes"))
-		HandleNotesCommand(Args, ChannelId);
-	else if (Command == TEXT("!reason"))
-		HandleReasonCommand(Args, ChannelId);
-	else if (Command == TEXT("!mutereason"))
-		HandleMuteReasonCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!reloadconfig"))
-		HandleReloadConfigCommand(ChannelId, SenderName);
-	else if (Command == TEXT("!appeals"))
-		HandleAppealsCommand(ChannelId);
-	else if (Command == TEXT("!dismissappeal"))
-		HandleDismissAppealCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!appealapprove"))
-		HandleAppealApproveCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!appealdeny"))
-		HandleAppealDenyCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!kick"))
-		HandleKickCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!modban"))
-		HandleModBanCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!mute"))
-		HandleMuteCommand(Args, ChannelId, SenderName, /*bMute=*/true);
-	else if (Command == TEXT("!unmute"))
-		HandleMuteCommand(Args, ChannelId, SenderName, /*bMute=*/false);
-	else if (Command == TEXT("!tempmute"))
-		HandleTempMuteCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!tempunmute"))
-		HandleTempUnmuteCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!mutecheck"))
-		HandleMuteCheckCommand(Args, ChannelId);
-	else if (Command == TEXT("!mutelist"))
-		HandleMuteListCommand(ChannelId);
-	else if (Command == TEXT("!announce"))
-		HandleAnnounceCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!stafflist"))
-		HandleStaffListCommand(ChannelId);
-	else if (Command == TEXT("!staffchat"))
-		HandleStaffChatCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!playtime"))
-		HandlePlaytimeCommand(Args, ChannelId);
-	else if (Command == TEXT("!say"))
-		HandleSayCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!poll"))
-		HandlePollCommand(Args, ChannelId);
-	else if (Command == TEXT("!scheduleban"))
-		HandleScheduleBanCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!qban"))
-		HandleQBanCommand(Args, ChannelId, SenderName);
-	else if (Command == TEXT("!reputation"))
-		HandleReputationCommand(Args, ChannelId);
-	else if (Command == TEXT("!bulkban"))
-		HandleBulkBanCommand(Args, ChannelId, SenderName);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -625,7 +435,7 @@ bool UBanDiscordSubsystem::ResolveTarget(const FString& Arg,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !ban / !tempban
+// /ban add / /ban temp
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
@@ -633,7 +443,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
                                              const FString& SenderName,
                                              bool bTemporary)
 {
-	const FString CmdName = bTemporary ? TEXT("!tempban") : TEXT("!ban");
+	const FString CmdName = bTemporary ? TEXT("/ban temp") : TEXT("/ban add");
 
 	if (!CachedProvider) return;
 
@@ -646,14 +456,14 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 	}
 
 	// Validate minimum argument count.
-	// !ban:     <target> [reason]         → 1 arg minimum
-	// !tempban: <target> <minutes> [reason] → 2 args minimum
+	// /ban add:  <target> [reason]          → 1 arg minimum
+	// /ban temp: <target> <minutes> [reason] → 2 args minimum
 	const int32 MinArgs = bTemporary ? 2 : 1;
 	if (Args.Num() < MinArgs)
 	{
 		const FString Usage = bTemporary
-			? TEXT("Usage: `!tempban <PUID|name> <minutes> [reason]`")
-			: TEXT("Usage: `!ban <PUID|name> [reason]`");
+			? TEXT("Usage: `/ban temp <PUID|name> <minutes> [reason]`")
+			: TEXT("Usage: `/ban add <PUID|name> [reason]`");
 		Respond(ChannelId, Usage);
 		return;
 	}
@@ -666,7 +476,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 		return;
 	}
 
-	// Parse duration for !tempban.
+	// Parse duration for /ban temp.
 	int32 DurationMinutes = 0;
 	int32 ReasonStartIdx  = 1;
 	if (bTemporary)
@@ -675,7 +485,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 		{
 			Respond(ChannelId,
 				TEXT("❌ `<minutes>` must be a positive integer.\n"
-				     "Usage: `!tempban <PUID|name> <minutes> [reason]`"));
+				     "Usage: `/ban temp <PUID|name> <minutes> [reason]`"));
 			return;
 		}
 		ReasonStartIdx = 2;
@@ -742,7 +552,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !unban
+// /ban remove
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
@@ -806,7 +616,7 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !bancheck
+// /ban check
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleBanCheckCommand(const TArray<FString>& Args,
@@ -825,7 +635,7 @@ void UBanDiscordSubsystem::HandleBanCheckCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!bancheck <PUID|name>`"));
+			TEXT("Usage: `/ban check <PUID|name>`");
 		return;
 	}
 
@@ -888,7 +698,7 @@ void UBanDiscordSubsystem::HandleBanCheckCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !banlist
+// /ban list
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleBanListCommand(const TArray<FString>& Args,
@@ -971,7 +781,7 @@ void UBanDiscordSubsystem::HandleBanListCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !playerhistory
+// /player history
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandlePlayerHistoryCommand(const TArray<FString>& Args,
@@ -982,7 +792,7 @@ void UBanDiscordSubsystem::HandlePlayerHistoryCommand(const TArray<FString>& Arg
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!playerhistory <name|PUID|IP>`"));
+			TEXT("Usage: `/player history <name|PUID|IP>`");
 		return;
 	}
 
@@ -1070,7 +880,7 @@ void UBanDiscordSubsystem::HandlePlayerHistoryCommand(const TArray<FString>& Arg
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !kick
+// /mod kick
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleKickCommand(const TArray<FString>& Args,
@@ -1081,7 +891,7 @@ void UBanDiscordSubsystem::HandleKickCommand(const TArray<FString>& Args,
 
 	if (Args.IsEmpty())
 	{
-		Respond(ChannelId, TEXT("Usage: `!kick <PUID|name> [reason]`"));
+		Respond(ChannelId, TEXT("Usage: `/mod kick <PUID|name> [reason]`"));
 		return;
 	}
 
@@ -1122,7 +932,7 @@ void UBanDiscordSubsystem::HandleKickCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !mute / !unmute
+// /mod mute / /mod unmute
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
@@ -1136,8 +946,8 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 	{
 		Respond(ChannelId,
 			bMute
-			? TEXT("Usage: `!mute <PUID|name> [minutes] [reason]`")
-			: TEXT("Usage: `!unmute <PUID|name>`"));
+			? TEXT("Usage: `/mod mute <PUID|name> [minutes] [reason]`")
+			: TEXT("Usage: `/mod unmute <PUID|name>`"));
 		return;
 	}
 
@@ -1204,7 +1014,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !warn
+// /warn add
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
@@ -1215,7 +1025,7 @@ void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
 
 	if (Args.Num() < 2)
 	{
-		Respond(ChannelId, TEXT("Usage: `!warn <PUID|name> <reason...>`"));
+		Respond(ChannelId, TEXT("Usage: `/warn add <PUID|name> <reason...>`"));
 		return;
 	}
 
@@ -1250,7 +1060,7 @@ void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !announce
+// /mod announce
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleAnnounceCommand(const TArray<FString>& Args,
@@ -1261,7 +1071,7 @@ void UBanDiscordSubsystem::HandleAnnounceCommand(const TArray<FString>& Args,
 
 	if (Args.IsEmpty())
 	{
-		Respond(ChannelId, TEXT("Usage: `!announce <message...>`"));
+		Respond(ChannelId, TEXT("Usage: `/mod announce <message...>`"));
 		return;
 	}
 
@@ -1290,7 +1100,7 @@ void UBanDiscordSubsystem::HandleAnnounceCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !unbanname
+// /ban removename
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleUnbanNameCommand(const TArray<FString>& Args,
@@ -1384,7 +1194,7 @@ void UBanDiscordSubsystem::HandleUnbanNameCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !banname
+// /ban byname
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
@@ -1404,7 +1214,7 @@ void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!banname <name_substring> [reason]`"));
+			TEXT("Usage: `/ban byname <name_substring> [reason]`");
 		return;
 	}
 
@@ -1435,7 +1245,7 @@ void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
 		if (Matches.Num() > Show)
 			List += FString::Printf(TEXT(", +%d more"), Matches.Num() - Show);
 		Respond(ChannelId,
-			FString::Printf(TEXT("❌ Ambiguous name `%s` — %d matches: %s. Use `!ban <PUID>` instead."),
+			FString::Printf(TEXT("❌ Ambiguous name `%s` — %d matches: %s. Use `/ban add <PUID>` instead."),
 				*Args[0], Matches.Num(), *List));
 		return;
 	}
@@ -1503,7 +1313,7 @@ void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !banreason
+// /ban reason
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleBanReasonCommand(const TArray<FString>& Args,
@@ -1523,7 +1333,7 @@ void UBanDiscordSubsystem::HandleBanReasonCommand(const TArray<FString>& Args,
 	if (Args.Num() < 2)
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!banreason <PUID|name> <new reason...>`"));
+			TEXT("Usage: `/ban reason <PUID|name> <new reason...>`");
 		return;
 	}
 
@@ -1556,7 +1366,7 @@ void UBanDiscordSubsystem::HandleBanReasonCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !linkbans / !unlinkbans
+// /ban link / /ban unlink
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleLinkBansCommand(const TArray<FString>& Args,
@@ -1574,7 +1384,7 @@ void UBanDiscordSubsystem::HandleLinkBansCommand(const TArray<FString>& Args,
 		return;
 	}
 
-	const FString CmdName = bLink ? TEXT("!linkbans") : TEXT("!unlinkbans");
+	const FString CmdName = bLink ? TEXT("/ban link") : TEXT("/ban unlink");
 	if (Args.Num() < 2)
 	{
 		Respond(ChannelId,
@@ -1622,7 +1432,7 @@ void UBanDiscordSubsystem::HandleLinkBansCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !extend
+// /ban extend
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
@@ -1642,7 +1452,7 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 	if (Args.Num() < 2)
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!extend <PUID|name> <minutes>`"));
+			TEXT("Usage: `/ban extend <PUID|name> <minutes>`");
 		return;
 	}
 
@@ -1691,7 +1501,7 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !duration
+// /ban duration
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleDurationCommand(const TArray<FString>& Args,
@@ -1710,7 +1520,7 @@ void UBanDiscordSubsystem::HandleDurationCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!duration <PUID|name>`"));
+			TEXT("Usage: `/ban duration <PUID|name>`");
 		return;
 	}
 
@@ -1760,7 +1570,7 @@ void UBanDiscordSubsystem::HandleDurationCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !warnings
+// /warn list
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleWarningsCommand(const TArray<FString>& Args,
@@ -1771,7 +1581,7 @@ void UBanDiscordSubsystem::HandleWarningsCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!warnings <PUID|name>`"));
+			TEXT("Usage: `/warn list <PUID|name>`");
 		return;
 	}
 
@@ -1832,7 +1642,7 @@ void UBanDiscordSubsystem::HandleWarningsCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !clearwarns
+// /warn clearall
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleClearWarnsCommand(const TArray<FString>& Args,
@@ -1844,7 +1654,7 @@ void UBanDiscordSubsystem::HandleClearWarnsCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!clearwarns <PUID|name>`"));
+			TEXT("Usage: `/warn clearall <PUID|name>`");
 		return;
 	}
 
@@ -1874,7 +1684,7 @@ void UBanDiscordSubsystem::HandleClearWarnsCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !clearwarn (by ID)
+// /warn clearone (by ID)
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleClearWarnByIdCommand(const TArray<FString>& Args,
@@ -1886,7 +1696,7 @@ void UBanDiscordSubsystem::HandleClearWarnByIdCommand(const TArray<FString>& Arg
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!clearwarn <warning_id>`\nSee warning IDs with `!warnings <player>`."));
+			TEXT("Usage: `/warn clearone <warning_id>`\nSee warning IDs with `/warn list <player>`."));
 		return;
 	}
 
@@ -1926,7 +1736,7 @@ void UBanDiscordSubsystem::HandleClearWarnByIdCommand(const TArray<FString>& Arg
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !note
+// /player note
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleNoteCommand(const TArray<FString>& Args,
@@ -1938,7 +1748,7 @@ void UBanDiscordSubsystem::HandleNoteCommand(const TArray<FString>& Args,
 	if (Args.Num() < 2)
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!note <PUID|name> <text...>`"));
+			TEXT("Usage: `/player note <PUID|name> <text...>`");
 		return;
 	}
 
@@ -1967,7 +1777,7 @@ void UBanDiscordSubsystem::HandleNoteCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !notes
+// /player notes
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleNotesCommand(const TArray<FString>& Args,
@@ -1978,7 +1788,7 @@ void UBanDiscordSubsystem::HandleNotesCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!notes <PUID|name>`"));
+			TEXT("Usage: `/player notes <PUID|name>`");
 		return;
 	}
 
@@ -2034,7 +1844,7 @@ void UBanDiscordSubsystem::HandleNotesCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !reason
+// /ban reason
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleReasonCommand(const TArray<FString>& Args,
@@ -2053,7 +1863,7 @@ void UBanDiscordSubsystem::HandleReasonCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!reason <UID>`"));
+			TEXT("Usage: `/ban reason <UID>`");
 		return;
 	}
 
@@ -2080,7 +1890,7 @@ void UBanDiscordSubsystem::HandleReasonCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !reloadconfig
+// /admin reloadconfig
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleReloadConfigCommand(const FString& ChannelId,
@@ -2098,7 +1908,7 @@ void UBanDiscordSubsystem::HandleReloadConfigCommand(const FString& ChannelId,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !modban
+// /mod ban
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleModBanCommand(const TArray<FString>& Args,
@@ -2118,7 +1928,7 @@ void UBanDiscordSubsystem::HandleModBanCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!modban <PUID|name> [reason]`"));
+			TEXT("Usage: `/mod ban <PUID|name> [reason]`");
 		return;
 	}
 
@@ -2174,7 +1984,7 @@ void UBanDiscordSubsystem::HandleModBanCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !tempmute
+// /mod tempmute
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleTempMuteCommand(const TArray<FString>& Args,
@@ -2224,7 +2034,7 @@ void UBanDiscordSubsystem::HandleTempMuteCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !mutecheck
+// /mod mutecheck
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleMuteCheckCommand(const TArray<FString>& Args,
@@ -2235,7 +2045,7 @@ void UBanDiscordSubsystem::HandleMuteCheckCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!mutecheck <PUID|name>`"));
+			TEXT("Usage: `/mod mutecheck <PUID|name>`");
 		return;
 	}
 
@@ -2285,7 +2095,7 @@ void UBanDiscordSubsystem::HandleMuteCheckCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !mutelist
+// /mod mutelist
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleMuteListCommand(const FString& ChannelId)
@@ -2341,7 +2151,7 @@ void UBanDiscordSubsystem::HandleMuteListCommand(const FString& ChannelId)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !tempunmute
+// /mod tempunmute
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleTempUnmuteCommand(const TArray<FString>& Args,
@@ -2386,7 +2196,7 @@ void UBanDiscordSubsystem::HandleTempUnmuteCommand(const TArray<FString>& Args,
 	{
 		Respond(ChannelId,
 			FString::Printf(
-				TEXT("❌ **%s** has an indefinite mute, not a timed one. Use `!unmute` instead."),
+				TEXT("❌ **%s** has an indefinite mute, not a timed one. Use `/mod unmute` instead."),
 				*BanDiscordHelpers::EscapeMarkdown(DisplayName)));
 		return;
 	}
@@ -2401,7 +2211,7 @@ void UBanDiscordSubsystem::HandleTempUnmuteCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !mutereason
+// /mod mutereason
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleMuteReasonCommand(const TArray<FString>& Args,
@@ -2413,7 +2223,7 @@ void UBanDiscordSubsystem::HandleMuteReasonCommand(const TArray<FString>& Args,
 	if (Args.Num() < 2)
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!mutereason <PUID|name> <new reason...>`"));
+			TEXT("Usage: `/mod mutereason <PUID|name> <new reason...>`");
 		return;
 	}
 
@@ -2451,7 +2261,7 @@ void UBanDiscordSubsystem::HandleMuteReasonCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !stafflist
+// /mod stafflist
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleStaffListCommand(const FString& ChannelId)
@@ -2523,7 +2333,7 @@ void UBanDiscordSubsystem::HandleStaffListCommand(const FString& ChannelId)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !staffchat
+// /mod staffchat
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleStaffChatCommand(const TArray<FString>& Args,
@@ -2535,7 +2345,7 @@ void UBanDiscordSubsystem::HandleStaffChatCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!staffchat <message...>`"));
+			TEXT("Usage: `/mod staffchat <message...>`");
 		return;
 	}
 
@@ -2603,7 +2413,7 @@ CachedProvider->SendDiscordChannelMessage(Config.ModerationLogChannelId, Message
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !appeals
+// /appeal list
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleAppealsCommand(const FString& ChannelId)
@@ -2657,7 +2467,7 @@ void UBanDiscordSubsystem::HandleAppealsCommand(const FString& ChannelId)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !dismissappeal <id>
+// /appeal dismiss <id>
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleDismissAppealCommand(const TArray<FString>& Args,
@@ -2708,7 +2518,7 @@ void UBanDiscordSubsystem::HandleDismissAppealCommand(const TArray<FString>& Arg
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !appealapprove <id>
+// /appeal approve <id>
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Args,
@@ -2720,7 +2530,7 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!appealapprove <id> [note...]`"));
+			TEXT("Usage: `/appeal approve <id> [note...]`");
 		return;
 	}
 
@@ -2780,7 +2590,7 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !appealdeny <id>
+// /appeal deny <id>
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
@@ -2792,7 +2602,7 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!appealdeny <id> [note...]`"));
+			TEXT("Usage: `/appeal deny <id> [note...]`");
 		return;
 	}
 
@@ -2841,7 +2651,7 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !playtime
+// /player playtime
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandlePlaytimeCommand(const TArray<FString>& Args,
@@ -2852,7 +2662,7 @@ if (!CachedProvider) return;
 if (Args.IsEmpty())
 {
 Respond(ChannelId,
-TEXT("Usage: `!playtime <player|PUID>`"));
+TEXT("Usage: `/player playtime <player|PUID>`");
 return;
 }
 
@@ -2910,7 +2720,7 @@ Respond(ChannelId, Reply);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !say  — Discord → game broadcast as [ADMIN]
+// /admin say  — Discord → game broadcast as [ADMIN]
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleSayCommand(const TArray<FString>& Args,
@@ -2956,7 +2766,7 @@ PostModerationLog(FString::Printf(TEXT("%s broadcast [ADMIN]: %s"), *SenderName,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !poll  — create a Discord poll embed
+// /admin poll  — create a Discord poll embed
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandlePollCommand(const TArray<FString>& Args,
@@ -3070,7 +2880,7 @@ CachedProvider->SendDiscordChannelMessage(Config.ModerationLogChannelId, Prefixe
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !scheduleban <player|PUID> <delay> [banDuration] [reason...]
+// /ban schedule <player|PUID> <delay> [banDuration] [reason...]
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleScheduleBanCommand(const TArray<FString>& Args,
@@ -3143,7 +2953,7 @@ Entry.Id, *DisplayName, DelayMinutes, *EffectiveAt.ToString(TEXT("%Y-%m-%d %H:%M
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !qban <templateSlug> <player|PUID>
+// /ban quick <templateSlug> <player|PUID>
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleQBanCommand(const TArray<FString>& Args,
@@ -3241,7 +3051,7 @@ FString::Printf(TEXT(":hammer: [%s] Banned **%s** (%s). Reason: %s. Duration: %s
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !reputation <player|PUID>
+// /player reputation <player|PUID>
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleReputationCommand(const TArray<FString>& Args,
@@ -3335,7 +3145,7 @@ Respond(ChannelId, EmbedJson);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !bulkban <PUID1> <PUID2> ... -- <reason>
+// /ban bulk <PUID1> <PUID2> ... -- <reason>
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UBanDiscordSubsystem::HandleBulkBanCommand(const TArray<FString>& Args,

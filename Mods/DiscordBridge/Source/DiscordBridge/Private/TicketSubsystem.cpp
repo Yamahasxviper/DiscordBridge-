@@ -421,7 +421,12 @@ void UTicketSubsystem::OnInteractionReceived(const TSharedPtr<FJsonObject>& Data
 	DataObj->TryGetNumberField(TEXT("type"), TypeD);
 	const int32 InteractionType = static_cast<int32>(TypeD);
 
-	// We only handle MESSAGE_COMPONENT (3) and MODAL_SUBMIT (5).
+	// We handle APPLICATION_COMMAND (2), MESSAGE_COMPONENT (3), and MODAL_SUBMIT (5).
+	if (InteractionType == 2)
+	{
+		HandleSlashTicketCommand(DataObj);
+		return;
+	}
 	if (InteractionType != 3 && InteractionType != 5)
 	{
 		return;
@@ -1663,7 +1668,177 @@ void UTicketSubsystem::PostTicketPanel(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Raw gateway message handler – listens for the "!ticket-panel" command
+// Slash command handler – handles /ticket command group
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UTicketSubsystem::HandleSlashTicketCommand(const TSharedPtr<FJsonObject>& DataObj)
+{
+	if (!DataObj.IsValid()) return;
+
+	// Only handle APPLICATION_COMMAND interactions (type 2).
+	int32 InteractionType = 0;
+	DataObj->TryGetNumberField(TEXT("type"), InteractionType);
+	if (InteractionType != 2) return;
+
+	// Extract command data.
+	const TSharedPtr<FJsonObject>* CmdDataPtr = nullptr;
+	if (!DataObj->TryGetObjectField(TEXT("data"), CmdDataPtr) || !CmdDataPtr) return;
+
+	FString CmdGroupName;
+	(*CmdDataPtr)->TryGetStringField(TEXT("name"), CmdGroupName);
+	if (!CmdGroupName.Equals(TEXT("ticket"), ESearchCase::IgnoreCase)) return;
+
+	// Extract the subcommand.
+	const TArray<TSharedPtr<FJsonValue>>* TopOpts = nullptr;
+	(*CmdDataPtr)->TryGetArrayField(TEXT("options"), TopOpts);
+	if (!TopOpts || TopOpts->IsEmpty()) return;
+
+	const TSharedPtr<FJsonObject>* SubCmdPtr = nullptr;
+	if (!(*TopOpts)[0]->TryGetObject(SubCmdPtr) || !SubCmdPtr) return;
+
+	FString SubCmdName;
+	(*SubCmdPtr)->TryGetStringField(TEXT("name"), SubCmdName);
+	SubCmdName = SubCmdName.ToLower();
+
+	const TArray<TSharedPtr<FJsonValue>>* SubOpts = nullptr;
+	(*SubCmdPtr)->TryGetArrayField(TEXT("options"), SubOpts);
+
+	// Helper: extract a named option value as a string.
+	auto GetOpt = [&](const FString& Name) -> FString
+	{
+		if (!SubOpts) return FString();
+		for (const TSharedPtr<FJsonValue>& Opt : *SubOpts)
+		{
+			const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+			if (!Opt->TryGetObject(ObjPtr) || !ObjPtr) continue;
+			FString OptName;
+			if (!(*ObjPtr)->TryGetStringField(TEXT("name"), OptName) ||
+			    !OptName.Equals(Name, ESearchCase::IgnoreCase)) continue;
+			FString StrVal;
+			if ((*ObjPtr)->TryGetStringField(TEXT("value"), StrVal)) return StrVal;
+			return FString();
+		}
+		return FString();
+	};
+
+	// Extract channel and member info.
+	FString SourceChannelId;
+	DataObj->TryGetStringField(TEXT("channel_id"), SourceChannelId);
+
+	FString SenderName, SenderId;
+	const TSharedPtr<FJsonObject>* MemberPtr = nullptr;
+	if (DataObj->TryGetObjectField(TEXT("member"), MemberPtr) && MemberPtr)
+	{
+		(*MemberPtr)->TryGetStringField(TEXT("nick"), SenderName);
+		const TSharedPtr<FJsonObject>* UserPtr = nullptr;
+		if ((*MemberPtr)->TryGetObjectField(TEXT("user"), UserPtr) && UserPtr)
+		{
+			(*UserPtr)->TryGetStringField(TEXT("id"), SenderId);
+			if (SenderName.IsEmpty())
+				(*UserPtr)->TryGetStringField(TEXT("global_name"), SenderName);
+			if (SenderName.IsEmpty())
+				(*UserPtr)->TryGetStringField(TEXT("username"), SenderName);
+		}
+	}
+	if (SenderName.IsEmpty()) SenderName = TEXT("Staff");
+
+	// Check sender has TicketNotifyRoleId.
+	auto SenderHasNotifyRole = [&]() -> bool
+	{
+		if (Config.TicketNotifyRoleId.IsEmpty()) return false;
+		if (!MemberPtr) return false;
+		const TArray<TSharedPtr<FJsonValue>>* Roles = nullptr;
+		if (!(*MemberPtr)->TryGetArrayField(TEXT("roles"), Roles) || !Roles)
+			return false;
+		for (const TSharedPtr<FJsonValue>& R : *Roles)
+		{
+			FString RId;
+			if (R->TryGetString(RId) && RId == Config.TicketNotifyRoleId)
+				return true;
+		}
+		return false;
+	};
+
+	IDiscordBridgeProvider* Bridge = GetBridge();
+	if (!Bridge) return;
+
+	// Synthesize an internal "!ticket-<subcmd> <args>" routing string (never
+	// shown to users) and construct a
+	// minimal message JSON that OnRawDiscordMessage can process directly.
+	// This approach reuses all existing command logic without duplication.
+	FString SynthContent;
+
+	if (SubCmdName == TEXT("panel"))
+		SynthContent = TEXT("!ticket-panel");
+	else if (SubCmdName == TEXT("list"))
+		SynthContent = TEXT("!ticket-list");
+	else if (SubCmdName == TEXT("assign"))
+		SynthContent = FString::Printf(TEXT("!ticket-assign <@%s>"), *GetOpt(TEXT("user")));
+	else if (SubCmdName == TEXT("claim"))
+		SynthContent = TEXT("!ticket-claim");
+	else if (SubCmdName == TEXT("unclaim"))
+		SynthContent = TEXT("!ticket-unclaim");
+	else if (SubCmdName == TEXT("transfer"))
+		SynthContent = FString::Printf(TEXT("!ticket-transfer <@%s>"), *GetOpt(TEXT("user")));
+	else if (SubCmdName == TEXT("priority"))
+		SynthContent = FString::Printf(TEXT("!ticket-priority %s"), *GetOpt(TEXT("level")));
+	else if (SubCmdName == TEXT("macro"))
+		SynthContent = FString::Printf(TEXT("!ticket-macro %s"), *GetOpt(TEXT("name")));
+	else if (SubCmdName == TEXT("macros"))
+		SynthContent = TEXT("!ticket-macros");
+	else if (SubCmdName == TEXT("stats"))
+		SynthContent = TEXT("!ticket-stats");
+	else if (SubCmdName == TEXT("report"))
+		SynthContent = FString::Printf(TEXT("!ticket-report %s"), *GetOpt(TEXT("text")));
+	else if (SubCmdName == TEXT("tag"))
+		SynthContent = FString::Printf(TEXT("!ticket-tag %s"), *GetOpt(TEXT("tag")));
+	else if (SubCmdName == TEXT("untag"))
+		SynthContent = FString::Printf(TEXT("!ticket-untag %s"), *GetOpt(TEXT("tag")));
+	else if (SubCmdName == TEXT("tags"))
+		SynthContent = TEXT("!ticket-tags");
+	else if (SubCmdName == TEXT("note"))
+		SynthContent = FString::Printf(TEXT("!ticket-note %s"), *GetOpt(TEXT("text")));
+	else if (SubCmdName == TEXT("notes"))
+		SynthContent = TEXT("!ticket-notes");
+	else if (SubCmdName == TEXT("escalate"))
+		SynthContent = TEXT("!ticket-escalate");
+	else if (SubCmdName == TEXT("remind"))
+		SynthContent = FString::Printf(TEXT("!ticket-remind %s"), *GetOpt(TEXT("text")));
+	else if (SubCmdName == TEXT("blacklist"))
+		SynthContent = FString::Printf(TEXT("!ticket-blacklist %s"), *GetOpt(TEXT("user")));
+	else if (SubCmdName == TEXT("unblacklist"))
+		SynthContent = FString::Printf(TEXT("!ticket-unblacklist %s"), *GetOpt(TEXT("user")));
+	else if (SubCmdName == TEXT("blacklistlist"))
+		SynthContent = TEXT("!ticket-blacklist-list");
+	else if (SubCmdName == TEXT("merge"))
+		SynthContent = FString::Printf(TEXT("!ticket-merge %s"), *GetOpt(TEXT("ticket_id")));
+	else
+		return;
+
+	// Build a synthetic MESSAGE_CREATE JSON and route through OnRawDiscordMessage.
+	TSharedPtr<FJsonObject> SynthMsg = MakeShared<FJsonObject>();
+	SynthMsg->SetStringField(TEXT("content"),    SynthContent);
+	SynthMsg->SetStringField(TEXT("channel_id"), SourceChannelId);
+
+	// Copy the member object so role checks and name extraction work.
+	if (MemberPtr)
+		SynthMsg->SetObjectField(TEXT("member"), (*MemberPtr)->IsValid() ? MakeShared<FJsonObject>(**MemberPtr) : MakeShared<FJsonObject>());
+
+	// Copy author object for name extraction fallback.
+	const TSharedPtr<FJsonObject>* AuthorPtr = nullptr;
+	if (DataObj->TryGetObjectField(TEXT("author"), AuthorPtr) && AuthorPtr)
+		SynthMsg->SetObjectField(TEXT("author"), MakeShared<FJsonObject>(**AuthorPtr));
+	else if (MemberPtr)
+	{
+		// Synthesize a minimal author from the member's user field.
+		const TSharedPtr<FJsonObject>* UserPtr = nullptr;
+		if ((*MemberPtr)->TryGetObjectField(TEXT("user"), UserPtr) && UserPtr)
+			SynthMsg->SetObjectField(TEXT("author"), MakeShared<FJsonObject>(**UserPtr));
+	}
+
+	OnRawDiscordMessage(SynthMsg);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& MessageObj)
@@ -1734,6 +1909,20 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 
 	IDiscordBridgeProvider* Bridge = GetBridge();
 
+	// All ticket commands are now handled exclusively via Discord slash commands
+	// (/ticket subcommand).  HandleSlashTicketCommand synthesises an internal
+	// message object (without a Discord snowflake "id" field) and calls this
+	// method directly.  Any real Discord message that still starts with "!ticket-"
+	// (typed manually by a user) is ignored here, so ! prefix commands no longer
+	// work from Discord.
+	FString SyntheticCheckId;
+	const bool bIsSyntheticMessage = !MessageObj->TryGetStringField(TEXT("id"), SyntheticCheckId)
+	                                  || SyntheticCheckId.IsEmpty();
+	if (Content.StartsWith(TEXT("!ticket-"), ESearchCase::IgnoreCase) && !bIsSyntheticMessage)
+	{
+		return; // Real Discord !ticket-* message — ignore, use /ticket slash commands.
+	}
+
 	// ── !ticket-assign <@userId> ──────────────────────────────────────────────
 	if (Content.StartsWith(TEXT("!ticket-assign"), ESearchCase::IgnoreCase))
 	{
@@ -1770,7 +1959,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (AssigneeId.IsEmpty())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":warning: Usage: `!ticket-assign <@user>`"));
+				TEXT(":warning: Usage: `/ticket assign <@user>`"));
 			return;
 		}
 
@@ -1965,7 +2154,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (TargetId.IsEmpty())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":warning: Usage: `!ticket-transfer <@user>`"));
+				TEXT(":warning: Usage: `/ticket transfer <@user>`"));
 			return;
 		}
 		TicketChannelToAssignee.Add(SourceChannelId, TargetId);
@@ -2001,7 +2190,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (Matched.IsEmpty())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":warning: Usage: `!ticket-priority <Low|Medium|High|Urgent>`"));
+				TEXT(":warning: Usage: `/ticket priority <Low|Medium|High|Urgent>`"));
 			return;
 		}
 		TicketChannelToPriority.Add(SourceChannelId, Matched);
@@ -2068,7 +2257,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (MacroName.IsEmpty())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":warning: Usage: `!ticket-macro <name>`. Type `!ticket-macros` for a list."));
+				TEXT(":warning: Usage: `/ticket macro <name>`. Use `/ticket macros` for a list."));
 			return;
 		}
 		FString FoundText;
@@ -2171,7 +2360,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (PeriodArg.IsEmpty())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":warning: Usage: `!ticket-report <week|month>`"));
+				TEXT(":warning: Usage: `/ticket report <week|month>`"));
 			return;
 		}
 		const FString StatsPathRpt = GetStatsFilePath();
@@ -2259,7 +2448,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (UntagArg.IsEmpty())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":warning: Usage: `!ticket-untag <tag>`"));
+				TEXT(":warning: Usage: `/ticket untag <tag>`"));
 			return;
 		}
 		TArray<FString>& UntagList = TicketChannelToTags.FindOrAdd(SourceChannelId);
@@ -2289,7 +2478,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (TagArg.IsEmpty())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":warning: Usage: `!ticket-tag <tag>`"));
+				TEXT(":warning: Usage: `/ticket tag <tag>`"));
 			return;
 		}
 		TArray<FString>& TagList = TicketChannelToTags.FindOrAdd(SourceChannelId);
@@ -2343,7 +2532,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (NoteText.IsEmpty())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":warning: Usage: `!ticket-note <text>`"));
+				TEXT(":warning: Usage: `/ticket note <text>`"));
 			return;
 		}
 		TicketChannelToNotes.FindOrAdd(SourceChannelId).Add(NoteText);
@@ -2407,7 +2596,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (RemindArg.IsEmpty())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":warning: Usage: `!ticket-remind <duration>` (e.g. `30m`, `2h`, `1d`)"));
+				TEXT(":warning: Usage: `/ticket remind <duration>` (e.g. `30m`, `2h`, `1d`)"));
 			return;
 		}
 		// Parse duration: numeric prefix + suffix (w/d/h/m).
@@ -2496,7 +2685,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (BLUserId.IsEmpty())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":warning: Usage: `!ticket-blacklist <@user or userId>`"));
+				TEXT(":warning: Usage: `/ticket blacklist <@user or userId>`"));
 			return;
 		}
 		TicketBlacklist.Add(BLUserId);
@@ -2536,7 +2725,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (UBLUserId.IsEmpty())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":warning: Usage: `!ticket-unblacklist <@user or userId>`"));
+				TEXT(":warning: Usage: `/ticket unblacklist <@user or userId>`"));
 			return;
 		}
 		const bool bWasBlacklisted = TicketBlacklist.Remove(UBLUserId) > 0;
@@ -2581,7 +2770,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (TargetChanId.IsEmpty())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":warning: Usage: `!ticket-merge <#channel or channelId>`"));
+				TEXT(":warning: Usage: `/ticket merge <#channel or channelId>`"));
 			return;
 		}
 		if (TargetChanId == SourceChannelId)

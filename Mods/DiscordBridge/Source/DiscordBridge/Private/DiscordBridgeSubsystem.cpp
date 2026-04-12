@@ -1269,118 +1269,6 @@ void UDiscordBridgeSubsystem::HandleMessageCreate(const TSharedPtr<FJsonObject>&
 		return false;
 	};
 
-	// Check whether this message is a whitelist management command.
-	if (!Config.WhitelistCommandPrefix.IsEmpty() &&
-	    Content.StartsWith(Config.WhitelistCommandPrefix, ESearchCase::IgnoreCase))
-	{
-		const FString SubCommand = Content.Mid(Config.WhitelistCommandPrefix.Len()).TrimStartAndEnd();
-
-		// Determine the first word (verb) to decide if a role check is needed.
-		FString FirstVerb;
-		{
-			int32 SpaceIdx = INDEX_NONE;
-			SubCommand.FindChar(TEXT(' '), SpaceIdx);
-			FirstVerb = (SpaceIdx != INDEX_NONE)
-				? SubCommand.Left(SpaceIdx).ToLower()
-				: SubCommand.ToLower();
-		}
-
-		// "apply" and "link" are self-service commands that do not require
-		// WhitelistCommandRoleId.  All other verbs still require the role.
-		const bool bIsPublicVerb = (FirstVerb == TEXT("apply") || FirstVerb == TEXT("link"));
-
-		if (!bIsPublicVerb && !HasRequiredRole(Config.WhitelistCommandRoleId))
-		{
-			UE_LOG(LogDiscordBridge, Log,
-			       TEXT("DiscordBridge: Ignoring whitelist command from '%s' – sender lacks WhitelistCommandRoleId."),
-			       *Username);
-			SendMessageToChannel(MsgChannelId, TEXT(":no_entry: You do not have permission to use whitelist commands."));
-			return;
-		}
-		HandleWhitelistCommand(SubCommand, Username, MsgChannelId, AuthorId);
-		return; // Do not relay whitelist commands to in-game chat.
-	}
-
-	// Feature 2: !players command – reply with the list of online players.
-	if (!Config.PlayersCommandPrefix.IsEmpty() &&
-	    Content.Equals(Config.PlayersCommandPrefix, ESearchCase::IgnoreCase))
-	{
-		FString PlayersReply;
-		if (UWorld* World = GetWorld())
-		{
-			if (AGameStateBase* GS = World->GetGameState<AGameStateBase>())
-			{
-				TArray<FString> Names;
-				for (APlayerState* PS : GS->PlayerArray)
-				{
-					if (PS)
-					{
-						Names.Add(PS->GetPlayerName());
-					}
-				}
-				if (Names.Num() == 0)
-				{
-					PlayersReply = TEXT("No players currently online.");
-				}
-				else
-				{
-					PlayersReply = FString::Printf(
-						TEXT("**Online players (%d):** %s"),
-						Names.Num(), *FString::Join(Names, TEXT(", ")));
-				}
-			}
-		}
-		if (PlayersReply.IsEmpty())
-		{
-			PlayersReply = TEXT("No players currently online.");
-		}
-
-		const FString& PlayersChannel = Config.PlayersCommandChannelId.IsEmpty()
-			? Config.ChannelId
-			: Config.PlayersCommandChannelId;
-		SendMessageToChannel(PlayersChannel, PlayersReply);
-		return; // Do not relay the command itself to in-game chat.
-	}
-
-	// Feature 3: !stats command – reply with server statistics embed.
-	if (!Config.StatsCommandPrefix.IsEmpty() &&
-	    Content.Equals(Config.StatsCommandPrefix, ESearchCase::IgnoreCase))
-	{
-		HandleStatsCommand(MsgChannelId);
-		return;
-	}
-
-	// Feature 4: !playerstats <name> command – reply with per-player stats.
-	if (!Config.PlayerStatsCommandPrefix.IsEmpty() &&
-	    Content.StartsWith(Config.PlayerStatsCommandPrefix + TEXT(" "), ESearchCase::IgnoreCase))
-	{
-		const FString TargetName = Content.Mid(Config.PlayerStatsCommandPrefix.Len()).TrimStartAndEnd();
-		HandlePlayerStatsCommand(MsgChannelId, TargetName);
-		return;
-	}
-
-	// !server command
-	if (Content.Equals(TEXT("!server"), ESearchCase::IgnoreCase))
-	{
-		HandleServerCommand(MsgChannelId);
-		return;
-	}
-
-	// !online command
-	if (Content.Equals(TEXT("!online"), ESearchCase::IgnoreCase))
-	{
-		HandleOnlineCommand(MsgChannelId);
-		return;
-	}
-
-	// !help command – post the bot feature/command reference to this channel.
-	if (Content.Equals(TEXT("!help"), ESearchCase::IgnoreCase) ||
-	    Content.Equals(TEXT("!commands"), ESearchCase::IgnoreCase))
-	{
-		HandleBotInfoCommand(MsgChannelId);
-		return;
-	}
-
 	// ── Resolve %Role% label for the DiscordToGameFormat placeholder ──────────
 	// Iterate DiscordRoleLabels in config order; use the first matching entry.
 	CurrentMessageRoleLabel.Empty();
@@ -2212,115 +2100,6 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 	       TEXT("DiscordBridge: Player message detected. Sender: '%s', Text: '%s'"),
 	       *PlayerName, *MessageText);
 
-	// Check whether this message is an in-game whitelist management command.
-	if (!Config.InGameWhitelistCommandPrefix.IsEmpty() &&
-	    MessageText.StartsWith(Config.InGameWhitelistCommandPrefix, ESearchCase::IgnoreCase))
-	{
-		const FString SubCommand = MessageText.Mid(Config.InGameWhitelistCommandPrefix.Len()).TrimStartAndEnd();
-		HandleInGameWhitelistCommand(SubCommand);
-		return; // Do not forward commands to Discord.
-	}
-
-	// Handle the in-game !verify <code> command for account linking (Feature 6).
-	if (Config.bWhitelistVerificationEnabled &&
-	    MessageText.StartsWith(TEXT("!verify "), ESearchCase::IgnoreCase))
-	{
-		const FString Code = MessageText.Mid(8).TrimStartAndEnd();
-		const FString* DiscordUserIdPtr = PendingVerifications.Find(Code);
-		if (DiscordUserIdPtr && !DiscordUserIdPtr->IsEmpty())
-		{
-			const FDateTime* ExpiryPtr = PendingVerificationExpiry.Find(Code);
-			if (ExpiryPtr && *ExpiryPtr <= FDateTime::UtcNow())
-			{
-				// Code expired.
-				PendingVerifications.Remove(Code);
-				PendingVerificationNames.Remove(Code);
-				PendingVerificationExpiry.Remove(Code);
-				SendGameChatStatusMessage(TEXT("[DiscordBridge] Verification code has expired. Please request a new one with !whitelist link."));
-			}
-			else
-			{
-				const FString DiscordUserId  = *DiscordUserIdPtr;
-				const FString* NamePtr       = PendingVerificationNames.Find(Code);
-				// Always whitelist using the actual in-game PlayerName of the player who typed
-				// !verify. The Discord-submitted name is kept only for the audit log.
-				const FString  AuditName     = NamePtr && !NamePtr->IsEmpty() ? *NamePtr : PlayerName;
-
-				// Resolve EosPUID from the currently-connected player controller whose
-				// name matches PlayerName. Use the safe FUniqueNetIdRepl accessors
-				// (GetType/ToString) – never dereference via operator-> on CSS DS.
-				FString ResolvedEosPUID;
-				if (UWorld* VerWorld = GetWorld())
-				{
-					for (FConstPlayerControllerIterator It = VerWorld->GetPlayerControllerIterator(); It; ++It)
-					{
-						APlayerController* VerPC = It->Get();
-						if (!VerPC || !VerPC->PlayerState) continue;
-						if (VerPC->PlayerState->GetPlayerName() != PlayerName) continue;
-						const FUniqueNetIdRepl& NetId = VerPC->PlayerState->GetUniqueId();
-						if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
-						{
-							ResolvedEosPUID = NetId.ToString().ToLower();
-						}
-						break;
-					}
-				}
-
-				PendingVerifications.Remove(Code);
-				PendingVerificationNames.Remove(Code);
-				PendingVerificationExpiry.Remove(Code);
-
-				// Add using the real in-game player name and resolved EosPUID (may be empty).
-				if (FWhitelistManager::AddPlayer(PlayerName, ResolvedEosPUID, TEXT("[Verification]")))
-				{
-					SendGameChatStatusMessage(FString::Printf(
-						TEXT("[DiscordBridge] Account linked! **%s** has been added to the whitelist."),
-						*PlayerName));
-					PostWhitelistEvent(
-						FString::Printf(TEXT("**%s** added via in-game verification (Discord: %s)"),
-							*PlayerName, *AuditName),
-						PlayerName, TEXT("[Verification]"), 3066993);
-
-					// Confirm to the Discord user who initiated the link.
-					if (!Config.WhitelistApprovedDmMessage.IsEmpty())
-					{
-						const FString DmMsg = Config.WhitelistApprovedDmMessage
-							.Replace(TEXT("%PlayerName%"), *PlayerName);
-						SendDiscordDM(DiscordUserId, DmMsg);
-					}
-					else
-					{
-						SendDiscordDM(DiscordUserId, FString::Printf(
-							TEXT("✅ Your in-game account **%s** has been verified and added to the whitelist!"),
-							*PlayerName));
-					}
-				}
-				else
-				{
-					SendGameChatStatusMessage(FString::Printf(
-						TEXT("[DiscordBridge] **%s** is already on the whitelist."), *PlayerName));
-				}
-			}
-		}
-		else
-		{
-			SendGameChatStatusMessage(TEXT("[DiscordBridge] Unknown or expired verification code."));
-		}
-		return;
-	}
-
-	// Feature 3: /discord in-game command – reply with the invite link.
-	if (MessageText.Equals(TEXT("/discord"), ESearchCase::IgnoreCase) ||
-	    MessageText.Equals(TEXT("!discord"), ESearchCase::IgnoreCase))
-	{
-		if (!Config.DiscordInviteUrl.IsEmpty())
-		{
-			SendGameChatStatusMessage(
-				FString::Printf(TEXT("[DiscordBridge] Join our Discord: %s"), *Config.DiscordInviteUrl));
-		}
-		return; // Do not relay this command to Discord.
-	}
-
 	// Feature 1a: Chat relay find/replace — replace matched patterns with *** before forwarding.
 	// Feature 1b: Chat relay blocklist — silently drop messages that contain a blocked keyword.
 	FString FilteredMessage = MessageText;
@@ -3076,7 +2855,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 	{
 		if (Arg.IsEmpty())
 		{
-			Response = TEXT(":warning: Usage: `!whitelist add <PlayerName> [puid:<PUID>] [group:<Group>] [duration]`");
+			Response = TEXT(":warning: Usage: `/whitelist add <PlayerName> [puid:<PUID>] [group:<Group>] [duration]`");
 		}
 		else
 		{
@@ -3169,7 +2948,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 	{
 		if (Arg.IsEmpty())
 		{
-			Response = TEXT(":warning: Usage: `!whitelist remove <PlayerName>`");
+			Response = TEXT(":warning: Usage: `/whitelist remove <PlayerName>`");
 		}
 		else if (FWhitelistManager::RemovePlayer(Arg, TEXT(""), DiscordUsername))
 		{
@@ -3263,7 +3042,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 	{
 		if (Arg.IsEmpty())
 		{
-			Response = TEXT(":warning: Usage: `!whitelist import <json-array>`");
+			Response = TEXT(":warning: Usage: `/whitelist import <json-array>`");
 		}
 		else
 		{
@@ -3349,8 +3128,8 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 		}
 		else if (TargetUserId.IsEmpty())
 		{
-			Response = TEXT(":warning: Usage: `!whitelist role add <discord_user_id>` "
-			                "or `!whitelist role remove <discord_user_id>`");
+			Response = TEXT(":warning: Usage: `/whitelist role add <discord_user_id>` "
+			                "or `/whitelist role remove <discord_user_id>`");
 		}
 		else if (RoleVerb == TEXT("add"))
 		{
@@ -3366,15 +3145,15 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 		}
 		else
 		{
-			Response = TEXT(":question: Usage: `!whitelist role add <discord_user_id>` "
-			                "or `!whitelist role remove <discord_user_id>`");
+			Response = TEXT(":question: Usage: `/whitelist role add <discord_user_id>` "
+			                "or `/whitelist role remove <discord_user_id>`");
 		}
 	}
 	else if (Verb == TEXT("search"))
 	{
 		if (Arg.IsEmpty())
 		{
-			Response = TEXT(":warning: Usage: `!whitelist search <partial-name>`");
+			Response = TEXT(":warning: Usage: `/whitelist search <partial-name>`");
 		}
 		else
 		{
@@ -3440,7 +3219,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 		}
 		else if (Arg.IsEmpty())
 		{
-			Response = TEXT(":warning: Usage: `!whitelist apply <YourInGameName>`");
+			Response = TEXT(":warning: Usage: `/whitelist apply <YourInGameName>`");
 		}
 		else if (AuthorDiscordId.IsEmpty())
 		{
@@ -3506,7 +3285,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 		}
 		else if (Arg.IsEmpty())
 		{
-			Response = TEXT(":warning: Usage: `!whitelist link <YourInGameName>`");
+			Response = TEXT(":warning: Usage: `/whitelist link <YourInGameName>`");
 		}
 		else if (AuthorDiscordId.IsEmpty())
 		{
@@ -3530,7 +3309,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 			PendingVerificationExpiry.Add(CodeStr, FDateTime::UtcNow() + FTimespan::FromMinutes(10.0));
 
 			Response = FString::Printf(
-				TEXT(":key: Type `!verify %s` in-game within **10 minutes** to link your account **%s** to the whitelist."),
+				TEXT(":key: Type `/verify %s` in-game within **10 minutes** to link your account **%s** to the whitelist."),
 				*CodeStr, *Arg);
 		}
 	}
@@ -3948,6 +3727,95 @@ void UDiscordBridgeSubsystem::SendGameChatStatusMessage(const FString& Message)
 	ChatManager->BroadcastChatMessage(ChatMsg);
 }
 
+void UDiscordBridgeSubsystem::HandleInGameVerify(const FString& PlayerName, const FString& Code)
+{
+	const FString* DiscordUserIdPtr = PendingVerifications.Find(Code);
+	if (DiscordUserIdPtr && !DiscordUserIdPtr->IsEmpty())
+	{
+		const FDateTime* ExpiryPtr = PendingVerificationExpiry.Find(Code);
+		if (ExpiryPtr && *ExpiryPtr <= FDateTime::UtcNow())
+		{
+			// Code expired.
+			PendingVerifications.Remove(Code);
+			PendingVerificationNames.Remove(Code);
+			PendingVerificationExpiry.Remove(Code);
+			SendGameChatStatusMessage(TEXT("[DiscordBridge] Verification code has expired. Please request a new one with /whitelist link."));
+		}
+		else
+		{
+			const FString DiscordUserId  = *DiscordUserIdPtr;
+			const FString* NamePtr       = PendingVerificationNames.Find(Code);
+			// Always whitelist using the actual in-game PlayerName of the player who typed
+			// /verify. The Discord-submitted name is kept only for the audit log.
+			const FString  AuditName     = NamePtr && !NamePtr->IsEmpty() ? *NamePtr : PlayerName;
+
+			// Resolve EosPUID from the currently-connected player controller whose
+			// name matches PlayerName. Use the safe FUniqueNetIdRepl accessors
+			// (GetType/ToString) – never dereference via operator-> on CSS DS.
+			FString ResolvedEosPUID;
+			if (UWorld* VerWorld = GetWorld())
+			{
+				for (FConstPlayerControllerIterator It = VerWorld->GetPlayerControllerIterator(); It; ++It)
+				{
+					APlayerController* VerPC = It->Get();
+					if (!VerPC || !VerPC->PlayerState) continue;
+					if (VerPC->PlayerState->GetPlayerName() != PlayerName) continue;
+					const FUniqueNetIdRepl& NetId = VerPC->PlayerState->GetUniqueId();
+					if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
+					{
+						ResolvedEosPUID = NetId.ToString().ToLower();
+					}
+					break;
+				}
+			}
+
+			PendingVerifications.Remove(Code);
+			PendingVerificationNames.Remove(Code);
+			PendingVerificationExpiry.Remove(Code);
+
+			// Add using the real in-game player name and resolved EosPUID (may be empty).
+			if (FWhitelistManager::AddPlayer(PlayerName, ResolvedEosPUID, TEXT("[Verification]")))
+			{
+				SendGameChatStatusMessage(FString::Printf(
+					TEXT("[DiscordBridge] Account linked! **%s** has been added to the whitelist."),
+					*PlayerName));
+				PostWhitelistEvent(
+					FString::Printf(TEXT("**%s** added via in-game verification (Discord: %s)"),
+						*PlayerName, *AuditName),
+					PlayerName, TEXT("[Verification]"), 3066993);
+
+				// Confirm to the Discord user who initiated the link.
+				if (!Config.WhitelistApprovedDmMessage.IsEmpty())
+				{
+					const FString DmMsg = Config.WhitelistApprovedDmMessage
+						.Replace(TEXT("%PlayerName%"), *PlayerName);
+					SendDiscordDM(DiscordUserId, DmMsg);
+				}
+				else
+				{
+					SendDiscordDM(DiscordUserId, FString::Printf(
+						TEXT("✅ Your in-game account **%s** has been verified and added to the whitelist!"),
+						*PlayerName));
+				}
+			}
+			else
+			{
+				SendGameChatStatusMessage(FString::Printf(
+					TEXT("[DiscordBridge] **%s** is already on the whitelist."), *PlayerName));
+			}
+		}
+	}
+	else
+	{
+		SendGameChatStatusMessage(TEXT("[DiscordBridge] Unknown or expired verification code."));
+	}
+}
+
+FString UDiscordBridgeSubsystem::GetDiscordInviteUrl() const
+{
+	return Config.DiscordInviteUrl;
+}
+
 void UDiscordBridgeSubsystem::HandleInGameWhitelistCommand(const FString& SubCommand)
 {
 	UE_LOG(LogDiscordBridge, Log,
@@ -3980,7 +3848,7 @@ void UDiscordBridgeSubsystem::HandleInGameWhitelistCommand(const FString& SubCom
 	{
 		if (Arg.IsEmpty())
 		{
-			Response = TEXT("Usage: !whitelist add <PlayerName>");
+			Response = TEXT("Usage: /ingamewhitelist add <PlayerName>");
 		}
 		else if (FWhitelistManager::GetMaxSlots() > 0 &&
 		         FWhitelistManager::GetAllEntries().Num() >= FWhitelistManager::GetMaxSlots())
@@ -4004,7 +3872,7 @@ void UDiscordBridgeSubsystem::HandleInGameWhitelistCommand(const FString& SubCom
 	{
 		if (Arg.IsEmpty())
 		{
-			Response = TEXT("Usage: !whitelist remove <PlayerName>");
+			Response = TEXT("Usage: /ingamewhitelist remove <PlayerName>");
 		}
 		else if (FWhitelistManager::RemovePlayer(Arg, TEXT(""), TEXT("[server]")))
 		{
@@ -4203,7 +4071,7 @@ void UDiscordBridgeSubsystem::HandlePlayerStatsCommand(const FString& ResponseCh
 
 	if (TargetPlayerName.IsEmpty())
 	{
-		SendMessageToChannel(TargetChannel, TEXT("Usage: !playerstats <player name>"));
+		SendMessageToChannel(TargetChannel, TEXT("Usage: /playerstats <player name>"));
 		return;
 	}
 
@@ -4743,7 +4611,7 @@ Embed->SetStringField(TEXT("title"), TEXT("📖 DiscordBridge — Features & Com
 Embed->SetNumberField(TEXT("color"), 3447003); // Discord blurple
 Embed->SetStringField(TEXT("description"),
 TEXT("This bot bridges **Satisfactory** in-game chat with Discord and provides ")
-TEXT("server management commands.  Type any command in this channel.\n\u200b"));
+TEXT("server management via **slash commands**.  Use `/` to see available commands.\n\u200b"));
 
 TArray<TSharedPtr<FJsonValue>> Fields;
 auto AddField = [&](const FString& Name, const FString& Value, bool bInline = false)
@@ -4763,36 +4631,24 @@ TEXT("Discord messages sent here are shown in-game.\n\u200b"));
 // Player / server commands
 const FString ServerName = Config.ServerName.IsEmpty() ? TEXT("this server") : Config.ServerName;
 AddField(TEXT("🖥️ Server & Player Commands"),
-FString::Printf(
-TEXT("`!server`  — Server info embed (name, player count, uptime)\n")
-TEXT("`!online`  — Online players list as a rich embed\n")
-TEXT("`%s`  — Online player count (plain text)\n")
-TEXT("`!stats`  — Server statistics (phases, schematics, buildings)\n")
-TEXT("`!playerstats <name>`  — Per-player build/item stats\n\u200b"),
-*Config.PlayersCommandPrefix));
+TEXT("`/server`  — Server info embed (name, player count, uptime)\n")
+TEXT("`/online`  — Online players list as a rich embed\n")
+TEXT("`/players`  — Online player count (plain text)\n")
+TEXT("`/stats`  — Server statistics (phases, schematics, buildings)\n")
+TEXT("`/player stats <name>`  — Per-player build/item stats\n\u200b"));
 
 // Whitelist
-if (!Config.WhitelistCommandPrefix.IsEmpty())
-{
 AddField(TEXT("🔒 Whitelist Commands"),
-FString::Printf(
-TEXT("`%s on`  — Enable the server whitelist\n")
-TEXT("`%s off`  — Disable the server whitelist\n")
-TEXT("`%s add <name>`  — Add a player to the whitelist\n")
-TEXT("`%s remove <name>`  — Remove a player from the whitelist\n")
-TEXT("`%s list`  — Show all whitelisted players\n")
-TEXT("`%s status`  — Show whether the whitelist is active\n\u200b"),
-*Config.WhitelistCommandPrefix,
-*Config.WhitelistCommandPrefix,
-*Config.WhitelistCommandPrefix,
-*Config.WhitelistCommandPrefix,
-*Config.WhitelistCommandPrefix,
-*Config.WhitelistCommandPrefix));
-}
+TEXT("`/whitelist on`  — Enable the server whitelist\n")
+TEXT("`/whitelist off`  — Disable the server whitelist\n")
+TEXT("`/whitelist add <name>`  — Add a player to the whitelist\n")
+TEXT("`/whitelist remove <name>`  — Remove a player from the whitelist\n")
+TEXT("`/whitelist list`  — Show all whitelisted players\n")
+TEXT("`/whitelist status`  — Show whether the whitelist is active\n\u200b"));
 
 // Help itself
 AddField(TEXT("ℹ️ Help"),
-TEXT("`!help` or `!commands`  — Show this feature/command reference again\n\u200b"));
+TEXT("`/help`  — Show this feature/command reference again\n\u200b"));
 
 Embed->SetArrayField(TEXT("fields"), Fields);
 Embed->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
@@ -4814,7 +4670,7 @@ TSharedPtr<FJsonObject> Embed = MakeShared<FJsonObject>();
 Embed->SetStringField(TEXT("title"), TEXT("🛡️ Moderation Commands (BanSystem)"));
 Embed->SetNumberField(TEXT("color"), 15158332); // red
 Embed->SetStringField(TEXT("description"),
-TEXT("The following commands require the **Admin** or **Moderator** Discord role ")
+TEXT("The following slash commands require the **Admin** or **Moderator** Discord role ")
 TEXT("configured in `DefaultBanBridge.ini`.\n\u200b"));
 
 TArray<TSharedPtr<FJsonValue>> Fields;
@@ -4829,51 +4685,51 @@ Fields.Add(MakeShared<FJsonValueObject>(F));
 
 // Admin — ban management
 AddField(TEXT("⚔️ Admin — Ban Management"),
-TEXT("`!ban <player> [reason]`  — Permanently ban a player\n")
-TEXT("`!tempban <player> <duration> [reason]`  — Temporary ban (e.g. `1d`, `2h`)\n")
-TEXT("`!unban <PUID>`  — Unban by EOS Product User ID\n")
-TEXT("`!unbanname <name>`  — Unban by last-seen in-game name\n")
-TEXT("`!banname <name> [reason]`  — Ban by in-game name\n")
-TEXT("`!bancheck <player>`  — Check if a player is currently banned\n")
-TEXT("`!banreason <PUID> <reason>`  — Update the reason for an active ban\n")
-TEXT("`!banlist [page]`  — List active bans (paginated)\n")
-TEXT("`!extend <PUID> <duration>`  — Extend a temporary ban\n")
-TEXT("`!duration <PUID>`  — Show remaining ban duration\n\u200b"),
+TEXT("`/ban add <player> [reason]`  — Permanently ban a player\n")
+TEXT("`/ban temp <player> <duration> [reason]`  — Temporary ban (e.g. `1d`, `2h`)\n")
+TEXT("`/ban remove <uid>`  — Unban by EOS Product User ID\n")
+TEXT("`/ban removename <name>`  — Unban by last-seen in-game name\n")
+TEXT("`/ban byname <name> [reason]`  — Ban by in-game name\n")
+TEXT("`/ban check <player>`  — Check if a player is currently banned\n")
+TEXT("`/ban reason <player> <reason>`  — Update the reason for an active ban\n")
+TEXT("`/ban list [page]`  — List active bans (paginated)\n")
+TEXT("`/ban extend <player> <duration>`  — Extend a temporary ban\n")
+TEXT("`/ban duration <player>`  — Show remaining ban duration\n\u200b"),
 false);
 
 // Admin — server links, history, warns, notes
 AddField(TEXT("📋 Admin — History, Warnings & Notes"),
-TEXT("`!playerhistory <player>`  — Full join/ban history for a player\n")
-TEXT("`!warn <player> [reason]`  — Issue a warning to a player\n")
-TEXT("`!warnings <player>`  — List all warnings for a player\n")
-TEXT("`!clearwarns <player>`  — Clear all warnings for a player\n")
-TEXT("`!clearwarn <id>`  — Remove a single warning by its ID\n")
-TEXT("`!note <player> <text>`  — Add a staff note to a player's record\n")
-TEXT("`!notes <player>`  — Show all staff notes for a player\n")
-TEXT("`!reason <PUID>`  — Show the ban reason for a player\n\u200b"),
+TEXT("`/player history <query>`  — Full join/ban history for a player\n")
+TEXT("`/warn add <player> <reason>`  — Issue a warning to a player\n")
+TEXT("`/warn list <player>`  — List all warnings for a player\n")
+TEXT("`/warn clearall <player>`  — Clear all warnings for a player\n")
+TEXT("`/warn clearone <id>`  — Remove a single warning by its ID\n")
+TEXT("`/player note <player> <text>`  — Add a staff note to a player's record\n")
+TEXT("`/player notes <player>`  — Show all staff notes for a player\n")
+TEXT("`/player reason <uid>`  — Show the ban reason for a player\n\u200b"),
 false);
 
 // Admin — server links, config
 AddField(TEXT("⚙️ Admin — Server Links & Config"),
-TEXT("`!linkbans <serverName>`  — Link ban lists with another server\n")
-TEXT("`!unlinkbans <serverName>`  — Remove a ban-list link\n")
-TEXT("`!mutereason <player> <reason>`  — Update the reason on an active mute\n")
-TEXT("`!reloadconfig`  — Hot-reload BanSystem / BanChatCommands config\n\u200b"),
+TEXT("`/ban link <uid1> <uid2>`  — Link two UIDs so a ban blocks both\n")
+TEXT("`/ban unlink <uid1> <uid2>`  — Remove a UID link\n")
+TEXT("`/mod mutereason <player> <reason>`  — Update the reason on an active mute\n")
+TEXT("`/admin reloadconfig`  — Hot-reload BanSystem / BanChatCommands config\n\u200b"),
 false);
 
 // Moderator commands
 AddField(TEXT("👮 Moderator Commands"),
-TEXT("`!kick <player> [reason]`  — Kick a player from the server\n")
-TEXT("`!modban <player> [reason]`  — Permanent ban (moderator-level)\n")
-TEXT("`!mute <player> [reason]`  — Mute a player in-game\n")
-TEXT("`!unmute <player>`  — Unmute a player (indefinite mute)\n")
-TEXT("`!tempmute <player> <duration> [reason]`  — Temporary mute\n")
-TEXT("`!tempunmute <player>`  — Lift a timed mute early\n")
-TEXT("`!mutecheck <player>`  — Check if a player is muted\n")
-TEXT("`!mutelist`  — List all currently muted players\n")
-TEXT("`!announce <message>`  — Broadcast a message to all in-game players\n")
-TEXT("`!stafflist`  — List configured admins and moderators\n")
-TEXT("`!staffchat <message>`  — Send a message to the staff Discord channel\n\u200b"),
+TEXT("`/mod kick <player> [reason]`  — Kick a player from the server\n")
+TEXT("`/mod modban <player> [reason]`  — Permanent ban (moderator-level)\n")
+TEXT("`/mod mute <player> [reason]`  — Mute a player in-game\n")
+TEXT("`/mod unmute <player>`  — Unmute a player (indefinite mute)\n")
+TEXT("`/mod tempmute <player> <duration> [reason]`  — Temporary mute\n")
+TEXT("`/mod tempunmute <player>`  — Lift a timed mute early\n")
+TEXT("`/mod mutecheck <player>`  — Check if a player is muted\n")
+TEXT("`/mod mutelist`  — List all currently muted players\n")
+TEXT("`/mod announce <message>`  — Broadcast a message to all in-game players\n")
+TEXT("`/mod stafflist`  — List configured admins and moderators\n")
+TEXT("`/mod staffchat <message>`  — Send a message to the staff Discord channel\n\u200b"),
 false);
 
 Embed->SetArrayField(TEXT("fields"), Fields);
@@ -5214,6 +5070,45 @@ Commands.Add(MakeCmd(TEXT("whitelist"), TEXT("Whitelist management commands."),
 		{ Str(TEXT("query"),      TEXT("Partial name to search for")) }),
 }));
 
+// ── /ticket – ticket management (support role) ───────────────────────────
+Commands.Add(MakeCmd(TEXT("ticket"), TEXT("Support ticket management commands."),
+{
+	MakeSub(TEXT("panel"),    TEXT("Post the ticket selection panel to the configured channel.")),
+	MakeSub(TEXT("list"),     TEXT("List all open tickets.")),
+	MakeSub(TEXT("assign"),   TEXT("Claim/assign a ticket to a staff member."),
+		{ Str(TEXT("user"), TEXT("@mention of the staff member")) }),
+	MakeSub(TEXT("claim"),    TEXT("Claim this ticket for yourself.")),
+	MakeSub(TEXT("unclaim"),  TEXT("Release your claim on this ticket.")),
+	MakeSub(TEXT("transfer"), TEXT("Transfer this ticket to another staff member."),
+		{ Str(TEXT("user"), TEXT("@mention of the target staff member")) }),
+	MakeSub(TEXT("priority"), TEXT("Set the priority level of this ticket."),
+		{ Str(TEXT("level"), TEXT("Priority level (low, normal, high, urgent)")) }),
+	MakeSub(TEXT("macro"),    TEXT("Apply a saved macro/template response."),
+		{ Str(TEXT("name"), TEXT("Macro name")) }),
+	MakeSub(TEXT("macros"),   TEXT("List all available macros.")),
+	MakeSub(TEXT("stats"),    TEXT("Show ticket statistics.")),
+	MakeSub(TEXT("report"),   TEXT("Submit a ticket report/feedback."),
+		{ Str(TEXT("text"), TEXT("Report text")) }),
+	MakeSub(TEXT("tag"),      TEXT("Add a tag to this ticket."),
+		{ Str(TEXT("tag"), TEXT("Tag name")) }),
+	MakeSub(TEXT("untag"),    TEXT("Remove a tag from this ticket."),
+		{ Str(TEXT("tag"), TEXT("Tag name")) }),
+	MakeSub(TEXT("tags"),     TEXT("List all tags on this ticket.")),
+	MakeSub(TEXT("note"),     TEXT("Add a staff-only note to this ticket."),
+		{ Str(TEXT("text"), TEXT("Note text")) }),
+	MakeSub(TEXT("notes"),    TEXT("List all staff notes on this ticket.")),
+	MakeSub(TEXT("escalate"), TEXT("Escalate this ticket to a senior staff member.")),
+	MakeSub(TEXT("remind"),   TEXT("Set a reminder for this ticket."),
+		{ Str(TEXT("text"), TEXT("Reminder text")) }),
+	MakeSub(TEXT("blacklist"),     TEXT("Blacklist a user from creating tickets."),
+		{ Str(TEXT("user"), TEXT("User ID to blacklist")) }),
+	MakeSub(TEXT("unblacklist"),   TEXT("Remove a user from the ticket blacklist."),
+		{ Str(TEXT("user"), TEXT("User ID to unblacklist")) }),
+	MakeSub(TEXT("blacklistlist"), TEXT("List all blacklisted users.")),
+	MakeSub(TEXT("merge"),    TEXT("Merge another ticket into this one."),
+		{ Str(TEXT("ticket_id"), TEXT("Channel ID of the ticket to merge")) }),
+}));
+
 // Serialize the commands array and send to Discord.
 FString BodyStr;
 {
@@ -5236,7 +5131,7 @@ Request->OnProcessRequestComplete().BindLambda(
 		{
 			UE_LOG(LogDiscordBridge, Log,
 				TEXT("DiscordBridge: Slash commands registered successfully (%d commands)."),
-				12); // 5 standalone + 7 groups
+				13); // 5 standalone + 8 groups
 		}
 		else
 		{
@@ -5407,7 +5302,8 @@ TEXT("`/warn add|list|clearall|clearone` — Warning management (admin)\n")
 TEXT("`/mod kick|mute|unmute|announce|…` — Moderation (moderator)\n")
 TEXT("`/player history|note|notes|playtime|…` — Player info (admin)\n")
 TEXT("`/appeal list|approve|deny|dismiss` — Appeal management (admin)\n")
-TEXT("`/admin say|poll|reloadconfig` — Admin utilities (admin)");
+TEXT("`/admin say|poll|reloadconfig` — Admin utilities (admin)\n")
+TEXT("`/ticket panel|list|assign|claim|…` — Support ticket management");
 RespondToInteraction(InteractionId, InteractionToken, 4, Reply, false);
 return;
 }
@@ -5508,6 +5404,25 @@ const TArray<TSharedPtr<FJsonValue>>* StatsOpts = nullptr;
 HandlePlayerStatsCommand(InteractionChannelId, GetSlashOptionString(StatsOpts, TEXT("name")));
 return;
 }
+}
+
+// ── /ticket – delegated to TicketSubsystem via the interaction delegate ────
+if (CmdName == TEXT("ticket"))
+{
+if (!OnDiscordInteractionReceived.IsBound())
+{
+UE_LOG(LogDiscordBridge, Warning,
+       TEXT("DiscordBridge: /ticket slash command received but no interaction "
+            "subscriber is registered. TicketSubsystem may not be loaded."));
+RespondToInteraction(InteractionId, InteractionToken, 4,
+    TEXT("❌ Ticket system is not available — the TicketSubsystem module is not loaded."),
+    true);
+return;
+}
+
+RespondToInteraction(InteractionId, InteractionToken, 5, FString(), true);
+OnDiscordInteractionReceived.Broadcast(DataObj);
+return;
 }
 
 // ── Ban / mod / warn / player / appeal / admin ─────────────────────────────

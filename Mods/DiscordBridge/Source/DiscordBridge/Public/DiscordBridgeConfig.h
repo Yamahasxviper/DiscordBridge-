@@ -150,15 +150,15 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 
 	/**
 	 * When true, the whitelist is enabled on every server start, overriding any
-	 * runtime change made via !whitelist on / !whitelist off Discord commands.
+	 * runtime change made via /whitelist on / /whitelist off Discord commands.
 	 * Default: false (all players can join).
 	 */
 	bool bWhitelistEnabled{ false };
 
 	/**
 	 * Snowflake ID of the Discord role whose members are allowed to run
-	 * !whitelist management commands.
-	 * Leave empty (or unset) to disable !whitelist commands entirely – no
+	 * /whitelist management commands.
+	 * Leave empty (or unset) to disable /whitelist commands entirely – no
 	 * Discord user will be able to run them until a role ID is provided.
 	 *
 	 * IMPORTANT: holding this role does NOT grant automatic access to the game
@@ -171,30 +171,13 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	FString WhitelistCommandRoleId;
 
 	/**
-	 * Prefix that triggers whitelist management commands from Discord.
-	 * Set to an empty string to disable Discord-based whitelist management.
-	 * Default: "!whitelist"
-	 *
-	 * Supported commands (type in the bridged Discord channel):
-	 *   !whitelist on                       – enable the whitelist
-	 *   !whitelist off                      – disable the whitelist
-	 *   !whitelist add <name>               – add a player
-	 *   !whitelist remove <name>            – remove a player
-	 *   !whitelist list                     – list all whitelisted players
-	 *   !whitelist status                   – show current enabled/disabled state
-	 *   !whitelist role add <discord_id>    – grant WhitelistRoleId to a Discord user
-	 *   !whitelist role remove <discord_id> – revoke WhitelistRoleId from a Discord user
-	 */
-	FString WhitelistCommandPrefix{ TEXT("!whitelist") };
-
-	/**
 	 * Snowflake ID of the Discord role used to identify whitelisted members.
 	 * Leave empty to disable Discord role integration.
 	 *
 	 * When set:
 	 *  • Messages received on WhitelistChannelId are relayed to the game only
 	 *    when the sender holds this role.
-	 *  • The `!whitelist role add/remove <user_id>` commands assign or revoke
+	 *  • The `/whitelist role add/remove <user_id>` commands assign or revoke
 	 *    this role via the Discord REST API (bot must have Manage Roles permission).
 	 *  • At bot startup the member list is fetched from Discord and cached.
 	 *    Any player whose in-game name matches a cached Discord display name
@@ -241,22 +224,10 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	};
 
 	// ── In-game commands ──────────────────────────────────────────────────────
-
-	/**
-	 * Prefix that triggers whitelist management commands when typed in the
-	 * Satisfactory in-game chat.  Set to an empty string to disable in-game
-	 * whitelist commands.
-	 * Default: "!whitelist"
-	 *
-	 * Supported commands (type in the Satisfactory in-game chat):
-	 *   !whitelist on            – enable the whitelist
-	 *   !whitelist off           – disable the whitelist
-	 *   !whitelist add <name>    – add a player by in-game name
-	 *   !whitelist remove <name> – remove a player by in-game name
-	 *   !whitelist list          – list all whitelisted players
-	 *   !whitelist status        – show current enabled/disabled state
-	 */
-	FString InGameWhitelistCommandPrefix{ TEXT("!whitelist") };
+	// In-game chat commands are now registered as SML slash commands:
+	//   /verify <code>              — link Discord account (account verification)
+	//   /discord                    — show the Discord invite link
+	//   /ingamewhitelist <subcmd>   — manage the whitelist from in-game chat
 
 	/**
 	 * Snowflake ID of a dedicated Discord channel where whitelist events (add/remove/enable/disable)
@@ -266,7 +237,7 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 
 	/**
 	 * Maximum number of whitelist slots. 0 = unlimited.
-	 * When set, the !whitelist add command will refuse to add more players than this limit.
+	 * When set, the /whitelist add command will refuse to add more players than this limit.
 	 */
 	int32 MaxWhitelistSlots{ 0 };
 
@@ -277,13 +248,13 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	bool bSyncWhitelistWithRole{ false };
 
 	/**
-	 * Snowflake ID of the Discord channel where `!whitelist apply` application embeds are posted.
+	 * Snowflake ID of the Discord channel where `/whitelist apply` application embeds are posted.
 	 * Leave empty to disable the application flow entirely.
 	 */
 	FString WhitelistApplicationChannelId;
 
 	/**
-	 * When true, any Discord user may run `!whitelist apply <InGameName>` to submit a
+	 * When true, any Discord user may run `/whitelist apply <InGameName>` to submit a
 	 * whitelist application, which is posted as an embed with Approve/Deny buttons to
 	 * WhitelistApplicationChannelId.
 	 * Default: false.
@@ -309,15 +280,15 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	float WhitelistExpiryWarningHours{ 24.0f };
 
 	/**
-	 * When true, enables the `!whitelist link <InGameName>` Discord command that lets
+	 * When true, enables the `/whitelist link <InGameName>` Discord command that lets
 	 * Discord users link their in-game account via a one-time 6-digit verification code
-	 * typed in-game with `!verify <code>`.
+	 * typed in-game with `/verify <code>`.
 	 * Default: false.
 	 */
 	bool bWhitelistVerificationEnabled{ false };
 
 	/**
-	 * Snowflake ID of the Discord channel where `!whitelist link` commands are accepted.
+	 * Snowflake ID of the Discord channel where `/whitelist link` commands are accepted.
 	 * Leave empty to allow the command in any channel.
 	 */
 	FString WhitelistVerificationChannelId;
@@ -353,19 +324,15 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	// ── Bot commands ──────────────────────────────────────────────────────────
 
 	/**
-	 * The prefix for the !players Discord command (default: !players).
-	 * Discord users can type this in the bot channel to see the list of online players.
-	 */
-	FString PlayersCommandPrefix{ TEXT("!players") };
-
-	/**
-	 * Snowflake ID of the Discord channel where !players responses are posted.
+	 * Snowflake ID of the Discord channel where /players responses are posted.
 	 * Leave empty to post to the main bridged channel (ChannelId).
 	 */
 	FString PlayersCommandChannelId;
 
 	/**
-	 * Discord invite link shown to players when they type /discord or !discord
+	 * Discord invite link shown to players when they type /discord in the
+	 * Satisfactory in-game chat.
+	 */
 	 * in the Satisfactory in-game chat.
 	 * Leave empty to disable the /discord in-game command.
 	 * Example: https://discord.gg/yourserver
@@ -506,21 +473,10 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 */
 	FString BanEventsChannelId;
 
-	// ── !stats / !playerstats commands ───────────────────────────────────────
+	// ── /stats / /playerstats commands ───────────────────────────────────────
 
-	/**
-	 * Prefix for the !stats Discord command (default: !stats).
-	 * Discord users can type this to get a rich embed with server statistics.
-	 * Leave empty to disable the command.
-	 */
-	FString StatsCommandPrefix{ TEXT("!stats") };
-
-	/**
-	 * Prefix for the !playerstats Discord command (default: !playerstats).
-	 * Usage: !playerstats <in-game player name>
-	 * Leave empty to disable the command.
-	 */
-	FString PlayerStatsCommandPrefix{ TEXT("!playerstats") };
+	// Server statistics and per-player stats are now available as Discord slash
+	// commands (/stats and /playerstats) registered automatically by DiscordBridge.
 
 	// ── Join reaction voting ──────────────────────────────────────────────────
 
@@ -637,11 +593,11 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 
 	/**
 	 * When true, DiscordBridge registers its built-in Discord application
-	 * slash commands (/players, /stats, /server) with the Discord API on startup.
+	 * slash commands (/players, /stats, /server, etc.) with the Discord API on startup.
 	 * Requires the bot to have "applications.commands" scope.
-	 * Default: false.
+	 * Default: true.
 	 */
-	bool bEnableSlashCommands{ false };
+	bool bEnableSlashCommands{ true };
 
 	// ── Mute notifications ────────────────────────────────────────────────────
 
@@ -675,7 +631,7 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	/**
 	 * Snowflake ID of a dedicated Discord channel where the bot posts a
 	 * comprehensive embed listing every feature and command when the server
-	 * starts for the first time.  Discord users can also type !help in the
+	 * starts for the first time.  Discord users can also use /help in the
 	 * main bridged channel to re-post the embed at any time.
 	 *
 	 * Recommended setup:
@@ -683,7 +639,7 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 *   2. Copy its channel ID (Developer Mode → right-click → Copy Channel ID).
 	 *   3. Paste it here and restart the server.
 	 *
-	 * Leave empty to disable the automatic info post (you can still use !help
+	 * Leave empty to disable the automatic info post (you can still use /help
 	 * in the main channel to get a response there).
 	 * Example: BotInfoChannelId=111222333444555666777
 	 */

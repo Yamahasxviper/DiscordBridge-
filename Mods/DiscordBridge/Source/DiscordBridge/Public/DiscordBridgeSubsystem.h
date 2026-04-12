@@ -345,6 +345,24 @@ public:
 		TFunction<void(const TSharedPtr<FJsonObject>&)> Callback) override;
 	virtual void UnsubscribeRawMessage(FDelegateHandle Handle) override;
 
+	// ── In-game slash command helpers (callable from SML command actors) ──────
+
+	/**
+	 * Process a `/verify <code>` command issued from in-game chat.
+	 * Looks up the code in the pending verification table, resolves the player's
+	 * EOS PUID, and adds them to the whitelist if the code is valid and unexpired.
+	 *
+	 * @param PlayerName  In-game display name of the player who typed the command.
+	 * @param Code        Verification code string (without the `/verify ` prefix).
+	 */
+	void HandleInGameVerify(const FString& PlayerName, const FString& Code);
+
+	/** Handle a whitelist management command typed in the Satisfactory in-game chat. */
+	void HandleInGameWhitelistCommand(const FString& SubCommand);
+
+	/** Return the configured Discord invite URL (empty string if not set). */
+	FString GetDiscordInviteUrl() const;
+
 private:
 	// ── WebSocket event handlers (called on the game thread) ──────────────────
 
@@ -617,9 +635,6 @@ private:
 	                            const FString& ResponseChannelId,
 	                            const FString& AuthorDiscordId = TEXT(""));
 
-	/** Handle a whitelist management command typed in the Satisfactory in-game chat. */
-	void HandleInGameWhitelistCommand(const FString& SubCommand);
-
 	/** Broadcast a status/feedback message to all connected players via the game chat. */
 	void SendGameChatStatusMessage(const FString& Message);
 
@@ -714,10 +729,10 @@ private:
 
 	// ── !stats / !playerstats ─────────────────────────────────────────────────
 
-	/** Handle the !stats Discord command — send a server-stats embed. */
+	/** Handle the /stats Discord command — send a server-stats embed. */
 	void HandleStatsCommand(const FString& ResponseChannelId);
 
-	/** Handle the !playerstats <name> Discord command — send per-player stats embed. */
+	/** Handle the /playerstats <name> Discord command — send per-player stats embed. */
 	void HandlePlayerStatsCommand(const FString& ResponseChannelId,
 	                              const FString& TargetPlayerName);
 
@@ -821,10 +836,10 @@ private:
 
 	// ── !server / !online commands ────────────────────────────────────────────
 
-	/** Handle the !server Discord command — post a server info embed. */
+	/** Handle the /server Discord command — post a server info embed. */
 	void HandleServerCommand(const FString& ResponseChannelId);
 
-	/** Handle the !online Discord command — post a list of online players with session times. */
+	/** Handle the /online Discord command — post a list of online players with session times. */
 	void HandleOnlineCommand(const FString& ResponseChannelId);
 
 	// ── !help / bot info command ──────────────────────────────────────────────
@@ -832,7 +847,7 @@ private:
 	/**
 	 * Post a comprehensive feature/command-reference embed to ResponseChannelId.
 	 * Called automatically on the first Gateway READY when BotInfoChannelId is
-	 * configured, and in response to the !help command in the bridged channel.
+	 * configured, and in response to the /help command in the bridged channel.
 	 *
 	 * @param ResponseChannelId  Snowflake ID of the channel to post the embed to.
 	 */

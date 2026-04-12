@@ -17,12 +17,8 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBanDiscord, Log, All);
 struct DISCORDBRIDGE_API FBanBridgeConfig
 {
 	/**
-	 * Discord role ID whose members are authorised to run full admin ban commands
-	 * in Discord (!ban, !tempban, !unban, !unbanname, !banname, !bancheck, !banlist,
-	 * !playerhistory, !linkbans, !unlinkbans, !warnings, !clearwarns, !clearwarn,
-	 * !note, !notes, !duration, !banreason, !extend, !reloadconfig, !kick,
-	 * !mute, !unmute, !tempmute, !mutecheck, !mutelist, !warn, !announce,
-	 * !stafflist, !reason, !staffchat, !modban).
+	 * Discord role ID whose members are authorised to run full admin slash commands
+	 * in Discord (/ban, /warn, /player, /appeal, /admin groups).
 	 *
 	 * How to get the role ID: enable Developer Mode in Discord
 	 * (User Settings → Advanced → Developer Mode), open Server Settings → Roles,
@@ -34,8 +30,8 @@ struct DISCORDBRIDGE_API FBanBridgeConfig
 
 	/**
 	 * Discord role ID for moderators who may run a limited subset of commands:
-	 * !kick, !modban, !mute, !unmute, !tempmute, !mutecheck, !mutelist,
-	 * !staffchat, !stafflist, !announce.
+	 * /mod kick, /mod modban, /mod mute, /mod unmute, /mod tempmute,
+	 * /mod mutecheck, /mod mutelist, /mod staffchat, /mod stafflist, /mod announce.
 	 *
 	 * Admins (AdminRoleId) automatically pass the moderator check.
 	 * Leave empty to disable the moderator role (only admins can use those commands).
