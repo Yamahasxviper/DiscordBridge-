@@ -3,10 +3,54 @@
 ← [Back to index](README.md)
 
 The built-in whitelist lets you restrict which players can join the server and manage
-the list directly from the bridged Discord channel.
+the list from Discord slash commands or in-game chat commands.
 
 > **The whitelist is an independent access-control feature.**
 > Enable or disable it freely without affecting any other functionality.
+
+> **Note:** All Discord whitelist commands now use slash commands (`/whitelist`).
+> The old `!whitelist` prefix commands and `WhitelistCommandPrefix` /
+> `InGameWhitelistCommandPrefix` config fields have been removed.
+> In-game commands use SML registered commands (`/ingamewhitelist`).
+
+---
+
+## Discord `/whitelist` slash commands
+
+The following slash commands are available when the bot is in your Discord server:
+
+| Command | Effect |
+|---------|--------|
+| `/whitelist on` | Enable the whitelist (only whitelisted players can join) |
+| `/whitelist off` | Disable the whitelist (all players can join) |
+| `/whitelist add <name>` | Add a player by in-game name (supports `group:GroupName` token) |
+| `/whitelist remove <name>` | Remove a player by in-game name |
+| `/whitelist list` | List all whitelisted players (supports optional group filter) |
+| `/whitelist status` | Show the current enabled/disabled state of the whitelist |
+| `/whitelist role add <discord_id>` | Grant the `WhitelistRoleId` Discord role to a user |
+| `/whitelist role remove <discord_id>` | Revoke the `WhitelistRoleId` Discord role from a user |
+| `/whitelist apply` | Player-initiated whitelist application (when enabled) |
+| `/whitelist link` | Link Discord account to in-game player |
+| `/whitelist search <partial>` | Search whitelist by partial name match |
+| `/whitelist groups` | List all whitelist groups |
+
+---
+
+## In-game `/ingamewhitelist` commands
+
+The following SML chat commands are available in-game:
+
+| Command | Effect |
+|---------|--------|
+| `/ingamewhitelist on` | Enable the whitelist |
+| `/ingamewhitelist off` | Disable the whitelist (all players can join) |
+| `/ingamewhitelist add <name>` | Add a player by in-game name |
+| `/ingamewhitelist remove <name>` | Remove a player by in-game name |
+| `/ingamewhitelist list` | List all whitelisted players |
+| `/ingamewhitelist status` | Show the current enabled/disabled state of the whitelist |
+
+> **Note:** In-game whitelist commands support the same core operations as the Discord commands,
+> except for role management, application, link, search, and groups which are Discord-only.
 
 ---
 
@@ -17,7 +61,7 @@ the list directly from the bridged Discord channel.
 Controls whether the whitelist is active when the server starts.
 This setting is applied on **every** server restart — change it and restart the server to enable or disable the whitelist.
 
-`!whitelist on` / `!whitelist off` Discord commands update the in-memory state for the current session only; the config setting takes effect again on the next restart.
+`/whitelist on` / `/whitelist off` Discord slash commands update the in-memory state for the current session only; the config setting takes effect again on the next restart.
 
 **Default:** `False` (all players can join)
 
@@ -25,11 +69,11 @@ This setting is applied on **every** server restart — change it and restart th
 
 ### `WhitelistCommandRoleId`
 
-The snowflake ID of the Discord role whose members are allowed to run `!whitelist` management commands.
+The snowflake ID of the Discord role whose members are allowed to run `/whitelist` management commands.
 
-**Default:** *(empty — !whitelist commands are disabled for all Discord users)*
+**Default:** *(empty — /whitelist commands are disabled for all Discord users)*
 
-When set, **only members who hold this role** can run `!whitelist` commands in the bridged Discord channel. When left empty, `!whitelist` commands are fully disabled (deny-by-default) — no one can run them until a role ID is provided.
+When set, **only members who hold this role** can run `/whitelist` commands in Discord. When left empty, `/whitelist` commands are fully disabled (deny-by-default) — no one can run them until a role ID is provided.
 
 > **IMPORTANT:** Holding this role does **not** grant access to the game server. These members are still subject to the normal whitelist and ban checks when they try to join.
 
@@ -45,28 +89,6 @@ The whitelist admin role and the ban admin role are **completely independent** �
 
 ---
 
-### `WhitelistCommandPrefix`
-
-The prefix that triggers whitelist management commands when typed in the bridged Discord channel.
-Set to an **empty string** to disable Discord-based whitelist management entirely.
-
-**Default:** `!whitelist`
-
-**Supported commands** (type these in the bridged Discord channel):
-
-| Command | Effect |
-|---------|--------|
-| `!whitelist on` | Enable the whitelist (only whitelisted players can join) |
-| `!whitelist off` | Disable the whitelist (all players can join) |
-| `!whitelist add <name>` | Add a player by in-game name |
-| `!whitelist remove <name>` | Remove a player by in-game name |
-| `!whitelist list` | List all whitelisted players and current enabled/disabled state |
-| `!whitelist status` | Show the current enabled/disabled state of the whitelist |
-| `!whitelist role add <discord_id>` | Grant the `WhitelistRoleId` Discord role to a user |
-| `!whitelist role remove <discord_id>` | Revoke the `WhitelistRoleId` Discord role from a user |
-
----
-
 ### `WhitelistRoleId`
 
 The snowflake ID of the Discord role used to identify whitelisted members.
@@ -76,7 +98,7 @@ Leave **empty** to disable Discord role integration.
 
 When set:
 - Discord messages sent to `WhitelistChannelId` are relayed to the game **only when the sender holds this role**.
-- The `!whitelist role add/remove <discord_id>` commands assign or revoke this role via the Discord REST API (the bot must have the **Manage Roles** permission on your server).
+- The `/whitelist role add/remove <discord_id>` commands assign or revoke this role via the Discord REST API (the bot must have the **Manage Roles** permission on your server).
 - **Players whose in-game name matches a Discord display name (server nickname, global name, or username) of a member who holds this role are automatically allowed through the whitelist, even if they are not listed in `ServerWhitelist.json`.** The bot fetches and caches the role-member list when it connects, and keeps it up to date as members gain or lose the role.
 
 > **Tip:** For reliable matching, set each player's Discord server nickname to their exact in-game (Steam/Epic) name before granting them the whitelist role.
@@ -135,27 +157,16 @@ WhitelistKickReason=You are not whitelisted. DM an admin on Discord to request a
 
 ---
 
-### `InGameWhitelistCommandPrefix`
+### New settings (v1.1.0)
 
-The prefix that triggers whitelist management commands when typed in the **Satisfactory in-game chat**.
-This lets server admins manage the whitelist directly from inside the game without needing Discord.
-Set to an **empty string** to disable in-game whitelist commands.
-
-**Default:** `!whitelist`
-
-**Supported commands** (type these in the Satisfactory in-game chat):
-
-| Command | Effect |
-|---------|--------|
-| `!whitelist on` | Enable the whitelist |
-| `!whitelist off` | Disable the whitelist (all players can join) |
-| `!whitelist add <name>` | Add a player by in-game name |
-| `!whitelist remove <name>` | Remove a player by in-game name |
-| `!whitelist list` | List all whitelisted players and current enabled/disabled state |
-| `!whitelist status` | Show the current enabled/disabled state of the whitelist |
-
-> **Note:** In-game whitelist commands support the same operations as the Discord commands,
-> except for role management (`!whitelist role add/remove`) which is Discord-only.
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `WhitelistApplicationChannelId` | string | *(empty)* | Channel for whitelist applications |
+| `bWhitelistApplyEnabled` | bool | `False` | Enable `/whitelist apply` from Discord |
+| `WhitelistApprovedDmMessage` | string | *(empty)* | DM sent when application is approved |
+| `WhitelistExpiryWarningHours` | float | `24.0` | Hours before expiry to warn |
+| `bWhitelistVerificationEnabled` | bool | `False` | Enable Discord verification workflow |
+| `WhitelistVerificationChannelId` | string | *(empty)* | Channel for verification messages |
 
 ---
 
