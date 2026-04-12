@@ -373,21 +373,9 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.PlayerCountPresenceFormat       = GetIniStringOrFallback(ConfigFile, TEXT("PlayerCountPresenceFormat"),       Config.PlayerCountPresenceFormat);
 		Config.PlayerCountUpdateIntervalSeconds = GetIniFloatOrDefault (ConfigFile, TEXT("PlayerCountUpdateIntervalSeconds"), Config.PlayerCountUpdateIntervalSeconds);
 		Config.PlayerCountActivityType         = GetIniIntOrDefault   (ConfigFile, TEXT("PlayerCountActivityType"),         Config.PlayerCountActivityType);
-		Config.WhitelistCommandRoleId          = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistCommandRoleId"),          Config.WhitelistCommandRoleId);
-		Config.WhitelistRoleId                 = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistRoleId"),                 Config.WhitelistRoleId);
-		Config.WhitelistChannelId              = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistChannelId"),              Config.WhitelistChannelId);
-		Config.WhitelistKickDiscordMessage     = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistKickDiscordMessage"),     Config.WhitelistKickDiscordMessage);
-		Config.WhitelistKickReason             = GetIniStringOrFallback(ConfigFile, TEXT("WhitelistKickReason"),             Config.WhitelistKickReason);
-		Config.bWhitelistEnabled               = GetIniBoolOrDefault  (ConfigFile, TEXT("WhitelistEnabled"),               Config.bWhitelistEnabled);
-		Config.WhitelistEventsChannelId    = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistEventsChannelId"),    Config.WhitelistEventsChannelId);
-		Config.MaxWhitelistSlots           = GetIniIntOrDefault   (ConfigFile, TEXT("MaxWhitelistSlots"),           Config.MaxWhitelistSlots);
-		Config.bSyncWhitelistWithRole      = GetIniBoolOrDefault  (ConfigFile, TEXT("SyncWhitelistWithRole"),      Config.bSyncWhitelistWithRole);
-		Config.WhitelistApplicationChannelId = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistApplicationChannelId"), Config.WhitelistApplicationChannelId);
-		Config.bWhitelistApplyEnabled        = GetIniBoolOrDefault  (ConfigFile, TEXT("WhitelistApplyEnabled"),        Config.bWhitelistApplyEnabled);
-		Config.WhitelistApprovedDmMessage    = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistApprovedDmMessage"),   Config.WhitelistApprovedDmMessage);
-		Config.WhitelistExpiryWarningHours   = GetIniFloatOrDefault (ConfigFile, TEXT("WhitelistExpiryWarningHours"),  Config.WhitelistExpiryWarningHours);
-		Config.bWhitelistVerificationEnabled = GetIniBoolOrDefault  (ConfigFile, TEXT("WhitelistVerificationEnabled"), Config.bWhitelistVerificationEnabled);
-		Config.WhitelistVerificationChannelId = GetIniStringOrDefault(ConfigFile, TEXT("WhitelistVerificationChannelId"), Config.WhitelistVerificationChannelId);
+
+		// Whitelist settings have moved to a separate config file
+		// (DefaultWhitelist.ini) loaded by FWhitelistConfig::Load().
 
 		// Player event notification settings
 		Config.bPlayerEventsEnabled   = GetIniBoolOrDefault  (ConfigFile, TEXT("PlayerEventsEnabled"),   Config.bPlayerEventsEnabled);
@@ -600,190 +588,12 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		}
 		else
 		{
-			// Detect configs written before the whitelist was added
-			// (upgrade scenario).  If the whitelist section's key-value pair is absent
-			// from the file, append the missing section so server operators can
-			// see and configure the new settings without losing their existing ones.
-			FString TmpVal;
-			const bool bFileHasWhitelist = ConfigFile.GetString(ConfigSection, TEXT("WhitelistEnabled"), TmpVal);
-
-			if (!bFileHasWhitelist)
-			{
-				UE_LOG(LogTemp, Log,
-				       TEXT("DiscordBridge: Config at '%s' is missing whitelist settings "
-				            "(older version detected). Appending new settings."),
-				       *ModFilePath);
-
-				FString ExistingContent;
-				FFileHelper::LoadFileToString(ExistingContent, *ModFilePath);
-				StripBOM(ExistingContent);
-
-				FString AppendContent;
-
-				if (!bFileHasWhitelist)
-				{
-					AppendContent +=
-						TEXT("\n")
-						TEXT("# -- WHITELIST (added by mod update) -----------------------------------------\n")
-						TEXT("# Controls the built-in server whitelist, manageable via Discord commands.\n")
-						TEXT("#\n")
-						TEXT("# Whether the whitelist is active. Applied on every server restart.\n")
-						TEXT("# Default: False (all players can join).\n")
-						TEXT("WhitelistEnabled=False\n")
-						TEXT("#\n")
-						TEXT("# Snowflake ID of the Discord role whose members may run /whitelist commands.\n")
-						TEXT("# Leave empty (default) to disable /whitelist commands for all Discord users.\n")
-						TEXT("WhitelistCommandRoleId=\n")
-						TEXT("#\n")
-						TEXT("#\n")
-						TEXT("# Snowflake ID of the Discord role assigned to whitelisted members.\n")
-						TEXT("# Leave empty to disable Discord role integration.\n")
-						TEXT("WhitelistRoleId=\n")
-						TEXT("#\n")
-						TEXT("# Snowflake ID of a dedicated Discord channel for whitelisted members.\n")
-						TEXT("# Leave empty to disable the whitelist-only channel.\n")
-						TEXT("WhitelistChannelId=\n")
-						TEXT("#\n")
-						TEXT("# Message posted to Discord when a non-whitelisted player is kicked.\n")
-						TEXT("# Leave empty to disable this notification.\n")
-						TEXT("# Placeholder: %PlayerName% - in-game name of the kicked player.\n")
-						TEXT("WhitelistKickDiscordMessage=:boot: **%PlayerName%** tried to join but is not on the whitelist and was kicked.\n")
-						TEXT("#\n")
-						TEXT("# Reason shown in-game to the player when they are kicked for not being whitelisted.\n")
-						TEXT("WhitelistKickReason=You are not on this server's whitelist. Contact the server admin to be added.\n")
-						TEXT("#\n")
-;
-				}
-
-				if (FFileHelper::SaveStringToFile(ExistingContent + AppendContent, *ModFilePath,
-				    FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
-				{
-					UE_LOG(LogTemp, Log,
-					       TEXT("DiscordBridge: Updated '%s' with whitelist settings. "
-					            "Review and configure them, then restart the server."),
-					       *ModFilePath);
-				}
-				else
-				{
-					UE_LOG(LogTemp, Warning,
-					       TEXT("DiscordBridge: Could not update '%s' with whitelist settings."),
-					       *ModFilePath);
-				}
-			}
-
 			// Second pass: detect individual settings that were added in later updates
-			// but may be absent from configs that already have the whitelist section.
+			// but may be absent from older configs.
 			// Only appends the specific missing keys so no existing custom values are lost.
 			{
+				FString TmpVal;
 				FString AppendContent2;
-
-				if (bFileHasWhitelist &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("WhitelistCommandRoleId"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# WhitelistCommandRoleId (added by mod update) --------------------------\n")
-						TEXT("# Snowflake ID of the Discord role whose members may run /whitelist commands.\n")
-						TEXT("# Leave empty (default) to disable /whitelist commands for all Discord users.\n")
-						TEXT("WhitelistCommandRoleId=\n");
-				}
-
-				if (bFileHasWhitelist &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("WhitelistRoleId"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# WhitelistRoleId (added by mod update) ---------------------------------\n")
-						TEXT("# Snowflake ID of the Discord role assigned to whitelisted members.\n")
-						TEXT("# Leave empty to disable Discord role integration.\n")
-						TEXT("WhitelistRoleId=\n");
-				}
-
-				if (bFileHasWhitelist &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("WhitelistChannelId"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# WhitelistChannelId (added by mod update) --------------------------------\n")
-						TEXT("# Snowflake ID of a dedicated Discord channel for whitelisted members.\n")
-						TEXT("# Leave empty to disable the whitelist-only channel.\n")
-						TEXT("WhitelistChannelId=\n");
-				}
-
-				if (bFileHasWhitelist &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("WhitelistKickDiscordMessage"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# WhitelistKickDiscordMessage (added by mod update) -------------------\n")
-						TEXT("# Message posted to Discord when a non-whitelisted player is kicked.\n")
-						TEXT("# Leave empty to disable this notification.\n")
-						TEXT("# Placeholder: %PlayerName% - in-game name of the kicked player.\n")
-						TEXT("WhitelistKickDiscordMessage=:boot: **%PlayerName%** tried to join but is not on the whitelist and was kicked.\n");
-				}
-
-				if (bFileHasWhitelist &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("WhitelistKickReason"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# WhitelistKickReason (added by mod update) ----------------------------\n")
-						TEXT("# Reason shown in-game to the player when kicked for not being whitelisted.\n")
-						TEXT("WhitelistKickReason=You are not on this server's whitelist. Contact the server admin to be added.\n");
-				}
-
-				if (bFileHasWhitelist &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("WhitelistEventsChannelId"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# WhitelistEventsChannelId (added by mod update) ----------------------\n")
-						TEXT("# Snowflake ID of a Discord channel where whitelist events are posted.\n")
-						TEXT("# Leave empty to disable whitelist event notifications.\n")
-						TEXT("WhitelistEventsChannelId=\n");
-				}
-
-				if (bFileHasWhitelist &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("MaxWhitelistSlots"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# MaxWhitelistSlots (added by mod update) ----------------------------\n")
-						TEXT("# Maximum number of whitelist slots. 0 = unlimited.\n")
-						TEXT("MaxWhitelistSlots=0\n");
-				}
-
-				if (bFileHasWhitelist &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("SyncWhitelistWithRole"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# SyncWhitelistWithRole (added by mod update) -------------------------\n")
-						TEXT("# When True, auto-add/remove players based on Discord WhitelistRoleId membership.\n")
-						TEXT("SyncWhitelistWithRole=False\n");
-				}
-
-				if (bFileHasWhitelist &&
-				    !ConfigFile.GetString(ConfigSection, TEXT("WhitelistApplicationChannelId"), TmpVal))
-				{
-					AppendContent2 +=
-						TEXT("\n")
-						TEXT("# WhitelistApplicationChannelId (added by mod update) ----------------\n")
-						TEXT("# Channel where whitelist application embeds (Approve/Deny) are posted.\n")
-						TEXT("# Leave empty to disable the application flow.\n")
-						TEXT("WhitelistApplicationChannelId=\n")
-						TEXT("# WhitelistApplyEnabled: when True, any Discord user can run /whitelist apply.\n")
-						TEXT("WhitelistApplyEnabled=False\n")
-						TEXT("# DM message sent to the Discord user when their application is approved.\n")
-						TEXT("# Placeholder: %PlayerName%. Leave empty to disable DMs.\n")
-						TEXT("WhitelistApprovedDmMessage=\n")
-						TEXT("# Hours before expiry to post a warning embed. 0 = disabled. Default: 24\n")
-						TEXT("WhitelistExpiryWarningHours=24\n")
-						TEXT("# When True, enables /whitelist link / in-game /verify account linking.\n")
-						TEXT("WhitelistVerificationEnabled=False\n")
-						TEXT("# Channel where /whitelist link commands are accepted. Empty = any channel.\n")
-						TEXT("WhitelistVerificationChannelId=\n");
-				}
 
 				if (!ConfigFile.GetString(ConfigSection, TEXT("ServerStatusMessagesEnabled"), TmpVal))
 				{
@@ -1013,36 +823,9 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			TEXT("PlayerCountActivityType=\n")
 			TEXT("\n")
 			TEXT("# -- WHITELIST ----------------------------------------------------------------\n")
-			TEXT("# Whether the whitelist is active. Default: False (all players can join).\n")
-			TEXT("WhitelistEnabled=False\n")
-			TEXT("# Snowflake ID of the Discord role whose members may run /whitelist commands.\n")
-			TEXT("WhitelistCommandRoleId=\n")
-			TEXT("# Snowflake ID of the Discord role assigned to whitelisted members.\n")
-			TEXT("WhitelistRoleId=\n")
-			TEXT("# Snowflake ID of a dedicated Discord channel for whitelisted members.\n")
-			TEXT("WhitelistChannelId=\n")
-			TEXT("# Message posted to Discord when a non-whitelisted player is kicked.\n")
-			TEXT("WhitelistKickDiscordMessage=:boot: **%PlayerName%** tried to join but is not on the whitelist and was kicked.\n")
-			TEXT("# Reason shown in-game to the player when kicked for not being whitelisted.\n")
-			TEXT("WhitelistKickReason=\n")
-			TEXT("# Snowflake ID of a Discord channel where whitelist events are posted. Leave empty to disable.\n")
-			TEXT("WhitelistEventsChannelId=\n")
-			TEXT("# Maximum whitelist slots. 0 = unlimited.\n")
-			TEXT("MaxWhitelistSlots=0\n")
-			TEXT("# When True, auto-add/remove players based on Discord WhitelistRoleId membership.\n")
-			TEXT("SyncWhitelistWithRole=False\n")
-			TEXT("# Channel where whitelist application embeds (Approve/Deny) are posted. Leave empty to disable.\n")
-			TEXT("WhitelistApplicationChannelId=\n")
-			TEXT("# When True, any Discord user can run /whitelist apply <InGameName>. Default: False\n")
-			TEXT("WhitelistApplyEnabled=False\n")
-			TEXT("# DM sent to user when approved. %PlayerName% placeholder. Leave empty to disable.\n")
-			TEXT("WhitelistApprovedDmMessage=\n")
-			TEXT("# Hours before expiry to post a warning. 0 = disabled. Default: 24\n")
-			TEXT("WhitelistExpiryWarningHours=24\n")
-			TEXT("# When True, enables /whitelist link / in-game /verify account linking. Default: False\n")
-			TEXT("WhitelistVerificationEnabled=False\n")
-			TEXT("# Channel where /whitelist link commands are accepted. Empty = any channel.\n")
-			TEXT("WhitelistVerificationChannelId=\n")
+			TEXT("# Whitelist settings have moved to a separate file for easier management:\n")
+			TEXT("#   Mods/DiscordBridge/Config/DefaultWhitelist.ini\n")
+			TEXT("\n")
 			TEXT("# -- PLAYER NOTIFICATIONS -----------------------------------------------------\n")
 			TEXT("# When True, posts a Discord message whenever a player joins, leaves, or times out.\n")
 			TEXT("# Default: False (disabled). Set to True to enable.\n")
@@ -1184,22 +967,9 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.PlayerCountPresenceFormat        = GetRawStringOrFallback(BackupValues, TEXT("PlayerCountPresenceFormat"),        Config.PlayerCountPresenceFormat);
 		Config.PlayerCountUpdateIntervalSeconds = GetRawFloatOrDefault (BackupValues, TEXT("PlayerCountUpdateIntervalSeconds"), Config.PlayerCountUpdateIntervalSeconds);
 		Config.PlayerCountActivityType          = GetRawIntOrDefault   (BackupValues, TEXT("PlayerCountActivityType"),          Config.PlayerCountActivityType);
-		Config.WhitelistCommandRoleId           = GetRawStringOrDefault(BackupValues, TEXT("WhitelistCommandRoleId"),           Config.WhitelistCommandRoleId);
-		Config.WhitelistRoleId                  = GetRawStringOrDefault(BackupValues, TEXT("WhitelistRoleId"),                  Config.WhitelistRoleId);
-		Config.WhitelistChannelId               = GetRawStringOrDefault(BackupValues, TEXT("WhitelistChannelId"),               Config.WhitelistChannelId);
-		Config.WhitelistKickDiscordMessage      = GetRawStringOrDefault(BackupValues, TEXT("WhitelistKickDiscordMessage"),      Config.WhitelistKickDiscordMessage);
-		Config.WhitelistKickReason              = GetRawStringOrFallback(BackupValues, TEXT("WhitelistKickReason"),              Config.WhitelistKickReason);
-		Config.bWhitelistEnabled                = GetRawBoolOrDefault  (BackupValues, TEXT("WhitelistEnabled"),                Config.bWhitelistEnabled);
-		Config.WhitelistEventsChannelId    = GetRawStringOrDefault(BackupValues, TEXT("WhitelistEventsChannelId"),    Config.WhitelistEventsChannelId);
-		Config.MaxWhitelistSlots           = GetRawIntOrDefault   (BackupValues, TEXT("MaxWhitelistSlots"),           Config.MaxWhitelistSlots);
-		Config.bSyncWhitelistWithRole      = GetRawBoolOrDefault  (BackupValues, TEXT("SyncWhitelistWithRole"),      Config.bSyncWhitelistWithRole);
-		Config.WhitelistApplicationChannelId = GetRawStringOrDefault(BackupValues, TEXT("WhitelistApplicationChannelId"), Config.WhitelistApplicationChannelId);
-		Config.bWhitelistApplyEnabled        = GetRawBoolOrDefault  (BackupValues, TEXT("WhitelistApplyEnabled"),        Config.bWhitelistApplyEnabled);
-		Config.WhitelistApprovedDmMessage    = GetRawStringOrDefault(BackupValues, TEXT("WhitelistApprovedDmMessage"),   Config.WhitelistApprovedDmMessage);
-		Config.WhitelistExpiryWarningHours   = GetRawFloatOrDefault (BackupValues, TEXT("WhitelistExpiryWarningHours"),  Config.WhitelistExpiryWarningHours);
-		Config.bWhitelistVerificationEnabled = GetRawBoolOrDefault  (BackupValues, TEXT("WhitelistVerificationEnabled"), Config.bWhitelistVerificationEnabled);
-		Config.WhitelistVerificationChannelId = GetRawStringOrDefault(BackupValues, TEXT("WhitelistVerificationChannelId"), Config.WhitelistVerificationChannelId);
 
+		// Whitelist settings are now in a separate config file
+		// (DefaultWhitelist.ini) loaded by FWhitelistConfig::Load().
 
 		// Player event notification settings
 		Config.bPlayerEventsEnabled    = GetRawBoolOrDefault  (BackupValues, TEXT("PlayerEventsEnabled"),    Config.bPlayerEventsEnabled);
@@ -1345,23 +1115,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("PlayerCountPresenceFormat"),     Config.PlayerCountPresenceFormat);
 				PatchLine(TEXT("PlayerCountUpdateIntervalSeconds"), *FString::SanitizeFloat(Config.PlayerCountUpdateIntervalSeconds));
 				PatchLine(TEXT("PlayerCountActivityType"),       *FString::FromInt(Config.PlayerCountActivityType));
-				PatchLine(TEXT("WhitelistEnabled"),              Config.bWhitelistEnabled ? TEXT("True") : TEXT("False"));
-				PatchLine(TEXT("WhitelistCommandRoleId"),        Config.WhitelistCommandRoleId);
-				PatchLine(TEXT("WhitelistCommandPrefix"),        Config.WhitelistCommandPrefix);
-				PatchLine(TEXT("WhitelistRoleId"),               Config.WhitelistRoleId);
-				PatchLine(TEXT("WhitelistChannelId"),            Config.WhitelistChannelId);
-				PatchLine(TEXT("WhitelistKickDiscordMessage"),   Config.WhitelistKickDiscordMessage);
-				PatchLine(TEXT("WhitelistKickReason"),           Config.WhitelistKickReason);
-				PatchLine(TEXT("InGameWhitelistCommandPrefix"),  Config.InGameWhitelistCommandPrefix);
-				PatchLine(TEXT("WhitelistEventsChannelId"),      Config.WhitelistEventsChannelId);
-				PatchLine(TEXT("MaxWhitelistSlots"),             *FString::FromInt(Config.MaxWhitelistSlots));
-				PatchLine(TEXT("SyncWhitelistWithRole"),         Config.bSyncWhitelistWithRole ? TEXT("True") : TEXT("False"));
-				PatchLine(TEXT("WhitelistApplicationChannelId"), Config.WhitelistApplicationChannelId);
-				PatchLine(TEXT("WhitelistApplyEnabled"),         Config.bWhitelistApplyEnabled ? TEXT("True") : TEXT("False"));
-				PatchLine(TEXT("WhitelistApprovedDmMessage"),    Config.WhitelistApprovedDmMessage);
-				PatchLine(TEXT("WhitelistExpiryWarningHours"),   *FString::SanitizeFloat(Config.WhitelistExpiryWarningHours));
-				PatchLine(TEXT("WhitelistVerificationEnabled"),  Config.bWhitelistVerificationEnabled ? TEXT("True") : TEXT("False"));
-				PatchLine(TEXT("WhitelistVerificationChannelId"), Config.WhitelistVerificationChannelId);
+				// Whitelist settings are now in DefaultWhitelist.ini (FWhitelistConfig).
 				PatchLine(TEXT("PlayerEventsEnabled"),           Config.bPlayerEventsEnabled ? TEXT("True") : TEXT("False"));
 				PatchLine(TEXT("PlayerEventsChannelId"),         Config.PlayerEventsChannelId);
 				PatchLine(TEXT("PlayerJoinMessage"),             Config.PlayerJoinMessage);
@@ -1479,21 +1233,6 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			+ TEXT("PlayerCountPresenceFormat=") + Config.PlayerCountPresenceFormat + TEXT("\n")
 			+ TEXT("PlayerCountUpdateIntervalSeconds=") + FString::SanitizeFloat(Config.PlayerCountUpdateIntervalSeconds) + TEXT("\n")
 			+ TEXT("PlayerCountActivityType=") + FString::FromInt(Config.PlayerCountActivityType) + TEXT("\n")
-			+ TEXT("WhitelistEnabled=") + (Config.bWhitelistEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
-			+ TEXT("WhitelistCommandRoleId=") + Config.WhitelistCommandRoleId + TEXT("\n")
-			+ TEXT("WhitelistRoleId=") + Config.WhitelistRoleId + TEXT("\n")
-			+ TEXT("WhitelistChannelId=") + Config.WhitelistChannelId + TEXT("\n")
-			+ TEXT("WhitelistKickDiscordMessage=") + Config.WhitelistKickDiscordMessage + TEXT("\n")
-			+ TEXT("WhitelistKickReason=") + Config.WhitelistKickReason + TEXT("\n")
-			+ TEXT("WhitelistEventsChannelId=") + Config.WhitelistEventsChannelId + TEXT("\n")
-			+ TEXT("MaxWhitelistSlots=") + FString::FromInt(Config.MaxWhitelistSlots) + TEXT("\n")
-			+ TEXT("SyncWhitelistWithRole=") + (Config.bSyncWhitelistWithRole ? TEXT("True") : TEXT("False")) + TEXT("\n")
-			+ TEXT("WhitelistApplicationChannelId=") + Config.WhitelistApplicationChannelId + TEXT("\n")
-			+ TEXT("WhitelistApplyEnabled=") + (Config.bWhitelistApplyEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
-			+ TEXT("WhitelistApprovedDmMessage=") + Config.WhitelistApprovedDmMessage + TEXT("\n")
-			+ TEXT("WhitelistExpiryWarningHours=") + FString::SanitizeFloat(Config.WhitelistExpiryWarningHours) + TEXT("\n")
-			+ TEXT("WhitelistVerificationEnabled=") + (Config.bWhitelistVerificationEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
-			+ TEXT("WhitelistVerificationChannelId=") + Config.WhitelistVerificationChannelId + TEXT("\n")
 			+ TEXT("PlayerEventsEnabled=") + (Config.bPlayerEventsEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
 			+ TEXT("PlayerEventsChannelId=") + Config.PlayerEventsChannelId + TEXT("\n")
 			+ TEXT("PlayerJoinMessage=") + Config.PlayerJoinMessage + TEXT("\n")
