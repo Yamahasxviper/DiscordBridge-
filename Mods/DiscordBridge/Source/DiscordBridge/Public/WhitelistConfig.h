@@ -98,10 +98,10 @@ struct DISCORDBRIDGE_API FWhitelistConfig
 	 * Reason shown in-game to the player when they are kicked because they are
 	 * not on the whitelist.  This is the text the player sees in the "Disconnected"
 	 * screen.
-	 * Default: "You are not on this server's whitelist. Contact the server admin to be added."
+	 * Default: "You are not on the server whitelist. Contact the server admin to be added."
 	 */
 	FString WhitelistKickReason{
-		TEXT("You are not on this server's whitelist. Contact the server admin to be added.")
+		TEXT("You are not on the server whitelist. Contact the server admin to be added.")
 	};
 
 	// ── Events channel ───────────────────────────────────────────────────────
