@@ -3412,19 +3412,49 @@ PostModerationLog(FString::Printf(TEXT("%s bulk-banned %d player(s). Reason: %s"
 
 void UBanDiscordSubsystem::OnDiscordInteraction(const TSharedPtr<FJsonObject>& InteractionObj)
 {
-if (!InteractionObj.IsValid() || !CachedProvider) return;
+if (!InteractionObj.IsValid() || !CachedProvider)
+{
+UE_LOG(LogBanDiscord, Warning,
+       TEXT("BanDiscordSubsystem: OnDiscordInteraction skipped — "
+            "InteractionObj is %s, CachedProvider is %s."),
+       InteractionObj.IsValid() ? TEXT("valid") : TEXT("null"),
+       CachedProvider ? TEXT("set") : TEXT("null"));
+return;
+}
 
 // Only handle APPLICATION_COMMAND interactions (type 2).
 int32 InteractionType = 0;
 InteractionObj->TryGetNumberField(TEXT("type"), InteractionType);
 if (InteractionType != 2) return;
 
+// Extract channel_id early so error messages can be posted.
+FString ChannelId;
+InteractionObj->TryGetStringField(TEXT("channel_id"), ChannelId);
+
 // Commands are disabled when neither role is configured.
-if (Config.AdminRoleId.IsEmpty() && Config.ModeratorRoleId.IsEmpty()) return;
+if (Config.AdminRoleId.IsEmpty() && Config.ModeratorRoleId.IsEmpty())
+{
+UE_LOG(LogBanDiscord, Warning,
+       TEXT("BanDiscordSubsystem: Slash command ignored — "
+            "neither AdminRoleId nor ModeratorRoleId is set in DefaultBanBridge.ini."));
+if (!ChannelId.IsEmpty())
+{
+CachedProvider->SendDiscordChannelMessage(ChannelId,
+    TEXT("❌ Ban commands are disabled — `AdminRoleId` is not configured.\n"
+         "Set `AdminRoleId` in `DefaultBanBridge.ini` and restart the server."));
+}
+return;
+}
 
 // Extract command data.
 const TSharedPtr<FJsonObject>* CmdDataPtr = nullptr;
-if (!InteractionObj->TryGetObjectField(TEXT("data"), CmdDataPtr) || !CmdDataPtr) return;
+if (!InteractionObj->TryGetObjectField(TEXT("data"), CmdDataPtr) || !CmdDataPtr)
+{
+UE_LOG(LogBanDiscord, Warning,
+       TEXT("BanDiscordSubsystem: Slash command ignored — "
+            "interaction payload has no 'data' field."));
+return;
+}
 
 FString CmdGroupName;
 (*CmdDataPtr)->TryGetStringField(TEXT("name"), CmdGroupName);
@@ -3440,10 +3470,28 @@ if (!HandledGroups.Contains(CmdGroupName)) return;
 // Extract the subcommand and its option list.
 const TArray<TSharedPtr<FJsonValue>>* TopOpts = nullptr;
 (*CmdDataPtr)->TryGetArrayField(TEXT("options"), TopOpts);
-if (!TopOpts || TopOpts->IsEmpty()) return;
+if (!TopOpts || TopOpts->IsEmpty())
+{
+UE_LOG(LogBanDiscord, Warning,
+       TEXT("BanDiscordSubsystem: /%s interaction has no subcommand options."),
+       *CmdGroupName);
+if (!ChannelId.IsEmpty())
+CachedProvider->SendDiscordChannelMessage(ChannelId,
+    TEXT("❌ Could not parse the subcommand. Please try the command again."));
+return;
+}
 
 const TSharedPtr<FJsonObject>* SubCmdPtr = nullptr;
-if (!(*TopOpts)[0]->TryGetObject(SubCmdPtr) || !SubCmdPtr) return;
+if (!(*TopOpts)[0]->TryGetObject(SubCmdPtr) || !SubCmdPtr)
+{
+UE_LOG(LogBanDiscord, Warning,
+       TEXT("BanDiscordSubsystem: /%s interaction subcommand object is malformed."),
+       *CmdGroupName);
+if (!ChannelId.IsEmpty())
+CachedProvider->SendDiscordChannelMessage(ChannelId,
+    TEXT("❌ Could not parse the subcommand. Please try the command again."));
+return;
+}
 
 FString SubCmdName;
 (*SubCmdPtr)->TryGetStringField(TEXT("name"), SubCmdName);
@@ -3453,9 +3501,8 @@ const TArray<TSharedPtr<FJsonValue>>* SubOpts = nullptr;
 (*SubCmdPtr)->TryGetArrayField(TEXT("options"), SubOpts);
 
 // Extract sender identity, channel, and roles.
-FString ChannelId, SenderName, AuthorId;
+FString SenderName, AuthorId;
 TArray<FString> MemberRoles;
-InteractionObj->TryGetStringField(TEXT("channel_id"), ChannelId);
 
 const TSharedPtr<FJsonObject>* MemberPtr = nullptr;
 if (InteractionObj->TryGetObjectField(TEXT("member"), MemberPtr) && MemberPtr)
@@ -3481,7 +3528,13 @@ if (RV->TryGetString(RId)) MemberRoles.Add(RId);
 }
 }
 if (SenderName.IsEmpty()) SenderName = TEXT("Discord Admin");
-if (ChannelId.IsEmpty()) return;
+if (ChannelId.IsEmpty())
+{
+UE_LOG(LogBanDiscord, Warning,
+       TEXT("BanDiscordSubsystem: /%s %s — channel_id is empty, cannot respond."),
+       *CmdGroupName, *SubCmdName);
+return;
+}
 
 // Helper: extract a named option value as a string (handles STRING and INTEGER types).
 auto GetOpt = [&](const FString& Name) -> FString
@@ -3527,6 +3580,7 @@ return;
 
 // ── Route to the appropriate command handler ──────────────────────────────
 TArray<FString> Args;
+bool bHandled = true;
 
 if (CmdGroupName == TEXT("ban"))
 {
@@ -3629,6 +3683,7 @@ Args.Add(TEXT("--"));
 if (!Reason.IsEmpty()) Args.Add(Reason);
 HandleBulkBanCommand(Args, ChannelId, SenderName);
 }
+else { bHandled = false; }
 }
 else if (CmdGroupName == TEXT("warn"))
 {
@@ -3653,6 +3708,7 @@ else if (SubCmdName == TEXT("clearone"))
 Args.Add(GetOpt(TEXT("warning_id")));
 HandleClearWarnByIdCommand(Args, ChannelId, SenderName);
 }
+else { bHandled = false; }
 }
 else if (CmdGroupName == TEXT("mod"))
 {
@@ -3720,6 +3776,7 @@ else if (SubCmdName == TEXT("staffchat"))
 Args.Add(GetOpt(TEXT("message")));
 HandleStaffChatCommand(Args, ChannelId, SenderName);
 }
+else { bHandled = false; }
 }
 else if (CmdGroupName == TEXT("player"))
 {
@@ -3756,6 +3813,7 @@ Args.Add(GetOpt(TEXT("player")));
 HandleReputationCommand(Args, ChannelId);
 }
 // "stats" is intentionally absent — handled in DiscordBridgeSubsystem.
+else { bHandled = false; }
 }
 else if (CmdGroupName == TEXT("appeal"))
 {
@@ -3778,6 +3836,7 @@ else if (SubCmdName == TEXT("deny"))
 Args.Add(GetOpt(TEXT("id")));
 HandleAppealDenyCommand(Args, ChannelId, SenderName);
 }
+else { bHandled = false; }
 }
 else if (CmdGroupName == TEXT("admin"))
 {
@@ -3804,5 +3863,16 @@ else if (SubCmdName == TEXT("reloadconfig"))
 {
 HandleReloadConfigCommand(ChannelId, SenderName);
 }
+else { bHandled = false; }
+}
+else { bHandled = false; }
+
+if (!bHandled)
+{
+UE_LOG(LogBanDiscord, Warning,
+       TEXT("BanDiscordSubsystem: Unrecognised slash command /%s %s — no handler matched."),
+       *CmdGroupName, *SubCmdName);
+CachedProvider->SendDiscordChannelMessage(ChannelId,
+    FString::Printf(TEXT("❌ Unknown subcommand `/%s %s`."), *CmdGroupName, *SubCmdName));
 }
 }

@@ -5475,10 +5475,23 @@ TEXT("player"), TEXT("appeal"), TEXT("admin"),
 };
 if (BanGroups.Contains(CmdName))
 {
+if (!OnDiscordInteractionReceived.IsBound())
+{
+// BanDiscordSubsystem is not subscribed — respond with a helpful error
+// instead of the "Processing command…" ack that would leave the user
+// waiting forever.
+UE_LOG(LogDiscordBridge, Warning,
+       TEXT("DiscordBridge: /%s slash command received but no interaction "
+            "subscriber is registered. BanDiscordSubsystem may not be loaded."),
+       *CmdName);
+RespondToInteraction(InteractionId, InteractionToken, 4,
+    TEXT("❌ Ban system is not available — the BanDiscordSubsystem module is not loaded."),
+    true);
+return;
+}
+
 RespondToInteraction(InteractionId, InteractionToken, 4,
     TEXT("✅ Processing command…"), true);
-// Re-broadcast so UBanDiscordSubsystem (subscribed via SubscribeInteraction) handles it.
-if (OnDiscordInteractionReceived.IsBound())
 OnDiscordInteractionReceived.Broadcast(DataObj);
 }
 }
