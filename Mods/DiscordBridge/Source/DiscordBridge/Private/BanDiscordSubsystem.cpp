@@ -98,6 +98,36 @@ namespace BanDiscordHelpers
 		return Out;
 	}
 
+	/**
+	 * Look up the player's session record and return a string with EOS PUID
+	 * and IP address suitable for appending to a ban confirmation message.
+	 * Returns an empty string when no session record is found.
+	 */
+	static FString FormatPlayerLookup(const UBanDiscordSubsystem* Self,
+	                                  const FString& Uid)
+	{
+		UPlayerSessionRegistry* Registry = GetRegistry(Self);
+		if (!Registry) return FString();
+
+		FPlayerSessionRecord Record;
+		if (!Registry->FindByUid(Uid, Record)) return FString();
+
+		FString Info;
+		// Extract the raw EOS PUID from the compound UID.
+		FString Platform, RawPuid;
+		UBanDatabase::ParseUid(Record.Uid, Platform, RawPuid);
+		if (!RawPuid.IsEmpty())
+			Info += FString::Printf(TEXT("\nEOS PUID: `%s`"), *RawPuid);
+
+		if (!Record.IpAddress.IsEmpty())
+			Info += FString::Printf(TEXT("\nIP: `%s`"), *Record.IpAddress);
+
+		if (!Record.LastSeen.IsEmpty())
+			Info += FString::Printf(TEXT("\nLast seen: %s"), *Record.LastSeen);
+
+		return Info;
+	}
+
 	// Number of bans shown per /ban list page.
 	static constexpr int32 BanListPageSize = 10;
 }
@@ -526,6 +556,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 
 	// Format confirmation message.
 	const FString SafeName = BanDiscordHelpers::EscapeMarkdown(DisplayName);
+	const FString LookupInfo = BanDiscordHelpers::FormatPlayerLookup(this, Uid);
 	FString Msg;
 	if (bTemporary)
 	{
@@ -543,6 +574,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 			     "Reason: %s\nBanned by: %s"),
 			*SafeName, *Uid, *Entry.Reason, *SenderName);
 	}
+	Msg += LookupInfo;
 
 	UE_LOG(LogBanDiscord, Log, TEXT("BanDiscordSubsystem: %s banned %s (%s). Reason: %s"),
 	       *SenderName, *DisplayName, *Uid, *Entry.Reason);
@@ -693,6 +725,9 @@ void UBanDiscordSubsystem::HandleBanCheckCommand(const TArray<FString>& Args,
 				*DisplayName, *Uid);
 		}
 	}
+
+	// Append player session lookup (EOS PUID + IP).
+	Msg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
 
 	Respond(ChannelId, Msg);
 }
@@ -917,9 +952,10 @@ void UBanDiscordSubsystem::HandleKickCommand(const TArray<FString>& Args,
 	if (bKicked)
 	{
 		FBanDiscordNotifier::NotifyPlayerKicked(DisplayName, Reason, SenderName);
-		const FString KickMsg = FString::Printf(
+		FString KickMsg = FString::Printf(
 			TEXT("✅ Kicked **%s** (`%s`).\nReason: %s\nKicked by: %s"),
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *Reason, *SenderName);
+		KickMsg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
 		Respond(ChannelId, KickMsg);
 		PostModerationLog(KickMsg);
 	}
@@ -1303,8 +1339,17 @@ void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
 	FString Msg = FString::Printf(
 		TEXT("✅ Banned **%s** (`%s`) — %d record(s) added.\nReason: %s\nBanned by: %s"),
 		*SafeName, *Record.Uid, Banned, *Reason, *SenderName);
+
+	// Show EOS PUID.
+	FString ByNamePlatform, ByNameRawPuid;
+	UBanDatabase::ParseUid(Record.Uid, ByNamePlatform, ByNameRawPuid);
+	if (!ByNameRawPuid.IsEmpty())
+		Msg += FString::Printf(TEXT("\nEOS PUID: `%s`"), *ByNameRawPuid);
+
 	if (!IpUid.IsEmpty())
 		Msg += FString::Printf(TEXT("\nIP ban: `%s`"), *IpUid);
+	else if (!Record.IpAddress.IsEmpty())
+		Msg += FString::Printf(TEXT("\nIP: `%s` (not IP-banned)"), *Record.IpAddress);
 
 	UE_LOG(LogBanDiscord, Log, TEXT("BanDiscordSubsystem: %s banname %s (%s). Reason: %s"),
 		*SenderName, *Record.DisplayName, *Record.Uid, *Reason);
@@ -1838,8 +1883,11 @@ void UBanDiscordSubsystem::HandleNotesCommand(const TArray<FString>& Args,
 		TEXT("**Notes for %s** (`%s`) — %d total\n"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, Notes.Num());
 	FString Msg = Header + Body;
-	if (Msg.Len() > 1990)
-		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
+	if (Msg.Len() > 1800)
+		Msg = Msg.Left(1750) + TEXT("\n...(truncated)```");
+	// Append player session lookup (EOS PUID + IP).
+	Msg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
+
 	Respond(ChannelId, Msg);
 }
 
@@ -1969,12 +2017,13 @@ void UBanDiscordSubsystem::HandleModBanCommand(const TArray<FString>& Args,
 	if (UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr)
 		UBanEnforcer::KickConnectedPlayer(World, Uid, Entry.GetKickMessage());
 
-	const FString Msg = FString::Printf(
+	FString Msg = FString::Printf(
 		TEXT("🔨 **%s** (`%s`) has been banned for **%d minute(s)** (mod action).\n"
 		     "Expires: %s UTC\nReason: %s\nBanned by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, DurationMinutes,
 		*Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")),
 		*Reason, *SenderName);
+	Msg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
 
 	UE_LOG(LogBanDiscord, Log,
 		TEXT("BanDiscordSubsystem: %s modban %s (%s) for %d min. Reason: %s"),
@@ -3045,9 +3094,10 @@ UBanEnforcer::KickConnectedPlayer(W, Uid, Ban.GetKickMessage());
 FBanDiscordNotifier::NotifyBanCreated(Ban);
 
 const FString DurStr = Ban.bIsPermanent ? TEXT("permanent") : FString::Printf(TEXT("%dmin"), Template->DurationMinutes);
-Respond(ChannelId,
-FString::Printf(TEXT(":hammer: [%s] Banned **%s** (%s). Reason: %s. Duration: %s."),
-*Slug, *DisplayName, *Uid, *Template->Reason, *DurStr));
+FString QBanMsg = FString::Printf(TEXT(":hammer: [%s] Banned **%s** (%s). Reason: %s. Duration: %s."),
+*Slug, *DisplayName, *Uid, *Template->Reason, *DurStr);
+QBanMsg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
+Respond(ChannelId, QBanMsg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
