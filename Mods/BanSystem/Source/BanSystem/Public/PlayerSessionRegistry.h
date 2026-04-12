@@ -85,6 +85,12 @@ public:
                        const FString& ClientVersion = FString());
 
     /**
+     * Returns the total number of session records in the registry.
+     * Thread-safe.
+     */
+    int32 GetCount() const;
+
+    /**
      * Returns all session records whose display name contains the given substring
      * (case-insensitive).  Useful for /playerhistory <name>.
      */
