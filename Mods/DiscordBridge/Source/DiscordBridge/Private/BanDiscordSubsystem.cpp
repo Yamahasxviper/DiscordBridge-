@@ -142,6 +142,11 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 		CachedProvider->UnsubscribeRawMessage(RawMessageDelegateHandle);
 		RawMessageDelegateHandle.Reset();
 	}
+	if (CachedProvider && InteractionDelegateHandle.IsValid())
+	{
+		CachedProvider->UnsubscribeInteraction(InteractionDelegateHandle);
+		InteractionDelegateHandle.Reset();
+	}
 
 	// Unbind appeal-submitted notification when clearing the provider.
 	if (AppealSubmittedDelegateHandle.IsValid())
@@ -161,6 +166,13 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 			{
 				if (UBanDiscordSubsystem* Self = WeakThis.Get())
 					Self->OnRawDiscordMessage(MsgObj);
+			});
+
+		InteractionDelegateHandle = CachedProvider->SubscribeInteraction(
+			[WeakThis](const TSharedPtr<FJsonObject>& InteractionObj)
+			{
+				if (UBanDiscordSubsystem* Self = WeakThis.Get())
+					Self->OnDiscordInteraction(InteractionObj);
 			});
 
 		// Bind to appeal-submitted notifications so new appeals are posted to Discord.
@@ -3392,4 +3404,405 @@ CachedProvider->SendDiscordChannelMessage(ChannelId,
 FString::Printf(TEXT(":hammer: Bulk ban complete: **%d/%d** players banned. Reason: %s"),
 BannedCount, Uids.Num(), *Reason));
 PostModerationLog(FString::Printf(TEXT("%s bulk-banned %d player(s). Reason: %s"), *SenderName, BannedCount, *Reason));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Slash command interaction handler
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::OnDiscordInteraction(const TSharedPtr<FJsonObject>& InteractionObj)
+{
+if (!InteractionObj.IsValid() || !CachedProvider) return;
+
+// Only handle APPLICATION_COMMAND interactions (type 2).
+int32 InteractionType = 0;
+InteractionObj->TryGetNumberField(TEXT("type"), InteractionType);
+if (InteractionType != 2) return;
+
+// Commands are disabled when neither role is configured.
+if (Config.AdminRoleId.IsEmpty() && Config.ModeratorRoleId.IsEmpty()) return;
+
+// Extract command data.
+const TSharedPtr<FJsonObject>* CmdDataPtr = nullptr;
+if (!InteractionObj->TryGetObjectField(TEXT("data"), CmdDataPtr) || !CmdDataPtr) return;
+
+FString CmdGroupName;
+(*CmdDataPtr)->TryGetStringField(TEXT("name"), CmdGroupName);
+CmdGroupName = CmdGroupName.ToLower();
+
+// Only handle groups that belong to BanDiscordSubsystem.
+static const TArray<FString> HandledGroups = {
+TEXT("ban"), TEXT("warn"), TEXT("mod"),
+TEXT("player"), TEXT("appeal"), TEXT("admin"),
+};
+if (!HandledGroups.Contains(CmdGroupName)) return;
+
+// Extract the subcommand and its option list.
+const TArray<TSharedPtr<FJsonValue>>* TopOpts = nullptr;
+(*CmdDataPtr)->TryGetArrayField(TEXT("options"), TopOpts);
+if (!TopOpts || TopOpts->IsEmpty()) return;
+
+const TSharedPtr<FJsonObject>* SubCmdPtr = nullptr;
+if (!(*TopOpts)[0]->TryGetObject(SubCmdPtr) || !SubCmdPtr) return;
+
+FString SubCmdName;
+(*SubCmdPtr)->TryGetStringField(TEXT("name"), SubCmdName);
+SubCmdName = SubCmdName.ToLower();
+
+const TArray<TSharedPtr<FJsonValue>>* SubOpts = nullptr;
+(*SubCmdPtr)->TryGetArrayField(TEXT("options"), SubOpts);
+
+// Extract sender identity, channel, and roles.
+FString ChannelId, SenderName, AuthorId;
+TArray<FString> MemberRoles;
+InteractionObj->TryGetStringField(TEXT("channel_id"), ChannelId);
+
+const TSharedPtr<FJsonObject>* MemberPtr = nullptr;
+if (InteractionObj->TryGetObjectField(TEXT("member"), MemberPtr) && MemberPtr)
+{
+(*MemberPtr)->TryGetStringField(TEXT("nick"), SenderName);
+const TSharedPtr<FJsonObject>* UserPtr = nullptr;
+if ((*MemberPtr)->TryGetObjectField(TEXT("user"), UserPtr) && UserPtr)
+{
+(*UserPtr)->TryGetStringField(TEXT("id"), AuthorId);
+if (SenderName.IsEmpty())
+(*UserPtr)->TryGetStringField(TEXT("global_name"), SenderName);
+if (SenderName.IsEmpty())
+(*UserPtr)->TryGetStringField(TEXT("username"), SenderName);
+}
+const TArray<TSharedPtr<FJsonValue>>* RolesArr = nullptr;
+if ((*MemberPtr)->TryGetArrayField(TEXT("roles"), RolesArr) && RolesArr)
+{
+for (const TSharedPtr<FJsonValue>& RV : *RolesArr)
+{
+FString RId;
+if (RV->TryGetString(RId)) MemberRoles.Add(RId);
+}
+}
+}
+if (SenderName.IsEmpty()) SenderName = TEXT("Discord Admin");
+if (ChannelId.IsEmpty()) return;
+
+// Helper: extract a named option value as a string (handles STRING and INTEGER types).
+auto GetOpt = [&](const FString& Name) -> FString
+{
+if (!SubOpts) return FString();
+for (const TSharedPtr<FJsonValue>& Opt : *SubOpts)
+{
+const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+if (!Opt->TryGetObject(ObjPtr) || !ObjPtr) continue;
+FString OptName;
+if (!(*ObjPtr)->TryGetStringField(TEXT("name"), OptName) ||
+    !OptName.Equals(Name, ESearchCase::IgnoreCase)) continue;
+FString StrVal;
+if ((*ObjPtr)->TryGetStringField(TEXT("value"), StrVal)) return StrVal;
+double NumVal = 0.0;
+if ((*ObjPtr)->TryGetNumberField(TEXT("value"), NumVal))
+return FString::Printf(TEXT("%lld"), static_cast<int64>(NumVal));
+return FString();
+}
+return FString();
+};
+
+// Determine required permission level.
+// /mod subcommands are accessible to moderators; all others require admin.
+static const TArray<FString> ModOnlyCmds = {
+TEXT("kick"), TEXT("modban"), TEXT("mute"), TEXT("unmute"),
+TEXT("tempmute"), TEXT("tempunmute"), TEXT("mutecheck"), TEXT("mutelist"),
+TEXT("mutereason"), TEXT("announce"), TEXT("stafflist"), TEXT("staffchat"),
+};
+const bool bNeedsAdminOnly = (CmdGroupName != TEXT("mod")) || !ModOnlyCmds.Contains(SubCmdName);
+const bool bAuthorised     = bNeedsAdminOnly
+? IsAdminMember(MemberRoles)
+: IsModeratorMember(MemberRoles);
+
+if (!bAuthorised)
+{
+CachedProvider->SendDiscordChannelMessage(ChannelId,
+bNeedsAdminOnly
+? TEXT("❌ Admin role required for that command.")
+: TEXT("❌ Moderator role required for that command."));
+return;
+}
+
+// ── Route to the appropriate command handler ──────────────────────────────
+TArray<FString> Args;
+
+if (CmdGroupName == TEXT("ban"))
+{
+if (SubCmdName == TEXT("add"))
+{
+Args.Add(GetOpt(TEXT("player")));
+const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
+HandleBanCommand(Args, ChannelId, SenderName, false);
+}
+else if (SubCmdName == TEXT("temp"))
+{
+// Convert duration string (e.g. "2h") to minutes.
+const FString Player = GetOpt(TEXT("player"));
+const FString DurStr = GetOpt(TEXT("duration"));
+const int32 Minutes  = ParseDurationMinutes(DurStr);
+const FString Reason = GetOpt(TEXT("reason"));
+Args.Add(Player);
+Args.Add(FString::FromInt(FMath::Max(1, Minutes)));
+if (!Reason.IsEmpty()) Args.Add(Reason);
+HandleBanCommand(Args, ChannelId, SenderName, true);
+}
+else if (SubCmdName == TEXT("remove"))
+{
+Args.Add(GetOpt(TEXT("uid")));
+HandleUnbanCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("removename"))
+{
+Args.Add(GetOpt(TEXT("name")));
+HandleUnbanNameCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("byname"))
+{
+Args.Add(GetOpt(TEXT("name")));
+const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
+HandleBanNameCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("check"))
+{
+Args.Add(GetOpt(TEXT("player")));
+HandleBanCheckCommand(Args, ChannelId);
+}
+else if (SubCmdName == TEXT("reason"))
+{
+Args.Add(GetOpt(TEXT("player")));
+Args.Add(GetOpt(TEXT("new_reason")));
+HandleBanReasonCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("list"))
+{
+const FString P = GetOpt(TEXT("page")); if (!P.IsEmpty()) Args.Add(P);
+HandleBanListCommand(Args, ChannelId);
+}
+else if (SubCmdName == TEXT("extend"))
+{
+Args.Add(GetOpt(TEXT("player")));
+Args.Add(GetOpt(TEXT("duration")));
+HandleExtendBanCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("duration"))
+{
+Args.Add(GetOpt(TEXT("player")));
+HandleDurationCommand(Args, ChannelId);
+}
+else if (SubCmdName == TEXT("link"))
+{
+Args.Add(GetOpt(TEXT("uid1")));
+Args.Add(GetOpt(TEXT("uid2")));
+HandleLinkBansCommand(Args, ChannelId, SenderName, true);
+}
+else if (SubCmdName == TEXT("unlink"))
+{
+Args.Add(GetOpt(TEXT("uid1")));
+Args.Add(GetOpt(TEXT("uid2")));
+HandleLinkBansCommand(Args, ChannelId, SenderName, false);
+}
+else if (SubCmdName == TEXT("schedule"))
+{
+Args.Add(GetOpt(TEXT("player")));
+Args.Add(GetOpt(TEXT("delay")));
+const FString BD = GetOpt(TEXT("ban_duration")); if (!BD.IsEmpty()) Args.Add(BD);
+const FString R  = GetOpt(TEXT("reason"));       if (!R.IsEmpty())  Args.Add(R);
+HandleScheduleBanCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("quick"))
+{
+Args.Add(GetOpt(TEXT("template")));
+Args.Add(GetOpt(TEXT("player")));
+HandleQBanCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("bulk"))
+{
+// Split the space-separated player list into individual UID args.
+const FString PlayersStr = GetOpt(TEXT("players"));
+const FString Reason     = GetOpt(TEXT("reason"));
+TArray<FString> PlayerTokens;
+PlayersStr.ParseIntoArrayWS(PlayerTokens);
+Args.Append(PlayerTokens);
+Args.Add(TEXT("--"));
+if (!Reason.IsEmpty()) Args.Add(Reason);
+HandleBulkBanCommand(Args, ChannelId, SenderName);
+}
+}
+else if (CmdGroupName == TEXT("warn"))
+{
+if (SubCmdName == TEXT("add"))
+{
+Args.Add(GetOpt(TEXT("player")));
+Args.Add(GetOpt(TEXT("reason")));
+HandleWarnCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("list"))
+{
+Args.Add(GetOpt(TEXT("player")));
+HandleWarningsCommand(Args, ChannelId);
+}
+else if (SubCmdName == TEXT("clearall"))
+{
+Args.Add(GetOpt(TEXT("player")));
+HandleClearWarnsCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("clearone"))
+{
+Args.Add(GetOpt(TEXT("warning_id")));
+HandleClearWarnByIdCommand(Args, ChannelId, SenderName);
+}
+}
+else if (CmdGroupName == TEXT("mod"))
+{
+if (SubCmdName == TEXT("kick"))
+{
+Args.Add(GetOpt(TEXT("player")));
+const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
+HandleKickCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("modban"))
+{
+Args.Add(GetOpt(TEXT("player")));
+const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
+HandleModBanCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("mute"))
+{
+Args.Add(GetOpt(TEXT("player")));
+const FString Mins = GetOpt(TEXT("minutes")); if (!Mins.IsEmpty()) Args.Add(Mins);
+const FString R    = GetOpt(TEXT("reason"));  if (!R.IsEmpty())    Args.Add(R);
+HandleMuteCommand(Args, ChannelId, SenderName, true);
+}
+else if (SubCmdName == TEXT("unmute"))
+{
+Args.Add(GetOpt(TEXT("player")));
+HandleMuteCommand(Args, ChannelId, SenderName, false);
+}
+else if (SubCmdName == TEXT("tempmute"))
+{
+Args.Add(GetOpt(TEXT("player")));
+Args.Add(GetOpt(TEXT("minutes")));
+HandleTempMuteCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("tempunmute"))
+{
+Args.Add(GetOpt(TEXT("player")));
+HandleTempUnmuteCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("mutecheck"))
+{
+Args.Add(GetOpt(TEXT("player")));
+HandleMuteCheckCommand(Args, ChannelId);
+}
+else if (SubCmdName == TEXT("mutelist"))
+{
+HandleMuteListCommand(ChannelId);
+}
+else if (SubCmdName == TEXT("mutereason"))
+{
+Args.Add(GetOpt(TEXT("player")));
+Args.Add(GetOpt(TEXT("new_reason")));
+HandleMuteReasonCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("announce"))
+{
+Args.Add(GetOpt(TEXT("message")));
+HandleAnnounceCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("stafflist"))
+{
+HandleStaffListCommand(ChannelId);
+}
+else if (SubCmdName == TEXT("staffchat"))
+{
+Args.Add(GetOpt(TEXT("message")));
+HandleStaffChatCommand(Args, ChannelId, SenderName);
+}
+}
+else if (CmdGroupName == TEXT("player"))
+{
+// Note: /player stats is handled by DiscordBridgeSubsystem (not BanDiscordSubsystem).
+if (SubCmdName == TEXT("history"))
+{
+Args.Add(GetOpt(TEXT("query")));
+HandlePlayerHistoryCommand(Args, ChannelId);
+}
+else if (SubCmdName == TEXT("note"))
+{
+Args.Add(GetOpt(TEXT("player")));
+Args.Add(GetOpt(TEXT("text"))); // JoinArgs(Args, 1) in handler reassembles the text
+HandleNoteCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("notes"))
+{
+Args.Add(GetOpt(TEXT("player")));
+HandleNotesCommand(Args, ChannelId);
+}
+else if (SubCmdName == TEXT("reason"))
+{
+Args.Add(GetOpt(TEXT("uid")));
+HandleReasonCommand(Args, ChannelId);
+}
+else if (SubCmdName == TEXT("playtime"))
+{
+Args.Add(GetOpt(TEXT("player")));
+HandlePlaytimeCommand(Args, ChannelId);
+}
+else if (SubCmdName == TEXT("reputation"))
+{
+Args.Add(GetOpt(TEXT("player")));
+HandleReputationCommand(Args, ChannelId);
+}
+// "stats" is intentionally absent — handled in DiscordBridgeSubsystem.
+}
+else if (CmdGroupName == TEXT("appeal"))
+{
+if (SubCmdName == TEXT("list"))
+{
+HandleAppealsCommand(ChannelId);
+}
+else if (SubCmdName == TEXT("dismiss"))
+{
+Args.Add(GetOpt(TEXT("id")));
+HandleDismissAppealCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("approve"))
+{
+Args.Add(GetOpt(TEXT("id")));
+HandleAppealApproveCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("deny"))
+{
+Args.Add(GetOpt(TEXT("id")));
+HandleAppealDenyCommand(Args, ChannelId, SenderName);
+}
+}
+else if (CmdGroupName == TEXT("admin"))
+{
+if (SubCmdName == TEXT("say"))
+{
+Args.Add(GetOpt(TEXT("message")));
+HandleSayCommand(Args, ChannelId, SenderName);
+}
+else if (SubCmdName == TEXT("poll"))
+{
+// Reconstruct the pipe-delimited string that HandlePollCommand expects
+// (JoinArgs(Args, 0) then split on "|").
+const FString Question = GetOpt(TEXT("question"));
+const FString Options  = GetOpt(TEXT("options")); // "Yes|No|Maybe"
+TArray<FString> OptTokens;
+Options.ParseIntoArray(OptTokens, TEXT("|"), true);
+FString PollText = Question;
+for (const FString& O : OptTokens)
+PollText += TEXT(" | ") + O.TrimStartAndEnd();
+Args.Add(PollText);
+HandlePollCommand(Args, ChannelId);
+}
+else if (SubCmdName == TEXT("reloadconfig"))
+{
+HandleReloadConfigCommand(ChannelId, SenderName);
+}
+}
 }

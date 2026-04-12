@@ -849,9 +849,18 @@ private:
 
 	// ── Slash command registration ────────────────────────────────────────────
 
-	/** Register built-in Discord application slash commands (/players, /stats, /server)
-	 *  with the Discord REST API. Called on READY when bEnableSlashCommands=true. */
+	/** Register all Discord application slash commands with the guild via the
+	 *  REST bulk-overwrite endpoint. Called on READY when bEnableSlashCommands=true. */
 	void RegisterSlashCommands();
+
+	/** Handle an APPLICATION_COMMAND slash command interaction (interaction type 2).
+	 *  Called from the INTERACTION_CREATE gateway event handler. */
+	void HandleSlashCommandInteraction(const TSharedPtr<FJsonObject>& DataObj);
+
+	/** Extract the string value of a named option from a Discord slash command options array.
+	 *  Handles both STRING and INTEGER option types.  Returns empty string when not found. */
+	static FString GetSlashOptionString(const TArray<TSharedPtr<FJsonValue>>* Options,
+	                                    const FString& Name);
 
 	/** Post a whitelist event embed to WhitelistEventsChannelId. */
 	void PostWhitelistEvent(const FString& Action, const FString& Target,
