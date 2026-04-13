@@ -907,6 +907,10 @@ private:
 	 *  Called from the INTERACTION_CREATE gateway event handler. */
 	void HandleSlashCommandInteraction(const TSharedPtr<FJsonObject>& DataObj);
 
+	/** Handle an APPLICATION_COMMAND_AUTOCOMPLETE interaction (interaction type 4).
+	 *  Returns up to 25 matching player names from PlayerSessionRegistry. */
+	void HandleAutocompleteInteraction(const TSharedPtr<FJsonObject>& DataObj);
+
 	/** Extract the string value of a named option from a Discord slash command options array.
 	 *  Handles both STRING and INTEGER option types.  Returns empty string when not found. */
 	static FString GetSlashOptionString(const TArray<TSharedPtr<FJsonValue>>* Options,
