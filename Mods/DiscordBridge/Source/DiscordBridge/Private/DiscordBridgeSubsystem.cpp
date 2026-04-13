@@ -5300,6 +5300,17 @@ void UDiscordBridgeSubsystem::HandleAutocompleteInteraction(
 	}
 
 	// ── Build the choices array from the PlayerSessionRegistry ─────────────
+	// Choices cover three identifier types that the command handlers accept:
+	//   • Display name  (value = "PlayerName")
+	//   • EOS compound UID (value = "EOS:<32hex>")
+	//   • IP compound UID  (value = "IP:<address>")
+	// Routing depends on what the admin has started typing:
+	//   - Empty           → recent players by display name
+	//   - Starts "EOS:"   → EOS UID substring search
+	//   - Starts "IP:" or IP fragment (digits + dots)
+	//                     → IP substring search via FindByIp()
+	//   - Otherwise       → name search, with EOS/IP alternatives for each match
+
 	TArray<TSharedPtr<FJsonValue>> Choices;
 
 	UGameInstance* GI = GetGameInstance();
@@ -5307,31 +5318,112 @@ void UDiscordBridgeSubsystem::HandleAutocompleteInteraction(
 
 	if (Registry)
 	{
-		// When the user has typed something, search by partial name.
-		// When the field is empty, return the most recently seen players.
-		TArray<FPlayerSessionRecord> Matches;
+		const FString FocusedLower = FocusedValue.ToLower();
+
+		// Helper: append one choice (name capped at Discord's 100-char limit).
+		auto AddChoice = [&Choices](const FString& Label, const FString& Value)
+		{
+			if (Choices.Num() >= 25) return; // Discord maximum
+			TSharedPtr<FJsonObject> Choice = MakeShared<FJsonObject>();
+			Choice->SetStringField(TEXT("name"),  Label.Left(100));
+			Choice->SetStringField(TEXT("value"), Value);
+			Choices.Add(MakeShared<FJsonValueObject>(Choice));
+		};
+
+		// Helper: true when the string looks like a partial IPv4 address
+		// (only decimal digits and dots, at least one dot).
+		auto IsIpFragment = [](const FString& S) -> bool
+		{
+			if (S.IsEmpty()) return false;
+			bool bHasDot = false;
+			for (TCHAR C : S)
+			{
+				if (C == TEXT('.')) { bHasDot = true; continue; }
+				if (C < TEXT('0') || C > TEXT('9')) return false;
+			}
+			return bHasDot;
+		};
+
 		if (FocusedValue.IsEmpty())
 		{
-			Matches = Registry->GetAllRecords(); // sorted by LastSeen desc
+			// Empty input: show the most recently seen players by display name.
+			TSet<FString> SeenNames;
+			for (const FPlayerSessionRecord& Rec : Registry->GetAllRecords())
+			{
+				if (SeenNames.Contains(Rec.DisplayName)) continue;
+				SeenNames.Add(Rec.DisplayName);
+				AddChoice(Rec.DisplayName, Rec.DisplayName);
+				if (Choices.Num() >= 25) break;
+			}
+		}
+		else if (FocusedLower.StartsWith(TEXT("eos:")))
+		{
+			// Typing an EOS compound UID — filter all records whose UID contains
+			// the typed prefix (case-insensitive).
+			TSet<FString> SeenUids;
+			for (const FPlayerSessionRecord& Rec : Registry->GetAllRecords())
+			{
+				if (Rec.Uid.IsEmpty()) continue;
+				if (!Rec.Uid.ToLower().Contains(FocusedLower)) continue;
+				if (SeenUids.Contains(Rec.Uid)) continue;
+				SeenUids.Add(Rec.Uid);
+				const FString Label = FString::Printf(
+					TEXT("%s (%s)"), *Rec.DisplayName, *Rec.Uid);
+				AddChoice(Label, Rec.Uid);
+			}
+		}
+		else if (FocusedLower.StartsWith(TEXT("ip:")) || IsIpFragment(FocusedValue))
+		{
+			// Typing an IP address — strip any "IP:" prefix then search.
+			const FString IpQuery = FocusedLower.StartsWith(TEXT("ip:"))
+				? FocusedValue.Mid(3) : FocusedValue;
+			TSet<FString> SeenIps;
+			for (const FPlayerSessionRecord& Rec : Registry->FindByIp(IpQuery))
+			{
+				if (Rec.IpAddress.IsEmpty()) continue;
+				if (SeenIps.Contains(Rec.IpAddress)) continue;
+				SeenIps.Add(Rec.IpAddress);
+				const FString IpUid = TEXT("IP:") + Rec.IpAddress;
+				const FString Label = FString::Printf(
+					TEXT("%s (%s)"), *Rec.DisplayName, *Rec.IpAddress);
+				AddChoice(Label, IpUid);
+			}
 		}
 		else
 		{
-			Matches = Registry->FindByName(FocusedValue);
-		}
-
-		// De-duplicate by display name (keep most recent per name).
-		TSet<FString> SeenNames;
-		for (const FPlayerSessionRecord& Rec : Matches)
-		{
-			if (SeenNames.Contains(Rec.DisplayName)) continue;
-			SeenNames.Add(Rec.DisplayName);
-
-			TSharedPtr<FJsonObject> Choice = MakeShared<FJsonObject>();
-			Choice->SetStringField(TEXT("name"),  Rec.DisplayName);
-			Choice->SetStringField(TEXT("value"), Rec.DisplayName);
-			Choices.Add(MakeShared<FJsonValueObject>(Choice));
-
-			if (Choices.Num() >= 25) break; // Discord maximum
+			// Name search: for each matching record surface three choices so the
+			// admin can pick the exact identifier they want to target.
+			TSet<FString> SeenValues;
+			for (const FPlayerSessionRecord& Rec : Registry->FindByName(FocusedValue))
+			{
+				// 1. Display name choice.
+				if (!SeenValues.Contains(Rec.DisplayName))
+				{
+					SeenValues.Add(Rec.DisplayName);
+					AddChoice(Rec.DisplayName, Rec.DisplayName);
+				}
+				// 2. EOS UID choice.
+				if (!Rec.Uid.IsEmpty() && !SeenValues.Contains(Rec.Uid))
+				{
+					SeenValues.Add(Rec.Uid);
+					const FString Label = FString::Printf(
+						TEXT("%s (%s)"), *Rec.DisplayName, *Rec.Uid);
+					AddChoice(Label, Rec.Uid);
+				}
+				// 3. IP address choice.
+				if (!Rec.IpAddress.IsEmpty())
+				{
+					const FString IpUid = TEXT("IP:") + Rec.IpAddress;
+					if (!SeenValues.Contains(IpUid))
+					{
+						SeenValues.Add(IpUid);
+						const FString Label = FString::Printf(
+							TEXT("%s (IP: %s)"), *Rec.DisplayName, *Rec.IpAddress);
+						AddChoice(Label, IpUid);
+					}
+				}
+				if (Choices.Num() >= 25) break;
+			}
 		}
 	}
 
