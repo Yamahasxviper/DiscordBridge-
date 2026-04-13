@@ -8,6 +8,7 @@
 #include "SMLWebSocketClient.h"
 #include "DiscordBridgeConfig.h"
 #include "WhitelistConfig.h"
+#include "InGameMessagesConfig.h"
 #include "FGChatManager.h"
 #include "FGGamePhase.h"
 #include "GameFramework/GameModeBase.h"
@@ -511,6 +512,9 @@ private:
 	/** Loaded whitelist configuration (populated in Initialize()). */
 	FWhitelistConfig WhitelistConfig;
 
+	/** Loaded in-game broadcast messages configuration (populated in Initialize()). */
+	FInGameMessagesConfig InGameMessagesConfig;
+
 	/** Last sequence number received from Discord (used in heartbeats). */
 	int32 LastSequenceNumber{-1};
 
@@ -864,6 +868,14 @@ private:
 
 	/** Ticker callback — posts the announcement message at the configured interval. */
 	bool AnnouncementTick(float DeltaTime);
+
+	// ── Scheduled in-game broadcast messages ─────────────────────────────────
+
+	/** Ticker handles for individual in-game broadcast message tickers. */
+	TArray<FTSTicker::FDelegateHandle> InGameMessageTickerHandles;
+
+	/** Start one ticker per InGameMessagesConfig.Messages entry. */
+	void StartInGameMessageTickers();
 
 	// ── !server / !online commands ────────────────────────────────────────────
 
