@@ -102,6 +102,10 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	FWhitelistConfig::RestoreDefaultConfigIfNeeded();
 	WhitelistConfig = FWhitelistConfig::Load();
 
+	// Load the in-game broadcast messages config file (DefaultInGameMessages.ini + backup).
+	FInGameMessagesConfig::RestoreDefaultConfigIfNeeded();
+	InGameMessagesConfig = FInGameMessagesConfig::Load();
+
 	// Load (or create) the whitelist JSON from disk, using the config value as
 	// the default only on the very first server start (when no JSON file exists).
 	// After the first start the enabled/disabled state is saved in the JSON and
@@ -249,6 +253,9 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	StartAnnouncementTicker();
 	StartScheduledAnnouncementTickers();
 
+	// Start in-game broadcast message tickers when configured.
+	StartInGameMessageTickers();
+
 }
 
 void UDiscordBridgeSubsystem::Deinitialize()
@@ -301,6 +308,11 @@ void UDiscordBridgeSubsystem::Deinitialize()
 	for (FTSTicker::FDelegateHandle& H : ScheduledAnnouncementHandles)
 		FTSTicker::GetCoreTicker().RemoveTicker(H);
 	ScheduledAnnouncementHandles.Empty();
+
+	// Stop in-game broadcast message tickers.
+	for (FTSTicker::FDelegateHandle& H : InGameMessageTickerHandles)
+		FTSTicker::GetCoreTicker().RemoveTicker(H);
+	InGameMessageTickerHandles.Empty();
 
 	Disconnect();
 	Super::Deinitialize();
@@ -4660,6 +4672,75 @@ SendMessageBodyToChannel(Target, Body);
 }
 
 return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scheduled in-game broadcast messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UDiscordBridgeSubsystem::StartInGameMessageTickers()
+{
+	if (!InGameMessagesConfig.bEnabled)
+	{
+		UE_LOG(LogDiscordBridge, Log,
+		       TEXT("DiscordBridge: In-game broadcast messages are disabled (Enabled=False)."));
+		return;
+	}
+
+	if (InGameMessagesConfig.Messages.Num() == 0)
+	{
+		UE_LOG(LogDiscordBridge, Log,
+		       TEXT("DiscordBridge: No in-game broadcast messages configured."));
+		return;
+	}
+
+	for (int32 i = 0; i < InGameMessagesConfig.Messages.Num(); ++i)
+	{
+		const FInGameBroadcastMessage& Entry = InGameMessagesConfig.Messages[i];
+		if (Entry.IntervalMinutes <= 0 || Entry.Message.IsEmpty())
+			continue;
+
+		const FString Msg        = Entry.Message;
+		const FString SenderName = Entry.SenderName;
+		const float   Interval   = static_cast<float>(Entry.IntervalMinutes) * 60.0f;
+
+		TWeakObjectPtr<UDiscordBridgeSubsystem> WeakThis(this);
+		FTSTicker::FDelegateHandle Handle = FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateLambda(
+				[WeakThis, Msg, SenderName](float) -> bool
+				{
+					UDiscordBridgeSubsystem* Self = WeakThis.Get();
+					if (!Self)
+						return false;
+
+					UWorld* World = Self->GetWorld();
+					if (!World)
+						return true;
+
+					AFGChatManager* ChatManager = AFGChatManager::Get(World);
+					if (!ChatManager)
+						return true;
+
+					FChatMessageStruct ChatMsg;
+					ChatMsg.MessageType   = EFGChatMessageType::CMT_CustomMessage;
+					ChatMsg.MessageSender = FText::FromString(SenderName);
+					ChatMsg.MessageText   = FText::FromString(Msg);
+
+					ChatManager->BroadcastChatMessage(ChatMsg);
+					return true; // keep ticking
+				}),
+			Interval);
+
+		InGameMessageTickerHandles.Add(Handle);
+
+		UE_LOG(LogDiscordBridge, Log,
+		       TEXT("DiscordBridge: In-game broadcast [%d] every %d min sender=\"%s\" message=\"%s\""),
+		       i, Entry.IntervalMinutes, *SenderName, *Msg);
+	}
+
+	UE_LOG(LogDiscordBridge, Log,
+	       TEXT("DiscordBridge: Started %d in-game broadcast message ticker(s)."),
+	       InGameMessageTickerHandles.Num());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
