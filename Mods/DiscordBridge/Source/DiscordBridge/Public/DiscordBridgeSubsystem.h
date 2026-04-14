@@ -807,8 +807,10 @@ private:
 
 	struct FPlayerAfkState
 	{
-		int32     LastBuildCount   = 0;
+		int32     LastBuildCount    = 0;
 		FDateTime LastActivityTime;
+		/** World-space location sampled each AFK tick; ZeroVector until first tick. */
+		FVector   LastKnownLocation = FVector::ZeroVector;
 	};
 
 	/** Per-player AFK idle tracking map keyed by in-game display name. */
@@ -939,6 +941,9 @@ private:
 
 	/** Maps Discord user ID → in-game player name for pending whitelist applications. */
 	TMap<FString, FString> PendingWhitelistApps;
+
+	/** Maps Discord user ID → submission time for pending whitelist applications (for expiry). */
+	TMap<FString, FDateTime> PendingWhitelistAppExpiry;
 
 	// ── Whitelist expiry warnings (Feature 5) ─────────────────────────────────
 

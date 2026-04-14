@@ -85,7 +85,7 @@ private:
 
     FSocket* ListenSocket{nullptr};
 
-    FCriticalSection ClientMutex;
+    mutable FCriticalSection ClientMutex;
     TMap<FString, FClientState> Clients;
 
     /** Outbound messages queued for specific clients: (ClientId, Frame). */

@@ -679,10 +679,11 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
                                 *PlayerName, *CapturedUid, *CountryCode);
 
                             if (W2)
+                            {
                                 UBanEnforcer::KickConnectedPlayer(W2, CapturedUid, FinalMsg);
-
-                            FBanDiscordNotifier::NotifyGeoIpBlocked(
-                                PlayerName, CapturedUid, IpAddress, CountryCode);
+                                FBanDiscordNotifier::NotifyGeoIpBlocked(
+                                    PlayerName, CapturedUid, IpAddress, CountryCode);
+                            }
                         });
                     GeoReq->ProcessRequest();
                 }
@@ -973,10 +974,11 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
 
                             const FString FinalMsg = KickMsg.Replace(TEXT("{country}"), *CountryCode);
                             if (W2)
+                            {
                                 UBanEnforcer::KickConnectedPlayer(W2, CapturedUid, FinalMsg);
-
-                            FBanDiscordNotifier::NotifyGeoIpBlocked(
-                                CapturedName, CapturedUid, IpAddress, CountryCode);
+                                FBanDiscordNotifier::NotifyGeoIpBlocked(
+                                    CapturedName, CapturedUid, IpAddress, CountryCode);
+                            }
                         });
                     GeoReq->ProcessRequest();
                 }
