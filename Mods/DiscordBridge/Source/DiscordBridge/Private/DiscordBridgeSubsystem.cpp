@@ -181,6 +181,22 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				}
 			}
 
+			// ── Clean up expired whitelist applications ───────────────────────
+			{
+				const FDateTime Now = FDateTime::UtcNow();
+				TArray<FString> ExpiredApps;
+				for (const auto& Pair : PendingWhitelistAppExpiry)
+				{
+					if (Pair.Value <= Now)
+						ExpiredApps.Add(Pair.Key);
+				}
+				for (const FString& DiscordId : ExpiredApps)
+				{
+					PendingWhitelistApps.Remove(DiscordId);
+					PendingWhitelistAppExpiry.Remove(DiscordId);
+				}
+			}
+
 			return true;
 		}),
 		60.0f);
@@ -780,6 +796,7 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 					{
 						const FString PlayerNameCopy = *PendingNamePtr;
 						PendingWhitelistApps.Remove(TargetDiscordId);
+						PendingWhitelistAppExpiry.Remove(TargetDiscordId);
 
 						if (FWhitelistManager::AddPlayer(PlayerNameCopy, TEXT(""), TEXT("[Discord Approval]")))
 						{
@@ -822,6 +839,7 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 					{
 						const FString PlayerNameCopy = *PendingNamePtr;
 						PendingWhitelistApps.Remove(TargetDiscordId);
+						PendingWhitelistAppExpiry.Remove(TargetDiscordId);
 						RespondToInteraction(InteractionId, InteractionToken, 4,
 							FString::Printf(
 								TEXT(":red_circle: Whitelist application for **%s** (in-game: `%s`) has been denied."),
@@ -2527,7 +2545,29 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 	}
 
 	// ── Resolve EOS PUID ─────────────────────────────────────────────────────
+	// Walk the connected controllers to find this player's PlayerState and read
+	// their EOS Product User ID via the safe FUniqueNetIdRepl accessors.
+	// We iterate rather than using Controller->GetPlayerState directly because
+	// OnPostLogin may be called from a deferred retry where Controller is still
+	// the same object but PlayerState replication may have completed by now.
 	FString ResolvedEOSProductUserId;
+	if (UWorld* PW = Controller->GetWorld())
+	{
+		for (FConstPlayerControllerIterator It = PW->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* JPC = It->Get();
+			if (!JPC || !JPC->PlayerState) continue;
+			if (JPC->PlayerState->GetPlayerName() != PlayerName) continue;
+			const FUniqueNetIdRepl& NetId = JPC->PlayerState->GetUniqueId();
+			// Use FUniqueNetIdRepl member accessors only — do NOT dereference
+			// via operator-> on CSS DS (EOS V2 inner pointer is not a valid C++ object).
+			if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
+			{
+				ResolvedEOSProductUserId = NetId.ToString().ToLower();
+			}
+			break;
+		}
+	}
 
 	// ── Resolve remote IP address ─────────────────────────────────────────────
 	FString ResolvedIpAddress;
@@ -2788,6 +2828,25 @@ void UDiscordBridgeSubsystem::SendPlayerJoinNotification(const FString& PlayerNa
 
 void UDiscordBridgeSubsystem::OnLogout(AGameModeBase* /*GameMode*/, AController* Exiting)
 {
+	// Always clean up per-player state regardless of whether event notifications
+	// are enabled, so these maps don't grow without bound over the server lifetime.
+	{
+		const APlayerController* CleanPC = Cast<APlayerController>(Exiting);
+		if (CleanPC && !CleanPC->IsLocalController())
+		{
+			if (const APlayerState* CleanPS = CleanPC->GetPlayerState<APlayerState>())
+			{
+				const FString CleanName = CleanPS->GetPlayerName();
+				if (!CleanName.IsEmpty())
+				{
+					AfkStates.Remove(CleanName);
+					ChatFilterHits.Remove(CleanName);
+					PlayerStats.Remove(CleanName);
+				}
+			}
+		}
+	}
+
 	if (!Config.bPlayerEventsEnabled)
 	{
 		return;
@@ -3259,7 +3318,10 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 		else
 		{
 			// Store the pending application keyed by Discord user ID.
+			// Record expiry time (24 hours) so ignored applications don't
+			// accumulate forever in memory.
 			PendingWhitelistApps.Add(AuthorDiscordId, Arg);
+			PendingWhitelistAppExpiry.Add(AuthorDiscordId, FDateTime::UtcNow() + FTimespan::FromHours(24.0));
 
 			// Build an embed with Approve/Deny buttons posted to WhitelistApplicationChannelId.
 			const FString AppJson = FString::Printf(
@@ -3334,6 +3396,23 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 			// Generate a random 6-digit code.
 			const int32 Code = FMath::RandRange(100000, 999999);
 			const FString CodeStr = FString::FromInt(Code);
+
+			// Invalidate any prior pending code for this Discord user so they
+			// cannot accumulate multiple valid codes and share them with others.
+			{
+				TArray<FString> OldCodes;
+				for (const auto& Pair : PendingVerifications)
+				{
+					if (Pair.Value == AuthorDiscordId)
+						OldCodes.Add(Pair.Key);
+				}
+				for (const FString& Old : OldCodes)
+				{
+					PendingVerifications.Remove(Old);
+					PendingVerificationNames.Remove(Old);
+					PendingVerificationExpiry.Remove(Old);
+				}
+			}
 
 			PendingVerifications.Add(CodeStr, AuthorDiscordId);
 			PendingVerificationNames.Add(CodeStr, Arg);
@@ -3811,7 +3890,7 @@ void UDiscordBridgeSubsystem::HandleInGameVerify(const FString& PlayerName, cons
 	if (DiscordUserIdPtr && !DiscordUserIdPtr->IsEmpty())
 	{
 		const FDateTime* ExpiryPtr = PendingVerificationExpiry.Find(Code);
-		if (ExpiryPtr && *ExpiryPtr <= FDateTime::UtcNow())
+		if (!ExpiryPtr || *ExpiryPtr <= FDateTime::UtcNow())
 		{
 			// Code expired.
 			PendingVerifications.Remove(Code);
@@ -4356,6 +4435,25 @@ bool UDiscordBridgeSubsystem::AfkKickTick(float /*DeltaTime*/)
 		{
 			State.LastBuildCount   = CurrentBuilt;
 			State.LastActivityTime = Now;
+		}
+
+		// Also detect activity via pawn movement so players who are exploring,
+		// mining, or otherwise not building are not incorrectly AFK-kicked.
+		// This is essential because PlayerStats is not currently updated by any
+		// game hook, meaning BuildingsBuilt is always 0 without movement detection.
+		if (APawn* Pawn = PC->GetPawn())
+		{
+			const FVector CurrentLoc = Pawn->GetActorLocation();
+			if (State.LastKnownLocation == FVector::ZeroVector)
+			{
+				// First tick for this player — record location without counting as activity.
+				State.LastKnownLocation = CurrentLoc;
+			}
+			else if (!CurrentLoc.Equals(State.LastKnownLocation, 50.f))
+			{
+				State.LastKnownLocation = CurrentLoc;
+				State.LastActivityTime  = Now;
+			}
 		}
 
 		if (State.LastActivityTime == FDateTime(0))

@@ -383,7 +383,7 @@ int32 UBanDatabase::PruneExpiredBans()
 
     Bans.RemoveAll([&Now](const FBanEntry& E)
     {
-        return !E.bIsPermanent && E.ExpireDate <= Now;
+        return !E.bIsPermanent && E.ExpireDate < Now;
     });
 
     const int32 Pruned = Before - Bans.Num();

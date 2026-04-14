@@ -144,6 +144,7 @@ namespace BanChat
      */
     static bool IsAdminSender(UCommandSender* Sender, FString& OutUid)
     {
+        if (!Sender) return false; // null sender — deny to fail safely
         if (!Sender->IsPlayerSender())
         {
             // Console / server operator — always allowed.
@@ -715,6 +716,16 @@ namespace BanChat
 
         const FString Key = CommandName + TEXT(":") + SenderUid;
         const FDateTime Now = FDateTime::UtcNow();
+
+        // Prune stale entries for players who have disconnected so the map
+        // doesn't grow for the entire server process lifetime.
+        const FTimespan CutOff = FTimespan::FromSeconds(CooldownSeconds);
+        for (auto It = CommandCooldowns.CreateIterator(); It; ++It)
+        {
+            if ((Now - It.Value()) > CutOff)
+                It.RemoveCurrent();
+        }
+
         if (const FDateTime* Last = CommandCooldowns.Find(Key))
         {
             if ((Now - *Last).GetTotalSeconds() < static_cast<double>(CooldownSeconds))
