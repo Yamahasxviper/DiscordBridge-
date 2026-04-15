@@ -133,6 +133,20 @@ namespace BanDiscordHelpers
 	static constexpr int32 BanListPageSize = 10;
 
 	/**
+	 * Build a separator string of N "─" characters.
+	 * NOTE: FString(TEXT("─"), N) only sets extra capacity, not repetitions,
+	 * so we build the line explicitly.
+	 */
+	static FString SepLine(int32 N)
+	{
+		FString Out;
+		Out.Reserve(N + 1);
+		for (int32 i = 0; i < N; ++i)
+			Out += TEXT("─");
+		return Out;
+	}
+
+	/**
 	 * After a primary ban for PrimaryUid has been committed, look up the
 	 * player's other identifiers in the session registry and create matching
 	 * ban records:
@@ -967,7 +981,7 @@ void UBanDiscordSubsystem::HandleBanListCommand(const TArray<FString>& Args,
 	Body += FString::Printf(TEXT("%-4s  %-22s  %-16s  %-20s  %s\n"),
 	                        TEXT("ID"), TEXT("UID (truncated)"),
 	                        TEXT("Name"), TEXT("Expires"), TEXT("Reason"));
-	Body += FString(TEXT("─"), 80) + TEXT("\n");
+	Body += BanDiscordHelpers::SepLine(80) + TEXT("\n");
 
 	for (int32 i = StartIdx; i < EndIdx; ++i)
 	{
@@ -1072,7 +1086,7 @@ void UBanDiscordSubsystem::HandlePlayerHistoryCommand(const TArray<FString>& Arg
 	Body += TEXT("```\n");
 	Body += FString::Printf(TEXT("%-16s  %-40s  %-15s  %-20s\n"),
 	                        TEXT("Name"), TEXT("UID"), TEXT("IP"), TEXT("Last Seen (UTC)"));
-	Body += FString(TEXT("─"), 97) + TEXT("\n");
+	Body += BanDiscordHelpers::SepLine(97) + TEXT("\n");
 
 	for (int32 i = 0; i < ShowCount; ++i)
 	{
@@ -1848,7 +1862,7 @@ void UBanDiscordSubsystem::HandleWarningsCommand(const TArray<FString>& Args,
 	Body += TEXT("```\n");
 	Body += FString::Printf(TEXT("%-4s  %-20s  %-12s  %s\n"),
 		TEXT("ID"), TEXT("Date (UTC)"), TEXT("By"), TEXT("Reason"));
-	Body += FString(TEXT("─"), 72) + TEXT("\n");
+	Body += BanDiscordHelpers::SepLine(72) + TEXT("\n");
 
 	const int32 ShowMax = FMath::Min(Warnings.Num(), 15);
 	for (int32 i = 0; i < ShowMax; ++i)
@@ -2369,7 +2383,7 @@ void UBanDiscordSubsystem::HandleMuteListCommand(const FString& ChannelId)
 	Body += TEXT("```\n");
 	Body += FString::Printf(TEXT("%-18s  %-30s  %-18s  %s\n"),
 		TEXT("Name"), TEXT("UID (truncated)"), TEXT("Expires"), TEXT("Reason"));
-	Body += FString(TEXT("─"), 80) + TEXT("\n");
+	Body += BanDiscordHelpers::SepLine(80) + TEXT("\n");
 
 	const int32 ShowMax = FMath::Min(Mutes.Num(), 15);
 	for (int32 i = 0; i < ShowMax; ++i)
@@ -5056,11 +5070,20 @@ FString UBanDiscordSubsystem::ExecutePanelMute(const FString& PlayerArg,
 	if (!ResolveTarget(PlayerArg, Uid, DisplayName, ErrorMsg))
 		return ErrorMsg;
 
-	// Bug 1 fix: use ParseDurationMinutes() so "30m", "2h", "7d" formats are
-	// accepted in addition to bare integers.  Falls back to 0 (indefinite) on
-	// empty or unparseable input.
-	const int32 Minutes = DurationArg.IsEmpty() ? 0
-		: FMath::Max(0, ParseDurationMinutes(DurationArg));
+	// Use ParseDurationMinutes() so "30m", "2h", "7d" formats are accepted.
+	// A non-empty but unparseable duration (returns <= 0) is an error rather
+	// than a silent fallback to indefinite — report it to the caller.
+	int32 Minutes = 0;
+	if (!DurationArg.IsEmpty())
+	{
+		Minutes = ParseDurationMinutes(DurationArg);
+		if (Minutes <= 0)
+		{
+			return FString::Printf(
+				TEXT("❌ Invalid duration `%s`. Use formats like: 30m, 2h, 1d, 1w."),
+				*DurationArg);
+		}
+	}
 
 	const FString MuteReason = Reason.IsEmpty() ? TEXT("Muted by Discord admin") : Reason;
 	MuteReg->MutePlayer(Uid, DisplayName, MuteReason, SenderName, Minutes);
@@ -5128,7 +5151,7 @@ FString UBanDiscordSubsystem::ExecutePanelBanList() const
 	Body += FString::Printf(TEXT("%-4s  %-22s  %-16s  %-20s  %s\n"),
 	                        TEXT("ID"), TEXT("UID (truncated)"),
 	                        TEXT("Name"), TEXT("Expires"), TEXT("Reason"));
-	Body += FString(TEXT("─"), 80) + TEXT("\n");
+	Body += BanDiscordHelpers::SepLine(80) + TEXT("\n");
 
 	const int32 EndIdx = FMath::Min(BanDiscordHelpers::BanListPageSize, Total);
 	for (int32 i = 0; i < EndIdx; ++i)
@@ -5409,7 +5432,7 @@ FString UBanDiscordSubsystem::ExecutePanelWarnList(const FString& PlayerArg) con
 	Body += TEXT("```\n");
 	Body += FString::Printf(TEXT("%-4s  %-20s  %-12s  %s\n"),
 		TEXT("ID"), TEXT("Date (UTC)"), TEXT("By"), TEXT("Reason"));
-	Body += FString(TEXT("─"), 72) + TEXT("\n");
+	Body += BanDiscordHelpers::SepLine(72) + TEXT("\n");
 
 	const int32 ShowMax = FMath::Min(Warnings.Num(), 15);
 	for (int32 i = 0; i < ShowMax; ++i)
@@ -5490,7 +5513,7 @@ FString UBanDiscordSubsystem::ExecutePanelMuteList() const
 	Body += TEXT("```\n");
 	Body += FString::Printf(TEXT("%-18s  %-30s  %-18s  %s\n"),
 		TEXT("Name"), TEXT("UID (truncated)"), TEXT("Expires"), TEXT("Reason"));
-	Body += FString(TEXT("─"), 80) + TEXT("\n");
+	Body += BanDiscordHelpers::SepLine(80) + TEXT("\n");
 
 	const int32 ShowMax = FMath::Min(Mutes.Num(), 15);
 	for (int32 i = 0; i < ShowMax; ++i)
@@ -5542,7 +5565,7 @@ FString UBanDiscordSubsystem::ExecutePanelAppeals() const
 	Body += TEXT("```\n");
 	Body += FString::Printf(TEXT("%-6s  %-36s  %-22s\n"),
 		TEXT("ID"), TEXT("UID"), TEXT("Submitted"));
-	Body += FString(TEXT("─"), 68) + TEXT("\n");
+	Body += BanDiscordHelpers::SepLine(68) + TEXT("\n");
 
 	const int32 ShowMax = FMath::Min(Pending.Num(), 15);
 	for (int32 i = 0; i < ShowMax; ++i)
@@ -5612,7 +5635,7 @@ FString UBanDiscordSubsystem::ExecutePanelHistory(const FString& PlayerArg) cons
 	Body += TEXT("```\n");
 	Body += FString::Printf(TEXT("%-16s  %-40s  %-15s  %-20s\n"),
 		TEXT("Name"), TEXT("UID"), TEXT("IP"), TEXT("Last Seen (UTC)"));
-	Body += FString(TEXT("─"), 97) + TEXT("\n");
+	Body += BanDiscordHelpers::SepLine(97) + TEXT("\n");
 
 	for (int32 i = 0; i < ShowCount; ++i)
 	{
