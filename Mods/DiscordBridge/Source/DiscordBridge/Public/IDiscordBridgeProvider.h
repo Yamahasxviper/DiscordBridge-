@@ -7,6 +7,43 @@
 #include "Dom/JsonValue.h"
 
 /**
+ * FModalField
+ *
+ * Describes a single text-input component for use in RespondWithMultiFieldModal().
+ * Each field is rendered as its own ACTION_ROW inside the modal (Discord allows
+ * up to 5 fields per modal).
+ */
+struct DISCORDBRIDGE_API FModalField
+{
+	/** Label shown above the text input field (max 45 characters). */
+	FString Label;
+
+	/** Unique custom_id for the field; used to retrieve the submitted value
+	 *  from the MODAL_SUBMIT components array. */
+	FString CustomId;
+
+	/** Greyed-out hint text displayed inside the empty field (optional). */
+	FString Placeholder;
+
+	/** Pre-filled default value shown in the field (optional). */
+	FString DefaultValue;
+
+	/** When true, the user must provide a non-empty value before submitting. */
+	bool bRequired = false;
+
+	/** When true, renders as a multi-line paragraph input (style 2).
+	 *  When false, renders as a single-line short input (style 1). */
+	bool bParagraph = false;
+
+	/** Minimum character count required.  0 means no minimum. */
+	int32 MinLength = 0;
+
+	/** Maximum character count allowed (clamped to Discord's 4000-char limit).
+	 *  0 defaults to 200. */
+	int32 MaxLength = 200;
+};
+
+/**
  * IDiscordBridgeProvider
  *
  * Abstract interface through which UTicketSubsystem communicates with the
@@ -168,4 +205,52 @@ public:
 		const FString& CategoryId,
 		const TArray<TSharedPtr<FJsonValue>>& PermissionOverwrites,
 		TFunction<void(const FString& NewChannelId)> OnCreated) = 0;
+
+	/**
+	 * Respond to a Discord button-click or slash-command interaction with a
+	 * fully constructed message body (Discord response type 4 =
+	 * CHANNEL_MESSAGE_WITH_SOURCE), supporting embeds and interactive
+	 * components.  Must be called within ~3 seconds of receiving the
+	 * interaction.
+	 *
+	 * Unlike RespondToInteraction(), this overload accepts a complete
+	 * "data" JSON object so callers can include embeds, action-row
+	 * buttons, and other rich content as the interaction response.
+	 *
+	 * @param InteractionId    The interaction "id" field from the payload.
+	 * @param InteractionToken The interaction "token" field from the payload.
+	 * @param MessageData      The "data" object for the callback body.
+	 *                         May contain "content", "embeds", "components",
+	 *                         and/or "flags".  Caller retains ownership.
+	 * @param bEphemeral       When true, flags = 64 is added so the response
+	 *                         is only visible to the invoker.
+	 */
+	virtual void RespondToInteractionWithBody(const FString& InteractionId,
+	                                          const FString& InteractionToken,
+	                                          const TSharedPtr<FJsonObject>& MessageData,
+	                                          bool bEphemeral) = 0;
+
+	/**
+	 * Respond to a Discord button-click interaction by showing a multi-field
+	 * modal popup (Discord response type 9 = MODAL) via the REST API.  Must
+	 * be called within ~3 seconds of receiving the interaction.
+	 *
+	 * Each element of Fields becomes its own ACTION_ROW containing a single
+	 * TEXT_INPUT component.  Discord allows a maximum of 5 fields per modal.
+	 *
+	 * @param InteractionId    The interaction "id" field from the payload.
+	 * @param InteractionToken The interaction "token" field from the payload.
+	 * @param ModalCustomId    The custom_id to assign to the modal itself.
+	 *                         Returned verbatim in the subsequent MODAL_SUBMIT
+	 *                         interaction payload.
+	 * @param Title            Modal window title (max 45 characters).
+	 * @param Fields           List of text-input fields (max 5).  Each field's
+	 *                         CustomId is used as the component custom_id so
+	 *                         submitted values can be located by name.
+	 */
+	virtual void RespondWithMultiFieldModal(const FString& InteractionId,
+	                                        const FString& InteractionToken,
+	                                        const FString& ModalCustomId,
+	                                        const FString& Title,
+	                                        const TArray<FModalField>& Fields) = 0;
 };

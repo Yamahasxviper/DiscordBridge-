@@ -36,7 +36,7 @@
  *   list, dismiss, approve, deny
  *
  * /admin (admin)
- *   say, poll, reloadconfig
+ *   say, poll, reloadconfig, panel
  *
  * Authorisation
  * =============
@@ -83,7 +83,10 @@ private:
 
 	/** Subscribed to the provider's INTERACTION_CREATE stream via SetProvider().
 	 *  Handles APPLICATION_COMMAND (type 2) slash command interactions for the
-	 *  ban/mod/warn/player/appeal/admin command groups. */
+	 *  ban/mod/warn/player/appeal/admin command groups.
+	 *  Also dispatches MESSAGE_COMPONENT (type 3) and MODAL_SUBMIT (type 5)
+	 *  interactions whose custom_ids begin with "panel:" / "panel_modal:"
+	 *  respectively to the admin panel handlers. */
 	void OnDiscordInteraction(const TSharedPtr<FJsonObject>& InteractionObj);
 
 	// ── Authorisation / extraction helpers ───────────────────────────────────
@@ -342,6 +345,80 @@ private:
 	void HandleBulkBanCommand(const TArray<FString>& Args,
 	                           const FString& ChannelId,
 	                           const FString& SenderName);
+
+	// ── Admin panel ───────────────────────────────────────────────────────────
+
+	/**
+	 * Handle /admin panel.
+	 * Posts an interactive embed with action-row buttons to ChannelId (or
+	 * AdminPanelChannelId when configured).  The response is sent as a
+	 * non-ephemeral type-4 interaction callback so the panel is visible
+	 * to all users in the channel.
+	 */
+	void HandlePanelCommand(const FString& ChannelId,
+	                        const FString& InteractionId,
+	                        const FString& InteractionToken,
+	                        const TArray<FString>& MemberRoles,
+	                        const FString& SenderName);
+
+	/**
+	 * Handle MESSAGE_COMPONENT (type 3) interactions whose custom_id starts
+	 * with "panel:".  Direct-action buttons produce an immediate ephemeral
+	 * response; input-action buttons open a multi-field modal.
+	 */
+	void HandlePanelButtonInteraction(const TSharedPtr<FJsonObject>& InteractionObj);
+
+	/**
+	 * Handle MODAL_SUBMIT (type 5) interactions whose custom_id starts with
+	 * "panel_modal:".  Extracts field values, executes the requested action,
+	 * and responds ephemerally with the result.
+	 */
+	void HandlePanelModalSubmit(const TSharedPtr<FJsonObject>& InteractionObj);
+
+	/** Build the JSON "data" object for the panel interaction response.
+	 *  Includes the embed (title, description, colour, timestamp) and
+	 *  two action rows of buttons. */
+	TSharedPtr<FJsonObject> BuildPanelData() const;
+
+	// ── Panel action executors ────────────────────────────────────────────────
+	// Each function performs the core action and returns a human-readable
+	// result string for the ephemeral interaction reply.  The caller is
+	// responsible for posting to ModerationLogChannelId when appropriate.
+
+	/** Kick a player by name/PUID.  Returns the result message. */
+	FString ExecutePanelKick(const FString& PlayerArg, const FString& Reason,
+	                         const FString& SenderName);
+
+	/** Permanently ban a player by name/PUID.  Returns the result message. */
+	FString ExecutePanelBan(const FString& PlayerArg, const FString& Reason,
+	                        const FString& SenderName);
+
+	/** Temporarily ban a player.  Returns the result message. */
+	FString ExecutePanelTempBan(const FString& PlayerArg, const FString& DurationArg,
+	                             const FString& Reason, const FString& SenderName);
+
+	/** Issue a warning to a player.  Returns the result message. */
+	FString ExecutePanelWarn(const FString& PlayerArg, const FString& Reason,
+	                         const FString& SenderName);
+
+	/** Mute a player.  Returns the result message. */
+	FString ExecutePanelMute(const FString& PlayerArg, const FString& DurationArg,
+	                         const FString& Reason, const FString& SenderName);
+
+	/** Broadcast an in-game announcement.  Returns the result message. */
+	FString ExecutePanelAnnounce(const FString& Message, const FString& SenderName);
+
+	/** Return page-1 of the active ban list as a formatted string. */
+	FString ExecutePanelBanList() const;
+
+	/** Return the list of currently connected players as a formatted string. */
+	FString ExecutePanelPlayers() const;
+
+	/** Return the list of online staff members as a formatted string. */
+	FString ExecutePanelStaffList() const;
+
+	/** Reload BanBridge config and return a result message. */
+	FString ExecutePanelReloadConfig(const FString& SenderName);
 
 	// ── State ─────────────────────────────────────────────────────────────────
 
