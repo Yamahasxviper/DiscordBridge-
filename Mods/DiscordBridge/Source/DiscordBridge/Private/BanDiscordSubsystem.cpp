@@ -2815,18 +2815,37 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 	const FBanAppealEntry Entry = Registry->GetAppealById(AppealId);
 
 	// Auto-unban the player on approval.
+	// Use IsCurrentlyBannedByAnyId so that appeals submitted with a Discord:<id>
+	// UID are matched against the EOS:<puid> ban record via its LinkedUids, then
+	// remove by the primary ban UID + any counterparts — same pattern as /unban.
 	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
 	bool bUnbanned = false;
+	FString UnbannedUid = Entry.Uid;
 	if (DB && !Entry.Uid.IsEmpty())
-		bUnbanned = DB->RemoveBanByUid(Entry.Uid);
+	{
+		FBanEntry BanRecord;
+		if (DB->IsCurrentlyBannedByAnyId(Entry.Uid, BanRecord))
+		{
+			UnbannedUid = BanRecord.Uid;
+			bUnbanned = DB->RemoveBanByUid(BanRecord.Uid);
+			if (bUnbanned)
+				BanDiscordHelpers::RemoveCounterpartBans(this, DB, BanRecord.Uid, BanRecord.LinkedUids);
+		}
+		else
+		{
+			// Fallback: direct removal covers edge cases where the ban was stored
+			// with a Discord UID (e.g. manually added entries).
+			bUnbanned = DB->RemoveBanByUid(Entry.Uid);
+		}
+	}
 
 	const FString NoteStr = ReviewNote.IsEmpty() ? TEXT("") : FString::Printf(TEXT(" Note: %s"), *ReviewNote);
 	const FString Msg = bUnbanned
-		? FString::Printf(TEXT(":white_check_mark: Appeal `#%lld` **approved** — ban for `%s` removed.%s"), AppealId, *Entry.Uid, *NoteStr)
+		? FString::Printf(TEXT(":white_check_mark: Appeal `#%lld` **approved** — ban for `%s` removed.%s"), AppealId, *UnbannedUid, *NoteStr)
 		: FString::Printf(TEXT(":white_check_mark: Appeal `#%lld` **approved** — no active ban found for `%s`.%s"), AppealId, *Entry.Uid, *NoteStr);
 
 	Respond(ChannelId, Msg);
-	PostModerationLog(FString::Printf(TEXT("%s approved appeal #%lld (uid=%s)%s"), *SenderName, AppealId, *Entry.Uid, *NoteStr));
+	PostModerationLog(FString::Printf(TEXT("%s approved appeal #%lld (uid=%s)%s"), *SenderName, AppealId, *UnbannedUid, *NoteStr));
 
 	FBanDiscordNotifier::NotifyAppealReviewed(Entry);
 
@@ -2853,7 +2872,7 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 
 	UE_LOG(LogTemp, Log,
 	       TEXT("BanDiscordSubsystem: Appeal #%lld approved by '%s' (uid=%s, unbanned=%s)."),
-	       AppealId, *SenderName, *Entry.Uid, bUnbanned ? TEXT("yes") : TEXT("no"));
+	       AppealId, *SenderName, *UnbannedUid, bUnbanned ? TEXT("yes") : TEXT("no"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
