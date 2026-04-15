@@ -439,6 +439,7 @@ private:
 	FString ExecutePanelMuteCheck(const FString& PlayerArg) const;
 	FString ExecutePanelMuteList() const;
 	FString ExecutePanelHistory(const FString& PlayerArg) const;
+	FString ExecutePanelAppeals() const;
 
 	// ── State ─────────────────────────────────────────────────────────────────
 

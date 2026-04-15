@@ -21,6 +21,7 @@
 
 // DiscordBridge config (ServerName for panel embed)
 #include "DiscordBridgeConfig.h"
+#include "TicketSubsystem.h"
 
 #include "Misc/DefaultValueHelper.h"
 #include "Engine/GameInstance.h"
@@ -2775,7 +2776,7 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/appeal approve <id> [note...]`");
+			TEXT("Usage: `/appeal approve <id> [note...]`"));
 		return;
 	}
 
@@ -2829,6 +2830,27 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 
 	FBanDiscordNotifier::NotifyAppealReviewed(Entry);
 
+	// Auto-close the associated ban-appeal ticket channel (if still open).
+	// The Uid stored in the entry is "Discord:<userId>"; extract the user ID.
+	if (Entry.Uid.StartsWith(TEXT("Discord:")))
+	{
+		const FString AppealDiscordId = Entry.Uid.Mid(FCString::Strlen(TEXT("Discord:")));
+		if (!AppealDiscordId.IsEmpty())
+		{
+			if (UGameInstance* GI = GetGameInstance())
+			{
+				if (UTicketSubsystem* TicketSys = GI->GetSubsystem<UTicketSubsystem>())
+				{
+					const FString Resolution = FString::Printf(
+						TEXT(":white_check_mark: **Appeal approved** by %s. %s\n"
+						     "This ticket has been automatically closed."),
+						*SenderName, *NoteStr);
+					TicketSys->CloseAppealTicketForOpener(AppealDiscordId, Resolution);
+				}
+			}
+		}
+	}
+
 	UE_LOG(LogTemp, Log,
 	       TEXT("BanDiscordSubsystem: Appeal #%lld approved by '%s' (uid=%s, unbanned=%s)."),
 	       AppealId, *SenderName, *Entry.Uid, bUnbanned ? TEXT("yes") : TEXT("no"));
@@ -2847,7 +2869,7 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/appeal deny <id> [note...]`");
+			TEXT("Usage: `/appeal deny <id> [note...]`"));
 		return;
 	}
 
@@ -2890,6 +2912,26 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 	PostModerationLog(FString::Printf(TEXT("%s denied appeal #%lld (uid=%s)%s"), *SenderName, AppealId, *Entry.Uid, *NoteStr));
 
 	FBanDiscordNotifier::NotifyAppealReviewed(Entry);
+
+	// Auto-close the associated ban-appeal ticket channel (if still open).
+	if (Entry.Uid.StartsWith(TEXT("Discord:")))
+	{
+		const FString AppealDiscordId = Entry.Uid.Mid(FCString::Strlen(TEXT("Discord:")));
+		if (!AppealDiscordId.IsEmpty())
+		{
+			if (UGameInstance* GI = GetGameInstance())
+			{
+				if (UTicketSubsystem* TicketSys = GI->GetSubsystem<UTicketSubsystem>())
+				{
+					const FString Resolution = FString::Printf(
+						TEXT(":x: **Appeal denied** by %s.%s\n"
+						     "This ticket has been automatically closed."),
+						*SenderName, *NoteStr);
+					TicketSys->CloseAppealTicketForOpener(AppealDiscordId, Resolution);
+				}
+			}
+		}
+	}
 
 	UE_LOG(LogTemp, Log,
 	       TEXT("BanDiscordSubsystem: Appeal #%lld denied by '%s'."), AppealId, *SenderName);
@@ -4110,11 +4152,12 @@ TSharedPtr<FJsonObject> UBanDiscordSubsystem::BuildPanelData() const
 		MakeButton(2, TEXT("📋 Mute List"), TEXT("panel:mutelist")),
 	};
 
-	// Row 4 — utility (staff list, reload config, refresh panel).
+	// Row 4 — utility (staff list, reload config, refresh panel, pending appeals).
 	TArray<TSharedPtr<FJsonObject>> Row4 = {
-		MakeButton(2, TEXT("👮 Staff"),  TEXT("panel:stafflist")),
-		MakeButton(2, TEXT("🔁 Reload"), TEXT("panel:reload")),
-		MakeButton(3, TEXT("🔄 Refresh"), TEXT("panel:refresh")),
+		MakeButton(2, TEXT("👮 Staff"),     TEXT("panel:stafflist")),
+		MakeButton(2, TEXT("🔁 Reload"),    TEXT("panel:reload")),
+		MakeButton(3, TEXT("🔄 Refresh"),   TEXT("panel:refresh")),
+		MakeButton(2, TEXT("🔔 Appeals"),   TEXT("panel:appeals")),
 	};
 
 	TArray<TSharedPtr<FJsonValue>> Rows;
@@ -4251,7 +4294,7 @@ void UBanDiscordSubsystem::HandlePanelButtonInteraction(const TSharedPtr<FJsonOb
 	static const TArray<FString> ModActions = {
 		TEXT("kick"), TEXT("mute"), TEXT("unmute"), TEXT("announce"),
 		TEXT("players"), TEXT("stafflist"), TEXT("refresh"),
-		TEXT("bancheck"), TEXT("mutecheck"), TEXT("mutelist"),
+		TEXT("bancheck"), TEXT("mutecheck"), TEXT("mutelist"), TEXT("appeals"),
 	};
 
 	const bool bNeedsAdmin = AdminActions.Contains(Action);
@@ -4299,6 +4342,12 @@ void UBanDiscordSubsystem::HandlePanelButtonInteraction(const TSharedPtr<FJsonOb
 	if (Action == TEXT("stafflist"))
 	{
 		const FString Result = ExecutePanelStaffList();
+		CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4, Result, true);
+		return;
+	}
+	if (Action == TEXT("appeals"))
+	{
+		const FString Result = ExecutePanelAppeals();
 		CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4, Result, true);
 		return;
 	}
@@ -5442,6 +5491,54 @@ FString UBanDiscordSubsystem::ExecutePanelMuteList() const
 	FString Header = FString::Printf(TEXT("**Muted Players — %d total**\n"), Mutes.Num());
 	if (Mutes.Num() > ShowMax)
 		Header += FString::Printf(TEXT("_(Showing first %d)_\n"), ShowMax);
+
+	FString Msg = Header + Body;
+	if (Msg.Len() > 1990)
+		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
+	return Msg;
+}
+
+FString UBanDiscordSubsystem::ExecutePanelAppeals() const
+{
+	UGameInstance* GI = GetGameInstance();
+	UBanAppealRegistry* AppealReg = GI ? GI->GetSubsystem<UBanAppealRegistry>() : nullptr;
+	if (!AppealReg)
+		return TEXT("❌ BanAppealRegistry is not available (BanSystem may not be installed).");
+
+	TArray<FBanAppealEntry> AllAppeals = AppealReg->GetAllAppeals();
+
+	// Filter to pending only.
+	TArray<FBanAppealEntry> Pending;
+	for (const FBanAppealEntry& E : AllAppeals)
+	{
+		if (E.Status == EAppealStatus::Pending)
+			Pending.Add(E);
+	}
+
+	if (Pending.IsEmpty())
+		return TEXT("✅ No pending ban appeals.");
+
+	FString Body;
+	Body.Reserve(1400);
+	Body += TEXT("```\n");
+	Body += FString::Printf(TEXT("%-6s  %-36s  %-22s\n"),
+		TEXT("ID"), TEXT("UID"), TEXT("Submitted"));
+	Body += FString(TEXT("─"), 68) + TEXT("\n");
+
+	const int32 ShowMax = FMath::Min(Pending.Num(), 15);
+	for (int32 i = 0; i < ShowMax; ++i)
+	{
+		const FBanAppealEntry& E = Pending[i];
+		const FString UidSh      = BanDiscordHelpers::Truncate(E.Uid, 36);
+		const FString SubmittedSh = E.SubmittedAt.ToString(TEXT("%m-%d %H:%M UTC"));
+		Body += FString::Printf(TEXT("%-6lld  %-36s  %-22s\n"),
+			E.Id, *UidSh, *SubmittedSh);
+	}
+	Body += TEXT("```");
+
+	FString Header = FString::Printf(TEXT("**Pending Ban Appeals — %d total**\n"), Pending.Num());
+	if (Pending.Num() > ShowMax)
+		Header += FString::Printf(TEXT("_(Showing first %d. Use `/appeal list` for full list.)_\n"), ShowMax);
 
 	FString Msg = Header + Body;
 	if (Msg.Len() > 1990)

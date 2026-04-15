@@ -93,6 +93,21 @@ public:
 	 */
 	void SetProvider(IDiscordBridgeProvider* InProvider);
 
+	/**
+	 * Returns the active ticket channel ID for the given Discord opener user ID,
+	 * or an empty string if that user has no open ticket.
+	 * Used by BanDiscordSubsystem to auto-close a ban-appeal ticket on approval/denial.
+	 */
+	FString GetTicketChannelForOpener(const FString& DiscordUserId) const;
+
+	/**
+	 * Close and delete the ticket channel associated with a specific Discord user ID.
+	 * Posts @Resolution to the channel before deleting it.  No-ops if no channel
+	 * exists for that user.  Safe to call from BanDiscordSubsystem after approving
+	 * or denying a ban appeal.
+	 */
+	void CloseAppealTicketForOpener(const FString& DiscordUserId, const FString& Resolution);
+
 private:
 	// ── Interaction routing ───────────────────────────────────────────────────
 
@@ -307,6 +322,14 @@ private:
 
 	/** Maps opener user ID to (ticketType -> channelId) for multi-ticket support. */
 	TMap<FString, TMap<FString, FString>> OpenerToTicketsByType;
+
+	/**
+	 * Maps a Discord opener user ID to the BanAppealRegistry entry ID created
+	 * when they submitted a ban-appeal ticket.  Populated in the
+	 * ticket_modal:appeal handler so that approve/deny commands can look up
+	 * the appeal without searching the entire registry.
+	 */
+	TMap<FString, int64> OpenerToAppealId;
 
 	/** Stored panel message ID for auto-refresh. */
 	FString StoredPanelMessageId;

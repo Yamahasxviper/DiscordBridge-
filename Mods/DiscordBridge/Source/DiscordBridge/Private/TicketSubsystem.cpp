@@ -769,6 +769,32 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		// Persist the updated state so this closure survives a server restart.
 		SaveTicketState();
 
+		// If this was a ban-appeal ticket, dismiss the pending registry entry so
+		// it doesn't accumulate as "pending" after the ticket is closed without
+		// a formal approve/deny decision.
+		if (RemovedType == TEXT("banappeal") && !RemovedOpener.IsEmpty())
+		{
+			if (UGameInstance* GI = GetGameInstance())
+			{
+				if (UBanAppealRegistry* AppealReg = GI->GetSubsystem<UBanAppealRegistry>())
+				{
+					const FString AppealUid = FString::Printf(TEXT("Discord:%s"), *RemovedOpener);
+					for (const FBanAppealEntry& E : AppealReg->GetAllAppeals())
+					{
+						if (E.Uid == AppealUid && E.Status == EAppealStatus::Pending)
+						{
+							AppealReg->DeleteAppeal(E.Id);
+							OpenerToAppealId.Remove(RemovedOpener);
+							UE_LOG(LogTicketSystem, Log,
+							       TEXT("TicketSystem: Auto-dismissed pending appeal id=%lld for Discord user %s on ticket close."),
+							       E.Id, *RemovedOpener);
+							break;
+						}
+					}
+				}
+			}
+		}
+
 		// Reopen grace period: if configured, don't delete immediately
 		if (Config.TicketReopenGracePeriodMinutes > 0)
 		{
@@ -1196,11 +1222,17 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 			{
 				const FString AppealUid     = FString::Printf(TEXT("Discord:%s"), *DiscordUserId);
 				const FString ContactInfo   = FString::Printf(TEXT("Discord: %s (%s)"), *DiscordUsername, *DiscordUserId);
-				AppealReg->AddAppeal(AppealUid, Reason, ContactInfo);
+				const FBanAppealEntry NewEntry = AppealReg->AddAppeal(AppealUid, Reason, ContactInfo);
+				if (NewEntry.Id > 0)
+				{
+					// Keep the appeal ID mapped to this opener so approve/deny can
+					// look it up without scanning the full registry.
+					OpenerToAppealId.Add(DiscordUserId, NewEntry.Id);
+				}
 
 				UE_LOG(LogTicketSystem, Log,
-				       TEXT("TicketSystem: Ban appeal from Discord user '%s' (%s) saved to BanAppealRegistry."),
-				       *DiscordUsername, *DiscordUserId);
+				       TEXT("TicketSystem: Ban appeal from Discord user '%s' (%s) saved to BanAppealRegistry (id=%lld)."),
+				       *DiscordUsername, *DiscordUserId, NewEntry.Id);
 			}
 		}
 
@@ -3175,6 +3207,150 @@ FString UTicketSubsystem::GetStatsFilePath()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GetTicketChannelForOpener — public helper for BanDiscordSubsystem
+// ─────────────────────────────────────────────────────────────────────────────
+
+FString UTicketSubsystem::GetTicketChannelForOpener(const FString& DiscordUserId) const
+{
+	if (const FString* ChannelId = OpenerToTicketChannel.Find(DiscordUserId))
+	{
+		return *ChannelId;
+	}
+	return FString();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CloseAppealTicketForOpener — called by BanDiscordSubsystem on approve/deny
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
+                                                   const FString& Resolution)
+{
+	IDiscordBridgeProvider* Bridge = GetBridge();
+	if (!Bridge) return;
+
+	const FString ChannelId = GetTicketChannelForOpener(DiscordUserId);
+	if (ChannelId.IsEmpty()) return;
+
+	// Remove from all tracking maps before deleting.
+	FString RemovedOpener;
+	TicketChannelToOpener.RemoveAndCopyValue(ChannelId, RemovedOpener);
+	if (!RemovedOpener.IsEmpty())
+		OpenerToTicketChannel.Remove(RemovedOpener);
+	OpenerToAppealId.Remove(DiscordUserId);
+
+	FString RemovedType;
+	TicketChannelToType.RemoveAndCopyValue(ChannelId, RemovedType);
+	TicketChannelToAssignee.Remove(ChannelId);
+	TicketChannelToAssigneeName.Remove(ChannelId);
+	TicketChannelToLastActivity.Remove(ChannelId);
+	TicketChannelToOpenTime.Remove(ChannelId);
+	TicketChannelToOpenerName.Remove(ChannelId);
+	TicketChannelToPriority.Remove(ChannelId);
+	TicketChannelToTags.Remove(ChannelId);
+	TicketChannelToNotes.Remove(ChannelId);
+	TicketChannelStaffReplied.Remove(ChannelId);
+	TicketChannelToReminder.Remove(ChannelId);
+	if (Config.bAllowMultipleTicketTypes && !RemovedOpener.IsEmpty() && !RemovedType.IsEmpty())
+	{
+		if (TMap<FString, FString>* TypeMap = OpenerToTicketsByType.Find(RemovedOpener))
+			TypeMap->Remove(RemovedType);
+	}
+
+	SaveTicketState();
+
+	// Post the resolution message so it appears in the transcript.
+	if (!Resolution.IsEmpty())
+		Bridge->SendDiscordChannelMessage(ChannelId, Resolution);
+
+	// Fetch transcript and delete the channel (mirrors the standard close flow).
+	if (!Config.TicketLogChannelId.IsEmpty() && !Bridge->GetBotToken().IsEmpty())
+	{
+		const FString LogChannelId    = Config.TicketLogChannelId;
+		const FString BotToken        = Bridge->GetBotToken();
+		const FString ClosedChannelId = ChannelId;
+		const FString OpenerIdForLog  = RemovedOpener;
+		const FString ClosedAt        = FDateTime::UtcNow().ToString(TEXT("%Y-%m-%d"));
+
+		TWeakObjectPtr<UTicketSubsystem> WeakThis(this);
+
+		const FString FetchUrl = FString::Printf(
+			TEXT("https://discord.com/api/v10/channels/%s/messages?limit=100"),
+			*ClosedChannelId);
+
+		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> FetchReq =
+			FHttpModule::Get().CreateRequest();
+		FetchReq->SetURL(FetchUrl);
+		FetchReq->SetVerb(TEXT("GET"));
+		FetchReq->SetHeader(TEXT("Authorization"),
+			FString::Printf(TEXT("Bot %s"), *BotToken));
+
+		FetchReq->OnProcessRequestComplete().BindWeakLambda(
+			WeakThis.Get(),
+			[WeakThis, LogChannelId, BotToken, OpenerIdForLog, ClosedAt, ClosedChannelId]
+			(FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bOk) mutable
+			{
+				UTicketSubsystem* Self = WeakThis.Get();
+				if (!Self) return;
+				IDiscordBridgeProvider* B = Self->GetBridge();
+				if (!B) return;
+
+				FString TranscriptText = FString::Printf(
+					TEXT(":scroll: **Ban Appeal Ticket Resolved**\n")
+					TEXT("Opener: %s\n")
+					TEXT("Date closed: %s\n\n"),
+					OpenerIdForLog.IsEmpty()
+						? TEXT("(unknown)")
+						: *FString::Printf(TEXT("<@%s>"), *OpenerIdForLog),
+					*ClosedAt);
+
+				if (bOk && Resp.IsValid() &&
+				    Resp->GetResponseCode() >= 200 && Resp->GetResponseCode() < 300)
+				{
+					TSharedPtr<FJsonValue> Root;
+					TSharedRef<TJsonReader<>> Reader =
+						TJsonReaderFactory<>::Create(Resp->GetContentAsString());
+					if (FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid())
+					{
+						const TArray<TSharedPtr<FJsonValue>>* MsgArr = nullptr;
+						if (Root->TryGetArray(MsgArr) && MsgArr)
+						{
+							for (int32 Idx = MsgArr->Num() - 1; Idx >= 0; --Idx)
+							{
+								const TSharedPtr<FJsonObject>* MsgObjPtr = nullptr;
+								if (!(*MsgArr)[Idx]->TryGetObject(MsgObjPtr) || !MsgObjPtr) continue;
+
+								FString AuthorName;
+								const TSharedPtr<FJsonObject>* AuthorPtr = nullptr;
+								if ((*MsgObjPtr)->TryGetObjectField(TEXT("author"), AuthorPtr) && AuthorPtr)
+									(*AuthorPtr)->TryGetStringField(TEXT("username"), AuthorName);
+
+								FString MsgContent;
+								(*MsgObjPtr)->TryGetStringField(TEXT("content"), MsgContent);
+
+								if (!MsgContent.IsEmpty())
+									TranscriptText += FString::Printf(TEXT("[%s]: %s\n"), *AuthorName, *MsgContent);
+							}
+						}
+					}
+				}
+
+				B->SendDiscordChannelMessage(LogChannelId, TranscriptText);
+				B->DeleteDiscordChannel(ClosedChannelId);
+			});
+		FetchReq->ProcessRequest();
+	}
+	else
+	{
+		Bridge->DeleteDiscordChannel(ChannelId);
+	}
+
+	UE_LOG(LogTicketSystem, Log,
+	       TEXT("TicketSystem: Appeal ticket for Discord user %s closed by BanDiscordSubsystem."),
+	       *DiscordUserId);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // CloseTicketChannelInactive — auto-close a ticket due to inactivity
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -3214,6 +3390,31 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 	TicketChannelStaffReplied.Remove(ChannelId);
 	TicketChannelToReminder.Remove(ChannelId);
 	SaveTicketState();
+
+	// If this was a ban-appeal ticket closed by inactivity, dismiss the pending
+	// registry entry so it doesn't pile up as "pending" indefinitely.
+	if (RemovedTypeInactive == TEXT("banappeal") && !RemovedOpener.IsEmpty())
+	{
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UBanAppealRegistry* AppealReg = GI->GetSubsystem<UBanAppealRegistry>())
+			{
+				const FString AppealUid = FString::Printf(TEXT("Discord:%s"), *RemovedOpener);
+				for (const FBanAppealEntry& E : AppealReg->GetAllAppeals())
+				{
+					if (E.Uid == AppealUid && E.Status == EAppealStatus::Pending)
+					{
+						AppealReg->DeleteAppeal(E.Id);
+						OpenerToAppealId.Remove(RemovedOpener);
+						UE_LOG(LogTicketSystem, Log,
+						       TEXT("TicketSystem: Auto-dismissed pending appeal id=%lld for Discord user %s on inactivity close."),
+						       E.Id, *RemovedOpener);
+						break;
+					}
+				}
+			}
+		}
+	}
 
 	// Post an auto-close notice so the transcript includes it.
 	Bridge->SendDiscordChannelMessage(ChannelId,
