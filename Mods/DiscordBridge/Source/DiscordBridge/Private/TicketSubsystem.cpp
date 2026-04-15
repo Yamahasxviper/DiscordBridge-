@@ -66,6 +66,7 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 					PendingReopenExpiry.Remove(ChanId);
 					FString OpenerId;
 					PendingReopenOpener.RemoveAndCopyValue(ChanId, OpenerId);
+					ReopenedOnceChannels.Remove(ChanId);
 					IDiscordBridgeProvider* B = GetBridge();
 					if (B)
 					{
@@ -2979,6 +2980,10 @@ void UTicketSubsystem::SaveTicketState() const
 		if (bSaveStaffReplied)
 			Entry->SetBoolField(TEXT("staff_replied"), *bSaveStaffReplied);
 
+		// Persist reopened-once flag so the limit survives a server restart.
+		if (ReopenedOnceChannels.Contains(Pair.Key))
+			Entry->SetBoolField(TEXT("reopened_once"), true);
+
 		// Persist reminder.
 		const FDateTime* SaveReminder = TicketChannelToReminder.Find(Pair.Key);
 		if (SaveReminder && SaveReminder->GetTicks() > 0)
@@ -3147,6 +3152,11 @@ void UTicketSubsystem::LoadTicketState()
 			TicketChannelStaffReplied.Add(ChannelId, bLoadedStaffReplied);
 		else
 			TicketChannelStaffReplied.Add(ChannelId, false);
+
+		// Restore reopened-once flag so the limit survives a server restart.
+		bool bLoadedReopenedOnce = false;
+		if ((*EntryObj)->TryGetBoolField(TEXT("reopened_once"), bLoadedReopenedOnce) && bLoadedReopenedOnce)
+			ReopenedOnceChannels.Add(ChannelId);
 
 		// Restore reminder.
 		FString LoadReminderStr;
