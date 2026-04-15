@@ -546,19 +546,6 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 	if (CustomId.StartsWith(TEXT("ticket_reopen:")))
 	{
 		const FString ChanId = CustomId.Mid(FCString::Strlen(TEXT("ticket_reopen:")));
-		const FString* PendingOpener = PendingReopenOpener.Find(ChanId);
-		const bool bIsOpenerReopen = PendingOpener && *PendingOpener == DiscordUserId;
-		bool bIsAdminReopen = false;
-		if (!Config.TicketNotifyRoleId.IsEmpty())
-			bIsAdminReopen = MemberRoles.Contains(Config.TicketNotifyRoleId);
-
-		if (!bIsOpenerReopen && !bIsAdminReopen)
-		{
-			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
-				TEXT(":no_entry: Only the ticket opener or admin can reopen this ticket."),
-				true);
-			return;
-		}
 
 		FString RestoredOpener;
 		PendingReopenOpener.RemoveAndCopyValue(ChanId, RestoredOpener);
