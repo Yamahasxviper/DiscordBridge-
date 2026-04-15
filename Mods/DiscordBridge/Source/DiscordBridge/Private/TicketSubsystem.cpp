@@ -551,12 +551,36 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		PendingReopenOpener.RemoveAndCopyValue(ChanId, RestoredOpener);
 		PendingReopenExpiry.Remove(ChanId);
 
+		// Guard: if the grace period already expired (the ticker purged the entry)
+		// RestoredOpener will be empty.  Poisoning the maps with an empty-string key
+		// would break every subsequent ticket lookup.  Reject the click instead.
+		if (RestoredOpener.IsEmpty())
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT(":x: This ticket can no longer be reopened (the reopen window has expired)."), true);
+			return;
+		}
+
 		TicketChannelToOpener.Add(ChanId, RestoredOpener);
 		OpenerToTicketChannel.Add(RestoredOpener, ChanId);
+
+		// Reset the last-activity timestamp so the inactivity ticker re-starts
+		// from now rather than treating the ticket as immediately stale.
+		if (Config.InactiveTicketTimeoutHours > 0.0f)
+			TicketChannelToLastActivity.Add(ChanId, FDateTime::UtcNow());
+
 		SaveTicketState();
 
 		Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
 			TEXT(":white_check_mark: Ticket reopened!"), false);
+
+		// Notify staff that the ticket was reopened.
+		const FString NotifyMention = Config.TicketNotifyRoleId.IsEmpty()
+			? FString()
+			: FString::Printf(TEXT("<@&%s> "), *Config.TicketNotifyRoleId);
+		Bridge->SendDiscordChannelMessage(ChanId,
+			FString::Printf(TEXT("%s:arrows_counterclockwise: Ticket reopened by <@%s>."),
+				*NotifyMention, *DiscordUserId));
 		return;
 	}
 
