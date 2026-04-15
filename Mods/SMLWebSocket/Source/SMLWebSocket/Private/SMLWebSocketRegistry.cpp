@@ -5,7 +5,7 @@
 
 void USMLWebSocketRegistry::RegisterClient(const FString& Name, USMLWebSocketClient* Client)
 {
-    if (Name.IsEmpty()) return;
+    if (Name.IsEmpty() || !Client) return;
     Clients.Add(Name, Client);
 }
 

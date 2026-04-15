@@ -110,7 +110,7 @@ void FBanChatCommandsModule::StartupModule()
             CmdSys->RegisterCommand(TEXT("BanChatCommands"), ABulkBanChatCommand::StaticClass());
 
             UE_LOG(LogBanChatCommands, Log,
-                TEXT("BanChatCommands: Registered 43 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns, announce, stafflist, reason, history, mute, unmute, note, notes, duration, tempunmute, mutecheck, banreason, staffchat, mutelist, clearwarn, extend, appeal, mutereason, freeze, clearchat, report, scheduleban, qban, reputation, bulkban)."));
+                TEXT("BanChatCommands: Registered 42 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns, announce, stafflist, reason, history, mute, unmute, note, notes, duration, tempunmute, mutecheck, banreason, staffchat, mutelist, clearwarn, extend, appeal, mutereason, freeze, clearchat, report, scheduleban, qban, reputation, bulkban)."));
 
             // Bind MuteRegistry delegates to push WebSocket events and write audit log.
             UGameInstance* GI = World->GetGameInstance();

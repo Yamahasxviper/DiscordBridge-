@@ -25,6 +25,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
+#include "UObject/UnrealType.h"
 
 DEFINE_LOG_CATEGORY(LogBanRestApi);
 
@@ -980,13 +981,19 @@ void UBanRestApi::RegisterRoutes()
                 // When a tier has PointThreshold > 0, use accumulated points; otherwise use count.
                 if (Cfg->WarnEscalationTiers.Num() > 0)
                 {
+                    int32 BestThreshold = -1;
                     for (const FWarnEscalationTier& Tier : Cfg->WarnEscalationTiers)
                     {
                         const bool bHit = (Tier.PointThreshold > 0)
                             ? (WarnPoints >= Tier.PointThreshold)
                             : (WarnCount  >= Tier.WarnCount);
-                        if (bHit)
+                        const int32 ThisThreshold = (Tier.PointThreshold > 0)
+                            ? Tier.PointThreshold : Tier.WarnCount;
+                        if (bHit && ThisThreshold > BestThreshold)
+                        {
+                            BestThreshold      = ThisThreshold;
                             BanDurationMinutes = Tier.DurationMinutes;
+                        }
                     }
                 }
                 else if (Cfg->AutoBanWarnCount > 0 && WarnCount >= Cfg->AutoBanWarnCount)
@@ -999,6 +1006,10 @@ void UBanRestApi::RegisterRoutes()
                     UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
                     if (DB)
                     {
+                        // Only auto-ban if the player is not already banned.
+                        FBanEntry ExistingBan;
+                        if (!DB->IsCurrentlyBanned(Uid, ExistingBan))
+                        {
                         FBanEntry AutoBan;
                         AutoBan.Uid      = Uid;
                         UBanDatabase::ParseUid(Uid, AutoBan.Platform, AutoBan.PlayerUID);
@@ -1016,6 +1027,7 @@ void UBanRestApi::RegisterRoutes()
                         FBanDiscordNotifier::NotifyAutoEscalationBan(AutoBan, WarnCount);
                         if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
                             AuditLog->LogAction(TEXT("ban"), Uid, PlayerName, TEXT("system"), TEXT("system"), AutoBan.Reason);
+                        }
                     }
                 }
             }
@@ -1281,6 +1293,14 @@ void UBanRestApi::RegisterRoutes()
             Obj->SetNumberField(TEXT("totalAuditEntries"),       AuditLog  ? static_cast<double>(AuditLog->GetAllEntries().Num())  : 0.0);
             Obj->SetNumberField(TEXT("knownPlayers"),            PlayerReg ? static_cast<double>(PlayerReg->GetAllRecords().Num()) : 0.0);
             Obj->SetNumberField(TEXT("onlinePlayers"),           static_cast<double>(OnlinePlayers));
+            {
+                int32 PendingAppeals = 0;
+                if (UBanAppealRegistry* AppReg = GI->GetSubsystem<UBanAppealRegistry>())
+                    for (const FBanAppealEntry& A : AppReg->GetAllAppeals())
+                        if (A.Status == EAppealStatus::Pending)
+                            ++PendingAppeals;
+                Obj->SetNumberField(TEXT("pendingAppeals"), static_cast<double>(PendingAppeals));
+            }
             Obj->SetArrayField (TEXT("dailyBans30d"),            DailyBansArr);
             Obj->SetArrayField (TEXT("topOffenders"),            TopOffendersArr);
             Obj->SetStringField(TEXT("timestamp"),               FDateTime::UtcNow().ToIso8601());
@@ -1501,21 +1521,23 @@ void UBanRestApi::RegisterRoutes()
                 return true;
             }
 
-            // Reflect into the subsystem to call GetAllNotes().
-            TArray<TSharedPtr<FJsonValue>> Arr;
-            UFunction* GetAllNotesFn = NoteSubsys->GetClass()->FindFunctionByName(TEXT("GetAllNotes"));
-            if (GetAllNotesFn)
+            // Reflect into the subsystem to read the note count from the internal
+            // Notes array property — this is safe across module boundaries because we
+            // only read the array's element count, not the element layout.
+            int32 NoteCount = 0;
+            if (FArrayProperty* NotesProp = FindFProperty<FArrayProperty>(
+                    NoteSubsys->GetClass(), TEXT("Notes")))
             {
-                struct { TArray<UObject*> Ret; } Params;
-                // Fall through to empty if reflection fails
+                FScriptArrayHelper Helper(NotesProp,
+                    NotesProp->ContainerPtrToValuePtr<void>(NoteSubsys));
+                NoteCount = Helper.Num();
             }
 
-            // Simple JSON response: return note count 0 when registry exists
-            // but reflection is skipped (avoids unsafe casting across module).
+            TArray<TSharedPtr<FJsonValue>> Arr;
             TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
-            Root->SetNumberField(TEXT("count"), 0);
+            Root->SetNumberField(TEXT("count"), static_cast<double>(NoteCount));
             Root->SetArrayField (TEXT("notes"),  Arr);
-            Root->SetStringField(TEXT("info"), TEXT("Notes available. Query BanChatCommands module directly for full data."));
+            Root->SetStringField(TEXT("info"), TEXT("Note count is accurate. Full note data is accessible via BanChatCommands module directly."));
             Done(BanJson::Json(BanJson::ObjectToString(Root)));
             return true;
         }
@@ -1765,7 +1787,13 @@ void UBanRestApi::RegisterRoutes()
             Gauge(TEXT("bansystem_audit_entries"),   TEXT("Number of audit log entries"),
                   AuditLog  ? static_cast<double>(AuditLog->GetAllEntries().Num())  : 0.0);
             Gauge(TEXT("bansystem_pending_appeals"), TEXT("Number of pending ban appeals"),
-                  AppealReg ? static_cast<double>(AppealReg->GetAllAppeals().Num()) : 0.0);
+                  [AppealReg]() -> double {
+                      if (!AppealReg) return 0.0;
+                      double Count = 0.0;
+                      for (const FBanAppealEntry& A : AppealReg->GetAllAppeals())
+                          if (A.Status == EAppealStatus::Pending) ++Count;
+                      return Count;
+                  }());
             Gauge(TEXT("bansystem_online_players"),  TEXT("Number of players currently connected"),
                   static_cast<double>(OnlinePlayers));
 
@@ -1841,7 +1869,7 @@ void UBanRestApi::RegisterRoutes()
       st.style.display='block'; st.className=''; st.textContent='Submitting…';
       try{
         const r = await fetch('%s/appeals',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({playerUID:uid,contactInfo:contact,reason:reason,platform:'EOS'})});
+          body:JSON.stringify({uid:uid,contactInfo:contact,reason:reason,platform:'EOS'})});
         const j = await r.json();
         if(r.ok){st.className='ok';st.textContent='✅ Appeal submitted (ID #'+j.id+'). Staff will review it shortly.';}
         else{st.className='err';st.textContent='❌ Error: '+(j.error||'Unknown error');}
@@ -2101,7 +2129,7 @@ void UBanRestApi::RegisterRoutes()
       // Audit log
       if(audit.status==='fulfilled'){
         const rows = (audit.value.entries||[]).slice(0,200).map(e=>
-          `<tr><td>${esc(e.timestamp)}</td><td>${badge(e.action,'blue')}</td><td>${esc(e.targetName||e.targetUid)}</td><td>${esc(e.performedBy)}</td><td>${esc(e.reason)}</td><td>${esc(e.modVersion||'')}</td></tr>`).join('');
+          `<tr><td>${esc(e.timestamp)}</td><td>${badge(e.action,'blue')}</td><td>${esc(e.targetName||e.targetUid)}</td><td>${esc(e.adminName||'')}</td><td>${esc(e.details||'')}</td><td>${esc(e.modVersion||'')}</td></tr>`).join('');
         document.getElementById('auditTable').innerHTML = rows || '<tr><td colspan="6" style="text-align:center;color:#9ca3af">No audit entries</td></tr>';
       }
 
@@ -2213,7 +2241,12 @@ void UBanRestApi::RegisterRoutes()
                     UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
                     if (DB && DB->RemoveBanByUid(Appeal.Uid))
                     {
-                        FBanDiscordNotifier::NotifyBanRemoved(Appeal.Uid, Appeal.Uid, ReviewedBy);
+                        // Look up the player name from the ban record so the
+                        // Discord notification shows a name instead of the raw UID.
+                        FBanEntry RemovedBan;
+                        const FString PlayerName = DB->GetBanByUid(Appeal.Uid, RemovedBan)
+                            ? RemovedBan.PlayerName : Appeal.Uid;
+                        FBanDiscordNotifier::NotifyBanRemoved(PlayerName, Appeal.Uid, ReviewedBy);
                         if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
                             AuditLog->LogAction(TEXT("unban"), Appeal.Uid, TEXT(""), ReviewedBy, ReviewedBy,
                                 FString::Printf(TEXT("Appeal #%lld approved: %s"), Id, *ReviewNote));
@@ -2229,40 +2262,6 @@ void UBanRestApi::RegisterRoutes()
 
             Done(BanJson::Ok(
                 FString::Printf(TEXT("Appeal #%lld %s"), Id, *Norm)));
-            return true;
-        }
-    ));
-
-    // ── DELETE /appeals/:id ───────────────────────────────────────────────────
-    Routes->Handles.Add(Router->BindRoute(
-        FHttpPath(TEXT("/appeals/:id")),
-        EHttpServerRequestVerbs::VERB_DELETE,
-        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
-        {
-            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
-
-            const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
-            if (IdStr.IsEmpty() || !IdStr.IsNumeric())
-            {
-                Done(BanJson::Error(TEXT("id must be an integer")));
-                return true;
-            }
-            const int64 Id = FCString::Atoi64(*IdStr);
-
-            UGameInstance* GI = WeakGI.Get();
-            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
-            UBanAppealRegistry* AppealsReg = GI->GetSubsystem<UBanAppealRegistry>();
-            if (!AppealsReg) { Done(BanJson::Error(TEXT("AppealRegistry unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
-
-            if (!AppealsReg->DeleteAppeal(Id))
-            {
-                Done(BanJson::Error(
-                    FString::Printf(TEXT("No appeal found with id %lld"), Id),
-                    EHttpServerResponseCodes::NotFound));
-                return true;
-            }
-
-            Done(BanJson::Ok(FString::Printf(TEXT("Appeal #%lld deleted"), Id)));
             return true;
         }
     ));

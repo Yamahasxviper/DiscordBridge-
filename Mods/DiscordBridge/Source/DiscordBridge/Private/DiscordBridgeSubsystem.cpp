@@ -227,14 +227,14 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	// Start a 5-second deferred ticker to bind to AFGGamePhaseManager and
 	// AFGSchematicManager delegates once the world and GameState are ready.
 	// The ticker cancels itself after the first successful bind.
-	{
-		FTSTicker::GetCoreTicker().AddTicker(
-			FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
-			{
-				return !TryBindToGameSubsystems(); // false = stop ticking
-			}),
-			5.0f);
-	}
+	GameSubsystemBindTickHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
+		{
+			const bool bDone = TryBindToGameSubsystems();
+			if (bDone) GameSubsystemBindTickHandle.Reset();
+			return !bDone; // false = stop ticking
+		}),
+		5.0f);
 
 	// Wire ourselves as the Discord provider into UTicketSubsystem (always
 	// present now that TicketSystem is merged into this module).
@@ -294,6 +294,10 @@ void UDiscordBridgeSubsystem::Deinitialize()
 	FTSTicker::GetCoreTicker().RemoveTicker(ChatManagerBindTickHandle);
 	ChatManagerBindTickHandle.Reset();
 
+	// Stop the deferred game-subsystem bind ticker if it is still running.
+	FTSTicker::GetCoreTicker().RemoveTicker(GameSubsystemBindTickHandle);
+	GameSubsystemBindTickHandle.Reset();
+
 	// Remove the whitelist PostLogin listener.
 	FGameModeEvents::GameModePostLoginEvent.Remove(PostLoginHandle);
 	PostLoginHandle.Reset();
@@ -309,6 +313,46 @@ void UDiscordBridgeSubsystem::Deinitialize()
 		BoundChatManager->OnChatMessageAdded.RemoveDynamic(
 			this, &UDiscordBridgeSubsystem::OnGameChatMessageAdded);
 		BoundChatManager.Reset();
+	}
+
+	// Unbind from UMuteRegistry delegates.
+	if (bBoundMuteEvents)
+	{
+		UWorld* W = GetWorld();
+		UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
+		if (UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr)
+		{
+			MuteReg->OnPlayerMuted.Remove(MutedEventHandle);
+			MuteReg->OnPlayerUnmuted.Remove(UnmutedEventHandle);
+		}
+		MutedEventHandle.Reset();
+		UnmutedEventHandle.Reset();
+		bBoundMuteEvents = false;
+	}
+
+	// Unbind from AFGGamePhaseManager and AFGSchematicManager delegates.
+	{
+		UWorld* W = GetWorld();
+		if (W && bBoundGamePhase)
+		{
+			if (AFGGamePhaseManager* PhaseMgr = AFGGamePhaseManager::Get(W))
+			{
+				PhaseMgr->mOnCurrentGamePhaseUpdated.RemoveDynamic(
+					this, &UDiscordBridgeSubsystem::OnGamePhaseUpdated);
+				PhaseMgr->mOnGameCompleted.RemoveDynamic(
+					this, &UDiscordBridgeSubsystem::OnGameCompleted);
+			}
+			bBoundGamePhase = false;
+		}
+		if (W && bBoundSchematic)
+		{
+			if (AFGSchematicManager* SchMgr = AFGSchematicManager::Get(W))
+			{
+				SchMgr->PurchasedSchematicDelegate.RemoveDynamic(
+					this, &UDiscordBridgeSubsystem::OnSchematicPurchased);
+			}
+			bBoundSchematic = false;
+		}
 	}
 
 	// Stop the whitelist expiry ticker.
@@ -4543,15 +4587,15 @@ UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
 UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
 if (MuteReg)
 {
-MuteReg->OnPlayerMuted.AddLambda(
+MutedEventHandle = MuteReg->OnPlayerMuted.AddLambda(
 [this](const FMuteEntry& Entry, bool bIsTimed)
 {
 NotifyMuteEvent(Entry.PlayerName, Entry.Uid, true, Entry.Reason);
 });
-MuteReg->OnPlayerUnmuted.AddLambda(
+UnmutedEventHandle = MuteReg->OnPlayerUnmuted.AddLambda(
 [this](const FString& Uid)
 {
-NotifyMuteEvent(Uid, Uid, false, TEXT(""));
+NotifyMuteEvent(TEXT(""), Uid, false, TEXT(""));
 });
 bBoundMuteEvents = true;
 UE_LOG(LogDiscordBridge, Log, TEXT("DiscordBridge: Bound to UMuteRegistry mute-event delegates."));

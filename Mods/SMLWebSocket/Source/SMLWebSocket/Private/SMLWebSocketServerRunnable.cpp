@@ -144,7 +144,19 @@ uint32 FSMLWebSocketServerRunnable::Run()
             {
                 FClientState& C = KV.Value;
                 uint32 Pending = 0;
-                if (!C.Socket->HasPendingData(Pending)) { ToRemove.Add(KV.Key); continue; }
+                if (!C.Socket->HasPendingData(Pending))
+                {
+                    // HasPendingData() returns false when the socket has been
+                    // closed by the remote side (connection reset / EOF).
+                    // We must also verify that the socket is actually in a
+                    // connected state before treating this as a disconnect.
+                    ESocketConnectionState State = C.Socket->GetConnectionState();
+                    if (State != SCS_Connected)
+                    {
+                        ToRemove.Add(KV.Key);
+                    }
+                    continue;
+                }
                 if (Pending == 0) continue;
 
                 const int32 OldLen = C.RecvBuffer.Num();

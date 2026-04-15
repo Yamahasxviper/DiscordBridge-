@@ -25,7 +25,8 @@ void USMLWebSocketServer::BeginDestroy()
 
 USMLWebSocketServer* USMLWebSocketServer::CreateWebSocketServer(UObject* WorldContextObject)
 {
-    return NewObject<USMLWebSocketServer>(WorldContextObject);
+    UObject* Outer = WorldContextObject ? WorldContextObject : GetTransientPackage();
+    return NewObject<USMLWebSocketServer>(Outer);
 }
 
 bool USMLWebSocketServer::Listen(int32 Port)
@@ -112,6 +113,10 @@ void USMLWebSocketServer::BroadcastEventText(const FString& EventType, const FSt
 {
     if (!ServerRunnable.IsValid()) return;
 
+    // Subscription sets store event types lowercased (see Internal_OnClientMessage).
+    // Normalize EventType to lowercase before the lookup so callers don't need to.
+    const FString NormEventType = EventType.ToLower();
+
     // Collect IDs of clients that should receive this event.
     // A client receives the event when:
     //   a) it has no subscription filter (receives everything), OR
@@ -122,7 +127,7 @@ void USMLWebSocketServer::BroadcastEventText(const FString& EventType, const FSt
         for (const FString& Id : ConnectedClientIds)
         {
             const TSet<FString>* Subs = ClientSubscriptions.Find(Id);
-            if (!Subs || Subs->Num() == 0 || Subs->Contains(EventType))
+            if (!Subs || Subs->Num() == 0 || Subs->Contains(NormEventType))
                 Targets.Add(Id);
         }
     }

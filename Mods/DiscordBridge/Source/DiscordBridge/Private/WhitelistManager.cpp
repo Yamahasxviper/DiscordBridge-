@@ -68,7 +68,8 @@ Save();
 return;
 }
 
-bEnabled = bDefaultEnabled;
+// Restore the runtime-toggled enabled state from JSON (overrides the ini default).
+Root->TryGetBoolField(TEXT("enabled"), bEnabled);
 
 // Load max_slots
 double MaxSlotsD = 0.0;
