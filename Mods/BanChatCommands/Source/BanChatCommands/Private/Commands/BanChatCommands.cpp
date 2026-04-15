@@ -142,7 +142,7 @@ namespace BanChat
      * @param OutUid  Populated with the sender's compound UID when they connect via a known platform.
      * @return true when the sender is authorised to run admin commands.
      */
-    static bool IsAdminSender(UCommandSender* Sender, FString& OutUid)
+    static bool IsAdminSender(UCommandSender* Sender, FString& OutUid, bool bSendError = true)
     {
         if (!Sender) return false; // null sender — deny to fail safely
         if (!Sender->IsPlayerSender())
@@ -185,9 +185,10 @@ namespace BanChat
         const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
         if (!Cfg || !Cfg->IsAdminUid(OutUid))
         {
-            Sender->SendChatMessage(
-                TEXT("[BanChatCommands] You do not have permission to use this command."),
-                FLinearColor::Red);
+            if (bSendError)
+                Sender->SendChatMessage(
+                    TEXT("[BanChatCommands] You do not have permission to use this command."),
+                    FLinearColor::Red);
             return false;
         }
         return true;
@@ -612,6 +613,7 @@ namespace BanChat
      */
     static bool IsModeratorSender(UCommandSender* Sender, FString& OutUid)
     {
+        if (!Sender) return false; // null sender — deny to fail safely
         if (!Sender->IsPlayerSender())
         {
             OutUid.Reset();
@@ -1607,11 +1609,11 @@ EExecutionStatus AReloadConfigChatCommand::ExecuteCommand_Implementation(
             ? TEXT("No changes detected")
             : FString::Join(Changes, TEXT("\n• "));
 
-        // Escape for JSON.
+        // Escape for JSON — backslash must be escaped first to avoid double-escaping.
         FString EscReloader = Sender->GetSenderName()
-            .Replace(TEXT("\""), TEXT("\\\"")).Replace(TEXT("\n"), TEXT("\\n"));
+            .Replace(TEXT("\\"), TEXT("\\\\")).Replace(TEXT("\""), TEXT("\\\"")).Replace(TEXT("\n"), TEXT("\\n"));
         FString EscChanges = ChangeList
-            .Replace(TEXT("\""), TEXT("\\\"")).Replace(TEXT("\n"), TEXT("\\n"));
+            .Replace(TEXT("\\"), TEXT("\\\\")).Replace(TEXT("\""), TEXT("\\\"")).Replace(TEXT("\n"), TEXT("\\n"));
 
         const FString Payload = FString::Printf(
             TEXT("{\"embeds\":[{\"title\":\"🔄 Config Reloaded\",\"color\":3066993,\"fields\":["
@@ -1788,10 +1790,16 @@ EExecutionStatus AWarnChatCommand::ExecuteCommand_Implementation(
 
         if (SysCfg->WarnEscalationTiers.Num() > 0)
         {
+            // Apply the highest threshold tier that has been reached so the most
+            // severe applicable punishment is used regardless of config order.
+            int32 BestThreshold = -1;
             for (const FWarnEscalationTier& Tier : SysCfg->WarnEscalationTiers)
             {
-                if (WarnCount >= Tier.WarnCount)
+                if (WarnCount >= Tier.WarnCount && Tier.WarnCount > BestThreshold)
+                {
+                    BestThreshold      = Tier.WarnCount;
                     BanDurationMinutes = Tier.DurationMinutes;
+                }
             }
         }
         else if (SysCfg->AutoBanWarnCount > 0 && WarnCount >= SysCfg->AutoBanWarnCount)
@@ -1909,8 +1917,8 @@ EExecutionStatus AWarningsChatCommand::ExecuteCommand_Implementation(
     {
         const FWarningEntry& W = Warnings[i];
         Sender->SendChatMessage(
-            FString::Printf(TEXT("  #%d | %s | By: %s | %s"),
-                i + 1, *W.Reason, *W.WarnedBy,
+            FString::Printf(TEXT("  #%lld | %s | By: %s | %s"),
+                W.Id, *W.Reason, *W.WarnedBy,
                 *W.WarnDate.ToString(TEXT("%Y-%m-%d %H:%M:%S"))),
             FLinearColor::White);
     }
@@ -2283,7 +2291,15 @@ EExecutionStatus AMuteChatCommand::ExecuteCommand_Implementation(
     int32 ReasonStart = 1;
     if (Arguments.Num() >= 2 && Arguments[1].IsNumeric())
     {
-        Minutes      = FMath::Max(0, FCString::Atoi(*Arguments[1]));
+        const int32 ParsedMinutes = FCString::Atoi(*Arguments[1]);
+        if (ParsedMinutes <= 0)
+        {
+            Sender->SendChatMessage(
+                TEXT("[BanChatCommands] Duration must be a positive number of minutes (e.g. 30)."),
+                FLinearColor::Red);
+            return EExecutionStatus::BAD_ARGUMENTS;
+        }
+        Minutes      = ParsedMinutes;
         ReasonStart  = 2;
     }
 
@@ -2386,10 +2402,15 @@ EExecutionStatus ANoteChatCommand::ExecuteCommand_Implementation(
 {
     FString AdminId;
     const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
-    if (!BanChat::IsAdminSender(Sender, AdminId))
+    if (!BanChat::IsAdminSender(Sender, AdminId, false))
     {
         if (!Cfg || !Cfg->bAllowModNotes || !Cfg->IsModeratorUid(AdminId))
+        {
+            if (Sender) Sender->SendChatMessage(
+                TEXT("[BanChatCommands] You do not have permission to use this command."),
+                FLinearColor::Red);
             return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+        }
     }
 
     FString Uid, DisplayName;
@@ -2436,10 +2457,15 @@ EExecutionStatus ANotesChatCommand::ExecuteCommand_Implementation(
 {
     FString AdminId;
     const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
-    if (!BanChat::IsAdminSender(Sender, AdminId))
+    if (!BanChat::IsAdminSender(Sender, AdminId, false))
     {
         if (!Cfg || !Cfg->bAllowModNotes || !Cfg->IsModeratorUid(AdminId))
+        {
+            if (Sender) Sender->SendChatMessage(
+                TEXT("[BanChatCommands] You do not have permission to use this command."),
+                FLinearColor::Red);
             return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+        }
     }
 
     FString Uid, DisplayName;
@@ -2649,10 +2675,15 @@ EExecutionStatus AMuteCheckChatCommand::ExecuteCommand_Implementation(
 {
     FString CallerId;
     const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
-    if (!BanChat::IsAdminSender(Sender, CallerId))
+    if (!BanChat::IsAdminSender(Sender, CallerId, false))
     {
         if (!Cfg || !Cfg->IsModeratorUid(CallerId))
+        {
+            if (Sender) Sender->SendChatMessage(
+                TEXT("[BanChatCommands] You do not have permission to use this command."),
+                FLinearColor::Red);
             return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+        }
     }
 
     FString Uid, DisplayName;
@@ -2788,10 +2819,15 @@ EExecutionStatus AStaffChatCommand::ExecuteCommand_Implementation(
 {
     FString CallerId;
     const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
-    if (!BanChat::IsAdminSender(Sender, CallerId))
+    if (!BanChat::IsAdminSender(Sender, CallerId, false))
     {
         if (!Cfg || !Cfg->IsModeratorUid(CallerId))
+        {
+            if (Sender) Sender->SendChatMessage(
+                TEXT("[BanChatCommands] You do not have permission to use this command."),
+                FLinearColor::Red);
             return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+        }
     }
 
     const FString Message = BanChat::JoinArgs(Arguments, 0);
@@ -2812,7 +2848,9 @@ EExecutionStatus AStaffChatCommand::ExecuteCommand_Implementation(
         APlayerState* PS = PC->PlayerState;
         if (!PS) continue;
 
-        const FString PSUid = UBanDatabase::MakeUid(TEXT("EOS"), PS->GetUniqueId().ToString().ToLower());
+        const FUniqueNetIdRepl& PsUniqueId = PS->GetUniqueId();
+        if (!PsUniqueId.IsValid() || PsUniqueId.GetType() == FName(TEXT("NONE"))) continue;
+        const FString PSUid = UBanDatabase::MakeUid(TEXT("EOS"), PsUniqueId.ToString().ToLower());
 
         if (!Cfg) continue;
 
@@ -2848,10 +2886,15 @@ EExecutionStatus AMuteListChatCommand::ExecuteCommand_Implementation(
 {
     FString CallerId;
     const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
-    if (!BanChat::IsAdminSender(Sender, CallerId))
+    if (!BanChat::IsAdminSender(Sender, CallerId, false))
     {
         if (!Cfg || !Cfg->IsModeratorUid(CallerId))
+        {
+            if (Sender) Sender->SendChatMessage(
+                TEXT("[BanChatCommands] You do not have permission to use this command."),
+                FLinearColor::Red);
             return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+        }
     }
 
     UWorld* World = GetWorld();
@@ -3203,7 +3246,9 @@ EExecutionStatus AFreezeChatCommand::ExecuteCommand_Implementation(
         {
             APlayerController* PC = It->Get();
             if (!PC || !PC->PlayerState) continue;
-            if (PC->PlayerState->GetPlayerName() == DisplayName)
+            const FUniqueNetIdRepl& PcId = PC->PlayerState->GetUniqueId();
+            if (!PcId.IsValid() || PcId.GetType() == FName(TEXT("NONE"))) continue;
+            if (UBanDatabase::MakeUid(TEXT("EOS"), PcId.ToString().ToLower()) == Uid)
             {
                 PC->SetIgnoreMoveInput(false);
                 break;
@@ -3222,7 +3267,9 @@ EExecutionStatus AFreezeChatCommand::ExecuteCommand_Implementation(
         {
             APlayerController* PC = It->Get();
             if (!PC || !PC->PlayerState) continue;
-            if (PC->PlayerState->GetPlayerName() == DisplayName)
+            const FUniqueNetIdRepl& PcId = PC->PlayerState->GetUniqueId();
+            if (!PcId.IsValid() || PcId.GetType() == FName(TEXT("NONE"))) continue;
+            if (UBanDatabase::MakeUid(TEXT("EOS"), PcId.ToString().ToLower()) == Uid)
             {
                 PC->SetIgnoreMoveInput(true);
                 break;
@@ -3286,7 +3333,7 @@ EExecutionStatus AClearChatChatCommand::ExecuteCommand_Implementation(
         {
             auto Esc = [](const FString& S) -> FString
             {
-                return S.Replace(TEXT("\""), TEXT("\\\"")).Replace(TEXT("\n"), TEXT("\\n"));
+                return S.Replace(TEXT("\\"), TEXT("\\\\")).Replace(TEXT("\""), TEXT("\\\"")).Replace(TEXT("\n"), TEXT("\\n"));
             };
             const FString JsonPayload = FString::Printf(
                 TEXT("{\"embeds\":[{\"title\":\"Chat Cleared\",\"color\":3447003,\"fields\":["
@@ -3370,7 +3417,7 @@ EExecutionStatus AReportChatCommand::ExecuteCommand_Implementation(
     {
         auto Esc = [](const FString& S) -> FString
         {
-            return S.Replace(TEXT("\""), TEXT("\\\"")).Replace(TEXT("\n"), TEXT("\\n"));
+            return S.Replace(TEXT("\\"), TEXT("\\\\")).Replace(TEXT("\""), TEXT("\\\"")).Replace(TEXT("\n"), TEXT("\\n"));
         };
 
         const FString JsonPayload = FString::Printf(

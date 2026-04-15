@@ -623,7 +623,13 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		TicketChannelToAssigneeName.Remove(SourceChannelId);
 		TicketChannelToLastActivity.Remove(SourceChannelId);
 		TicketChannelToOpenerName.Remove(SourceChannelId);
-		TicketChannelToType.Remove(SourceChannelId);
+		FString RemovedTypeApprove;
+		TicketChannelToType.RemoveAndCopyValue(SourceChannelId, RemovedTypeApprove);
+		if (Config.bAllowMultipleTicketTypes && !RemovedOpenerApprove.IsEmpty() && !RemovedTypeApprove.IsEmpty())
+		{
+			if (TMap<FString, FString>* TypeMap = OpenerToTicketsByType.Find(RemovedOpenerApprove))
+				TypeMap->Remove(RemovedTypeApprove);
+		}
 		TicketChannelToOpenTime.Remove(SourceChannelId);
 		TicketChannelToPriority.Remove(SourceChannelId);
 		TicketChannelToTags.Remove(SourceChannelId);
@@ -3186,10 +3192,17 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 	TicketChannelToAssignee.Remove(ChannelId);
 	TicketChannelToAssigneeName.Remove(ChannelId);
 	TicketChannelToLastActivity.Remove(ChannelId);
-	TicketChannelToType.Remove(ChannelId);
+	FString RemovedTypeInactive;
+	TicketChannelToType.RemoveAndCopyValue(ChannelId, RemovedTypeInactive);
 	TicketChannelToPriority.Remove(ChannelId);
 	TicketChannelToOpenTime.Remove(ChannelId);
 	TicketChannelToOpenerName.Remove(ChannelId);
+
+	if (Config.bAllowMultipleTicketTypes && !RemovedOpener.IsEmpty() && !RemovedTypeInactive.IsEmpty())
+	{
+		if (TMap<FString, FString>* TypeMap = OpenerToTicketsByType.Find(RemovedOpener))
+			TypeMap->Remove(RemovedTypeInactive);
+	}
 
 	// Capture notes for transcript before removing.
 	TArray<FString> InactiveNotesForLog;

@@ -851,6 +851,15 @@ private:
 	/** True once UMuteRegistry mute-event delegates have been bound. */
 	bool bBoundMuteEvents = false;
 
+	/** Handle for the deferred-bind ticker that calls TryBindToGameSubsystems(). */
+	FTSTicker::FDelegateHandle GameSubsystemBindTickHandle;
+
+	/** Handle for the OnPlayerMuted delegate bound to UMuteRegistry. */
+	FDelegateHandle MutedEventHandle;
+
+	/** Handle for the OnPlayerUnmuted delegate bound to UMuteRegistry. */
+	FDelegateHandle UnmutedEventHandle;
+
 	// ── Scheduled announcements ───────────────────────────────────────────────
 
 	/** Accumulated seconds since last scheduled announcement was posted. */

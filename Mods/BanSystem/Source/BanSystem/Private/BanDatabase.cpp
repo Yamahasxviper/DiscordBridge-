@@ -192,11 +192,18 @@ void UBanDatabase::Deinitialize()
 
 void UBanDatabase::ReloadIfChanged()
 {
+    // Read the cached mtime under the lock to avoid a data race with SaveToFile().
+    FDateTime CachedModTime;
+    {
+        FScopeLock Lock(&DbMutex);
+        CachedModTime = LastKnownFileModTime;
+    }
+
     const FDateTime NewModTime = IFileManager::Get().GetTimeStamp(*DbPath);
 
     // GetTimeStamp returns FDateTime(0) when the file does not exist.
     // In that case there is nothing to reload, so bail out early.
-    if (NewModTime == FDateTime(0) || NewModTime == LastKnownFileModTime)
+    if (NewModTime == FDateTime(0) || NewModTime == CachedModTime)
         return;
 
     UE_LOG(LogBanDatabase, Log,
