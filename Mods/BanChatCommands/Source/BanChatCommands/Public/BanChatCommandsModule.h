@@ -50,6 +50,8 @@ public:
 
 private:
     FDelegateHandle WorldInitHandle;
+    /** Handle for the game-mode logout event — removes disconnected players from FrozenPlayerUids. */
+    FDelegateHandle LogoutHandle;
 
     // ── Auto-reload ───────────────────────────────────────────────────────────
 
@@ -61,6 +63,11 @@ private:
 
     /** Handle to the recurring ticker that expires timed mutes every 30 s. */
     FTSTicker::FDelegateHandle MuteExpiryHandle;
+
+    /** Per-world mute-event delegate handles — stored so they can be removed before
+     *  re-binding on subsequent world loads, preventing duplicate firings. */
+    FDelegateHandle MutedDelegateHandle;
+    FDelegateHandle UnmutedDelegateHandle;
 
     /** Ticker callback — calls UMuteRegistry::TickExpiry() on all instances.
      *  Returns true to keep ticking. */

@@ -4,6 +4,11 @@
 #include "DiscordBridgeSubsystem.h"
 #include "Command/CommandSender.h"
 #include "Engine/GameInstance.h"
+#include "BanChatCommandsConfig.h"
+#include "BanDatabase.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
+#include "GameFramework/OnlineReplStructs.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: get the UDiscordBridgeSubsystem from any actor in the game world.
@@ -119,6 +124,29 @@ EExecutionStatus AInGameWhitelistChatCommand::ExecuteCommand_Implementation(
 			TEXT("[DiscordBridge] Discord bridge is not active."),
 			FLinearColor::Red);
 		return EExecutionStatus::UNCOMPLETED;
+	}
+
+	// Admin-only: only server console or listed admin EOS PUIDs may manage the whitelist.
+	if (Sender->IsPlayerSender())
+	{
+		FString SenderUid;
+		if (APlayerController* PC = Cast<APlayerController>(Sender->GetPlayer()))
+		{
+			if (PC->PlayerState)
+			{
+				const FUniqueNetIdRepl& UniqueId = PC->PlayerState->GetUniqueId();
+				if (UniqueId.IsValid() && UniqueId.GetType() != FName(TEXT("NONE")))
+					SenderUid = UBanDatabase::MakeUid(TEXT("EOS"), UniqueId.ToString().ToLower());
+			}
+		}
+		const UBanChatCommandsConfig* AdminCfg = UBanChatCommandsConfig::Get();
+		if (!AdminCfg || !AdminCfg->IsAdminUid(SenderUid))
+		{
+			Sender->SendChatMessage(
+				TEXT("[DiscordBridge] You do not have permission to use this command."),
+				FLinearColor::Red);
+			return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+		}
 	}
 
 	// Reconstruct the sub-command string (verb + optional name argument).

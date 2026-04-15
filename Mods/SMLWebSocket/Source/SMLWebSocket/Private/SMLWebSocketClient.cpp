@@ -95,8 +95,10 @@ void USMLWebSocketClient::SendText(const FString& Message)
 
 void USMLWebSocketClient::SendBinary(const TArray<uint8>& Data)
 {
-	if (Runnable.IsValid())
+	if (bIsConnected && Runnable.IsValid())
 	{
+		StatBytesSent.fetch_add(Data.Num());
+		StatMessagesSent.fetch_add(1);
 		Runnable->EnqueueBinary(Data);
 	}
 }
