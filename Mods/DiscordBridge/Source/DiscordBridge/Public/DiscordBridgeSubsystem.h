@@ -340,6 +340,14 @@ public:
 	                                        const FString& Title,
 	                                        const TArray<FModalField>& Fields) override;
 
+	/** Creates a public thread in @p ChannelId and calls @p OnCreated with the
+	 *  new thread ID (or an empty string if the Discord API request fails).
+	 *  Implements IDiscordBridgeProvider::CreateDiscordThread(). */
+	virtual void CreateDiscordThread(
+		const FString& ChannelId,
+		const FString& ThreadName,
+		TFunction<void(const FString& ThreadId)> OnCreated) override;
+
 	/**
 	 * Called by OnGameChatMessageAdded every time a player-chat message lands
 	 * in the server's history.  Forwards the message to Discord.

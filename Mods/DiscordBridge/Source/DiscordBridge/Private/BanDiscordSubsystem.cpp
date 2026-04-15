@@ -3161,10 +3161,9 @@ if (!CachedProvider) return;
 if (Config.ModerationLogChannelId.IsEmpty()) return;
 if (Config.ModerationLogChannelId == TEXT("0")) return;
 
-// Check if we already have a cached thread ID for this player.
+// Fast path: a thread for this player was already created in a prior call.
 if (const FString* CachedId = PlayerThreadIdCache.Find(Uid))
 {
-// Post directly into the existing thread.
 CachedProvider->SendDiscordChannelMessage(*CachedId, Message);
 return;
 }
@@ -3173,10 +3172,31 @@ return;
 const FString ThreadName = BanDiscordHelpers::Truncate(
 FString::Printf(TEXT("%s [%s]"), *PlayerName, *Uid), 100);
 
-// No cached thread ID — post a prefixed message to the main mod-log channel.
+// Post a prefixed fallback to the main mod-log channel immediately so the
+// message is never lost, even if thread creation fails or is slow.
 const FString Prefixed = FString::Printf(
 TEXT("**[%s]** %s"), *BanDiscordHelpers::EscapeMarkdown(ThreadName), *Message);
 CachedProvider->SendDiscordChannelMessage(Config.ModerationLogChannelId, Prefixed);
+
+// Asynchronously create a Discord thread for this player so that future
+// moderation events are grouped per-player rather than posted inline.
+const FString ChanId = Config.ModerationLogChannelId;
+const FString UidKey = Uid;
+TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
+
+CachedProvider->CreateDiscordThread(ChanId, ThreadName,
+[WeakThis, UidKey](const FString& ThreadId)
+{
+UBanDiscordSubsystem* Self = WeakThis.Get();
+if (Self && !ThreadId.IsEmpty())
+{
+// Cache the thread so subsequent events go straight into it.
+Self->PlayerThreadIdCache.Add(UidKey, ThreadId);
+UE_LOG(LogBanDiscord, Log,
+       TEXT("BanDiscordSubsystem: Created mod-log thread %s for player uid=%s."),
+       *ThreadId, *UidKey);
+}
+});
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4319,7 +4339,7 @@ void UBanDiscordSubsystem::HandlePanelButtonInteraction(const TSharedPtr<FJsonOb
 	// Determine which permission tier the action requires.
 	// Admin-level: ban, tempban, warn, banlist, reload, unban, warnlist, history.
 	// Mod-level:   kick, mute, unmute, announce, players, stafflist, refresh,
-	//              bancheck, mutecheck, mutelist.
+	//              bancheck, mutecheck, mutelist, appeals.
 	static const TArray<FString> AdminActions = {
 		TEXT("ban"), TEXT("tempban"), TEXT("warn"), TEXT("banlist"), TEXT("reload"),
 		TEXT("unban"), TEXT("warnlist"), TEXT("history"),

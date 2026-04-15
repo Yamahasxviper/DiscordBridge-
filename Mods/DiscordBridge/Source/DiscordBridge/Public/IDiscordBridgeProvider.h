@@ -253,4 +253,22 @@ public:
 	                                        const FString& ModalCustomId,
 	                                        const FString& Title,
 	                                        const TArray<FModalField>& Fields) = 0;
+
+	/**
+	 * Asynchronously creates a public thread in @p ChannelId named @p ThreadName
+	 * (auto-archive after 7 days).  Calls @p OnCreated with the new thread's
+	 * channel ID on success, or with an empty string if the request fails.
+	 *
+	 * The caller is responsible for posting the first message to the returned
+	 * thread ID.
+	 *
+	 * @param ChannelId   Parent channel where the thread is created.
+	 * @param ThreadName  Thread name (max 100 characters; truncated by caller).
+	 * @param OnCreated   Callback invoked on the game thread once the Discord
+	 *                    API responds.  Receives the thread channel ID or "".
+	 */
+	virtual void CreateDiscordThread(
+		const FString& ChannelId,
+		const FString& ThreadName,
+		TFunction<void(const FString& ThreadId)> OnCreated) = 0;
 };

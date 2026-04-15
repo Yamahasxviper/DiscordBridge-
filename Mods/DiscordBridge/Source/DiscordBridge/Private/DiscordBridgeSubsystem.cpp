@@ -1999,6 +1999,64 @@ void UDiscordBridgeSubsystem::RespondWithMultiFieldModal(const FString& Interact
 	Request->ProcessRequest();
 }
 
+void UDiscordBridgeSubsystem::CreateDiscordThread(
+	const FString& ChannelId,
+	const FString& ThreadName,
+	TFunction<void(const FString& ThreadId)> OnCreated)
+{
+	if (Config.BotToken.IsEmpty() || ChannelId.IsEmpty() || ThreadName.IsEmpty())
+	{
+		if (OnCreated) OnCreated(FString());
+		return;
+	}
+
+	// Escape the thread name for embedding in JSON.
+	FString SafeName = ThreadName;
+	SafeName.ReplaceInline(TEXT("\\"), TEXT("\\\\"));
+	SafeName.ReplaceInline(TEXT("\""), TEXT("\\\""));
+
+	const FString BodyStr = FString::Printf(
+		TEXT("{\"name\":\"%s\",\"type\":11,\"auto_archive_duration\":10080}"),
+		*SafeName);
+
+	const FString Url = FString::Printf(
+		TEXT("%s/channels/%s/threads"), *DiscordApiBase, *ChannelId);
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
+		FHttpModule::Get().CreateRequest();
+	Request->SetURL(Url);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
+	Request->SetHeader(TEXT("Authorization"),
+	                   FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+	Request->SetContentAsString(BodyStr);
+
+	Request->OnProcessRequestComplete().BindLambda(
+		[OnCreated, ChannelId, ThreadName](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
+		{
+			FString ThreadId;
+			if (bConnected && Resp.IsValid() &&
+			    Resp->GetResponseCode() >= 200 && Resp->GetResponseCode() < 300)
+			{
+				TSharedPtr<FJsonObject> ThreadObj;
+				TSharedRef<TJsonReader<>> Reader =
+					TJsonReaderFactory<>::Create(Resp->GetContentAsString());
+				if (FJsonSerializer::Deserialize(Reader, ThreadObj) && ThreadObj.IsValid())
+					ThreadObj->TryGetStringField(TEXT("id"), ThreadId);
+			}
+			else
+			{
+				UE_LOG(LogDiscordBridge, Warning,
+				       TEXT("DiscordBridge: CreateDiscordThread failed for '%s' in channel %s (HTTP %d)."),
+				       *ThreadName, *ChannelId,
+				       Resp.IsValid() ? Resp->GetResponseCode() : 0);
+			}
+			if (OnCreated) OnCreated(ThreadId);
+		});
+
+	Request->ProcessRequest();
+}
+
 void UDiscordBridgeSubsystem::DeleteDiscordChannel(const FString& ChannelId)
 {
 	if (Config.BotToken.IsEmpty() || ChannelId.IsEmpty())
