@@ -97,6 +97,9 @@ private:
 	/** Extract the sender's display name (nick > global_name > username). */
 	static FString ExtractSenderName(const TSharedPtr<FJsonObject>& MessageObj);
 
+	/** Extract the Discord user ID (snowflake) of the sender from an interaction object. */
+	static FString ExtractSenderId(const TSharedPtr<FJsonObject>& MessageObj);
+
 	/** Returns true when the member's role list contains Config.AdminRoleId. */
 	bool IsAdminMember(const TArray<FString>& Roles) const;
 
@@ -354,12 +357,16 @@ private:
 	 * AdminPanelChannelId when configured).  The response is sent as a
 	 * non-ephemeral type-4 interaction callback so the panel is visible
 	 * to all users in the channel.
+	 *
+	 * AuthorId is the Discord user snowflake used for per-user rate-limiting.
+	 * Pass an empty string to bypass the rate-limit (e.g. auto-post on startup).
 	 */
 	void HandlePanelCommand(const FString& ChannelId,
 	                        const FString& InteractionId,
 	                        const FString& InteractionToken,
 	                        const TArray<FString>& MemberRoles,
-	                        const FString& SenderName);
+	                        const FString& SenderName,
+	                        const FString& AuthorId = FString());
 
 	/**
 	 * Handle MESSAGE_COMPONENT (type 3) interactions whose custom_id starts
@@ -376,8 +383,8 @@ private:
 	void HandlePanelModalSubmit(const TSharedPtr<FJsonObject>& InteractionObj);
 
 	/** Build the JSON "data" object for the panel interaction response.
-	 *  Includes the embed (title, description, colour, timestamp) and
-	 *  two action rows of buttons. */
+	 *  Includes the embed (title, description, colour, timestamp, dashboard fields)
+	 *  and three action rows of buttons. */
 	TSharedPtr<FJsonObject> BuildPanelData() const;
 
 	// ── Panel action executors ────────────────────────────────────────────────
@@ -420,6 +427,15 @@ private:
 	/** Reload BanBridge config and return a result message. */
 	FString ExecutePanelReloadConfig(const FString& SenderName);
 
+	/** Remove an active ban by player name/PUID.  Returns the result message. */
+	FString ExecutePanelUnban(const FString& PlayerArg, const FString& SenderName);
+
+	/** Remove an active mute by player name/PUID.  Returns the result message. */
+	FString ExecutePanelUnmute(const FString& PlayerArg, const FString& SenderName);
+
+	/** Look up a player's ban status and return a formatted result string. */
+	FString ExecutePanelBanCheck(const FString& PlayerArg) const;
+
 	// ── State ─────────────────────────────────────────────────────────────────
 
 	/** Loaded config (populated in Initialize()). */
@@ -440,6 +456,16 @@ private:
 	 * Not persisted across restarts (threads are reused by name-search when missing).
 	 */
 	TMap<FString, FString> PlayerThreadIdCache;
+
+	/**
+	 * Rate-limit tracker for /admin panel: Discord user ID → last post timestamp.
+	 * Prevents a single staff member from spamming AdminPanelChannelId within
+	 * PanelRateLimitSeconds (60 s).
+	 */
+	TMap<FString, FDateTime> LastPanelPostByUser;
+
+	/** Minimum seconds between /admin panel posts from the same Discord user. */
+	static constexpr float PanelRateLimitSeconds = 60.f;
 
 	/**
 	 * Interaction token for the slash command currently being processed.
