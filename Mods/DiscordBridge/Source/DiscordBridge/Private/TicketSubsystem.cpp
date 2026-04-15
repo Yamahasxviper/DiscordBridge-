@@ -254,6 +254,7 @@ void UTicketSubsystem::Deinitialize()
 	UserTicketCooldown.Empty();
 	PendingReopenExpiry.Empty();
 	PendingReopenOpener.Empty();
+	ReopenedOnceChannels.Empty();
 	OpenerToTicketsByType.Empty();
 	TicketChannelToTags.Empty();
 	TicketChannelToNotes.Empty();
@@ -569,6 +570,9 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		if (Config.InactiveTicketTimeoutHours > 0.0f)
 			TicketChannelToLastActivity.Add(ChanId, FDateTime::UtcNow());
 
+		// Mark this channel as having been reopened once; a second reopen will not be offered.
+		ReopenedOnceChannels.Add(ChanId);
+
 		SaveTicketState();
 
 		Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
@@ -645,6 +649,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		TicketChannelToPriority.Remove(SourceChannelId);
 		TicketChannelToTags.Remove(SourceChannelId);
 		TicketChannelToNotes.Remove(SourceChannelId);
+		ReopenedOnceChannels.Remove(SourceChannelId);
 		TicketChannelStaffReplied.Remove(SourceChannelId);
 		TicketChannelToReminder.Remove(SourceChannelId);
 		SaveTicketState();
@@ -806,8 +811,9 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 			}
 		}
 
-		// Reopen grace period: if configured, don't delete immediately
-		if (Config.TicketReopenGracePeriodMinutes > 0)
+		// Reopen grace period: if configured, and this ticket has not already been
+		// reopened once before, show the Reopen button and delay deletion.
+		if (Config.TicketReopenGracePeriodMinutes > 0 && !ReopenedOnceChannels.Contains(SourceChannelId))
 		{
 			PendingReopenExpiry.Add(SourceChannelId,
 				FDateTime::UtcNow() + FTimespan::FromMinutes(Config.TicketReopenGracePeriodMinutes));
@@ -2879,6 +2885,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		TicketChannelToNotes.Remove(SourceChannelId);
 		TicketChannelStaffReplied.Remove(SourceChannelId);
 		TicketChannelToReminder.Remove(SourceChannelId);
+		ReopenedOnceChannels.Remove(SourceChannelId);
 		if (Config.bAllowMultipleTicketTypes && !MergeRemovedOpener.IsEmpty() && !MergeRemovedType.IsEmpty())
 		{
 			if (TMap<FString, FString>* MergeTypeMap = OpenerToTicketsByType.Find(MergeRemovedOpener))
@@ -3262,6 +3269,7 @@ void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
 	TicketChannelToNotes.Remove(ChannelId);
 	TicketChannelStaffReplied.Remove(ChannelId);
 	TicketChannelToReminder.Remove(ChannelId);
+	ReopenedOnceChannels.Remove(ChannelId);
 	if (Config.bAllowMultipleTicketTypes && !RemovedOpener.IsEmpty() && !RemovedType.IsEmpty())
 	{
 		if (TMap<FString, FString>* TypeMap = OpenerToTicketsByType.Find(RemovedOpener))
@@ -3384,6 +3392,7 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 	TicketChannelToPriority.Remove(ChannelId);
 	TicketChannelToOpenTime.Remove(ChannelId);
 	TicketChannelToOpenerName.Remove(ChannelId);
+	ReopenedOnceChannels.Remove(ChannelId);
 
 	if (Config.bAllowMultipleTicketTypes && !RemovedOpener.IsEmpty() && !RemovedTypeInactive.IsEmpty())
 	{

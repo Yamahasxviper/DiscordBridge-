@@ -320,6 +320,9 @@ private:
 	/** Channels pending reopen. Maps channel ID to opener user ID. */
 	TMap<FString, FString> PendingReopenOpener;
 
+	/** Channel IDs that have already been reopened once; a second reopen is not allowed. */
+	TSet<FString> ReopenedOnceChannels;
+
 	/** Maps opener user ID to (ticketType -> channelId) for multi-ticket support. */
 	TMap<FString, TMap<FString, FString>> OpenerToTicketsByType;
 
