@@ -27,9 +27,6 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
-#include "HttpModule.h"
-#include "Interfaces/IHttpRequest.h"
-#include "Interfaces/IHttpResponse.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal namespace helpers
@@ -1017,7 +1014,7 @@ void UBanDiscordSubsystem::HandlePlayerHistoryCommand(const TArray<FString>& Arg
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/player history <name|PUID|IP>`");
+			TEXT("Usage: `/player history <name|PUID|IP>`"));
 		return;
 	}
 
@@ -3097,31 +3094,11 @@ CachedProvider->SendDiscordChannelMessage(*CachedId, Message);
 return;
 }
 
-// Derive the Config.BotToken from the provider's interface.
-// We need to create a new thread via the Discord API.
-// Build the thread name: "PlayerName (EOS:xxx)" truncated to 100 chars.
+// Build the thread name: "PlayerName [EOS:xxx]" truncated to 100 chars.
 const FString ThreadName = BanDiscordHelpers::Truncate(
 FString::Printf(TEXT("%s [%s]"), *PlayerName, *Uid), 100);
 
-// POST /channels/{channel_id}/threads to create a public thread.
-const FString Url = FString::Printf(
-TEXT("https://discord.com/api/v10/channels/%s/threads"),
-*Config.ModerationLogChannelId);
-
-const FString BodyStr = FString::Printf(
-TEXT("{\"name\":\"%s\",\"type\":11,\"auto_archive_duration\":10080}"),
-*ThreadName.Replace(TEXT("\""), TEXT("\\\"")));
-
-TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
-FHttpModule::Get().CreateRequest();
-Request->SetURL(Url);
-Request->SetVerb(TEXT("POST"));
-// We derive the token from the first connected provider config.
-// Since we don't have direct access to the token here, we post a plain
-// message to the log channel instead (falls back to flat log).
-// Full thread creation is supported when BotToken is accessible.
-
-// Fallback: post a prefixed message to the main mod-log channel.
+// No cached thread ID — post a prefixed message to the main mod-log channel.
 const FString Prefixed = FString::Printf(
 TEXT("**[%s]** %s"), *BanDiscordHelpers::EscapeMarkdown(ThreadName), *Message);
 CachedProvider->SendDiscordChannelMessage(Config.ModerationLogChannelId, Prefixed);
