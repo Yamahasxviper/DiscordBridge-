@@ -123,6 +123,11 @@ void UBanSyncClient::OnLocalBanAdded(const FBanEntry& Entry)
         ? 0
         : static_cast<int32>((Entry.ExpireDate - FDateTime::UtcNow()).GetTotalMinutes());
 
+    // Do not sync a temporary ban that has already expired — a duration of 0 or
+    // less would be misread by the receiving peer as a permanent ban.
+    if (!Entry.bIsPermanent && DurationMinutes <= 0)
+        return;
+
     BroadcastBan(Entry.Uid, Entry.PlayerName, Entry.Reason, Entry.BannedBy,
                  FMath::Max(0, DurationMinutes), Entry.Category);
 }
@@ -166,9 +171,23 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
 
         if (Uid.IsEmpty()) return;
 
-        // Do not re-apply if already banned.
+        // If the player is already banned, check whether key fields differ.
+        // If they match exactly, skip (no change). If they differ (reason, duration,
+        // category updated on the origin server), remove the stale entry so the
+        // updated ban can be applied below.
         FBanEntry Existing;
-        if (DB->IsCurrentlyBanned(Uid, Existing)) return;
+        if (DB->IsCurrentlyBanned(Uid, Existing))
+        {
+            const FString IncomingReason   = Reason.IsEmpty() ? TEXT("Synced ban from peer server") : Reason;
+            const FString IncomingBannedBy = BannedBy.IsEmpty() ? TEXT("peer") : BannedBy;
+            const bool bPermanentMatch     = (Existing.bIsPermanent == (DurationMinutes <= 0));
+            const bool bReasonMatch        = (Existing.Reason == IncomingReason);
+            const bool bCategoryMatch      = (Existing.Category == Category);
+            if (bPermanentMatch && bReasonMatch && bCategoryMatch)
+                return; // Identical — nothing to update.
+            // Fields changed — remove the stale record and fall through to re-add.
+            DB->RemoveBanByUid(Uid);
+        }
 
         FBanEntry Ban;
         Ban.Uid        = Uid;

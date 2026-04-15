@@ -372,13 +372,28 @@ bool UBanDatabase::RemoveBanByUid(const FString& Uid)
 
 bool UBanDatabase::RemoveBanById(int64 Id)
 {
-    FScopeLock Lock(&DbMutex);
+    FString RemovedUid;
+    FString RemovedPlayerName;
+    bool bRemoved;
 
-    const int32 Removed = Bans.RemoveAll([Id](const FBanEntry& E){ return E.Id == Id; });
-    if (Removed == 0)
-        return false;
+    {
+        FScopeLock Lock(&DbMutex);
 
-    return SaveToFile();
+        // Capture identity before removal so the delegate can carry it.
+        for (const FBanEntry& E : Bans)
+        {
+            if (E.Id == Id) { RemovedUid = E.Uid; RemovedPlayerName = E.PlayerName; break; }
+        }
+
+        const int32 Removed = Bans.RemoveAll([Id](const FBanEntry& E){ return E.Id == Id; });
+        bRemoved = (Removed > 0);
+        if (bRemoved) SaveToFile();
+    }
+
+    if (bRemoved)
+        OnBanRemoved.Broadcast(RemovedUid, RemovedPlayerName);
+
+    return bRemoved;
 }
 
 int32 UBanDatabase::PruneExpiredBans()

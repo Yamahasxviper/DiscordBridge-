@@ -195,11 +195,26 @@ uint32 FSMLWebSocketServerRunnable::Run()
         FPlatformProcess::SleepNoStats(0.005f);
     }
 
-    // Close all client sockets on shutdown.
-    FScopeLock L(&ClientMutex);
-    for (auto& KV : Clients)
-        ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(KV.Value.Socket);
-    Clients.Empty();
+    // Close all client sockets on shutdown and notify the game thread for each.
+    TArray<FString> RemainingIds;
+    {
+        FScopeLock L(&ClientMutex);
+        for (auto& KV : Clients)
+        {
+            RemainingIds.Add(KV.Key);
+            ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(KV.Value.Socket);
+        }
+        Clients.Empty();
+    }
+    TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
+    for (FString& ClientId : RemainingIds)
+    {
+        AsyncTask(ENamedThreads::GameThread, [WeakOwner, Id = MoveTemp(ClientId)]()
+        {
+            if (USMLWebSocketServer* O = WeakOwner.Get())
+                O->Internal_OnClientDisconnected(Id, TEXT("server stopped"));
+        });
+    }
 
     return 0;
 }

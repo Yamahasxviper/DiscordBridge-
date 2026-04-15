@@ -7,11 +7,16 @@
 #include "MuteRegistry.h"
 #include "BanWebSocketPusher.h"
 #include "BanAuditLog.h"
+#include "BanDatabase.h"
 #include "Engine/World.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/Crc.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "GameFramework/GameModeBase.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
+#include "GameFramework/OnlineReplStructs.h"
 
 #define LOCTEXT_NAMESPACE "FBanChatCommandsModule"
 
@@ -48,8 +53,24 @@ void FBanChatCommandsModule::StartupModule()
         FTickerDelegate::CreateRaw(this, &FBanChatCommandsModule::OnMuteExpiryTick),
         30.0f);
 
+    // Bind game-mode logout event to clean up FrozenPlayerUids when a player
+    // disconnects.  Without this, the toggle fires in the wrong direction on
+    // reconnect because the UID is still in the set even though the freeze was
+    // never re-applied to the new PlayerController.
+    LogoutHandle = FGameModeEvents::GameModeLogoutEvent.AddLambda(
+        [](AGameModeBase* /*GameMode*/, AController* Exiting)
+        {
+            if (!Exiting) return;
+            const APlayerController* PC = Cast<APlayerController>(Exiting);
+            if (!PC || !PC->PlayerState) return;
+            const FUniqueNetIdRepl& UniqueId = PC->PlayerState->GetUniqueId();
+            if (!UniqueId.IsValid() || UniqueId.GetType() == FName(TEXT("NONE"))) return;
+            const FString Uid = UBanDatabase::MakeUid(TEXT("EOS"), UniqueId.ToString().ToLower());
+            AFreezeChatCommand::FrozenPlayerUids.Remove(Uid);
+        });
+
     WorldInitHandle = FWorldDelegates::OnWorldInitializedActors.AddLambda(
-        [](const UWorld::FActorsInitializedParams& Params)
+        [this](const UWorld::FActorsInitializedParams& Params)
         {
             UWorld* World = Params.World;
             if (!World) return;
@@ -113,6 +134,9 @@ void FBanChatCommandsModule::StartupModule()
                 TEXT("BanChatCommands: Registered 42 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns, announce, stafflist, reason, history, mute, unmute, note, notes, duration, tempunmute, mutecheck, banreason, staffchat, mutelist, clearwarn, extend, appeal, mutereason, freeze, clearchat, report, scheduleban, qban, reputation, bulkban)."));
 
             // Bind MuteRegistry delegates to push WebSocket events and write audit log.
+            // Remove any previous binding first: on servers that reload a world while the
+            // GameInstance persists the same UMuteRegistry survives, so AddLambda would
+            // otherwise stack a new binding on every world load.
             UGameInstance* GI = World->GetGameInstance();
             if (GI)
             {
@@ -120,7 +144,12 @@ void FBanChatCommandsModule::StartupModule()
                 UMuteRegistry* MuteReg = GI->GetSubsystem<UMuteRegistry>();
                 if (MuteReg)
                 {
-                    MuteReg->OnPlayerMuted.AddLambda(
+                    if (MutedDelegateHandle.IsValid())
+                        MuteReg->OnPlayerMuted.Remove(MutedDelegateHandle);
+                    if (UnmutedDelegateHandle.IsValid())
+                        MuteReg->OnPlayerUnmuted.Remove(UnmutedDelegateHandle);
+
+                    MutedDelegateHandle = MuteReg->OnPlayerMuted.AddLambda(
                         [WeakGI](const FMuteEntry& Entry, bool bIsTimed)
                         {
                             UBanWebSocketPusher::PushMuteEvent(
@@ -137,7 +166,7 @@ void FBanChatCommandsModule::StartupModule()
                             }
                         });
 
-                    MuteReg->OnPlayerUnmuted.AddLambda(
+                    UnmutedDelegateHandle = MuteReg->OnPlayerUnmuted.AddLambda(
                         [WeakGI](const FString& Uid)
                         {
                             UBanWebSocketPusher::PushMuteEvent(
@@ -390,7 +419,12 @@ void FBanChatCommandsModule::RestoreDefaultConfigIfNeeded()
 void FBanChatCommandsModule::ShutdownModule()
 {
     FTSTicker::GetCoreTicker().RemoveTicker(ConfigPollHandle);
+    ConfigPollHandle.Reset();
     FTSTicker::GetCoreTicker().RemoveTicker(MuteExpiryHandle);
+    MuteExpiryHandle.Reset();
+
+    FGameModeEvents::GameModeLogoutEvent.Remove(LogoutHandle);
+    LogoutHandle.Reset();
 
     FWorldDelegates::OnWorldInitializedActors.Remove(WorldInitHandle);
     WorldInitHandle.Reset();

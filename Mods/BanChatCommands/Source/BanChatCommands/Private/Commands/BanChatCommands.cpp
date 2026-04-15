@@ -2863,6 +2863,13 @@ EExecutionStatus AStaffChatCommand::ExecuteCommand_Implementation(
         }
     }
 
+    if (!bSentToAnyone)
+    {
+        Sender->SendChatMessage(
+            TEXT("[BanChatCommands] No staff members are currently online."),
+            FLinearColor::Yellow);
+    }
+
     // Also echo back to the sender (in case they're console and not in world).
     Sender->SendChatMessage(Formatted, StaffColor);
 
