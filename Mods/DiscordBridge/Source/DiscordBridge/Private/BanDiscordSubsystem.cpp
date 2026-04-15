@@ -758,7 +758,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 	       *SenderName, *DisplayName, *Uid, *Entry.Reason);
 
 	Respond(ChannelId, Msg);
-	PostModerationLog(Msg);
+	PostToPlayerModerationThread(DisplayName, Uid, Msg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -813,7 +813,7 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 		       *SenderName, *DisplayName, *Uid);
 
 		Respond(ChannelId, Msg);
-		PostModerationLog(Msg);
+		PostToPlayerModerationThread(DisplayName, Uid, Msg);
 		return;
 	}
 
@@ -834,7 +834,7 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 	       *SenderName, *DisplayName, *Uid);
 
 	Respond(ChannelId, Msg);
-	PostModerationLog(Msg);
+	PostToPlayerModerationThread(DisplayName, Uid, Msg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1147,7 +1147,7 @@ void UBanDiscordSubsystem::HandleKickCommand(const TArray<FString>& Args,
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *Reason, *SenderName);
 		KickMsg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
 		Respond(ChannelId, KickMsg);
-		PostModerationLog(KickMsg);
+		PostToPlayerModerationThread(DisplayName, Uid, KickMsg);
 	}
 	else
 	{
@@ -1206,7 +1206,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 			TEXT("✅ Unmuted **%s** (`%s`).\nUnmuted by: %s"),
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
 		Respond(ChannelId, UnmuteMsg);
-		PostModerationLog(UnmuteMsg);
+		PostToPlayerModerationThread(DisplayName, Uid, UnmuteMsg);
 		return;
 	}
 
@@ -1236,7 +1236,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 		TEXT("🔇 Muted **%s** (`%s`)%s.\nReason: %s\nMuted by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *DurStr, *Reason, *SenderName);
 	Respond(ChannelId, MuteMsg);
-	PostModerationLog(MuteMsg);
+	PostToPlayerModerationThread(DisplayName, Uid, MuteMsg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1282,7 +1282,7 @@ void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
 		TEXT("⚠️ Warned **%s** (`%s`).\nReason: %s\nTotal warnings: **%d**\nWarned by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *Reason, WarnCount, *SenderName);
 	Respond(ChannelId, WarnMsg);
-	PostModerationLog(WarnMsg);
+	PostToPlayerModerationThread(DisplayName, Uid, WarnMsg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4045,12 +4045,15 @@ TSharedPtr<FJsonObject> UBanDiscordSubsystem::BuildPanelData() const
 		TitleStr = FString::Printf(TEXT("🛡️ %s — Admin Panel"), *ServerName);
 	Embed->SetStringField(TEXT("title"), TitleStr);
 
+	// Discord dynamic relative timestamp for the 15-minute button expiry window.
+	const int64 ExpiryUnix = (FDateTime::UtcNow() + FTimespan::FromMinutes(15)).ToUnixTimestamp();
+
 	Embed->SetStringField(TEXT("description"),
 		FString::Printf(
 			TEXT("**Online Players: %d**\n"
 			     "Use the buttons below to manage the server.\n\n"
-			     "⏳ This panel expires in 15 minutes — press **🔄 Refresh** or run `/admin panel`."),
-			PlayerCount));
+			     "⏳ Buttons expire <t:%lld:R> — press **🔄 Refresh** or run `/admin panel`."),
+			PlayerCount, ExpiryUnix));
 	Embed->SetNumberField(TEXT("color"), 3447003); // #3498DB — a solid Discord blue
 
 	// Feature 11: Dashboard fields.
@@ -4102,7 +4105,7 @@ TSharedPtr<FJsonObject> UBanDiscordSubsystem::BuildPanelData() const
 		return Row;
 	};
 
-	// Row 1 — moderator-level actions (kick, mute, announce, players, staff).
+	// Row 1 — moderator-level actions (kick, mute, unmute, announce, players).
 	// Button styles: 1=blurple, 2=grey, 3=green, 4=red.
 	TArray<TSharedPtr<FJsonObject>> Row1 = {
 		MakeButton(2, TEXT("👢 Kick"),     TEXT("panel:kick")),
@@ -4121,18 +4124,27 @@ TSharedPtr<FJsonObject> UBanDiscordSubsystem::BuildPanelData() const
 		MakeButton(2, TEXT("📋 Ban List"), TEXT("panel:banlist")),
 	};
 
-	// Row 3 — utility (ban check, staff list, reload, refresh).
+	// Row 3 — lookup tools (warn list, player history, ban check, mute check, mute list).
 	TArray<TSharedPtr<FJsonObject>> Row3 = {
+		MakeButton(2, TEXT("⚠️ Warns"),    TEXT("panel:warnlist")),
+		MakeButton(1, TEXT("📜 History"),   TEXT("panel:history")),
 		MakeButton(2, TEXT("🔍 Ban Check"), TEXT("panel:bancheck")),
-		MakeButton(2, TEXT("👮 Staff"),     TEXT("panel:stafflist")),
-		MakeButton(2, TEXT("🔁 Reload"),    TEXT("panel:reload")),
-		MakeButton(3, TEXT("🔄 Refresh"),   TEXT("panel:refresh")),
+		MakeButton(2, TEXT("🔇 Mute Chk"), TEXT("panel:mutecheck")),
+		MakeButton(2, TEXT("📋 Mute List"), TEXT("panel:mutelist")),
+	};
+
+	// Row 4 — utility (staff list, reload config, refresh panel).
+	TArray<TSharedPtr<FJsonObject>> Row4 = {
+		MakeButton(2, TEXT("👮 Staff"),  TEXT("panel:stafflist")),
+		MakeButton(2, TEXT("🔁 Reload"), TEXT("panel:reload")),
+		MakeButton(3, TEXT("🔄 Refresh"), TEXT("panel:refresh")),
 	};
 
 	TArray<TSharedPtr<FJsonValue>> Rows;
 	Rows.Add(MakeShared<FJsonValueObject>(MakeActionRow(Row1)));
 	Rows.Add(MakeShared<FJsonValueObject>(MakeActionRow(Row2)));
 	Rows.Add(MakeShared<FJsonValueObject>(MakeActionRow(Row3)));
+	Rows.Add(MakeShared<FJsonValueObject>(MakeActionRow(Row4)));
 
 	// Assemble the top-level data object.
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
@@ -4155,6 +4167,20 @@ void UBanDiscordSubsystem::HandlePanelCommand(const FString& ChannelId,
 	if (!AuthorId.IsEmpty())
 	{
 		const FDateTime Now = FDateTime::UtcNow();
+
+		// Prune entries that are more than 2× the rate-limit age to keep the map bounded.
+		{
+			TArray<FString> ToRemove;
+			const double PruneCutoffSec = PanelRateLimitSeconds * 2.0;
+			for (auto& Pair : LastPanelPostByUser)
+			{
+				if ((Now - Pair.Value).GetTotalSeconds() > PruneCutoffSec)
+					ToRemove.Add(Pair.Key);
+			}
+			for (const FString& K : ToRemove)
+				LastPanelPostByUser.Remove(K);
+		}
+
 		if (const FDateTime* LastPost = LastPanelPostByUser.Find(AuthorId))
 		{
 			const float SecondsElapsed =
@@ -4238,15 +4264,17 @@ void UBanDiscordSubsystem::HandlePanelButtonInteraction(const TSharedPtr<FJsonOb
 	const FString Action = CustomId.Mid(6); // strip "panel:"
 
 	// Determine which permission tier the action requires.
-	// Admin-level: ban, tempban, warn, banlist, reload, unban, bancheck.
-	// Mod-level:   kick, mute, unmute, announce, players, stafflist, refresh.
+	// Admin-level: ban, tempban, warn, banlist, reload, unban, warnlist, history.
+	// Mod-level:   kick, mute, unmute, announce, players, stafflist, refresh,
+	//              bancheck, mutecheck, mutelist.
 	static const TArray<FString> AdminActions = {
 		TEXT("ban"), TEXT("tempban"), TEXT("warn"), TEXT("banlist"), TEXT("reload"),
-		TEXT("unban"), TEXT("bancheck"),
+		TEXT("unban"), TEXT("warnlist"), TEXT("history"),
 	};
 	static const TArray<FString> ModActions = {
 		TEXT("kick"), TEXT("mute"), TEXT("unmute"), TEXT("announce"),
 		TEXT("players"), TEXT("stafflist"), TEXT("refresh"),
+		TEXT("bancheck"), TEXT("mutecheck"), TEXT("mutelist"),
 	};
 
 	const bool bNeedsAdmin = AdminActions.Contains(Action);
@@ -4276,6 +4304,12 @@ void UBanDiscordSubsystem::HandlePanelButtonInteraction(const TSharedPtr<FJsonOb
 	if (Action == TEXT("banlist"))
 	{
 		const FString Result = ExecutePanelBanList();
+		CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4, Result, true);
+		return;
+	}
+	if (Action == TEXT("mutelist"))
+	{
+		const FString Result = ExecutePanelMuteList();
 		CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4, Result, true);
 		return;
 	}
@@ -4425,7 +4459,7 @@ void UBanDiscordSubsystem::HandlePanelButtonInteraction(const TSharedPtr<FJsonOb
 			TEXT("panel_modal:unmute"), TEXT("Unmute Player"), Fields);
 		return;
 	}
-	// Feature 6: Ban check modal (admin).
+	// Feature 6: Ban check modal (mod).
 	if (Action == TEXT("bancheck"))
 	{
 		TArray<FModalField> Fields;
@@ -4433,6 +4467,36 @@ void UBanDiscordSubsystem::HandlePanelButtonInteraction(const TSharedPtr<FJsonOb
 			TEXT("Enter name or 32-char EOS PUID"), true, false, 0, 100);
 		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
 			TEXT("panel_modal:bancheck"), TEXT("Ban Check"), Fields);
+		return;
+	}
+	// Warn list — show a player's warning history (admin).
+	if (Action == TEXT("warnlist"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Player name or EOS PUID"), TEXT("panel_player"),
+			TEXT("Enter name or 32-char EOS PUID"), true, false, 0, 100);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:warnlist"), TEXT("Warn List"), Fields);
+		return;
+	}
+	// Player history — session records lookup (admin).
+	if (Action == TEXT("history"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Player name, EOS PUID, or IP"), TEXT("panel_player"),
+			TEXT("Enter name, 32-char EOS PUID, or IP address"), true, false, 0, 100);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:history"), TEXT("Player History"), Fields);
+		return;
+	}
+	// Mute check — check a player's mute status (mod).
+	if (Action == TEXT("mutecheck"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Player name or EOS PUID"), TEXT("panel_player"),
+			TEXT("Enter name or 32-char EOS PUID"), true, false, 0, 100);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:mutecheck"), TEXT("Mute Check"), Fields);
 		return;
 	}
 
@@ -4650,7 +4714,7 @@ void UBanDiscordSubsystem::HandlePanelModalSubmit(const TSharedPtr<FJsonObject>&
 		else
 		{
 			ResultMsg     = ExecutePanelUnban(Player, SenderName);
-			bPostToModLog = !ResultMsg.StartsWith(TEXT("❌"));
+			bPostToModLog = !ResultMsg.StartsWith(TEXT("❌")) && !ResultMsg.StartsWith(TEXT("ℹ️"));
 		}
 	}
 	// Feature 4: Unmute (mod).
@@ -4673,8 +4737,28 @@ void UBanDiscordSubsystem::HandlePanelModalSubmit(const TSharedPtr<FJsonObject>&
 			bPostToModLog = !ResultMsg.StartsWith(TEXT("❌")) && !ResultMsg.StartsWith(TEXT("⚠️"));
 		}
 	}
-	// Feature 6: Ban check (admin).
+	// Feature 6: Ban check (mod).
 	else if (Action == TEXT("bancheck"))
+	{
+		if (!IsModeratorMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Moderator role required."), true);
+			return;
+		}
+		const FString Player = GetField(TEXT("panel_player"));
+		if (Player.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Player name or PUID is required.");
+		}
+		else
+		{
+			ResultMsg     = ExecutePanelBanCheck(Player);
+			bPostToModLog = false; // read-only, no log needed
+		}
+	}
+	// Warn list (admin).
+	else if (Action == TEXT("warnlist"))
 	{
 		if (!IsAdminMember(MemberRoles))
 		{
@@ -4689,8 +4773,48 @@ void UBanDiscordSubsystem::HandlePanelModalSubmit(const TSharedPtr<FJsonObject>&
 		}
 		else
 		{
-			ResultMsg     = ExecutePanelBanCheck(Player);
-			bPostToModLog = false; // read-only, no log needed
+			ResultMsg     = ExecutePanelWarnList(Player);
+			bPostToModLog = false; // read-only
+		}
+	}
+	// Player history (admin).
+	else if (Action == TEXT("history"))
+	{
+		if (!IsAdminMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Admin role required."), true);
+			return;
+		}
+		const FString Player = GetField(TEXT("panel_player"));
+		if (Player.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Player name, PUID, or IP is required.");
+		}
+		else
+		{
+			ResultMsg     = ExecutePanelHistory(Player);
+			bPostToModLog = false; // read-only
+		}
+	}
+	// Mute check (mod).
+	else if (Action == TEXT("mutecheck"))
+	{
+		if (!IsModeratorMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Moderator role required."), true);
+			return;
+		}
+		const FString Player = GetField(TEXT("panel_player"));
+		if (Player.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Player name or PUID is required.");
+		}
+		else
+		{
+			ResultMsg     = ExecutePanelMuteCheck(Player);
+			bPostToModLog = false; // read-only
 		}
 	}
 	else
@@ -5206,5 +5330,220 @@ FString UBanDiscordSubsystem::ExecutePanelBanCheck(const FString& PlayerArg) con
 	}
 
 	Msg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
+	if (Msg.Len() > 1990)
+		Msg = Msg.Left(1987) + TEXT("...");
+	return Msg;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin panel — Warn list / Mute check / Mute list / Player history executors
+// ─────────────────────────────────────────────────────────────────────────────
+
+FString UBanDiscordSubsystem::ExecutePanelWarnList(const FString& PlayerArg) const
+{
+	UGameInstance* GI = GetGameInstance();
+	UPlayerWarningRegistry* WarnReg =
+		GI ? GI->GetSubsystem<UPlayerWarningRegistry>() : nullptr;
+	if (!WarnReg)
+		return TEXT("❌ The warnings system requires the BanSystem mod to be installed.");
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(PlayerArg, Uid, DisplayName, ErrorMsg))
+		return ErrorMsg;
+
+	TArray<FWarningEntry> Warnings = WarnReg->GetWarningsForUid(Uid);
+	if (Warnings.IsEmpty())
+	{
+		return FString::Printf(
+			TEXT("✅ No warnings on record for **%s** (`%s`)."),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid);
+	}
+
+	FString Body;
+	Body.Reserve(1400);
+	Body += TEXT("```\n");
+	Body += FString::Printf(TEXT("%-4s  %-20s  %-12s  %s\n"),
+		TEXT("ID"), TEXT("Date (UTC)"), TEXT("By"), TEXT("Reason"));
+	Body += FString(TEXT("─"), 72) + TEXT("\n");
+
+	const int32 ShowMax = FMath::Min(Warnings.Num(), 15);
+	for (int32 i = 0; i < ShowMax; ++i)
+	{
+		const FWarningEntry& W = Warnings[i];
+		const FString DateStr  = W.WarnDate.ToString(TEXT("%m-%d %H:%M"));
+		const FString ByShort  = BanDiscordHelpers::Truncate(W.WarnedBy, 12);
+		const FString ReasonSh = BanDiscordHelpers::Truncate(W.Reason, 40);
+		Body += FString::Printf(TEXT("%-4lld  %-20s  %-12s  %s\n"),
+			W.Id, *DateStr, *ByShort, *ReasonSh);
+	}
+	Body += TEXT("```");
+
+	FString Header = FString::Printf(
+		TEXT("**Warnings for %s** (`%s`) — %d total\n"),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, Warnings.Num());
+	if (Warnings.Num() > ShowMax)
+		Header += FString::Printf(TEXT("_(Showing first %d)_\n"), ShowMax);
+
+	FString Msg = Header + Body;
+	if (Msg.Len() > 1990)
+		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
+	return Msg;
+}
+
+FString UBanDiscordSubsystem::ExecutePanelMuteCheck(const FString& PlayerArg) const
+{
+	UGameInstance* GI = GetGameInstance();
+	UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
+	if (!MuteReg)
+		return TEXT("❌ Mute check requires the BanChatCommands mod to be installed.");
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(PlayerArg, Uid, DisplayName, ErrorMsg))
+		return ErrorMsg;
+
+	FMuteEntry Entry;
+	if (!MuteReg->GetMuteEntry(Uid, Entry))
+	{
+		return FString::Printf(
+			TEXT("🔊 **%s** (`%s`) is **not currently muted**."),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid);
+	}
+
+	FString ExpiryStr;
+	if (Entry.bIsIndefinite)
+	{
+		ExpiryStr = TEXT("**indefinitely**");
+	}
+	else
+	{
+		const FTimespan Remaining = Entry.ExpireDate - FDateTime::UtcNow();
+		const int32 TotalMins = FMath::Max(0, static_cast<int32>(Remaining.GetTotalMinutes()));
+		ExpiryStr = FString::Printf(TEXT("for **%dm** more (expires %s UTC)"),
+			TotalMins,
+			*Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")));
+	}
+
+	return FString::Printf(
+		TEXT("🔇 **%s** (`%s`) is muted %s.\nReason: %s\nMuted by: %s"),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid,
+		*ExpiryStr, *Entry.Reason, *Entry.MutedBy);
+}
+
+FString UBanDiscordSubsystem::ExecutePanelMuteList() const
+{
+	UGameInstance* GI = GetGameInstance();
+	UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
+	if (!MuteReg)
+		return TEXT("❌ Mute list requires the BanChatCommands mod to be installed.");
+
+	TArray<FMuteEntry> Mutes = MuteReg->GetAllMutes();
+	if (Mutes.IsEmpty())
+		return TEXT("🔊 No players are currently muted.");
+
+	FString Body;
+	Body.Reserve(1400);
+	Body += TEXT("```\n");
+	Body += FString::Printf(TEXT("%-18s  %-30s  %-18s  %s\n"),
+		TEXT("Name"), TEXT("UID (truncated)"), TEXT("Expires"), TEXT("Reason"));
+	Body += FString(TEXT("─"), 80) + TEXT("\n");
+
+	const int32 ShowMax = FMath::Min(Mutes.Num(), 15);
+	for (int32 i = 0; i < ShowMax; ++i)
+	{
+		const FMuteEntry& M = Mutes[i];
+		const FString NameSh   = BanDiscordHelpers::Truncate(M.PlayerName, 18);
+		const FString UidSh    = BanDiscordHelpers::Truncate(M.Uid, 30);
+		const FString ExpirySh = M.bIsIndefinite
+			? TEXT("permanent")
+			: M.ExpireDate.ToString(TEXT("%m-%d %H:%M UTC"));
+		const FString ReasonSh = BanDiscordHelpers::Truncate(M.Reason, 24);
+		Body += FString::Printf(TEXT("%-18s  %-30s  %-18s  %s\n"),
+			*NameSh, *UidSh, *ExpirySh, *ReasonSh);
+	}
+	Body += TEXT("```");
+
+	FString Header = FString::Printf(TEXT("**Muted Players — %d total**\n"), Mutes.Num());
+	if (Mutes.Num() > ShowMax)
+		Header += FString::Printf(TEXT("_(Showing first %d)_\n"), ShowMax);
+
+	FString Msg = Header + Body;
+	if (Msg.Len() > 1990)
+		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
+	return Msg;
+}
+
+FString UBanDiscordSubsystem::ExecutePanelHistory(const FString& PlayerArg) const
+{
+	UPlayerSessionRegistry* Registry = BanDiscordHelpers::GetRegistry(this);
+	if (!Registry)
+		return TEXT("❌ PlayerSessionRegistry is not available on this server.");
+
+	TArray<FPlayerSessionRecord> Results;
+
+	FString Platform, RawId;
+	UBanDatabase::ParseUid(PlayerArg, Platform, RawId);
+	if (Platform == TEXT("EOS") && IsValidEOSPUID(RawId))
+	{
+		FPlayerSessionRecord Record;
+		if (Registry->FindByUid(UBanDatabase::MakeUid(TEXT("EOS"), RawId.ToLower()), Record))
+			Results.Add(Record);
+	}
+	else if (IsValidEOSPUID(PlayerArg))
+	{
+		FPlayerSessionRecord Record;
+		if (Registry->FindByUid(UBanDatabase::MakeUid(TEXT("EOS"), PlayerArg.ToLower()), Record))
+			Results.Add(Record);
+	}
+	else if (IsValidIPQuery(PlayerArg))
+	{
+		const FString IpQuery = (Platform == TEXT("IP")) ? RawId : PlayerArg;
+		Results = Registry->FindByIp(IpQuery);
+	}
+	else
+	{
+		Results = Registry->FindByName(PlayerArg);
+	}
+
+	if (Results.IsEmpty())
+	{
+		return FString::Printf(
+			TEXT("⚠️ No session records found for `%s`."),
+			*BanDiscordHelpers::EscapeMarkdown(PlayerArg));
+	}
+
+	constexpr int32 MaxResults = 10;
+	const int32 ShowCount = FMath::Min(Results.Num(), MaxResults);
+
+	FString Body;
+	Body.Reserve(1500);
+	Body += TEXT("```\n");
+	Body += FString::Printf(TEXT("%-16s  %-40s  %-15s  %-20s\n"),
+		TEXT("Name"), TEXT("UID"), TEXT("IP"), TEXT("Last Seen (UTC)"));
+	Body += FString(TEXT("─"), 97) + TEXT("\n");
+
+	for (int32 i = 0; i < ShowCount; ++i)
+	{
+		const FPlayerSessionRecord& R = Results[i];
+		const FString NameShort = BanDiscordHelpers::Truncate(R.DisplayName, 16);
+		const FString UidShort  = BanDiscordHelpers::Truncate(R.Uid, 40);
+		const FString IpShort   = R.IpAddress.IsEmpty()
+			? TEXT("—")
+			: BanDiscordHelpers::Truncate(R.IpAddress, 15);
+		const FString LastSeen  = BanDiscordHelpers::Truncate(R.LastSeen, 20);
+		Body += FString::Printf(TEXT("%-16s  %-40s  %-15s  %s\n"),
+			*NameShort, *UidShort, *IpShort, *LastSeen);
+	}
+	Body += TEXT("```");
+
+	FString Header = FString::Printf(
+		TEXT("**Player History for `%s`** (%d record(s))\n"),
+		*BanDiscordHelpers::EscapeMarkdown(PlayerArg), Results.Num());
+	if (Results.Num() > MaxResults)
+		Header += FString::Printf(TEXT("_(Showing first %d of %d results)_\n"),
+			MaxResults, Results.Num());
+
+	FString Msg = Header + Body;
+	if (Msg.Len() > 1990)
+		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
 	return Msg;
 }

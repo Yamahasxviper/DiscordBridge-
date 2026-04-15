@@ -435,6 +435,10 @@ private:
 
 	/** Look up a player's ban status and return a formatted result string. */
 	FString ExecutePanelBanCheck(const FString& PlayerArg) const;
+	FString ExecutePanelWarnList(const FString& PlayerArg) const;
+	FString ExecutePanelMuteCheck(const FString& PlayerArg) const;
+	FString ExecutePanelMuteList() const;
+	FString ExecutePanelHistory(const FString& PlayerArg) const;
 
 	// ── State ─────────────────────────────────────────────────────────────────
 
