@@ -1,6 +1,6 @@
 # Features Roadmap
 
-> **Last updated:** 2026-04-16  
+> **Last updated:** 2026-04-16 (pass 2)  
 > This file is maintained by Copilot and updated whenever you ask for a fresh suggestions pass.  
 > ✅ **Server-side only** — no client download required for any feature in this file.
 
@@ -119,6 +119,8 @@ Each suggested item also carries:
 | 🔵 **Next** | **Chat-spam detection** — auto-mute players sending > N messages in M seconds | 🔴 High | M |
 | ⚪ **Later** | **Auto-warn on temp-ban expiry** — add a warning when a temp-ban expires so the escalation ladder still advances | 🟡 Med | S |
 | ⚪ **Later** | **VPN/proxy detection** — flag or auto-kick players whose IP resolves as a known VPN range via a free API | 🟡 Med | L |
+| 🔵 **Next** | **Ban-evasion risk scoring** — on join, score the player using name-similarity to known bans + linked-UID count + prior session flags; post a risk-level embed to the admin channel for high scores | 🔴 High | M |
+| 🔵 **Next** | **Automated false-positive review queue** — collect recently auto-muted / auto-warned cases into a Discord channel so staff can quickly approve or overturn them with buttons | 🔴 High | M |
 
 ### REST API
 | Status | Feature | Impact | Complexity |
@@ -159,6 +161,8 @@ Each suggested item also carries:
 | ⚪ **Later** | **`/session <player>`** — show current session stats: time connected, build count | 🟡 Med | S |
 | ⚪ **Later** | **`/history export <player>`** — output full history (bans, warns, notes, sessions) as one formatted block | ⚪ Low | S |
 | ⚪ **Later** | **`/freeze <player>`** — prevent a player from moving without kicking them (investigation hold) | 🟡 Med | L |
+| 🔵 **Next** | **Silent quarantine mode** — `/quarantine <player>` hides that player's chat from everyone else and blocks interactions without kicking; lifts with `/unquarantine` | 🔴 High | L |
+| 🔵 **Next** | **`/caseexport <player>`** — bundle all evidence for a player (chat log excerpts, warns, notes, ban history, session timestamps) into one formatted Discord message for staff review | 🔴 High | M |
 
 ### Permission Tiers
 | Status | Feature | Impact | Complexity |
@@ -197,6 +201,7 @@ Each suggested item also carries:
 | 🟢 **Now** | **`/ticket stats` command** — open count, closed this week, average first-response time | 🟡 Med | M |
 | 🔵 **Next** | **Ticket escalation** — if SLA warning fires with no staff response, auto-ping a higher role | 🔴 High | M |
 | 🔵 **Next** | **Report evidence field** — allow the reporter to paste a screenshot URL in the report modal | 🟡 Med | S |
+| 🔵 **Next** | **Ticket triage queue** — auto-route new tickets by type/severity to specific staff roles; show queue position and SLA breach countdown in the ticket channel topic | 🔴 High | M |
 
 ---
 
@@ -228,6 +233,11 @@ Each suggested item also carries:
 | ✅ | Admin panel embed with dashboard stats | — | — |
 | 🔵 **Next** | **Admin activity dashboard** — track which admins issued how many bans/warns/kicks this month; surface in `/admin stats` | 🔴 High | M |
 | 🔵 **Next** | **`/player lookup <discord_id>` Discord command** — resolve a Discord user ID to their known EOS PUID / IP | 🔴 High | S |
+| 🔵 **Next** | **Moderator quality analytics** — extend admin activity dashboard with overturned-action rate, average response time, and consistency score per staff member | 🟡 Med | M |
+| 🔵 **Next** | **Two-person approval for high-impact actions** — permabans, UID unlinks, and ban-reason edits require a second staff member to confirm via a Discord button within 5 minutes | 🟡 Med | M |
 | ⚪ **Later** | **Config hot-reload watcher** — watch config files for on-disk changes and reload automatically without a command | 🟡 Med | M |
 | ⚪ **Later** | **Backup health-check alert** — if the scheduled backup fails, post an alert to a Discord admin channel | 🟡 Med | S |
 | ⚪ **Later** | **In-game `/help` command** — paginated list of all available commands for the caller's permission level | ⚪ Low | M |
+| ⚪ **Later** | **Incident Mode toggle** — `/incidentmode on/off` instantly applies a strict preset (tighter spam thresholds, auto-mute on first offense, join cooldown) to counter raids; reverts on off | 🔴 High | M |
+| ⚪ **Later** | **Config safety profiles** — named presets (e.g. `Normal`, `Strict`, `Event`) stored as config snapshots; `/profile apply <name>` switches instantly with one-step rollback | 🟡 Med | M |
+| ⚪ **Later** | **Data integrity watchdog** — periodic validation of `bans.json`, `warnings.json`, and ticket state; posts a Discord alert if checksums mismatch or records are malformed | 🟡 Med | S |
