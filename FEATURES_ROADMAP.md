@@ -1,6 +1,6 @@
 # Features Roadmap
 
-> **Last updated:** 2026-04-16 (pass 3)  
+> **Last updated:** 2026-04-16 (pass 4)  
 > This file is maintained by Copilot and updated whenever you ask for a fresh suggestions pass.  
 > ✅ **Server-side only** — no client download required for any feature in this file.
 
@@ -492,3 +492,93 @@ Each suggested item also carries:
 | ⚪ **Later** | **Seasonal moderation profiles** †— extend config safety profiles with a calendar schedule so the server automatically switches to Event / Wipe-Day / Normal profiles | 🟡 Med | M |
 | ⚪ **Later** | **Event-mode templates** — `/eventmode <name>` applies a named profile (launch day, wipe day, tournament) that bundles config overrides, announcement messages, and staff pings | 🔴 High | M |
 | ⚪ **Later** | **Unified command centre across all mods** — a single Discord `/admin` slash command with subcommands that routes to BanSystem, DiscordBridge, BanChatCommands, and TicketSubsystem without needing separate channel commands | 🔴 High | L |
+
+---
+
+## Extended Feature Backlog (Pass 4)
+
+> Items below were added in pass 4. All are **server-side only**.  
+> † = a related item already exists in the sections above.
+
+---
+
+### Identity & Risk Detection
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Device-fingerprint risk tagging** — on join, parse available device/client fingerprint fields and compare against known banned device signatures; flag high-similarity matches to the admin channel | 🔴 High | M |
+| ⚪ **Later** | **Unicode confusable name detection** — flag player names containing Unicode lookalike characters (e.g. Cyrillic `а` vs Latin `a`) used to evade name bans; post a warning embed and optionally block the join | 🔴 High | S |
+| ⚪ **Later** | **Auto-flag suspicious name changes** — detect when a returning player's display name differs significantly from all previous sessions and post an alert embed with old/new name and PUID | 🔴 High | S |
+| ⚪ **Later** | **Staff player watchlist with join alerts** — `/watch <player> <reason>` adds a PUID to a configurable watchlist; the moment that player joins, an alert embed is posted to the admin channel with the watch reason | 🔴 High | S |
+
+---
+
+### Moderation Intelligence
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Mod note privacy levels** — notes tagged `staff` are visible to all staff tiers; notes tagged `lead` are visible only to the lead-admin tier; enforced in `/notes` and `/bancheck` output | 🟡 Med | S |
+| ⚪ **Later** | **One-click repeat-offender bundle** — panel button (or `/repeatoffender <player>`) that pulls the last 5 punishments plus all notes for a player into a single formatted embed for quick review | 🔴 High | S |
+| ⚪ **Later** | **Role-based command cooldowns** — per-command cooldown that varies by permission tier (e.g. moderators have a 5-minute cooldown on `/kick`, admins have 30 seconds) | 🟡 Med | S |
+| ⚪ **Later** | **Scoped permissions by command + context** — extend the permission config to allow granting a command only in specific Discord channels or only against players below a configured risk score | 🟡 Med | M |
+| ⚪ **Later** | **Secure staff command aliases** — config-defined short aliases for long commands (e.g. `/b` → `/ban`) that are only active for admin-tier users; aliases are logged the same as the full command | ⚪ Low | S |
+
+---
+
+### Ticket & Appeal Enhancements
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Appeal prioritization queue** — sort open appeals by ban severity and recency; surface the highest-priority appeals at the top of a staff dashboard embed in the ticket channel | 🔴 High | M |
+| ⚪ **Later** | **Ticket ownership lock + takeover** — once a ticket is claimed, other staff see an "Override Claim" button instead of "Assign"; takeover events are audit-logged with the reason | 🟡 Med | S |
+| ⚪ **Later** | **Ticket category tags** — visual emoji/label prefix added to the ticket channel name on creation based on type and severity (e.g. 🔴 for urgent, ⚠️ for harassment) for quick visual scanning | ⚪ Low | S |
+| ⚪ **Later** | **Transcript export to JSON/CSV** — `/ticketexport <id>` posts a structured JSON or CSV file of the full ticket message history to a configured staff-log channel | 🟡 Med | M |
+| ⚪ **Later** | **Ticket reopen reason requirement** — require the user to submit a short text reason via modal before a closed ticket can be reopened; reason is appended to the ticket transcript | 🟡 Med | S |
+| ⚪ **Later** | **Per-category required form fields** — ticket category config supports declaring extra required form fields beyond the default reason box (e.g. report tickets require an accused player name) | 🟡 Med | M |
+| ⚪ **Later** | **Toxicity flag in closed transcript** — when a ticket is closed, scan the transcript for configured phrases and append a summary note to the transcript log embed if any matches are found | 🟡 Med | M |
+| ⚪ **Later** | **"Needs senior review" ticket status** — a button inside the ticket that sets a visual status flag and pings the senior-staff role without transferring ownership | 🔴 High | S |
+| ⚪ **Later** | **Appeal evidence attachment index** — track all URLs submitted across a ticket's history in a pinned index message that is automatically updated each time a new link is posted | 🟡 Med | S |
+| ⚪ **Later** | **Staff response quality checklist** — configurable checklist (e.g. "☐ Greeted user ☐ Read ban context ☐ Checked prior history") posted to the internal staff thread automatically when a ticket is opened | ⚪ Low | S |
+
+---
+
+### Audit, Analytics & Reporting
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Top recurring offenders leaderboard** — weekly embed listing the 10 players with the most combined punishments over the period; posted automatically to the staff channel | 🟡 Med | S |
+| ⚪ **Later** | **Action reversal report** — monthly embed tracking how many bans/mutes/warns were reversed (unban/unmute/clearwarn), the reversal rate, and which admin performed each reversal | 🟡 Med | S |
+| ⚪ **Later** | **Category-specific incident spike alerts** — if violations in a single offense category exceed N within M minutes, immediately post a Discord alert to the admin channel with a count and breakdown | 🔴 High | S |
+| ⚪ **Later** | **Config drift detection** — compare the running config hash to the last saved hash on each reload; post an alert embed if they diverge (e.g. file edited on disk without a reload command) | 🟡 Med | S |
+| ⚪ **Later** | **Policy-change impact tracking** — when a ban template or escalation rule is added/modified, auto-post a diff embed to a staff changelog channel showing what changed and who triggered the reload | 🟡 Med | S |
+| ⚪ **Later** | **Staff action anomaly detection** †— alert senior staff if any admin's action count spikes dramatically above their personal baseline within a short window (beyond the existing rate limit) | 🔴 High | M |
+| ⚪ **Later** | **Daily moderation digest** †— condensed one-liner-per-metric digest (bans, warns, kicks, tickets, auto-actions) posted each day to a staff channel; complements the existing weekly digest | 🟡 Med | S |
+
+---
+
+### Whitelist & Access Control
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Whitelist conflict checker** — on add, check if the player already exists under a different name or EOS PUID and surface a warning embed before creating a potentially duplicate entry | 🟡 Med | S |
+| ⚪ **Later** | **Expiry-notice channel post** — N days before a timed whitelist entry expires, post a reminder embed to the configured whitelist channel including the player's Discord ID and tier | 🟡 Med | S |
+| ⚪ **Later** | **Group-based slot caps** — each group/tier tag can declare its own MaxSlots independent of the global cap (e.g. max 20 Builder tier entries regardless of total server limit) | 🟡 Med | S |
+| ⚪ **Later** | **Priority login reservation** — reserve a configurable number of whitelist slots exclusively for staff and booster tiers that are never consumed by regular whitelist entries | 🟡 Med | S |
+| ⚪ **Later** | **Emergency whitelist lockdown toggle** — `/whitelist lock` instantly switches the server to whitelist-only mode; `/whitelist unlock` reverts; the locked state survives restarts | 🔴 High | S |
+| ⚪ **Later** | **Rule-based whitelist auto-approval** — config rules that automatically approve whitelist applications matching criteria (e.g. required Discord role + account age > N days) without manual review | 🟡 Med | M |
+| ⚪ **Later** | **Whitelist expiry reminder pings** †— configurable number of days before expiry at which a reminder is posted; supports multiple reminder thresholds (e.g. 7 days and 1 day) | 🟡 Med | S |
+| ⚪ **Later** | **Self-service whitelist status command** — `/wlstatus` in-game command lets a player check their own tier, expiry date, and group without contacting staff | ⚪ Low | S |
+| ⚪ **Later** | **Whitelist probation tier** — a dedicated tier that allows server join but automatically applies stricter chat/spam thresholds for the duration of the probation window | 🟡 Med | M |
+| ⚪ **Later** | **Startup whitelist validation report** — on server start, validate all whitelist entries for expired records, duplicate PUIDs, and missing display names; post a summary report to the admin channel | 🟡 Med | S |
+| ⚪ **Later** | **Whitelist audit discrepancy scanner** — periodic background job that cross-checks the whitelist JSON against the player session registry for orphaned or conflicting records and posts discrepancies | 🟡 Med | S |
+| ⚪ **Later** | **Tier migration tool** — `/whitelist migrate <player> <new_tier>` moves a player between tiers, updates all linked records, and creates a full audit-log entry for the change | 🟡 Med | S |
+
+---
+
+### Staff Operations
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Live incident command room** — `/incidentroom create <name>` creates a temporary private Discord channel with a pre-pinned incident playbook and auto-invites all currently online staff roles | 🔴 High | M |
+| ⚪ **Later** | **Moderator reputation / trust score** — internal score incremented on clean ticket resolutions and decremented on overturned actions; visible in the private staff metrics dashboard and used to gate peer-review requirements | 🟡 Med | M |
+| ⚪ **Later** | **Post-incident retrospective template** — `/retro <ticket_id|ban_id>` posts a structured retrospective embed to the staff channel pre-filled with case details (timeline, actions taken, outcome) | 🟡 Med | S |
