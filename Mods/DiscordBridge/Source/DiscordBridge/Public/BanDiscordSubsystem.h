@@ -27,7 +27,7 @@
  *
  * /mod (moderator or admin)
  *   kick, modban, mute, unmute, tempmute, tempunmute, mutecheck,
- *   mutelist, mutereason, announce, stafflist, staffchat
+ *   mutelist, mutereason, announce, stafflist, staffchat, freeze
  *
  * /player (admin)
  *   history, note, notes, reason, playtime, reputation
@@ -36,7 +36,7 @@
  *   list, dismiss, approve, deny
  *
  * /admin (admin)
- *   say, poll, reloadconfig, panel
+ *   say, poll, reloadconfig, panel, clearchat
  *
  * Authorisation
  * =============
@@ -349,6 +349,18 @@ private:
 	                           const FString& ChannelId,
 	                           const FString& SenderName);
 
+	/** Handle /mod freeze.  Toggles movement freeze for a player.
+	 *  Usage: /mod freeze <player> */
+	void HandleFreezeCommand(const TArray<FString>& Args,
+	                          const FString& ChannelId,
+	                          const FString& SenderName);
+
+	/** Handle /admin clearchat.  Flushes in-game chat and notifies Discord.
+	 *  Usage: /admin clearchat [reason] */
+	void HandleClearChatCommand(const TArray<FString>& Args,
+	                             const FString& ChannelId,
+	                             const FString& SenderName);
+
 	// ── Admin panel ───────────────────────────────────────────────────────────
 
 	/**
@@ -440,6 +452,12 @@ private:
 	FString ExecutePanelMuteList() const;
 	FString ExecutePanelHistory(const FString& PlayerArg) const;
 	FString ExecutePanelAppeals() const;
+
+	/** Toggle movement freeze for a player.  Returns the result message. */
+	FString ExecutePanelFreeze(const FString& PlayerArg, const FString& SenderName);
+
+	/** Flush in-game chat and notify staff.  Returns the result message. */
+	FString ExecutePanelClearChat(const FString& Reason, const FString& SenderName);
 
 	// ── State ─────────────────────────────────────────────────────────────────
 

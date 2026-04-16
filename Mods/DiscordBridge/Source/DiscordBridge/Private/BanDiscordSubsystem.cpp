@@ -3969,6 +3969,11 @@ else if (SubCmdName == TEXT("staffchat"))
 Args.Add(GetOpt(TEXT("message")));
 HandleStaffChatCommand(Args, ChannelId, SenderName);
 }
+else if (SubCmdName == TEXT("freeze"))
+{
+Args.Add(GetOpt(TEXT("player")));
+HandleFreezeCommand(Args, ChannelId, SenderName);
+}
 else { bHandled = false; }
 }
 else if (CmdGroupName == TEXT("player"))
@@ -4059,6 +4064,11 @@ HandleReloadConfigCommand(ChannelId, SenderName);
 else if (SubCmdName == TEXT("panel"))
 {
 HandlePanelCommand(ChannelId, InteractionId, PendingInteractionToken, MemberRoles, SenderName, AuthorId);
+}
+else if (SubCmdName == TEXT("clearchat"))
+{
+const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
+HandleClearChatCommand(Args, ChannelId, SenderName);
 }
 else { bHandled = false; }
 }
@@ -4213,11 +4223,18 @@ TSharedPtr<FJsonObject> UBanDiscordSubsystem::BuildPanelData() const
 		MakeButton(2, TEXT("🔔 Appeals"),   TEXT("panel:appeals")),
 	};
 
+	// Row 5 — admin actions (freeze player, clear in-game chat).
+	TArray<TSharedPtr<FJsonObject>> Row5 = {
+		MakeButton(2, TEXT("❄️ Freeze"),    TEXT("panel:freeze")),
+		MakeButton(2, TEXT("🧹 Clear Chat"), TEXT("panel:clearchat")),
+	};
+
 	TArray<TSharedPtr<FJsonValue>> Rows;
 	Rows.Add(MakeShared<FJsonValueObject>(MakeActionRow(Row1)));
 	Rows.Add(MakeShared<FJsonValueObject>(MakeActionRow(Row2)));
 	Rows.Add(MakeShared<FJsonValueObject>(MakeActionRow(Row3)));
 	Rows.Add(MakeShared<FJsonValueObject>(MakeActionRow(Row4)));
+	Rows.Add(MakeShared<FJsonValueObject>(MakeActionRow(Row5)));
 
 	// Assemble the top-level data object.
 	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
@@ -4342,7 +4359,7 @@ void UBanDiscordSubsystem::HandlePanelButtonInteraction(const TSharedPtr<FJsonOb
 	//              bancheck, mutecheck, mutelist, appeals.
 	static const TArray<FString> AdminActions = {
 		TEXT("ban"), TEXT("tempban"), TEXT("warn"), TEXT("banlist"), TEXT("reload"),
-		TEXT("unban"), TEXT("warnlist"), TEXT("history"),
+		TEXT("unban"), TEXT("warnlist"), TEXT("history"), TEXT("freeze"), TEXT("clearchat"),
 	};
 	static const TArray<FString> ModActions = {
 		TEXT("kick"), TEXT("mute"), TEXT("unmute"), TEXT("announce"),
@@ -4576,6 +4593,26 @@ void UBanDiscordSubsystem::HandlePanelButtonInteraction(const TSharedPtr<FJsonOb
 			TEXT("Enter name or 32-char EOS PUID"), true, false, 0, 100);
 		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
 			TEXT("panel_modal:mutecheck"), TEXT("Mute Check"), Fields);
+		return;
+	}
+	// Freeze — toggle movement freeze for a player (admin).
+	if (Action == TEXT("freeze"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Player name or EOS PUID"), TEXT("panel_player"),
+			TEXT("Enter name or 32-char EOS PUID"), true, false, 0, 100);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:freeze"), TEXT("Freeze / Unfreeze Player"), Fields);
+		return;
+	}
+	// Clear Chat — flush in-game chat (admin).
+	if (Action == TEXT("clearchat"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Reason (optional)"), TEXT("panel_reason"),
+			TEXT("Reason for clearing chat"), false, false, 0, 200);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:clearchat"), TEXT("Clear In-Game Chat"), Fields);
 		return;
 	}
 
@@ -4895,6 +4932,38 @@ void UBanDiscordSubsystem::HandlePanelModalSubmit(const TSharedPtr<FJsonObject>&
 			ResultMsg     = ExecutePanelMuteCheck(Player);
 			bPostToModLog = false; // read-only
 		}
+	}
+	// Freeze — toggle movement freeze (admin).
+	else if (Action == TEXT("freeze"))
+	{
+		if (!IsAdminMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Admin role required."), true);
+			return;
+		}
+		const FString Player = GetField(TEXT("panel_player"));
+		if (Player.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Player name or PUID is required.");
+		}
+		else
+		{
+			ResultMsg     = ExecutePanelFreeze(Player, SenderName);
+			bPostToModLog = !ResultMsg.StartsWith(TEXT("❌")) && !ResultMsg.StartsWith(TEXT("⚠️"));
+		}
+	}
+	// Clear Chat — flush in-game chat (admin).
+	else if (Action == TEXT("clearchat"))
+	{
+		if (!IsAdminMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Admin role required."), true);
+			return;
+		}
+		ResultMsg     = ExecutePanelClearChat(GetField(TEXT("panel_reason")), SenderName);
+		bPostToModLog = !ResultMsg.StartsWith(TEXT("❌"));
 	}
 	else
 	{
@@ -5682,4 +5751,233 @@ FString UBanDiscordSubsystem::ExecutePanelHistory(const FString& PlayerArg) cons
 	if (Msg.Len() > 1990)
 		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
 	return Msg;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /mod freeze  — toggle player movement freeze
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleFreezeCommand(const TArray<FString>& Args,
+                                                const FString& ChannelId,
+                                                const FString& SenderName)
+{
+	if (!CachedProvider) return;
+	if (Args.IsEmpty() || Args[0].IsEmpty())
+	{
+		Respond(ChannelId, TEXT("❌ Usage: `/mod freeze <player|PUID>`"));
+		return;
+	}
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
+	{
+		Respond(ChannelId, ErrorMsg);
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (!World)
+	{
+		Respond(ChannelId, TEXT("❌ No active game world. Is the server running?"));
+		return;
+	}
+
+	const bool bWasFrozen = AFreezeChatCommand::FrozenPlayerUids.Contains(Uid);
+
+	if (bWasFrozen)
+	{
+		AFreezeChatCommand::FrozenPlayerUids.Remove(Uid);
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* PC = It->Get();
+			if (!PC || !PC->PlayerState) continue;
+			const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+			if (!NetId.IsValid() || NetId.GetType() == FName(TEXT("NONE"))) continue;
+			if (UBanDatabase::MakeUid(TEXT("EOS"), NetId.ToString().ToLower()) == Uid)
+			{
+				PC->SetIgnoreMoveInput(false);
+				break;
+			}
+		}
+		const FString ResultMsg = FString::Printf(
+			TEXT("🔓 **%s** (`%s`) has been **unfrozen** by **%s**."),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
+		Respond(ChannelId, ResultMsg);
+		PostModerationLog(ResultMsg);
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: %s unfroze %s (%s)."),
+		       *SenderName, *DisplayName, *Uid);
+	}
+	else
+	{
+		AFreezeChatCommand::FrozenPlayerUids.Add(Uid);
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* PC = It->Get();
+			if (!PC || !PC->PlayerState) continue;
+			const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+			if (!NetId.IsValid() || NetId.GetType() == FName(TEXT("NONE"))) continue;
+			if (UBanDatabase::MakeUid(TEXT("EOS"), NetId.ToString().ToLower()) == Uid)
+			{
+				PC->SetIgnoreMoveInput(true);
+				break;
+			}
+		}
+		const FString ResultMsg = FString::Printf(
+			TEXT("❄️ **%s** (`%s`) has been **frozen** by **%s**."
+			     " Run `/mod freeze` again to unfreeze."),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
+		Respond(ChannelId, ResultMsg);
+		PostModerationLog(ResultMsg);
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: %s froze %s (%s)."),
+		       *SenderName, *DisplayName, *Uid);
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /admin clearchat  — flush in-game chat and notify staff
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleClearChatCommand(const TArray<FString>& Args,
+                                                   const FString& ChannelId,
+                                                   const FString& SenderName)
+{
+	if (!CachedProvider) return;
+
+	const FString Reason = Args.IsEmpty() || Args[0].IsEmpty()
+		? TEXT("Chat cleared by administrator")
+		: BanDiscordHelpers::JoinArgs(Args, 0);
+
+	UGameInstance* GI = GetGameInstance();
+	UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (!World)
+	{
+		Respond(ChannelId, TEXT("❌ No active game world. Is the server running?"));
+		return;
+	}
+
+	// Broadcast blank lines to visually scroll chat off screen.
+	for (int32 i = 0; i < 30; ++i)
+	{
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			if (APlayerController* PC = It->Get())
+				PC->ClientMessage(TEXT(" "));
+	}
+
+	// Notify all connected players.
+	const FString Notice = FString::Printf(
+		TEXT("Chat has been cleared by %s. Reason: %s"), *SenderName, *Reason);
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		if (APlayerController* PC = It->Get())
+			PC->ClientMessage(Notice);
+
+	const FString ResultMsg = FString::Printf(
+		TEXT("🧹 **Chat cleared** by **%s**.\nReason: %s"), *SenderName, *Reason);
+	Respond(ChannelId, ResultMsg);
+	PostModerationLog(ResultMsg);
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: %s cleared in-game chat. Reason: %s"),
+	       *SenderName, *Reason);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin panel — Freeze / ClearChat executors
+// ─────────────────────────────────────────────────────────────────────────────
+
+FString UBanDiscordSubsystem::ExecutePanelFreeze(const FString& PlayerArg,
+                                                  const FString& SenderName)
+{
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(PlayerArg, Uid, DisplayName, ErrorMsg))
+		return ErrorMsg;
+
+	UGameInstance* GI = GetGameInstance();
+	UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (!World)
+		return TEXT("❌ No active game world. Is the server running?");
+
+	const bool bWasFrozen = AFreezeChatCommand::FrozenPlayerUids.Contains(Uid);
+
+	if (bWasFrozen)
+	{
+		AFreezeChatCommand::FrozenPlayerUids.Remove(Uid);
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* PC = It->Get();
+			if (!PC || !PC->PlayerState) continue;
+			const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+			if (!NetId.IsValid() || NetId.GetType() == FName(TEXT("NONE"))) continue;
+			if (UBanDatabase::MakeUid(TEXT("EOS"), NetId.ToString().ToLower()) == Uid)
+			{
+				PC->SetIgnoreMoveInput(false);
+				break;
+			}
+		}
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: [Panel] %s unfroze %s (%s)."),
+		       *SenderName, *DisplayName, *Uid);
+		return FString::Printf(
+			TEXT("🔓 **%s** (`%s`) has been **unfrozen** by **%s**."),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
+	}
+	else
+	{
+		AFreezeChatCommand::FrozenPlayerUids.Add(Uid);
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* PC = It->Get();
+			if (!PC || !PC->PlayerState) continue;
+			const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+			if (!NetId.IsValid() || NetId.GetType() == FName(TEXT("NONE"))) continue;
+			if (UBanDatabase::MakeUid(TEXT("EOS"), NetId.ToString().ToLower()) == Uid)
+			{
+				PC->SetIgnoreMoveInput(true);
+				break;
+			}
+		}
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: [Panel] %s froze %s (%s)."),
+		       *SenderName, *DisplayName, *Uid);
+		return FString::Printf(
+			TEXT("❄️ **%s** (`%s`) has been **frozen** by **%s**."
+			     " Use the Freeze button again to unfreeze."),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
+	}
+}
+
+FString UBanDiscordSubsystem::ExecutePanelClearChat(const FString& Reason,
+                                                     const FString& SenderName)
+{
+	UGameInstance* GI = GetGameInstance();
+	UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (!World)
+		return TEXT("❌ No active game world. Is the server running?");
+
+	const FString EffectiveReason = Reason.IsEmpty()
+		? TEXT("Chat cleared by administrator")
+		: Reason;
+
+	// Broadcast blank lines to visually scroll chat off screen.
+	for (int32 i = 0; i < 30; ++i)
+	{
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			if (APlayerController* PC = It->Get())
+				PC->ClientMessage(TEXT(" "));
+	}
+
+	// Notify all connected players.
+	const FString Notice = FString::Printf(
+		TEXT("Chat has been cleared by %s. Reason: %s"), *SenderName, *EffectiveReason);
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		if (APlayerController* PC = It->Get())
+			PC->ClientMessage(Notice);
+
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: [Panel] %s cleared in-game chat. Reason: %s"),
+	       *SenderName, *EffectiveReason);
+	return FString::Printf(
+		TEXT("🧹 **Chat cleared** by **%s**.\nReason: %s"),
+		*SenderName, *EffectiveReason);
 }

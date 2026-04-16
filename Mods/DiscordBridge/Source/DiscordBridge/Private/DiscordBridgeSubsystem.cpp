@@ -5193,7 +5193,8 @@ TEXT("`/ban link <uid1> <uid2>`  — Link two UIDs so a ban blocks both\n")
 TEXT("`/ban unlink <uid1> <uid2>`  — Remove a UID link\n")
 TEXT("`/mod mutereason <player> <reason>`  — Update the reason on an active mute\n")
 TEXT("`/admin reloadconfig`  — Hot-reload BanSystem / BanChatCommands config\n")
-TEXT("`/admin panel`  — Post an interactive panel embed with kick/ban/mute/warn buttons\n\u200b"),
+TEXT("`/admin panel`  — Post an interactive panel embed with kick/ban/mute/warn buttons\n")
+TEXT("`/admin clearchat [reason]`  — Flush in-game chat and notify staff\n\u200b"),
 false);
 
 // Moderator commands
@@ -5208,7 +5209,8 @@ TEXT("`/mod mutecheck <player>`  — Check if a player is muted\n")
 TEXT("`/mod mutelist`  — List all currently muted players\n")
 TEXT("`/mod announce <message>`  — Broadcast a message to all in-game players\n")
 TEXT("`/mod stafflist`  — List configured admins and moderators\n")
-TEXT("`/mod staffchat <message>`  — Send a message to the staff Discord channel\n\u200b"),
+TEXT("`/mod staffchat <message>`  — Send a message to the staff Discord channel\n")
+TEXT("`/mod freeze <player>`  — Toggle movement freeze for a player (admin)\n\u200b"),
 false);
 
 Embed->SetArrayField(TEXT("fields"), Fields);
@@ -5489,6 +5491,8 @@ Commands.Add(MakeCmd(TEXT("mod"), TEXT("Moderation commands (moderator or admin)
 	MakeSub(TEXT("stafflist"),  TEXT("Show online staff members.")),
 	MakeSub(TEXT("staffchat"),  TEXT("Send a message to online staff only."),
 		{ Str(TEXT("message"),    TEXT("Staff-only message")) }),
+	MakeSub(TEXT("freeze"),     TEXT("Toggle movement freeze for a player (admin only)."),
+		{ StrAC(TEXT("player"),   TEXT("Player name or EOS PUID")) }),
 }));
 
 // ── /player – player information commands (admin) ─────────────────────────
@@ -5532,6 +5536,8 @@ Commands.Add(MakeCmd(TEXT("admin"), TEXT("Admin utility commands."),
 		  Str(TEXT("options"),  TEXT("Pipe-separated options: Yes|No|Maybe")) }),
 	MakeSub(TEXT("reloadconfig"), TEXT("Reload the bridge configuration from disk.")),
 	MakeSub(TEXT("panel"),        TEXT("Post an interactive admin panel with action buttons.")),
+	MakeSub(TEXT("clearchat"),    TEXT("Flush in-game chat and notify staff."),
+		{ StrO(TEXT("reason"),    TEXT("Reason for clearing chat")) }),
 }));
 
 // ── /whitelist – whitelist management (role-restricted) ──────────────────
@@ -6009,10 +6015,10 @@ TEXT("`/online` — Online players embed\n")
 TEXT("`/whitelist on|off|add|remove|list|status|apply|link|search` — Whitelist\n")
 TEXT("`/ban add|temp|remove|check|list|extend|…` — Ban management (admin)\n")
 TEXT("`/warn add|list|clearall|clearone` — Warning management (admin)\n")
-TEXT("`/mod kick|mute|unmute|announce|…` — Moderation (moderator)\n")
+TEXT("`/mod kick|mute|unmute|freeze|announce|…` — Moderation (moderator/admin)\n")
 TEXT("`/player history|note|notes|playtime|…` — Player info (admin)\n")
 TEXT("`/appeal list|approve|deny|dismiss` — Appeal management (admin)\n")
-TEXT("`/admin say|poll|reloadconfig|panel` — Admin utilities (admin)\n")
+TEXT("`/admin say|poll|reloadconfig|panel|clearchat` — Admin utilities (admin)\n")
 TEXT("`/ticket panel|list|assign|claim|…` — Support ticket management");
 RespondToInteraction(InteractionId, InteractionToken, 4, Reply, false);
 return;
