@@ -8,6 +8,10 @@ a collection of editor utilities,
 and more.
 It also serves as the Unreal project used for developing mods.
 
+## Roadmap
+
+View the project roadmap here: [ROADMAP.md](ROADMAP.md)
+
 ---
 
 ## Mods in this repository
