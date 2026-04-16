@@ -1,6 +1,6 @@
 # Features Roadmap
 
-> **Last updated:** 2026-04-16 (pass 4)  
+> **Last updated:** 2026-04-16 (pass 5)  
 > This file is maintained by Copilot and updated whenever you ask for a fresh suggestions pass.  
 > ✅ **Server-side only** — no client download required for any feature in this file.
 
@@ -582,3 +582,154 @@ Each suggested item also carries:
 | ⚪ **Later** | **Live incident command room** — `/incidentroom create <name>` creates a temporary private Discord channel with a pre-pinned incident playbook and auto-invites all currently online staff roles | 🔴 High | M |
 | ⚪ **Later** | **Moderator reputation / trust score** — internal score incremented on clean ticket resolutions and decremented on overturned actions; visible in the private staff metrics dashboard and used to gate peer-review requirements | 🟡 Med | M |
 | ⚪ **Later** | **Post-incident retrospective template** — `/retro <ticket_id|ban_id>` posts a structured retrospective embed to the staff channel pre-filled with case details (timeline, actions taken, outcome) | 🟡 Med | S |
+
+---
+
+## Extended Feature Backlog (Pass 5)
+
+> Added 2026-04-16. All items are ⚪ **Later** (unscheduled). Server-side only — no client download required.
+
+### Moderation / Enforcement
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Account age gate** — block or restrict joining accounts below a configurable minimum age; post an automated DM explaining the requirement | 🔴 High | S |
+| ⚪ **Later** | **Progressive punishment ladder per offense type** — separate escalation paths for chat abuse, griefing, and exploiting that advance independently | 🔴 High | M |
+| ⚪ **Later** | **Repeat-offender heat score** — decaying numeric score incremented on every recorded offense; gates harsher defaults once thresholds are crossed | 🔴 High | M |
+| ⚪ **Later** | **Auto-silence for spam bursts** — if a player sends N messages within T seconds, automatically mute for a configurable short duration without staff intervention | 🔴 High | S |
+| ⚪ **Later** | **Link / domain blacklist with categories** — configurable per-category domain deny list (ads, phishing, NSFW); violations produce a warn or auto-mute | 🔴 High | S |
+| ⚪ **Later** | **Regex-based slur / abuse filters** — configurable regex patterns matched against chat; hits trigger warn, mute, or delete depending on severity tier | 🔴 High | S |
+| ⚪ **Later** | **Similarity spam detection** — detect copy-paste variant spam using edit-distance or trigram similarity and auto-suppress within the burst window | 🟡 Med | M |
+| ⚪ **Later** | **Mass mention / ping abuse detection** — flag or auto-mute players who mention N or more unique users in a short window | 🟡 Med | S |
+| ⚪ **Later** | **Raid-mode toggle** — `/raidmode on/off` applies a stricter rule preset (e.g. no new joins, chat throttled) and posts an alert embed to the admin channel | 🔴 High | S |
+| ⚪ **Later** | **Alt-account suspicion scoring** — cross-reference IP range, EOS PUID history, and join timing to surface probable alt accounts with a confidence score | 🔴 High | L |
+| ⚪ **Later** | **Shared punishment notes across linked IDs** — when a ban or note is added to any linked account, automatically attach a reference note to all other accounts in the group | 🔴 High | M |
+| ⚪ **Later** | **Auto-kick on rapid reconnects** — kick and temp-ban players who reconnect more than N times within T minutes (crash-loop exploit mitigation) | 🟡 Med | S |
+| ⚪ **Later** | **Duplicate-name impersonation detection** — on join, compare the display name against all banned players using fuzzy matching; alert staff if similarity exceeds threshold | 🔴 High | M |
+| ⚪ **Later** | **Caps-lock flood penalty** — auto-warn when a message exceeds a configurable all-caps ratio and length | ⚪ Low | S |
+| ⚪ **Later** | **Cooldown per command category** — separate per-player cooldowns for report, appeal, and ticket commands to prevent abuse | 🟡 Med | S |
+| ⚪ **Later** | **Mod action reason required enforcement** — reject ban/mute/warn commands that omit a reason; display an in-game or Discord error prompt | 🟡 Med | S |
+| ⚪ **Later** | **Silent evidence-lock mode** — `/silentlock <player>` freezes all chat logs for a player in a read-only evidence state without notifying them | 🟡 Med | S |
+| ⚪ **Later** | **Probation mode** — automatically apply a probation flag after ban expiry that enforces stricter chat rules and shorter kick-before-ban thresholds for a configurable window | 🔴 High | M |
+| ⚪ **Later** | **Auto-escalate unresolved severe reports** — if a report tagged "severe" has no staff action after N hours, ping an escalation role and re-post in the priority queue | 🔴 High | S |
+| ⚪ **Later** | **Moderator action rollback command** — `/rollback <action_id>` reverses a specific ban, mute, or warn with a full audit entry noting the rollback and the reason | 🟡 Med | M |
+
+### Appeals / Cases
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Case timeline view** — `/case <id>` posts a chronological embed listing every action, note, and status change for that case | 🔴 High | M |
+| ⚪ **Later** | **Evidence attachment index per case** — staff can attach Discord message links, image URLs, or log snippets to a case; indexed and retrievable via `/evidence <case_id>` | 🟡 Med | M |
+| ⚪ **Later** | **Appeal cooldown after denial** — configurable minimum days a player must wait before reopening an appeal after a "Deny" decision | 🔴 High | S |
+| ⚪ **Later** | **Appeal auto-close for inactivity** — if an open appeal receives no player response within N days, automatically deny and close with a templated reason | 🟡 Med | S |
+| ⚪ **Later** | **Staff voting on appeals** — require a configurable minimum number of staff votes before an appeal is approved; `/vote <appeal_id> approve|deny` | 🟡 Med | M |
+| ⚪ **Later** | **Appeal priority queue** — high-severity bans automatically land at the top of the appeal queue; visible in the appeal dashboard embed | 🟡 Med | S |
+| ⚪ **Later** | **"Needs more info" appeal status** — staff can place an appeal in a NMI state that pauses the appeal timer and auto-DMs the player asking for details | 🟡 Med | S |
+| ⚪ **Later** | **One-click precedent lookup** — `/precedent <case_id>` searches closed cases for similar offense types and returns the three most comparable resolutions | 🟡 Med | M |
+| ⚪ **Later** | **Case tags** — staff-assignable category tags (toxicity, cheating, griefing, etc.) on each case; filterable in the appeal dashboard and audit export | 🟡 Med | S |
+| ⚪ **Later** | **Auto-remind staff of aging open appeals** — daily digest embed listing all appeals open longer than N hours, grouped by severity | 🔴 High | S |
+
+### DiscordBridge Enhancements
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Per-player incident thread templates** — configurable template for the opening message posted to each new per-player moderation thread | 🟡 Med | S |
+| ⚪ **Later** | **Auto-thread archive + summary post** — when a per-player thread is archived, automatically post a summary embed (action count, outcome) to the parent channel | 🟡 Med | S |
+| ⚪ **Later** | **Discord slash command parity** — expose every admin panel action as a native Discord `/` slash command for keyboard-first workflow | 🔴 High | L |
+| ⚪ **Later** | **"Confirm dangerous action" button flows** — destructive actions (permanent ban, mass-kick) require a second confirmation button click before execution | 🔴 High | S |
+| ⚪ **Later** | **Scheduled announcement campaigns** — define a sequence of announcements with relative offsets (T+0, T+30 min, T+60 min) that fire automatically | 🟡 Med | M |
+| ⚪ **Later** | **Staff shift handoff embed** — `/handoff` posts a summary of all open tickets, active bans issued in the last 4 hours, and muted players to the staff channel | 🔴 High | S |
+| ⚪ **Later** | **Moderator availability status sync** — `/oncall on/off` lets staff signal availability; the admin panel footer shows who is currently on-call | 🟡 Med | S |
+| ⚪ **Later** | **Cross-channel escalation routing** — configurable rule table that routes specific ticket categories or offense types to a dedicated secondary Discord channel | 🟡 Med | M |
+| ⚪ **Later** | **Message reaction shortcuts for mod actions** — reacting to a forwarded in-game message embed with a configured emoji (e.g. 🔇) triggers a quick mute on that player | 🟡 Med | M |
+| ⚪ **Later** | **Auto-pin important moderation updates** — server restart, raid-mode toggle, and mass-ban events are automatically pinned in the admin channel | ⚪ Low | S |
+
+### Logging / Audit / Forensics
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Immutable audit hash chain** — each audit entry stores the SHA-256 hash of the previous entry; tampering is detectable by re-validating the chain | 🔴 High | M |
+| ⚪ **Later** | **Exportable case bundles** — `/export <case_id>` generates a JSON or CSV file containing all events, notes, and evidence for a case; posted as a Discord file attachment | 🟡 Med | M |
+| ⚪ **Later** | **Searchable moderation transcript index** — full-text search across all stored audit notes via `/auditsearch <query>` | 🟡 Med | L |
+| ⚪ **Later** | **Staff action diff view** — when a ban or mute is edited, the audit log stores a before/after diff and the admin panel shows the change inline | 🟡 Med | M |
+| ⚪ **Later** | **Geolocation / event correlation in logs** — tag audit entries with the GeoIP region of the acting player; surface region-cluster anomalies in weekly digest | 🟡 Med | M |
+| ⚪ **Later** | **"Who touched this case" audit view** — `/casetouches <case_id>` lists every staff member who viewed or modified the case with timestamps | 🟡 Med | S |
+| ⚪ **Later** | **Deleted-message mirror log** — when a moderated player's chat message is deleted, a copy is stored in the audit log with original timestamp | 🟡 Med | S |
+| ⚪ **Later** | **Suspicious pattern weekly digest** — automated Sunday report embed summarising top offense categories, most-active offenders, and detection accuracy | 🟡 Med | M |
+| ⚪ **Later** | **Policy violation trend by category** — time-series chart data posted monthly showing which rule categories are trending up or down | ⚪ Low | M |
+| ⚪ **Later** | **Red-flag alerts for abnormal mod activity** — alert if a staff account performs N ban/mute actions within T minutes (compromised account or error detection) | 🔴 High | M |
+
+### Player Safety / Community Health
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Onboarding trust levels** — new players start at Trust Level 0 with limited chat rate; level increases automatically after N sessions without violations | 🔴 High | M |
+| ⚪ **Later** | **New-player protection window** — accounts below N sessions are shielded from certain chat triggers (caps filter, spam detection) to reduce false positives | 🟡 Med | S |
+| ⚪ **Later** | **Abuse report wizard** — guided `/report` command that prompts for category, evidence link, and description before submitting | 🔴 High | M |
+| ⚪ **Later** | **Anonymous reporting mode** — `/reportanon` submits a report without revealing the reporter's identity to other players or in public channels | 🔴 High | S |
+| ⚪ **Later** | **Harassment shield mode** — targeted player can request a temporary shield that escalates any message directed at them directly to staff review | 🔴 High | M |
+| ⚪ **Later** | **Ignore-list moderation signals** — when multiple players ignore the same user, auto-flag that user for staff review | 🟡 Med | M |
+| ⚪ **Later** | **Reputation decay / recovery system** — offense heat score decays over time; clean play for N days awards positive reputation that reduces auto-moderation sensitivity | 🟡 Med | M |
+| ⚪ **Later** | **Positive-behavior rewards integration** — configurable milestones (e.g. 30 clean sessions) post a recognition embed to a community channel | ⚪ Low | S |
+| ⚪ **Later** | **Auto-detect repeated target harassment** — if player A triggers violations involving player B multiple times, auto-flag as targeted harassment and escalate | 🔴 High | M |
+| ⚪ **Later** | **Cool-down room state** — a limited-chat mute variant where a player can still read but not send messages for a configurable short duration before returning to normal | 🟡 Med | S |
+
+### Staff Tools / Admin UX
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Unified moderation dashboard snapshot** — `/dashboard` command posts a live embed with: open tickets, active bans, muted players, recent incidents, and on-call staff | 🔴 High | M |
+| ⚪ **Later** | **One-click player history card** — panel button that opens a compact embed with a player's full history: bans, mutes, warns, notes, appeal outcomes | 🔴 High | M |
+| ⚪ **Later** | **Quick macros for common actions** — staff-defined macro slots in the admin panel for one-click execution of frequently repeated action+reason combinations | 🔴 High | S |
+| ⚪ **Later** | **Bulk actions for raid cleanup** — `/bulkkick <criteria>` and `/bulkban <criteria>` act on all players matching a filter (join-time window, name pattern) | 🔴 High | M |
+| ⚪ **Later** | **Mod notes templates** — configurable named templates for `/note` pre-filled with structured fields (incident type, severity, follow-up required) | 🟡 Med | S |
+| ⚪ **Later** | **Staff performance metrics** — opt-in per-staff stats: tickets closed, average response time, appeals overturned; displayed in a private staff channel embed | 🟡 Med | M |
+| ⚪ **Later** | **Incident queue assignment system** — staff can claim or assign open incident tickets; unclaimed tickets are highlighted after N minutes | 🔴 High | M |
+| ⚪ **Later** | **"Take ownership" lock for active cases** — when a staff member opens a case, it is soft-locked to them for N minutes to prevent double-handling | 🟡 Med | S |
+| ⚪ **Later** | **Command dry-run mode** — `/ban --dry-run` previews the exact embed and actions that would execute without applying them | 🟡 Med | S |
+| ⚪ **Later** | **Admin panel per-action rate limits** — independent configurable rate limits per action type (ban, mute, kick) in addition to the existing global 60s panel cooldown | 🟡 Med | S |
+
+### Whitelist / Access Control (Extended)
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Invite-code based whitelist grants** — generate single-use or N-use invite codes; redeeming a code adds the player automatically with a configurable tier | 🔴 High | M |
+| ⚪ **Later** | **Temporary whitelist windows by schedule** — define time-windows in config during which the whitelist is relaxed (e.g. open-server events) | 🟡 Med | S |
+| ⚪ **Later** | **Country / region allow / deny policy layers** — combine GeoIP blocking with whitelist overrides: deny a region globally but allow whitelisted players from that region | 🟡 Med | M |
+| ⚪ **Later** | **Role-based whitelist tiers** — automatically assign or validate whitelist tier based on the player's Discord role at join time | 🟡 Med | M |
+| ⚪ **Later** | **Auto-expiring VIP access** — whitelist entries granted via boost or purchase auto-expire and post a renewal prompt embed | 🟡 Med | S |
+| ⚪ **Later** | **Whitelist anomaly detector** — alert staff if more than N entries are added within T minutes (bulk-add abuse detection) | 🟡 Med | S |
+| ⚪ **Later** | **Access request + approval workflow** — players submit a `/whitelistrequest` in-game or via Discord; staff review and approve/deny from the admin panel | 🔴 High | M |
+| ⚪ **Later** | **Account fingerprint consistency checks** — flag whitelist entries whose EOS PUID or display name changes significantly since their last approved session | 🟡 Med | M |
+| ⚪ **Later** | **Grace-period reconnect exemptions** — whitelisted players who disconnect within a short window (crash/timeout) bypass re-join checks for N minutes | 🟡 Med | S |
+| ⚪ **Later** | **Priority queue slots by tier** — reserve a configurable number of join slots per whitelist tier that are never consumed by lower tiers | 🟡 Med | S |
+
+### Anti-Cheat / Integrity (Server-side Heuristics)
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Impossible movement / pathing checks** — flag players whose reported position changes exceed physically possible speeds over a configurable sample window | 🔴 High | L |
+| ⚪ **Later** | **Build / place speed anomaly detection** — alert when a player's build-placement rate exceeds the configurable human-possible threshold per second | 🔴 High | M |
+| ⚪ **Later** | **Resource gain outlier detection** — compare a player's resource-gain rate against the server-wide percentile; flag statistical outliers for staff review | 🔴 High | M |
+| ⚪ **Later** | **Repeated suspicious kill-pattern alerts** — detect repeat rapid-kill sequences and alert staff with a confidence score and session snapshot | 🔴 High | M |
+| ⚪ **Later** | **Shadow flag mode** — silently mark a suspicious player for elevated logging before any punitive action; staff are notified but the player sees no change | 🔴 High | M |
+| ⚪ **Later** | **Confidence-score based enforcement** — auto-moderation only acts when a configurable confidence threshold is met; borderline cases are flagged for manual review | 🔴 High | M |
+| ⚪ **Later** | **Auto-request manual review for edge cases** — when confidence score is between low and high thresholds, post a staff-review request embed and pause action | 🔴 High | S |
+| ⚪ **Later** | **Session risk score updated in real time** — composite score updated each tick combining movement anomalies, resource outliers, and violation history | 🔴 High | L |
+| ⚪ **Later** | **Toggleable anti-exploit rule packs by season** — config-driven rule bundles that can be enabled / disabled without a server restart for seasonal content changes | 🟡 Med | M |
+| ⚪ **Later** | **Automated evidence metadata snapshots** — when a player is shadow-flagged, automatically capture and store session metadata (position, resource counts, action rates) as evidence | 🔴 High | M |
+
+### Reliability / Ops / Config
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Hot-reloadable rule packs** — `/reloadrules` reloads all filter/escalation/exploit rule configs without a server restart | 🔴 High | S |
+| ⚪ **Later** | **Per-feature kill-switches** — each major subsystem (AFK kick, chat filter, anti-exploit) has a config toggle that can disable it instantly without code changes | 🔴 High | S |
+| ⚪ **Later** | **Canary mode for new moderation rules** — new rules run in log-only mode for a configurable trial period before enforcement is enabled | 🟡 Med | M |
+| ⚪ **Later** | **Automatic config schema migration** — on startup, detect old config keys and migrate them to the current schema, preserving values and logging all changes | 🟡 Med | M |
+| ⚪ **Later** | **Rule simulation against historical logs** — `/simrule <rule_id>` re-runs a rule against the last N audit-log entries and reports how many would have fired | 🟡 Med | L |
+| ⚪ **Later** | **Backup integrity verification job** — periodic job that re-reads each backup file, validates JSON/checksum, and posts a pass/fail report to the admin channel | 🔴 High | S |
+| ⚪ **Later** | **Alerting on failed webhook / Discord posts** — detect HTTP error responses from the Discord API, increment a failure counter, and page the admin channel after N consecutive failures | 🔴 High | S |
+| ⚪ **Later** | **Fallback queue when Discord API is down** — buffer outgoing messages in memory; replay them in order once the API recovers | 🔴 High | M |
+| ⚪ **Later** | **Health endpoint for mod subsystems** — REST endpoint (gated by RestApiKey) reporting the current state of each subsystem: OK / DEGRADED / DOWN | 🟡 Med | S |
+| ⚪ **Later** | **Safe mode startup** — config flag that starts the server with only critical subsystems active (join/ban enforcement) while disabling non-essential features for diagnostics | 🔴 High | S |
