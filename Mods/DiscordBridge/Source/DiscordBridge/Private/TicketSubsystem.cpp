@@ -15,6 +15,7 @@
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 #include "BanAppealRegistry.h"
+#include "BanDatabase.h"
 #include "WhitelistManager.h"
 #include "Containers/Ticker.h"
 
@@ -656,6 +657,138 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		SaveTicketState();
 
 		Bridge->DeleteDiscordChannel(SourceChannelId);
+		return;
+	}
+
+	// ── Approve Appeal (Unban) button ─────────────────────────────────────────
+	if (CustomId.StartsWith(TEXT("ticket_approve_ban:")))
+	{
+		const FString AppealOpenerId = CustomId.Mid(FCString::Strlen(TEXT("ticket_approve_ban:")));
+
+		bool bIsAdminApprove = false;
+		if (!Config.TicketNotifyRoleId.IsEmpty())
+			bIsAdminApprove = MemberRoles.Contains(Config.TicketNotifyRoleId);
+		if (!bIsAdminApprove)
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT(":no_entry: Only staff with the support role can approve ban appeals."), true);
+			return;
+		}
+
+		FString OpenerName;
+		const FString* NamePtr = TicketChannelToOpenerName.Find(SourceChannelId);
+		if (NamePtr) OpenerName = *NamePtr;
+
+		const FString DiscordUid = FString::Printf(TEXT("Discord:%s"), *AppealOpenerId);
+		FString ApproveResponse;
+		bool bUnbanned = false;
+
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UBanDatabase* BanDb = GI->GetSubsystem<UBanDatabase>())
+			{
+				FBanEntry BanRecord;
+				if (BanDb->IsCurrentlyBannedByAnyId(DiscordUid, BanRecord))
+				{
+					if (BanDb->RemoveBanByUid(BanRecord.Uid))
+					{
+						bUnbanned = true;
+						ApproveResponse = FString::Printf(
+							TEXT(":white_check_mark: Ban appeal **approved** by <@%s>.\n"
+							     "**%s** has been unbanned.\nOriginal reason: %s"),
+							*DiscordUserId,
+							OpenerName.IsEmpty() ? *AppealOpenerId : *OpenerName,
+							*BanRecord.Reason);
+					}
+					else
+					{
+						ApproveResponse = TEXT(":x: Failed to remove the ban. Please check server logs.");
+					}
+				}
+				else
+				{
+					ApproveResponse = FString::Printf(
+						TEXT(":information_source: No active ban found for %s (Discord ID: `%s`). "
+						     "The ticket will be closed."),
+						OpenerName.IsEmpty() ? TEXT("this player") : *OpenerName,
+						*AppealOpenerId);
+					bUnbanned = true; // treat as success so we close the ticket
+				}
+			}
+			else
+			{
+				ApproveResponse = TEXT(":x: BanDatabase is not available on this server.");
+			}
+
+			// Update the BanAppealRegistry entry if one exists.
+			if (bUnbanned)
+			{
+				if (UBanAppealRegistry* AppealReg = GI->GetSubsystem<UBanAppealRegistry>())
+				{
+					const int64* AppealIdPtr = OpenerToAppealId.Find(AppealOpenerId);
+					if (AppealIdPtr)
+					{
+						AppealReg->ReviewAppeal(*AppealIdPtr, EAppealStatus::Approved,
+							DiscordUsername, TEXT("Appeal approved via ticket."));
+						OpenerToAppealId.Remove(AppealOpenerId);
+					}
+				}
+			}
+		}
+
+		Bridge->RespondToInteraction(InteractionId, InteractionToken, 4, ApproveResponse, false);
+
+		if (bUnbanned)
+		{
+			CloseAppealTicketForOpener(AppealOpenerId,
+				FString::Printf(TEXT(":scales: Appeal approved by <@%s>."), *DiscordUserId));
+		}
+		return;
+	}
+
+	// ── Deny Appeal button ────────────────────────────────────────────────────
+	if (CustomId.StartsWith(TEXT("ticket_deny_ban:")))
+	{
+		const FString AppealOpenerId = CustomId.Mid(FCString::Strlen(TEXT("ticket_deny_ban:")));
+
+		bool bIsAdminDeny = false;
+		if (!Config.TicketNotifyRoleId.IsEmpty())
+			bIsAdminDeny = MemberRoles.Contains(Config.TicketNotifyRoleId);
+		if (!bIsAdminDeny)
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT(":no_entry: Only staff with the support role can deny ban appeals."), true);
+			return;
+		}
+
+		FString OpenerName;
+		const FString* NamePtr = TicketChannelToOpenerName.Find(SourceChannelId);
+		if (NamePtr) OpenerName = *NamePtr;
+
+		const FString DenyResponse = FString::Printf(
+			TEXT(":x: Ban appeal **denied** by <@%s>.\nThe ban for %s remains in place."),
+			*DiscordUserId,
+			OpenerName.IsEmpty() ? TEXT("this player") : *OpenerName);
+
+		Bridge->RespondToInteraction(InteractionId, InteractionToken, 4, DenyResponse, false);
+
+		// Mark the appeal entry as denied in the registry if one exists.
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UBanAppealRegistry* AppealReg = GI->GetSubsystem<UBanAppealRegistry>())
+			{
+				const int64* AppealIdPtr = OpenerToAppealId.Find(AppealOpenerId);
+				if (AppealIdPtr)
+				{
+					AppealReg->ReviewAppeal(*AppealIdPtr, EAppealStatus::Denied,
+						DiscordUsername, TEXT("Appeal denied via ticket."));
+					OpenerToAppealId.Remove(AppealOpenerId);
+				}
+			}
+		}
+
+		CloseAppealTicketForOpener(AppealOpenerId,
+			FString::Printf(TEXT(":x: Appeal denied by <@%s>. The ban remains active."), *DiscordUserId));
 		return;
 	}
 
@@ -1476,6 +1609,41 @@ void UTicketSubsystem::CreateTicketChannel(
 					     ":information_source: An admin will review your appeal here. "
 					       "Please be patient; appeals are handled in the order they are received."),
 					*MentionPrefix, *UserMention);
+
+				// Attempt to look up the ban record using the Discord user ID so
+				// staff immediately see the ban context without having to search.
+				if (!OpenerUserIdCopy.IsEmpty())
+				{
+					const FString DiscordUid = FString::Printf(TEXT("Discord:%s"), *OpenerUserIdCopy);
+					if (UGameInstance* GI = Self->GetGameInstance())
+					{
+						if (UBanDatabase* BanDb = GI->GetSubsystem<UBanDatabase>())
+						{
+							FBanEntry BanRecord;
+							if (BanDb->IsCurrentlyBannedByAnyId(DiscordUid, BanRecord))
+							{
+								const FString DurationStr = BanRecord.bIsPermanent
+									? TEXT("Permanent")
+									: FString::Printf(TEXT("Until %s"),
+										*BanRecord.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M UTC")));
+								WelcomeContent += FString::Printf(
+									TEXT("\n\n:bookmark: **Ban on record**\n"
+									     "```\n"
+									     "Player : %s\n"
+									     "Reason : %s\n"
+									     "Banned by: %s\n"
+									     "Date   : %s\n"
+									     "Duration: %s\n"
+									     "```"),
+									*BanRecord.PlayerName,
+									*BanRecord.Reason,
+									*BanRecord.BannedBy,
+									*BanRecord.BanDate.ToString(TEXT("%Y-%m-%d %H:%M UTC")),
+									*DurationStr);
+							}
+						}
+					}
+				}
 			}
 			else
 			{
@@ -1533,6 +1701,42 @@ void UTicketSubsystem::CreateTicketChannel(
 
 					IDiscordBridgeProvider* B2 = Self->GetBridge();
 					if (B2) B2->SendMessageBodyToChannel(NewChannelId, ApproveBody);
+				}
+
+				// Approve Appeal (Unban) and Deny Appeal buttons for banappeal tickets.
+				// Staff can approve or deny directly from the ticket without switching to
+				// the admin panel.
+				if (TicketTypeCopy == TEXT("banappeal") && !OpenerUserIdCopy.IsEmpty())
+				{
+					TSharedPtr<FJsonObject> ApproveBanBtn = MakeShared<FJsonObject>();
+					ApproveBanBtn->SetNumberField(TEXT("type"), 2);
+					ApproveBanBtn->SetNumberField(TEXT("style"), 3); // SUCCESS (green)
+					ApproveBanBtn->SetStringField(TEXT("label"), TEXT("✅ Approve Appeal (Unban)"));
+					ApproveBanBtn->SetStringField(TEXT("custom_id"),
+						FString::Printf(TEXT("ticket_approve_ban:%s"), *OpenerUserIdCopy));
+
+					TSharedPtr<FJsonObject> DenyBanBtn = MakeShared<FJsonObject>();
+					DenyBanBtn->SetNumberField(TEXT("type"), 2);
+					DenyBanBtn->SetNumberField(TEXT("style"), 4); // DANGER (red)
+					DenyBanBtn->SetStringField(TEXT("label"), TEXT("❌ Deny Appeal"));
+					DenyBanBtn->SetStringField(TEXT("custom_id"),
+						FString::Printf(TEXT("ticket_deny_ban:%s"), *OpenerUserIdCopy));
+
+					TSharedPtr<FJsonObject> AppealActionsRow = MakeShared<FJsonObject>();
+					AppealActionsRow->SetNumberField(TEXT("type"), 1);
+					AppealActionsRow->SetArrayField(TEXT("components"),
+						TArray<TSharedPtr<FJsonValue>>{
+							MakeShared<FJsonValueObject>(ApproveBanBtn),
+							MakeShared<FJsonValueObject>(DenyBanBtn)});
+
+					TSharedPtr<FJsonObject> AppealActionsBody = MakeShared<FJsonObject>();
+					AppealActionsBody->SetStringField(TEXT("content"),
+						TEXT(":scales: **Appeal Actions** — Only staff may use these buttons."));
+					AppealActionsBody->SetArrayField(TEXT("components"),
+						TArray<TSharedPtr<FJsonValue>>{MakeShared<FJsonValueObject>(AppealActionsRow)});
+
+					IDiscordBridgeProvider* B3 = Self->GetBridge();
+					if (B3) B3->SendMessageBodyToChannel(NewChannelId, AppealActionsBody);
 				}
 
 				// Notify EVERY configured admin/ticket channel (not just the first).
