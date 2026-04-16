@@ -113,6 +113,7 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 	Out.ModeratorRoleId        = GetIniBridgeString(Cfg, TEXT("ModeratorRoleId"));
 	Out.BanCommandChannelId    = GetIniBridgeString(Cfg, TEXT("BanCommandChannelId"));
 	Out.ModerationLogChannelId = GetIniBridgeString(Cfg, TEXT("ModerationLogChannelId"));
+	Out.AdminPanelChannelId    = GetIniBridgeString(Cfg, TEXT("AdminPanelChannelId"));
 
 	if (Out.AdminRoleId.IsEmpty())
 	{
@@ -132,6 +133,9 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 		UE_LOG(LogBanDiscord, Log,
 		       TEXT("BanBridge: ModerationLogChannelId = \"%s\""),
 		       Out.ModerationLogChannelId.IsEmpty() ? TEXT("(disabled)") : *Out.ModerationLogChannelId);
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanBridge: AdminPanelChannelId    = \"%s\""),
+		       Out.AdminPanelChannelId.IsEmpty() ? TEXT("(command channel)") : *Out.AdminPanelChannelId);
 	}
 
 	// ── Write backup ─────────────────────────────────────────────────────────
@@ -146,7 +150,8 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 			+ TEXT("AdminRoleId=")            + Out.AdminRoleId            + TEXT("\n")
 			+ TEXT("ModeratorRoleId=")        + Out.ModeratorRoleId        + TEXT("\n")
 			+ TEXT("BanCommandChannelId=")    + Out.BanCommandChannelId    + TEXT("\n")
-			+ TEXT("ModerationLogChannelId=") + Out.ModerationLogChannelId + TEXT("\n");
+			+ TEXT("ModerationLogChannelId=") + Out.ModerationLogChannelId + TEXT("\n")
+			+ TEXT("AdminPanelChannelId=")    + Out.AdminPanelChannelId    + TEXT("\n");
 
 		PF.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
 		if (FFileHelper::SaveStringToFile(BackupContent, *BackupPath,
@@ -233,7 +238,12 @@ void FBanBridgeConfig::RestoreDefaultConfigIfNeeded()
 		TEXT("\n")
 		TEXT("# Optional: Discord channel ID to post a moderation log after every\n")
 		TEXT("# ban/unban/kick/mute/warn action. Leave empty to disable logging.\n")
-		TEXT("ModerationLogChannelId=\n");
+		TEXT("ModerationLogChannelId=\n")
+		TEXT("\n")
+		TEXT("# Optional: Discord channel ID where /admin panel posts the interactive\n")
+		TEXT("# admin panel embed. When empty the panel is sent to the channel in which\n")
+		TEXT("# the /admin panel command was issued.\n")
+		TEXT("AdminPanelChannelId=\n");
 
 	PF.CreateDirectoryTree(*FPaths::GetPath(PrimaryPath));
 	if (FFileHelper::SaveStringToFile(Template, *PrimaryPath,

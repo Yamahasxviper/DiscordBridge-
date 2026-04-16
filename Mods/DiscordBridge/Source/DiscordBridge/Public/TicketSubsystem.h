@@ -93,6 +93,21 @@ public:
 	 */
 	void SetProvider(IDiscordBridgeProvider* InProvider);
 
+	/**
+	 * Returns the active ticket channel ID for the given Discord opener user ID,
+	 * or an empty string if that user has no open ticket.
+	 * Used by BanDiscordSubsystem to auto-close a ban-appeal ticket on approval/denial.
+	 */
+	FString GetTicketChannelForOpener(const FString& DiscordUserId) const;
+
+	/**
+	 * Close and delete the ticket channel associated with a specific Discord user ID.
+	 * Posts @Resolution to the channel before deleting it.  No-ops if no channel
+	 * exists for that user.  Safe to call from BanDiscordSubsystem after approving
+	 * or denying a ban appeal.
+	 */
+	void CloseAppealTicketForOpener(const FString& DiscordUserId, const FString& Resolution);
+
 private:
 	// ── Interaction routing ───────────────────────────────────────────────────
 
@@ -147,7 +162,8 @@ private:
 	                             const FString& ModalCustomId,
 	                             const TSharedPtr<FJsonObject>& DataObj,
 	                             const FString& DiscordUserId,
-	                             const FString& DiscordUsername);
+	                             const FString& DiscordUsername,
+	                             const FString& SourceChannelId);
 
 	/**
 	 * Create a private Discord text channel for a support ticket.
@@ -305,8 +321,19 @@ private:
 	/** Channels pending reopen. Maps channel ID to opener user ID. */
 	TMap<FString, FString> PendingReopenOpener;
 
+	/** Channel IDs that have already been reopened once; a second reopen is not allowed. */
+	TSet<FString> ReopenedOnceChannels;
+
 	/** Maps opener user ID to (ticketType -> channelId) for multi-ticket support. */
 	TMap<FString, TMap<FString, FString>> OpenerToTicketsByType;
+
+	/**
+	 * Maps a Discord opener user ID to the BanAppealRegistry entry ID created
+	 * when they submitted a ban-appeal ticket.  Populated in the
+	 * ticket_modal:appeal handler so that approve/deny commands can look up
+	 * the appeal without searching the entire registry.
+	 */
+	TMap<FString, int64> OpenerToAppealId;
 
 	/** Stored panel message ID for auto-refresh. */
 	FString StoredPanelMessageId;
@@ -327,6 +354,9 @@ private:
 
 	/** Ticker handle for the SLA warning check.  Valid only when TicketSlaWarningMinutes > 0. */
 	FTSTicker::FDelegateHandle SlaCheckHandle;
+
+	/** Ticker handle that auto-closes ban-appeal tickets when the ban has expired naturally. */
+	FTSTicker::FDelegateHandle ExpiredBanCheckHandle;
 
 	/** Maps ticket channel ID to the time a scheduled follow-up reminder should fire. */
 	TMap<FString, FDateTime> TicketChannelToReminder;

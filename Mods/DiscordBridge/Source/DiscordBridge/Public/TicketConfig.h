@@ -70,6 +70,9 @@ struct DISCORDBRIDGE_API FTicketConfig
 	/** When true the Ban Appeal button appears on the ticket panel. */
 	bool bTicketBanAppealEnabled{ true };
 
+	/** When true the Mute Appeal button appears on the ticket panel. */
+	bool bTicketMuteAppealEnabled{ true };
+
 	// ── Admin notifications ───────────────────────────────────────────────────
 
 	/**
@@ -140,6 +143,9 @@ struct DISCORDBRIDGE_API FTicketConfig
 	/** Discord category ID for ban appeal ticket channels. Falls back to TicketCategoryId when empty. */
 	FString AppealCategoryId;
 
+	/** Discord category ID for mute appeal ticket channels. Falls back to TicketCategoryId when empty. */
+	FString MuteAppealCategoryId;
+
 	// ── Feedback/rating ───────────────────────────────────────────────────────
 
 	/** When true, sends a DM star-rating request to the opener when a ticket is closed. */
@@ -209,6 +215,25 @@ struct DISCORDBRIDGE_API FTicketConfig
 	 * Config key: TicketAutoResponse= (one per line).
 	 */
 	TArray<FString> TicketAutoResponses;
+
+	// ── Ban appeal cooldown ───────────────────────────────────────────────────
+
+	/**
+	 * Days a player must wait after a denied ban appeal before submitting another.
+	 * Set to 0 (default) to disable the cooldown.
+	 * Example: BanAppealCooldownDays=7  ; player must wait 7 days after denial
+	 */
+	int32 BanAppealCooldownDays{ 0 };
+
+	// ── Repeat-offender appeal guard ──────────────────────────────────────────
+
+	/**
+	 * Maximum number of lifetime denied ban appeals a player may submit.
+	 * Once a player has had this many appeals denied, further appeal tickets are
+	 * blocked.  Set to 0 (default) to disable the limit.
+	 * Example: MaxLifetimeAppeals=3
+	 */
+	int32 MaxLifetimeAppeals{ 0 };
 
 	// ── Static helpers ────────────────────────────────────────────────────────
 

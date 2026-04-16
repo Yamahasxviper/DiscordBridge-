@@ -19,14 +19,15 @@
 #include "Commands/BanChatCommands.h"
 #include "BanChatCommandsConfig.h"
 
+// DiscordBridge config (ServerName for panel embed)
+#include "DiscordBridgeConfig.h"
+#include "TicketSubsystem.h"
+
 #include "Misc/DefaultValueHelper.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
-#include "HttpModule.h"
-#include "Interfaces/IHttpRequest.h"
-#include "Interfaces/IHttpResponse.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal namespace helpers
@@ -130,6 +131,20 @@ namespace BanDiscordHelpers
 
 	// Number of bans shown per /ban list page.
 	static constexpr int32 BanListPageSize = 10;
+
+	/**
+	 * Build a separator string of N "─" characters.
+	 * NOTE: FString(TEXT("─"), N) only sets extra capacity, not repetitions,
+	 * so we build the line explicitly.
+	 */
+	static FString SepLine(int32 N)
+	{
+		FString Out;
+		Out.Reserve(N + 1);
+		for (int32 i = 0; i < N; ++i)
+			Out += TEXT("─");
+		return Out;
+	}
 
 	/**
 	 * After a primary ban for PrimaryUid has been committed, look up the
@@ -359,6 +374,15 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 		       (Config.AdminRoleId.IsEmpty() && Config.ModeratorRoleId.IsEmpty())
 		           ? TEXT("DISABLED (neither AdminRoleId nor ModeratorRoleId is set)")
 		           : TEXT("enabled"));
+
+		// Feature 9: Auto-post the panel to AdminPanelChannelId on startup.
+		// Empty AuthorId bypasses the per-user rate-limit.
+		if (!Config.AdminPanelChannelId.IsEmpty())
+		{
+			HandlePanelCommand(Config.AdminPanelChannelId,
+			                   FString(), FString(), TArray<FString>(),
+			                   TEXT("Server Startup"), FString());
+		}
 	}
 }
 
@@ -405,6 +429,25 @@ FString UBanDiscordSubsystem::ExtractSenderName(const TSharedPtr<FJsonObject>& M
 	}
 
 	return Name.IsEmpty() ? TEXT("Discord Admin") : Name;
+}
+
+FString UBanDiscordSubsystem::ExtractSenderId(const TSharedPtr<FJsonObject>& MessageObj)
+{
+	FString UserId;
+	const TSharedPtr<FJsonObject>* MemberPtr = nullptr;
+	if (MessageObj->TryGetObjectField(TEXT("member"), MemberPtr) && MemberPtr)
+	{
+		const TSharedPtr<FJsonObject>* UserPtr = nullptr;
+		if ((*MemberPtr)->TryGetObjectField(TEXT("user"), UserPtr) && UserPtr)
+			(*UserPtr)->TryGetStringField(TEXT("id"), UserId);
+	}
+	if (UserId.IsEmpty())
+	{
+		const TSharedPtr<FJsonObject>* AuthorPtr = nullptr;
+		if (MessageObj->TryGetObjectField(TEXT("author"), AuthorPtr) && AuthorPtr)
+			(*AuthorPtr)->TryGetStringField(TEXT("id"), UserId);
+	}
+	return UserId;
 }
 
 bool UBanDiscordSubsystem::IsAdminMember(const TArray<FString>& Roles) const
@@ -727,7 +770,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 	       *SenderName, *DisplayName, *Uid, *Entry.Reason);
 
 	Respond(ChannelId, Msg);
-	PostModerationLog(Msg);
+	PostToPlayerModerationThread(DisplayName, Uid, Msg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -782,7 +825,7 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 		       *SenderName, *DisplayName, *Uid);
 
 		Respond(ChannelId, Msg);
-		PostModerationLog(Msg);
+		PostToPlayerModerationThread(DisplayName, Uid, Msg);
 		return;
 	}
 
@@ -803,7 +846,7 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 	       *SenderName, *DisplayName, *Uid);
 
 	Respond(ChannelId, Msg);
-	PostModerationLog(Msg);
+	PostToPlayerModerationThread(DisplayName, Uid, Msg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -938,7 +981,7 @@ void UBanDiscordSubsystem::HandleBanListCommand(const TArray<FString>& Args,
 	Body += FString::Printf(TEXT("%-4s  %-22s  %-16s  %-20s  %s\n"),
 	                        TEXT("ID"), TEXT("UID (truncated)"),
 	                        TEXT("Name"), TEXT("Expires"), TEXT("Reason"));
-	Body += FString(TEXT("─"), 80) + TEXT("\n");
+	Body += BanDiscordHelpers::SepLine(80) + TEXT("\n");
 
 	for (int32 i = StartIdx; i < EndIdx; ++i)
 	{
@@ -986,7 +1029,7 @@ void UBanDiscordSubsystem::HandlePlayerHistoryCommand(const TArray<FString>& Arg
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/player history <name|PUID|IP>`");
+			TEXT("Usage: `/player history <name|PUID|IP>`"));
 		return;
 	}
 
@@ -1043,7 +1086,7 @@ void UBanDiscordSubsystem::HandlePlayerHistoryCommand(const TArray<FString>& Arg
 	Body += TEXT("```\n");
 	Body += FString::Printf(TEXT("%-16s  %-40s  %-15s  %-20s\n"),
 	                        TEXT("Name"), TEXT("UID"), TEXT("IP"), TEXT("Last Seen (UTC)"));
-	Body += FString(TEXT("─"), 97) + TEXT("\n");
+	Body += BanDiscordHelpers::SepLine(97) + TEXT("\n");
 
 	for (int32 i = 0; i < ShowCount; ++i)
 	{
@@ -1116,7 +1159,7 @@ void UBanDiscordSubsystem::HandleKickCommand(const TArray<FString>& Args,
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *Reason, *SenderName);
 		KickMsg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
 		Respond(ChannelId, KickMsg);
-		PostModerationLog(KickMsg);
+		PostToPlayerModerationThread(DisplayName, Uid, KickMsg);
 	}
 	else
 	{
@@ -1175,7 +1218,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 			TEXT("✅ Unmuted **%s** (`%s`).\nUnmuted by: %s"),
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
 		Respond(ChannelId, UnmuteMsg);
-		PostModerationLog(UnmuteMsg);
+		PostToPlayerModerationThread(DisplayName, Uid, UnmuteMsg);
 		return;
 	}
 
@@ -1205,7 +1248,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 		TEXT("🔇 Muted **%s** (`%s`)%s.\nReason: %s\nMuted by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *DurStr, *Reason, *SenderName);
 	Respond(ChannelId, MuteMsg);
-	PostModerationLog(MuteMsg);
+	PostToPlayerModerationThread(DisplayName, Uid, MuteMsg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1251,7 +1294,7 @@ void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
 		TEXT("⚠️ Warned **%s** (`%s`).\nReason: %s\nTotal warnings: **%d**\nWarned by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *Reason, WarnCount, *SenderName);
 	Respond(ChannelId, WarnMsg);
-	PostModerationLog(WarnMsg);
+	PostToPlayerModerationThread(DisplayName, Uid, WarnMsg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1819,7 +1862,7 @@ void UBanDiscordSubsystem::HandleWarningsCommand(const TArray<FString>& Args,
 	Body += TEXT("```\n");
 	Body += FString::Printf(TEXT("%-4s  %-20s  %-12s  %s\n"),
 		TEXT("ID"), TEXT("Date (UTC)"), TEXT("By"), TEXT("Reason"));
-	Body += FString(TEXT("─"), 72) + TEXT("\n");
+	Body += BanDiscordHelpers::SepLine(72) + TEXT("\n");
 
 	const int32 ShowMax = FMath::Min(Warnings.Num(), 15);
 	for (int32 i = 0; i < ShowMax; ++i)
@@ -2340,7 +2383,7 @@ void UBanDiscordSubsystem::HandleMuteListCommand(const FString& ChannelId)
 	Body += TEXT("```\n");
 	Body += FString::Printf(TEXT("%-18s  %-30s  %-18s  %s\n"),
 		TEXT("Name"), TEXT("UID (truncated)"), TEXT("Expires"), TEXT("Reason"));
-	Body += FString(TEXT("─"), 80) + TEXT("\n");
+	Body += BanDiscordHelpers::SepLine(80) + TEXT("\n");
 
 	const int32 ShowMax = FMath::Min(Mutes.Num(), 15);
 	for (int32 i = 0; i < ShowMax; ++i)
@@ -2747,7 +2790,7 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/appeal approve <id> [note...]`");
+			TEXT("Usage: `/appeal approve <id> [note...]`"));
 		return;
 	}
 
@@ -2786,24 +2829,64 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 	const FBanAppealEntry Entry = Registry->GetAppealById(AppealId);
 
 	// Auto-unban the player on approval.
+	// Use IsCurrentlyBannedByAnyId so that appeals submitted with a Discord:<id>
+	// UID are matched against the EOS:<puid> ban record via its LinkedUids, then
+	// remove by the primary ban UID + any counterparts — same pattern as /unban.
 	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
 	bool bUnbanned = false;
+	FString UnbannedUid = Entry.Uid;
 	if (DB && !Entry.Uid.IsEmpty())
-		bUnbanned = DB->RemoveBanByUid(Entry.Uid);
+	{
+		FBanEntry BanRecord;
+		if (DB->IsCurrentlyBannedByAnyId(Entry.Uid, BanRecord))
+		{
+			UnbannedUid = BanRecord.Uid;
+			bUnbanned = DB->RemoveBanByUid(BanRecord.Uid);
+			if (bUnbanned)
+				BanDiscordHelpers::RemoveCounterpartBans(this, DB, BanRecord.Uid, BanRecord.LinkedUids);
+		}
+		else
+		{
+			// Fallback: direct removal covers edge cases where the ban was stored
+			// with a Discord UID (e.g. manually added entries).
+			bUnbanned = DB->RemoveBanByUid(Entry.Uid);
+		}
+	}
 
 	const FString NoteStr = ReviewNote.IsEmpty() ? TEXT("") : FString::Printf(TEXT(" Note: %s"), *ReviewNote);
 	const FString Msg = bUnbanned
-		? FString::Printf(TEXT(":white_check_mark: Appeal `#%lld` **approved** — ban for `%s` removed.%s"), AppealId, *Entry.Uid, *NoteStr)
+		? FString::Printf(TEXT(":white_check_mark: Appeal `#%lld` **approved** — ban for `%s` removed.%s"), AppealId, *UnbannedUid, *NoteStr)
 		: FString::Printf(TEXT(":white_check_mark: Appeal `#%lld` **approved** — no active ban found for `%s`.%s"), AppealId, *Entry.Uid, *NoteStr);
 
 	Respond(ChannelId, Msg);
-	PostModerationLog(FString::Printf(TEXT("%s approved appeal #%lld (uid=%s)%s"), *SenderName, AppealId, *Entry.Uid, *NoteStr));
+	PostModerationLog(FString::Printf(TEXT("%s approved appeal #%lld (uid=%s)%s"), *SenderName, AppealId, *UnbannedUid, *NoteStr));
 
 	FBanDiscordNotifier::NotifyAppealReviewed(Entry);
 
+	// Auto-close the associated ban-appeal ticket channel (if still open).
+	// The Uid stored in the entry is "Discord:<userId>"; extract the user ID.
+	if (Entry.Uid.StartsWith(TEXT("Discord:")))
+	{
+		const FString AppealDiscordId = Entry.Uid.Mid(FCString::Strlen(TEXT("Discord:")));
+		if (!AppealDiscordId.IsEmpty())
+		{
+			if (UGameInstance* GI = GetGameInstance())
+			{
+				if (UTicketSubsystem* TicketSys = GI->GetSubsystem<UTicketSubsystem>())
+				{
+					const FString Resolution = FString::Printf(
+						TEXT(":white_check_mark: **Appeal approved** by %s. %s\n"
+						     "This ticket has been automatically closed."),
+						*SenderName, *NoteStr);
+					TicketSys->CloseAppealTicketForOpener(AppealDiscordId, Resolution);
+				}
+			}
+		}
+	}
+
 	UE_LOG(LogTemp, Log,
 	       TEXT("BanDiscordSubsystem: Appeal #%lld approved by '%s' (uid=%s, unbanned=%s)."),
-	       AppealId, *SenderName, *Entry.Uid, bUnbanned ? TEXT("yes") : TEXT("no"));
+	       AppealId, *SenderName, *UnbannedUid, bUnbanned ? TEXT("yes") : TEXT("no"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2819,7 +2902,7 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/appeal deny <id> [note...]`");
+			TEXT("Usage: `/appeal deny <id> [note...]`"));
 		return;
 	}
 
@@ -2862,6 +2945,26 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 	PostModerationLog(FString::Printf(TEXT("%s denied appeal #%lld (uid=%s)%s"), *SenderName, AppealId, *Entry.Uid, *NoteStr));
 
 	FBanDiscordNotifier::NotifyAppealReviewed(Entry);
+
+	// Auto-close the associated ban-appeal ticket channel (if still open).
+	if (Entry.Uid.StartsWith(TEXT("Discord:")))
+	{
+		const FString AppealDiscordId = Entry.Uid.Mid(FCString::Strlen(TEXT("Discord:")));
+		if (!AppealDiscordId.IsEmpty())
+		{
+			if (UGameInstance* GI = GetGameInstance())
+			{
+				if (UTicketSubsystem* TicketSys = GI->GetSubsystem<UTicketSubsystem>())
+				{
+					const FString Resolution = FString::Printf(
+						TEXT(":x: **Appeal denied** by %s.%s\n"
+						     "This ticket has been automatically closed."),
+						*SenderName, *NoteStr);
+					TicketSys->CloseAppealTicketForOpener(AppealDiscordId, Resolution);
+				}
+			}
+		}
+	}
 
 	UE_LOG(LogTemp, Log,
 	       TEXT("BanDiscordSubsystem: Appeal #%lld denied by '%s'."), AppealId, *SenderName);
@@ -3058,42 +3161,42 @@ if (!CachedProvider) return;
 if (Config.ModerationLogChannelId.IsEmpty()) return;
 if (Config.ModerationLogChannelId == TEXT("0")) return;
 
-// Check if we already have a cached thread ID for this player.
+// Fast path: a thread for this player was already created in a prior call.
 if (const FString* CachedId = PlayerThreadIdCache.Find(Uid))
 {
-// Post directly into the existing thread.
 CachedProvider->SendDiscordChannelMessage(*CachedId, Message);
 return;
 }
 
-// Derive the Config.BotToken from the provider's interface.
-// We need to create a new thread via the Discord API.
-// Build the thread name: "PlayerName (EOS:xxx)" truncated to 100 chars.
+// Build the thread name: "PlayerName [EOS:xxx]" truncated to 100 chars.
 const FString ThreadName = BanDiscordHelpers::Truncate(
 FString::Printf(TEXT("%s [%s]"), *PlayerName, *Uid), 100);
 
-// POST /channels/{channel_id}/threads to create a public thread.
-const FString Url = FString::Printf(
-TEXT("https://discord.com/api/v10/channels/%s/threads"),
-*Config.ModerationLogChannelId);
-
-const FString BodyStr = FString::Printf(
-TEXT("{\"name\":\"%s\",\"type\":11,\"auto_archive_duration\":10080}"),
-*ThreadName.Replace(TEXT("\""), TEXT("\\\"")));
-
-TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
-FHttpModule::Get().CreateRequest();
-Request->SetURL(Url);
-Request->SetVerb(TEXT("POST"));
-// We derive the token from the first connected provider config.
-// Since we don't have direct access to the token here, we post a plain
-// message to the log channel instead (falls back to flat log).
-// Full thread creation is supported when BotToken is accessible.
-
-// Fallback: post a prefixed message to the main mod-log channel.
+// Post a prefixed fallback to the main mod-log channel immediately so the
+// message is never lost, even if thread creation fails or is slow.
 const FString Prefixed = FString::Printf(
 TEXT("**[%s]** %s"), *BanDiscordHelpers::EscapeMarkdown(ThreadName), *Message);
 CachedProvider->SendDiscordChannelMessage(Config.ModerationLogChannelId, Prefixed);
+
+// Asynchronously create a Discord thread for this player so that future
+// moderation events are grouped per-player rather than posted inline.
+const FString ChanId = Config.ModerationLogChannelId;
+const FString UidKey = Uid;
+TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
+
+CachedProvider->CreateDiscordThread(ChanId, ThreadName,
+[WeakThis, UidKey](const FString& ThreadId)
+{
+UBanDiscordSubsystem* Self = WeakThis.Get();
+if (Self && !ThreadId.IsEmpty())
+{
+// Cache the thread so subsequent events go straight into it.
+Self->PlayerThreadIdCache.Add(UidKey, ThreadId);
+UE_LOG(LogBanDiscord, Log,
+       TEXT("BanDiscordSubsystem: Created mod-log thread %s for player uid=%s."),
+       *ThreadId, *UidKey);
+}
+});
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3477,6 +3580,22 @@ return;
 // Only handle APPLICATION_COMMAND interactions (type 2).
 int32 InteractionType = 0;
 InteractionObj->TryGetNumberField(TEXT("type"), InteractionType);
+
+// Type 3 = MESSAGE_COMPONENT (button / select-menu clicks).
+if (InteractionType == 3)
+{
+HandlePanelButtonInteraction(InteractionObj);
+return;
+}
+
+// Type 5 = MODAL_SUBMIT.
+if (InteractionType == 5)
+{
+HandlePanelModalSubmit(InteractionObj);
+return;
+}
+
+// Only continue processing for APPLICATION_COMMAND (type 2) interactions.
 if (InteractionType != 2) return;
 
 // Extract the interaction token and set up a guard that clears
@@ -3487,6 +3606,11 @@ FString ExtractedToken;
 InteractionObj->TryGetStringField(TEXT("token"), ExtractedToken);
 PendingInteractionToken = ExtractedToken;
 }
+
+// Extract the interaction ID — passed explicitly to handlers that respond
+// directly (e.g. HandlePanelCommand sends an embed via RespondToInteractionWithBody).
+FString InteractionId;
+InteractionObj->TryGetStringField(TEXT("id"), InteractionId);
 
 // RAII guard: clears PendingInteractionToken on any return path.
 struct FInteractionTokenGuard
@@ -3845,6 +3969,11 @@ else if (SubCmdName == TEXT("staffchat"))
 Args.Add(GetOpt(TEXT("message")));
 HandleStaffChatCommand(Args, ChannelId, SenderName);
 }
+else if (SubCmdName == TEXT("freeze"))
+{
+Args.Add(GetOpt(TEXT("player")));
+HandleFreezeCommand(Args, ChannelId, SenderName);
+}
 else { bHandled = false; }
 }
 else if (CmdGroupName == TEXT("player"))
@@ -3932,6 +4061,15 @@ else if (SubCmdName == TEXT("reloadconfig"))
 {
 HandleReloadConfigCommand(ChannelId, SenderName);
 }
+else if (SubCmdName == TEXT("panel"))
+{
+HandlePanelCommand(ChannelId, InteractionId, PendingInteractionToken, MemberRoles, SenderName, AuthorId);
+}
+else if (SubCmdName == TEXT("clearchat"))
+{
+const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
+HandleClearChatCommand(Args, ChannelId, SenderName);
+}
 else { bHandled = false; }
 }
 else { bHandled = false; }
@@ -3944,4 +4082,1902 @@ UE_LOG(LogBanDiscord, Warning,
 Respond(ChannelId,
     FString::Printf(TEXT("❌ Unknown subcommand `/%s %s`."), *CmdGroupName, *SubCmdName));
 }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin panel — /admin panel
+// ─────────────────────────────────────────────────────────────────────────────
+
+TSharedPtr<FJsonObject> UBanDiscordSubsystem::BuildPanelData() const
+{
+	UGameInstance* GI = GetGameInstance();
+
+	// Count currently connected players.
+	int32 PlayerCount = 0;
+	if (GI)
+	{
+		if (UWorld* World = GI->GetWorld())
+		{
+			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			{
+				if (It->Get()) ++PlayerCount;
+			}
+		}
+	}
+
+	// Count active bans (Feature 11 dashboard).
+	int32 ActiveBanCount = 0;
+	if (UBanDatabase* DB = BanDiscordHelpers::GetDB(this))
+		ActiveBanCount = DB->GetActiveBans().Num();
+
+	// Count currently muted players (Feature 11 dashboard).
+	int32 MutedCount = 0;
+	if (UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr)
+		MutedCount = MuteReg->GetAllMutes().Num();
+
+	// Feature 7: Read ServerName from DiscordBridgeConfig for panel footer/title.
+	const FDiscordBridgeConfig DiscordCfg = FDiscordBridgeConfig::LoadOrCreate();
+	const FString ServerName = DiscordCfg.ServerName;
+
+	// Build the embed object.
+	TSharedPtr<FJsonObject> Embed = MakeShared<FJsonObject>();
+
+	FString TitleStr = TEXT("🛡️ Server Admin Panel");
+	if (!ServerName.IsEmpty())
+		TitleStr = FString::Printf(TEXT("🛡️ %s — Admin Panel"), *ServerName);
+	Embed->SetStringField(TEXT("title"), TitleStr);
+
+	// Discord dynamic relative timestamp for the 15-minute button expiry window.
+	const int64 ExpiryUnix = (FDateTime::UtcNow() + FTimespan::FromMinutes(15)).ToUnixTimestamp();
+
+	Embed->SetStringField(TEXT("description"),
+		FString::Printf(
+			TEXT("**Online Players: %d**\n"
+			     "Use the buttons below to manage the server.\n\n"
+			     "⏳ Buttons expire <t:%lld:R> — press **🔄 Refresh** or run `/admin panel`."),
+			PlayerCount, ExpiryUnix));
+	Embed->SetNumberField(TEXT("color"), 3447003); // #3498DB — a solid Discord blue
+
+	// Feature 11: Dashboard fields.
+	TArray<TSharedPtr<FJsonValue>> EmbedFields;
+	auto AddEmbedField = [&EmbedFields](const FString& Name, const FString& Value, bool bInline)
+	{
+		TSharedPtr<FJsonObject> F = MakeShared<FJsonObject>();
+		F->SetStringField(TEXT("name"),   Name);
+		F->SetStringField(TEXT("value"),  Value);
+		F->SetBoolField  (TEXT("inline"), bInline);
+		EmbedFields.Add(MakeShared<FJsonValueObject>(F));
+	};
+	AddEmbedField(TEXT("🟢 Online"),       FString::FromInt(PlayerCount), true);
+	AddEmbedField(TEXT("🔨 Active Bans"),  FString::FromInt(ActiveBanCount), true);
+	AddEmbedField(TEXT("🔇 Muted"),        FString::FromInt(MutedCount), true);
+	Embed->SetArrayField(TEXT("fields"), EmbedFields);
+
+	// ISO 8601 timestamp shown in the embed footer.
+	Embed->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+
+	TSharedPtr<FJsonObject> Footer = MakeShared<FJsonObject>();
+	const FString FooterText = ServerName.IsEmpty()
+		? TEXT("DiscordBridge Admin Panel")
+		: FString::Printf(TEXT("DiscordBridge Admin Panel · %s"), *ServerName);
+	Footer->SetStringField(TEXT("text"), FooterText);
+	Embed->SetObjectField(TEXT("footer"), Footer);
+
+	// Helper: build a single Discord BUTTON component object.
+	auto MakeButton = [](int32 Style, const FString& Label,
+	                     const FString& CustomId) -> TSharedPtr<FJsonObject>
+	{
+		TSharedPtr<FJsonObject> Btn = MakeShared<FJsonObject>();
+		Btn->SetNumberField(TEXT("type"),      2); // BUTTON
+		Btn->SetNumberField(TEXT("style"),     Style);
+		Btn->SetStringField(TEXT("label"),     Label);
+		Btn->SetStringField(TEXT("custom_id"), CustomId);
+		return Btn;
+	};
+
+	// Helper: wrap a list of buttons in an ACTION_ROW.
+	auto MakeActionRow = [](const TArray<TSharedPtr<FJsonObject>>& Btns) -> TSharedPtr<FJsonObject>
+	{
+		TSharedPtr<FJsonObject> Row = MakeShared<FJsonObject>();
+		Row->SetNumberField(TEXT("type"), 1); // ACTION_ROW
+		TArray<TSharedPtr<FJsonValue>> BtnValues;
+		for (const TSharedPtr<FJsonObject>& B : Btns)
+			BtnValues.Add(MakeShared<FJsonValueObject>(B));
+		Row->SetArrayField(TEXT("components"), BtnValues);
+		return Row;
+	};
+
+	// Row 1 — moderator-level actions (kick, mute, unmute, announce, players).
+	// Button styles: 1=blurple, 2=grey, 3=green, 4=red.
+	TArray<TSharedPtr<FJsonObject>> Row1 = {
+		MakeButton(2, TEXT("👢 Kick"),     TEXT("panel:kick")),
+		MakeButton(2, TEXT("🔇 Mute"),     TEXT("panel:mute")),
+		MakeButton(2, TEXT("🔊 Unmute"),   TEXT("panel:unmute")),
+		MakeButton(1, TEXT("📢 Announce"), TEXT("panel:announce")),
+		MakeButton(2, TEXT("👥 Players"),  TEXT("panel:players")),
+	};
+
+	// Row 2 — admin-level actions (ban, temp ban, warn, unban, ban list).
+	TArray<TSharedPtr<FJsonObject>> Row2 = {
+		MakeButton(4, TEXT("🔨 Ban"),      TEXT("panel:ban")),
+		MakeButton(4, TEXT("⏱ Temp Ban"), TEXT("panel:tempban")),
+		MakeButton(3, TEXT("⚠️ Warn"),    TEXT("panel:warn")),
+		MakeButton(3, TEXT("🔓 Unban"),    TEXT("panel:unban")),
+		MakeButton(2, TEXT("📋 Ban List"), TEXT("panel:banlist")),
+	};
+
+	// Row 3 — lookup tools (warn list, player history, ban check, mute check, mute list).
+	TArray<TSharedPtr<FJsonObject>> Row3 = {
+		MakeButton(2, TEXT("⚠️ Warns"),    TEXT("panel:warnlist")),
+		MakeButton(1, TEXT("📜 History"),   TEXT("panel:history")),
+		MakeButton(2, TEXT("🔍 Ban Check"), TEXT("panel:bancheck")),
+		MakeButton(2, TEXT("🔇 Mute Chk"), TEXT("panel:mutecheck")),
+		MakeButton(2, TEXT("📋 Mute List"), TEXT("panel:mutelist")),
+	};
+
+	// Row 4 — utility (staff list, reload config, refresh panel, pending appeals).
+	TArray<TSharedPtr<FJsonObject>> Row4 = {
+		MakeButton(2, TEXT("👮 Staff"),     TEXT("panel:stafflist")),
+		MakeButton(2, TEXT("🔁 Reload"),    TEXT("panel:reload")),
+		MakeButton(3, TEXT("🔄 Refresh"),   TEXT("panel:refresh")),
+		MakeButton(2, TEXT("🔔 Appeals"),   TEXT("panel:appeals")),
+	};
+
+	// Row 5 — admin actions (freeze player, clear in-game chat).
+	TArray<TSharedPtr<FJsonObject>> Row5 = {
+		MakeButton(2, TEXT("❄️ Freeze"),    TEXT("panel:freeze")),
+		MakeButton(2, TEXT("🧹 Clear Chat"), TEXT("panel:clearchat")),
+	};
+
+	TArray<TSharedPtr<FJsonValue>> Rows;
+	Rows.Add(MakeShared<FJsonValueObject>(MakeActionRow(Row1)));
+	Rows.Add(MakeShared<FJsonValueObject>(MakeActionRow(Row2)));
+	Rows.Add(MakeShared<FJsonValueObject>(MakeActionRow(Row3)));
+	Rows.Add(MakeShared<FJsonValueObject>(MakeActionRow(Row4)));
+	Rows.Add(MakeShared<FJsonValueObject>(MakeActionRow(Row5)));
+
+	// Assemble the top-level data object.
+	TSharedPtr<FJsonObject> Data = MakeShared<FJsonObject>();
+	Data->SetArrayField(TEXT("embeds"),
+		TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(Embed) });
+	Data->SetArrayField(TEXT("components"), Rows);
+	return Data;
+}
+
+void UBanDiscordSubsystem::HandlePanelCommand(const FString& ChannelId,
+                                               const FString& InteractionId,
+                                               const FString& InteractionToken,
+                                               const TArray<FString>& MemberRoles,
+                                               const FString& SenderName,
+                                               const FString& AuthorId)
+{
+	if (!CachedProvider) return;
+
+	// Feature 12: Per-user rate-limit.  Skip when AuthorId is empty (auto-post / tests).
+	if (!AuthorId.IsEmpty())
+	{
+		const FDateTime Now = FDateTime::UtcNow();
+
+		// Prune entries that are more than 2× the rate-limit age to keep the map bounded.
+		{
+			TArray<FString> ToRemove;
+			const double PruneCutoffSec = PanelRateLimitSeconds * 2.0;
+			for (auto& Pair : LastPanelPostByUser)
+			{
+				if ((Now - Pair.Value).GetTotalSeconds() > PruneCutoffSec)
+					ToRemove.Add(Pair.Key);
+			}
+			for (const FString& K : ToRemove)
+				LastPanelPostByUser.Remove(K);
+		}
+
+		if (const FDateTime* LastPost = LastPanelPostByUser.Find(AuthorId))
+		{
+			const float SecondsElapsed =
+				static_cast<float>((Now - *LastPost).GetTotalSeconds());
+			if (SecondsElapsed < PanelRateLimitSeconds)
+			{
+				const int32 SecsLeft =
+					FMath::CeilToInt(PanelRateLimitSeconds - SecondsElapsed);
+				if (!InteractionId.IsEmpty() && !InteractionToken.IsEmpty())
+				{
+					CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+						FString::Printf(
+							TEXT("⏳ Please wait %d second(s) before using `/admin panel` again."),
+							SecsLeft),
+						/*bEphemeral=*/true);
+				}
+				return;
+			}
+		}
+		LastPanelPostByUser.Add(AuthorId, Now);
+	}
+
+	// Determine the target channel.  When AdminPanelChannelId is set use that;
+	// otherwise fall back to the channel the /admin panel command was issued in.
+	const FString TargetChannel = Config.AdminPanelChannelId.IsEmpty()
+		? ChannelId
+		: Config.AdminPanelChannelId;
+
+	TSharedPtr<FJsonObject> PanelData = BuildPanelData();
+
+	if (!InteractionId.IsEmpty() && !InteractionToken.IsEmpty()
+		&& (Config.AdminPanelChannelId.IsEmpty() || Config.AdminPanelChannelId == ChannelId))
+	{
+		// Respond to the slash command interaction directly with the embed
+		// (type 4, non-ephemeral) so the panel appears inline with the command.
+		CachedProvider->RespondToInteractionWithBody(InteractionId, InteractionToken,
+			PanelData, /*bEphemeral=*/false);
+	}
+	else
+	{
+		// When AdminPanelChannelId differs from the command channel, post to
+		// the configured channel and ack the command with an ephemeral note.
+		CachedProvider->SendMessageBodyToChannel(TargetChannel, PanelData);
+		if (!InteractionId.IsEmpty() && !InteractionToken.IsEmpty())
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				FString::Printf(TEXT("✅ Admin panel posted in <#%s>."), *TargetChannel),
+				/*bEphemeral=*/true);
+		}
+	}
+
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: %s opened the admin panel (channel %s)."),
+	       *SenderName, *TargetChannel);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin panel — button interaction handler (type 3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandlePanelButtonInteraction(const TSharedPtr<FJsonObject>& InteractionObj)
+{
+	if (!CachedProvider || !InteractionObj.IsValid()) return;
+
+	FString InteractionId, InteractionToken, CustomId;
+	InteractionObj->TryGetStringField(TEXT("id"),    InteractionId);
+	InteractionObj->TryGetStringField(TEXT("token"), InteractionToken);
+
+	if (InteractionId.IsEmpty() || InteractionToken.IsEmpty()) return;
+
+	const TSharedPtr<FJsonObject>* DataPtr = nullptr;
+	if (!InteractionObj->TryGetObjectField(TEXT("data"), DataPtr) || !DataPtr) return;
+	(*DataPtr)->TryGetStringField(TEXT("custom_id"), CustomId);
+
+	// Only handle buttons belonging to the admin panel.
+	if (!CustomId.StartsWith(TEXT("panel:"))) return;
+
+	const TArray<FString> MemberRoles = ExtractMemberRoles(InteractionObj);
+	const FString SenderName          = ExtractSenderName(InteractionObj);
+
+	const FString Action = CustomId.Mid(6); // strip "panel:"
+
+	// Determine which permission tier the action requires.
+	// Admin-level: ban, tempban, warn, banlist, reload, unban, warnlist, history.
+	// Mod-level:   kick, mute, unmute, announce, players, stafflist, refresh,
+	//              bancheck, mutecheck, mutelist, appeals.
+	static const TArray<FString> AdminActions = {
+		TEXT("ban"), TEXT("tempban"), TEXT("warn"), TEXT("banlist"), TEXT("reload"),
+		TEXT("unban"), TEXT("warnlist"), TEXT("history"), TEXT("freeze"), TEXT("clearchat"),
+	};
+	static const TArray<FString> ModActions = {
+		TEXT("kick"), TEXT("mute"), TEXT("unmute"), TEXT("announce"),
+		TEXT("players"), TEXT("stafflist"), TEXT("refresh"),
+		TEXT("bancheck"), TEXT("mutecheck"), TEXT("mutelist"), TEXT("appeals"),
+	};
+
+	const bool bNeedsAdmin = AdminActions.Contains(Action);
+	const bool bNeedsMod   = ModActions.Contains(Action);
+
+	if (bNeedsAdmin && !IsAdminMember(MemberRoles))
+	{
+		CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+			TEXT("❌ Admin role required for that action."), true);
+		return;
+	}
+	if (bNeedsMod && !IsModeratorMember(MemberRoles))
+	{
+		CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+			TEXT("❌ Moderator role required for that action."), true);
+		return;
+	}
+	if (!bNeedsAdmin && !bNeedsMod)
+	{
+		CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+			TEXT("❌ Unknown panel action."), true);
+		return;
+	}
+
+	// ── Direct-action buttons — respond immediately ───────────────────────────
+
+	if (Action == TEXT("banlist"))
+	{
+		const FString Result = ExecutePanelBanList();
+		CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4, Result, true);
+		return;
+	}
+	if (Action == TEXT("mutelist"))
+	{
+		const FString Result = ExecutePanelMuteList();
+		CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4, Result, true);
+		return;
+	}
+	if (Action == TEXT("players"))
+	{
+		const FString Result = ExecutePanelPlayers();
+		CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4, Result, true);
+		return;
+	}
+	if (Action == TEXT("stafflist"))
+	{
+		const FString Result = ExecutePanelStaffList();
+		CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4, Result, true);
+		return;
+	}
+	if (Action == TEXT("appeals"))
+	{
+		const FString Result = ExecutePanelAppeals();
+		CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4, Result, true);
+		return;
+	}
+	if (Action == TEXT("reload"))
+	{
+		const FString Result = ExecutePanelReloadConfig(SenderName);
+		CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4, Result, true);
+		PostModerationLog(Result);
+		return;
+	}
+	// Feature 5: Refresh — post a fresh panel to the channel and ack the button.
+	if (Action == TEXT("refresh"))
+	{
+		FString InteractionChannelId;
+		InteractionObj->TryGetStringField(TEXT("channel_id"), InteractionChannelId);
+		const FString TargetChannel = Config.AdminPanelChannelId.IsEmpty()
+			? InteractionChannelId
+			: Config.AdminPanelChannelId;
+		TSharedPtr<FJsonObject> PanelData = BuildPanelData();
+		CachedProvider->SendMessageBodyToChannel(TargetChannel, PanelData);
+		CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+			TEXT("✅ Panel refreshed."), true);
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: [Panel] %s refreshed the panel (channel %s)."),
+		       *SenderName, *TargetChannel);
+		return;
+	}
+
+	// ── Modal-opening buttons ─────────────────────────────────────────────────
+
+	// Helper lambda: build a field and add it to the array.
+	auto AddField = [](TArray<FModalField>& Fields,
+	                   const FString& Label, const FString& Id,
+	                   const FString& Hint, bool bReq, bool bPara,
+	                   int32 Min, int32 Max)
+	{
+		FModalField F;
+		F.Label       = Label;
+		F.CustomId    = Id;
+		F.Placeholder = Hint;
+		F.bRequired   = bReq;
+		F.bParagraph  = bPara;
+		F.MinLength   = Min;
+		F.MaxLength   = Max;
+		Fields.Add(F);
+	};
+
+	if (Action == TEXT("kick"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Player name or EOS PUID"), TEXT("panel_player"),
+			TEXT("Enter name or 32-char EOS PUID"), true,  false, 0, 100);
+		AddField(Fields, TEXT("Reason (optional)"),       TEXT("panel_reason"),
+			TEXT("Reason for kick"),                  false, false, 0, 200);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:kick"), TEXT("Kick Player"), Fields);
+		return;
+	}
+	if (Action == TEXT("mute"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Player name or EOS PUID"),              TEXT("panel_player"),
+			TEXT("Enter name or 32-char EOS PUID"),                true,  false, 0, 100);
+		AddField(Fields, TEXT("Duration (e.g. 30m, 2h, 7d; blank = indefinite)"), TEXT("panel_duration"),
+			TEXT("30m = 30 min, 2h = 2 hours, 7d = 7 days"),      false, false, 0, 20);
+		AddField(Fields, TEXT("Reason (optional)"),                    TEXT("panel_reason"),
+			TEXT("Reason for mute"),                               false, false, 0, 200);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:mute"), TEXT("Mute Player"), Fields);
+		return;
+	}
+	if (Action == TEXT("announce"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Message to broadcast in-game"), TEXT("panel_message"),
+			TEXT("Enter announcement text"), true, true, 1, 500);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:announce"), TEXT("Broadcast Announcement"), Fields);
+		return;
+	}
+	if (Action == TEXT("ban"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Player name or EOS PUID"),    TEXT("panel_player"),
+			TEXT("Enter name or 32-char EOS PUID"),      true,  false, 0, 100);
+		AddField(Fields, TEXT("Reason (optional)"),          TEXT("panel_reason"),
+			TEXT("Reason for permanent ban"),            false, false, 0, 200);
+		AddField(Fields, TEXT("Type CONFIRM to proceed"),    TEXT("panel_confirm"),
+			TEXT("CONFIRM"),                             true,  false, 7, 7);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:ban"), TEXT("Ban Player (Permanent)"), Fields);
+		return;
+	}
+	if (Action == TEXT("tempban"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Player name or EOS PUID"),       TEXT("panel_player"),
+			TEXT("Enter name or 32-char EOS PUID"),          true,  false, 0, 100);
+		AddField(Fields, TEXT("Duration (e.g. 30m, 2h, 7d)"), TEXT("panel_duration"),
+			TEXT("30m = 30 min, 2h = 2 hours, 7d = 7 days"), true,  false, 1, 20);
+		AddField(Fields, TEXT("Reason (optional)"),             TEXT("panel_reason"),
+			TEXT("Reason for temporary ban"),                false, false, 0, 200);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:tempban"), TEXT("Temp-Ban Player"), Fields);
+		return;
+	}
+	if (Action == TEXT("warn"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Player name or EOS PUID"), TEXT("panel_player"),
+			TEXT("Enter name or 32-char EOS PUID"), true, false, 0, 100);
+		AddField(Fields, TEXT("Warning reason"),           TEXT("panel_reason"),
+			TEXT("Reason for this warning"),        true, false, 1, 200);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:warn"), TEXT("Warn Player"), Fields);
+		return;
+	}
+	// Feature 4: Unban modal (admin).
+	if (Action == TEXT("unban"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Player name or EOS PUID"), TEXT("panel_player"),
+			TEXT("Enter name or 32-char EOS PUID"), true, false, 0, 100);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:unban"), TEXT("Unban Player"), Fields);
+		return;
+	}
+	// Feature 4: Unmute modal (mod).
+	if (Action == TEXT("unmute"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Player name or EOS PUID"), TEXT("panel_player"),
+			TEXT("Enter name or 32-char EOS PUID"), true, false, 0, 100);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:unmute"), TEXT("Unmute Player"), Fields);
+		return;
+	}
+	// Feature 6: Ban check modal (mod).
+	if (Action == TEXT("bancheck"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Player name or EOS PUID"), TEXT("panel_player"),
+			TEXT("Enter name or 32-char EOS PUID"), true, false, 0, 100);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:bancheck"), TEXT("Ban Check"), Fields);
+		return;
+	}
+	// Warn list — show a player's warning history (admin).
+	if (Action == TEXT("warnlist"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Player name or EOS PUID"), TEXT("panel_player"),
+			TEXT("Enter name or 32-char EOS PUID"), true, false, 0, 100);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:warnlist"), TEXT("Warn List"), Fields);
+		return;
+	}
+	// Player history — session records lookup (admin).
+	if (Action == TEXT("history"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Player name, EOS PUID, or IP"), TEXT("panel_player"),
+			TEXT("Enter name, 32-char EOS PUID, or IP address"), true, false, 0, 100);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:history"), TEXT("Player History"), Fields);
+		return;
+	}
+	// Mute check — check a player's mute status (mod).
+	if (Action == TEXT("mutecheck"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Player name or EOS PUID"), TEXT("panel_player"),
+			TEXT("Enter name or 32-char EOS PUID"), true, false, 0, 100);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:mutecheck"), TEXT("Mute Check"), Fields);
+		return;
+	}
+	// Freeze — toggle movement freeze for a player (admin).
+	if (Action == TEXT("freeze"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Player name or EOS PUID"), TEXT("panel_player"),
+			TEXT("Enter name or 32-char EOS PUID"), true, false, 0, 100);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:freeze"), TEXT("Freeze / Unfreeze Player"), Fields);
+		return;
+	}
+	// Clear Chat — flush in-game chat (admin).
+	if (Action == TEXT("clearchat"))
+	{
+		TArray<FModalField> Fields;
+		AddField(Fields, TEXT("Reason (optional)"), TEXT("panel_reason"),
+			TEXT("Reason for clearing chat"), false, false, 0, 200);
+		CachedProvider->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("panel_modal:clearchat"), TEXT("Clear In-Game Chat"), Fields);
+		return;
+	}
+
+	// Unknown panel button (should not occur in practice).
+	CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+		TEXT("❌ Unknown panel button."), true);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin panel — modal-submit handler (type 5)
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandlePanelModalSubmit(const TSharedPtr<FJsonObject>& InteractionObj)
+{
+	if (!CachedProvider || !InteractionObj.IsValid()) return;
+
+	FString InteractionId, InteractionToken;
+	InteractionObj->TryGetStringField(TEXT("id"),    InteractionId);
+	InteractionObj->TryGetStringField(TEXT("token"), InteractionToken);
+
+	if (InteractionId.IsEmpty() || InteractionToken.IsEmpty()) return;
+
+	const TSharedPtr<FJsonObject>* DataPtr = nullptr;
+	if (!InteractionObj->TryGetObjectField(TEXT("data"), DataPtr) || !DataPtr) return;
+
+	FString ModalId;
+	(*DataPtr)->TryGetStringField(TEXT("custom_id"), ModalId);
+
+	// Only handle modals belonging to the admin panel.
+	if (!ModalId.StartsWith(TEXT("panel_modal:"))) return;
+
+	const TArray<FString> MemberRoles = ExtractMemberRoles(InteractionObj);
+	const FString SenderName          = ExtractSenderName(InteractionObj);
+
+	// Helper: extract a named text-input field from the nested components array.
+	// Discord MODAL_SUBMIT structure:
+	//   data.components[]         = ACTION_ROWs
+	//   data.components[i].components[0]  = TEXT_INPUT
+	auto GetField = [&DataPtr](const FString& FieldId) -> FString
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Rows = nullptr;
+		if (!(*DataPtr)->TryGetArrayField(TEXT("components"), Rows) || !Rows)
+			return FString();
+		for (const TSharedPtr<FJsonValue>& RowVal : *Rows)
+		{
+			const TSharedPtr<FJsonObject>* RowPtr = nullptr;
+			if (!RowVal->TryGetObject(RowPtr) || !RowPtr) continue;
+			const TArray<TSharedPtr<FJsonValue>>* FieldArr = nullptr;
+			if (!(*RowPtr)->TryGetArrayField(TEXT("components"), FieldArr) || !FieldArr) continue;
+			for (const TSharedPtr<FJsonValue>& FV : *FieldArr)
+			{
+				const TSharedPtr<FJsonObject>* FP = nullptr;
+				if (!FV->TryGetObject(FP) || !FP) continue;
+				FString FId;
+				if (!(*FP)->TryGetStringField(TEXT("custom_id"), FId)) continue;
+				if (!FId.Equals(FieldId, ESearchCase::IgnoreCase)) continue;
+				FString FVal;
+				(*FP)->TryGetStringField(TEXT("value"), FVal);
+				return FVal.TrimStartAndEnd();
+			}
+		}
+		return FString();
+	};
+
+	const FString Action = ModalId.Mid(12); // strip "panel_modal:"
+	FString ResultMsg;
+	bool bPostToModLog = false;
+
+	if (Action == TEXT("kick"))
+	{
+		if (!IsModeratorMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Moderator role required."), true);
+			return;
+		}
+		const FString Player = GetField(TEXT("panel_player"));
+		if (Player.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Player name or PUID is required.");
+		}
+		else
+		{
+			ResultMsg     = ExecutePanelKick(Player, GetField(TEXT("panel_reason")), SenderName);
+			// Feature 10: FBanDiscordNotifier::NotifyPlayerKicked already handles logging.
+			bPostToModLog = false;
+		}
+	}
+	else if (Action == TEXT("mute"))
+	{
+		if (!IsModeratorMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Moderator role required."), true);
+			return;
+		}
+		const FString Player = GetField(TEXT("panel_player"));
+		if (Player.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Player name or PUID is required.");
+		}
+		else
+		{
+			ResultMsg     = ExecutePanelMute(Player, GetField(TEXT("panel_duration")),
+			                                GetField(TEXT("panel_reason")), SenderName);
+			bPostToModLog = !ResultMsg.StartsWith(TEXT("❌")) && !ResultMsg.StartsWith(TEXT("⚠️"));
+		}
+	}
+	else if (Action == TEXT("announce"))
+	{
+		if (!IsModeratorMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Moderator role required."), true);
+			return;
+		}
+		const FString Message = GetField(TEXT("panel_message"));
+		if (Message.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Message is required.");
+		}
+		else
+		{
+			ResultMsg     = ExecutePanelAnnounce(Message, SenderName);
+			bPostToModLog = !ResultMsg.StartsWith(TEXT("❌"));
+		}
+	}
+	else if (Action == TEXT("ban"))
+	{
+		if (!IsAdminMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Admin role required."), true);
+			return;
+		}
+		// Feature 8: Confirmation guard for permanent ban.
+		const FString Confirm = GetField(TEXT("panel_confirm"));
+		if (!Confirm.Equals(TEXT("CONFIRM"), ESearchCase::IgnoreCase))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Permanent ban cancelled — you must type **CONFIRM** exactly in the confirmation field."),
+				true);
+			return;
+		}
+		const FString Player = GetField(TEXT("panel_player"));
+		if (Player.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Player name or PUID is required.");
+		}
+		else
+		{
+			ResultMsg = ExecutePanelBan(Player, GetField(TEXT("panel_reason")), SenderName);
+			// Feature 10: FBanDiscordNotifier::NotifyBanCreated already posts to
+			// ModerationLogChannelId, so skip the duplicate plain-text log here.
+			bPostToModLog = false;
+		}
+	}
+	else if (Action == TEXT("tempban"))
+	{
+		if (!IsAdminMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Admin role required."), true);
+			return;
+		}
+		const FString Player   = GetField(TEXT("panel_player"));
+		const FString Duration = GetField(TEXT("panel_duration"));
+		if (Player.IsEmpty() || Duration.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Player and duration are required.");
+		}
+		else
+		{
+			ResultMsg = ExecutePanelTempBan(Player, Duration,
+			                               GetField(TEXT("panel_reason")), SenderName);
+			// Feature 10: FBanDiscordNotifier::NotifyBanCreated already handles logging.
+			bPostToModLog = false;
+		}
+	}
+	else if (Action == TEXT("warn"))
+	{
+		if (!IsAdminMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Admin role required."), true);
+			return;
+		}
+		const FString Player = GetField(TEXT("panel_player"));
+		const FString Reason = GetField(TEXT("panel_reason"));
+		if (Player.IsEmpty() || Reason.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Player and reason are required.");
+		}
+		else
+		{
+			ResultMsg = ExecutePanelWarn(Player, Reason, SenderName);
+			// Feature 10: FBanDiscordNotifier::NotifyWarningIssued already handles logging.
+			bPostToModLog = false;
+		}
+	}
+	// Feature 4: Unban (admin).
+	else if (Action == TEXT("unban"))
+	{
+		if (!IsAdminMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Admin role required."), true);
+			return;
+		}
+		const FString Player = GetField(TEXT("panel_player"));
+		if (Player.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Player name or PUID is required.");
+		}
+		else
+		{
+			ResultMsg     = ExecutePanelUnban(Player, SenderName);
+			bPostToModLog = !ResultMsg.StartsWith(TEXT("❌")) && !ResultMsg.StartsWith(TEXT("ℹ️"));
+		}
+	}
+	// Feature 4: Unmute (mod).
+	else if (Action == TEXT("unmute"))
+	{
+		if (!IsModeratorMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Moderator role required."), true);
+			return;
+		}
+		const FString Player = GetField(TEXT("panel_player"));
+		if (Player.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Player name or PUID is required.");
+		}
+		else
+		{
+			ResultMsg     = ExecutePanelUnmute(Player, SenderName);
+			bPostToModLog = !ResultMsg.StartsWith(TEXT("❌")) && !ResultMsg.StartsWith(TEXT("⚠️"));
+		}
+	}
+	// Feature 6: Ban check (mod).
+	else if (Action == TEXT("bancheck"))
+	{
+		if (!IsModeratorMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Moderator role required."), true);
+			return;
+		}
+		const FString Player = GetField(TEXT("panel_player"));
+		if (Player.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Player name or PUID is required.");
+		}
+		else
+		{
+			ResultMsg     = ExecutePanelBanCheck(Player);
+			bPostToModLog = false; // read-only, no log needed
+		}
+	}
+	// Warn list (admin).
+	else if (Action == TEXT("warnlist"))
+	{
+		if (!IsAdminMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Admin role required."), true);
+			return;
+		}
+		const FString Player = GetField(TEXT("panel_player"));
+		if (Player.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Player name or PUID is required.");
+		}
+		else
+		{
+			ResultMsg     = ExecutePanelWarnList(Player);
+			bPostToModLog = false; // read-only
+		}
+	}
+	// Player history (admin).
+	else if (Action == TEXT("history"))
+	{
+		if (!IsAdminMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Admin role required."), true);
+			return;
+		}
+		const FString Player = GetField(TEXT("panel_player"));
+		if (Player.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Player name, PUID, or IP is required.");
+		}
+		else
+		{
+			ResultMsg     = ExecutePanelHistory(Player);
+			bPostToModLog = false; // read-only
+		}
+	}
+	// Mute check (mod).
+	else if (Action == TEXT("mutecheck"))
+	{
+		if (!IsModeratorMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Moderator role required."), true);
+			return;
+		}
+		const FString Player = GetField(TEXT("panel_player"));
+		if (Player.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Player name or PUID is required.");
+		}
+		else
+		{
+			ResultMsg     = ExecutePanelMuteCheck(Player);
+			bPostToModLog = false; // read-only
+		}
+	}
+	// Freeze — toggle movement freeze (admin).
+	else if (Action == TEXT("freeze"))
+	{
+		if (!IsAdminMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Admin role required."), true);
+			return;
+		}
+		const FString Player = GetField(TEXT("panel_player"));
+		if (Player.IsEmpty())
+		{
+			ResultMsg = TEXT("❌ Player name or PUID is required.");
+		}
+		else
+		{
+			ResultMsg     = ExecutePanelFreeze(Player, SenderName);
+			bPostToModLog = !ResultMsg.StartsWith(TEXT("❌")) && !ResultMsg.StartsWith(TEXT("⚠️"));
+		}
+	}
+	// Clear Chat — flush in-game chat (admin).
+	else if (Action == TEXT("clearchat"))
+	{
+		if (!IsAdminMember(MemberRoles))
+		{
+			CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT("❌ Admin role required."), true);
+			return;
+		}
+		ResultMsg     = ExecutePanelClearChat(GetField(TEXT("panel_reason")), SenderName);
+		bPostToModLog = !ResultMsg.StartsWith(TEXT("❌"));
+	}
+	else
+	{
+		ResultMsg = FString::Printf(TEXT("❌ Unknown panel modal action `%s`."), *Action);
+	}
+
+	// Respond to the modal-submit interaction with the result (ephemeral).
+	if (!ResultMsg.IsEmpty())
+	{
+		CachedProvider->RespondToInteraction(InteractionId, InteractionToken, 4,
+			ResultMsg, true);
+	}
+
+	if (bPostToModLog)
+		PostModerationLog(ResultMsg);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin panel — action executors
+// ─────────────────────────────────────────────────────────────────────────────
+
+FString UBanDiscordSubsystem::ExecutePanelKick(const FString& PlayerArg,
+                                                const FString& Reason,
+                                                const FString& SenderName)
+{
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(PlayerArg, Uid, DisplayName, ErrorMsg))
+		return ErrorMsg;
+
+	UGameInstance* GI = GetGameInstance();
+	UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (!World)
+		return TEXT("❌ No active game world found. Is the server running?");
+
+	const FString KickReason = Reason.IsEmpty() ? TEXT("Kicked by Discord admin") : Reason;
+	const bool bKicked = UBanEnforcer::KickConnectedPlayer(World, Uid, KickReason);
+
+	if (bKicked)
+	{
+		FBanDiscordNotifier::NotifyPlayerKicked(DisplayName, KickReason, SenderName);
+		FString Msg = FString::Printf(
+			TEXT("✅ Kicked **%s** (`%s`).\nReason: %s\nKicked by: %s"),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *KickReason, *SenderName);
+		Msg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: [Panel] %s kicked %s (%s). Reason: %s"),
+		       *SenderName, *DisplayName, *Uid, *KickReason);
+		return Msg;
+	}
+	return FString::Printf(
+		TEXT("⚠️ Player **%s** (`%s`) is not currently connected."),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid);
+}
+
+FString UBanDiscordSubsystem::ExecutePanelBan(const FString& PlayerArg,
+                                               const FString& Reason,
+                                               const FString& SenderName)
+{
+	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
+	if (!DB)
+		return TEXT("❌ BanSystem is not available on this server.");
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(PlayerArg, Uid, DisplayName, ErrorMsg))
+		return ErrorMsg;
+
+	FBanEntry Entry;
+	Entry.Uid          = Uid;
+	UBanDatabase::ParseUid(Uid, Entry.Platform, Entry.PlayerUID);
+	Entry.PlayerName   = DisplayName;
+	Entry.Reason       = Reason.IsEmpty() ? TEXT("No reason given") : Reason;
+	Entry.BannedBy     = SenderName;
+	Entry.BanDate      = FDateTime::UtcNow();
+	Entry.bIsPermanent = true;
+	Entry.ExpireDate   = FDateTime(0);
+
+	if (!DB->AddBan(Entry))
+		return TEXT("❌ Failed to write the ban to the database. Check server logs.");
+
+	if (UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr)
+		UBanEnforcer::KickConnectedPlayer(World, Uid, Entry.GetKickMessage());
+
+	BanDiscordHelpers::AddCounterpartBans(this, DB, Uid, DisplayName,
+		Entry.Reason, SenderName, /*bPermanent=*/true, FDateTime(0));
+
+	FBanDiscordNotifier::NotifyBanCreated(Entry);
+
+	FString Msg = FString::Printf(
+		TEXT("✅ **%s** (`%s`) has been **permanently** banned.\nReason: %s\nBanned by: %s"),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *Entry.Reason, *SenderName);
+	Msg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
+
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: [Panel] %s permanently banned %s (%s). Reason: %s"),
+	       *SenderName, *DisplayName, *Uid, *Entry.Reason);
+	return Msg;
+}
+
+FString UBanDiscordSubsystem::ExecutePanelTempBan(const FString& PlayerArg,
+                                                   const FString& DurationArg,
+                                                   const FString& Reason,
+                                                   const FString& SenderName)
+{
+	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
+	if (!DB)
+		return TEXT("❌ BanSystem is not available on this server.");
+
+	const int32 DurationMinutes = ParseDurationMinutes(DurationArg);
+	if (DurationMinutes <= 0)
+	{
+		return FString::Printf(
+			TEXT("❌ Invalid duration `%s`. Use formats like: 30m, 2h, 1d, 1w."),
+			*DurationArg);
+	}
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(PlayerArg, Uid, DisplayName, ErrorMsg))
+		return ErrorMsg;
+
+	FBanEntry Entry;
+	Entry.Uid          = Uid;
+	UBanDatabase::ParseUid(Uid, Entry.Platform, Entry.PlayerUID);
+	Entry.PlayerName   = DisplayName;
+	Entry.Reason       = Reason.IsEmpty() ? TEXT("No reason given") : Reason;
+	Entry.BannedBy     = SenderName;
+	Entry.BanDate      = FDateTime::UtcNow();
+	Entry.bIsPermanent = false;
+	Entry.ExpireDate   = FDateTime::UtcNow() + FTimespan::FromMinutes(DurationMinutes);
+
+	if (!DB->AddBan(Entry))
+		return TEXT("❌ Failed to write the ban to the database. Check server logs.");
+
+	if (UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr)
+		UBanEnforcer::KickConnectedPlayer(World, Uid, Entry.GetKickMessage());
+
+	BanDiscordHelpers::AddCounterpartBans(this, DB, Uid, DisplayName,
+		Entry.Reason, SenderName, /*bPermanent=*/false, Entry.ExpireDate);
+
+	FBanDiscordNotifier::NotifyBanCreated(Entry);
+
+	FString Msg = FString::Printf(
+		TEXT("✅ **%s** (`%s`) has been temporarily banned for **%d minute(s)**.\n"
+		     "Expires: %s\nReason: %s\nBanned by: %s"),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, DurationMinutes,
+		*BanDiscordHelpers::FormatExpiry(Entry), *Entry.Reason, *SenderName);
+	Msg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
+
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: [Panel] %s temp-banned %s (%s) for %d min. Reason: %s"),
+	       *SenderName, *DisplayName, *Uid, DurationMinutes, *Entry.Reason);
+	return Msg;
+}
+
+FString UBanDiscordSubsystem::ExecutePanelWarn(const FString& PlayerArg,
+                                                const FString& Reason,
+                                                const FString& SenderName)
+{
+	UGameInstance* GI = GetGameInstance();
+	UPlayerWarningRegistry* WarnReg =
+		GI ? GI->GetSubsystem<UPlayerWarningRegistry>() : nullptr;
+	if (!WarnReg)
+		return TEXT("❌ The warn command requires the BanSystem mod to be installed.");
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(PlayerArg, Uid, DisplayName, ErrorMsg))
+		return ErrorMsg;
+
+	WarnReg->AddWarning(Uid, DisplayName, Reason, SenderName);
+	const int32 WarnCount = WarnReg->GetWarningCount(Uid);
+
+	FBanDiscordNotifier::NotifyWarningIssued(Uid, DisplayName, Reason, SenderName, WarnCount);
+
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: [Panel] %s warned %s (%s). Reason: %s"),
+	       *SenderName, *DisplayName, *Uid, *Reason);
+
+	return FString::Printf(
+		TEXT("⚠️ Warned **%s** (`%s`).\nReason: %s\nTotal warnings: **%d**\nWarned by: %s"),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *Reason, WarnCount, *SenderName);
+}
+
+FString UBanDiscordSubsystem::ExecutePanelMute(const FString& PlayerArg,
+                                                const FString& DurationArg,
+                                                const FString& Reason,
+                                                const FString& SenderName)
+{
+	UGameInstance* GI = GetGameInstance();
+	UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
+	if (!MuteReg)
+		return TEXT("❌ Mute requires the BanChatCommands mod to be installed.");
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(PlayerArg, Uid, DisplayName, ErrorMsg))
+		return ErrorMsg;
+
+	// Use ParseDurationMinutes() so "30m", "2h", "7d" formats are accepted.
+	// A non-empty but unparseable duration (returns <= 0) is an error rather
+	// than a silent fallback to indefinite — report it to the caller.
+	int32 Minutes = 0;
+	if (!DurationArg.IsEmpty())
+	{
+		Minutes = ParseDurationMinutes(DurationArg);
+		if (Minutes <= 0)
+		{
+			return FString::Printf(
+				TEXT("❌ Invalid duration `%s`. Use formats like: 30m, 2h, 1d, 1w."),
+				*DurationArg);
+		}
+	}
+
+	const FString MuteReason = Reason.IsEmpty() ? TEXT("Muted by Discord admin") : Reason;
+	MuteReg->MutePlayer(Uid, DisplayName, MuteReason, SenderName, Minutes);
+
+	const FString DurStr = (Minutes > 0)
+		? FString::Printf(TEXT("%d minute(s)"), Minutes)
+		: TEXT("indefinitely");
+
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: [Panel] %s muted %s (%s) for %s. Reason: %s"),
+	       *SenderName, *DisplayName, *Uid, *DurStr, *MuteReason);
+
+	return FString::Printf(
+		TEXT("🔇 Muted **%s** (`%s`) %s.\nReason: %s\nMuted by: %s"),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *DurStr,
+		*MuteReason, *SenderName);
+}
+
+FString UBanDiscordSubsystem::ExecutePanelAnnounce(const FString& Message,
+                                                    const FString& SenderName)
+{
+	UGameInstance* GI = GetGameInstance();
+	UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (!World)
+		return TEXT("❌ No active game world found. Is the server running?");
+
+	int32 Delivered = 0;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PC = It->Get();
+		if (PC)
+		{
+			PC->ClientMessage(FString::Printf(TEXT("[Announcement] %s"), *Message));
+			++Delivered;
+		}
+	}
+
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: [Panel] %s announced to %d player(s): %s"),
+	       *SenderName, Delivered, *Message);
+
+	return FString::Printf(
+		TEXT("📢 Announcement sent to **%d** player(s):\n> %s\nSent by: %s"),
+		Delivered, *Message, *SenderName);
+}
+
+FString UBanDiscordSubsystem::ExecutePanelBanList() const
+{
+	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
+	if (!DB)
+		return TEXT("❌ BanSystem is not available on this server.");
+
+	DB->ReloadIfChanged();
+	TArray<FBanEntry> ActiveBans = DB->GetActiveBans();
+
+	if (ActiveBans.IsEmpty())
+		return TEXT("✅ No active bans.");
+
+	const int32 Total      = ActiveBans.Num();
+	const int32 TotalPages = FMath::DivideAndRoundUp(Total, BanDiscordHelpers::BanListPageSize);
+
+	FString Body;
+	Body.Reserve(1600);
+	Body += TEXT("```\n");
+	Body += FString::Printf(TEXT("%-4s  %-22s  %-16s  %-20s  %s\n"),
+	                        TEXT("ID"), TEXT("UID (truncated)"),
+	                        TEXT("Name"), TEXT("Expires"), TEXT("Reason"));
+	Body += BanDiscordHelpers::SepLine(80) + TEXT("\n");
+
+	const int32 EndIdx = FMath::Min(BanDiscordHelpers::BanListPageSize, Total);
+	for (int32 i = 0; i < EndIdx; ++i)
+	{
+		const FBanEntry& E = ActiveBans[i];
+		const FString UidShort    = BanDiscordHelpers::Truncate(E.Uid, 22);
+		const FString NameShort   = BanDiscordHelpers::Truncate(E.PlayerName, 16);
+		const FString ExpiryShort = E.bIsPermanent
+			? TEXT("permanent")
+			: E.ExpireDate.ToString(TEXT("%m-%d %H:%M UTC"));
+		const FString ReasonShort = BanDiscordHelpers::Truncate(E.Reason, 28);
+		Body += FString::Printf(TEXT("%-4lld  %-22s  %-16s  %-20s  %s\n"),
+		                        E.Id, *UidShort, *NameShort, *ExpiryShort, *ReasonShort);
+	}
+	Body += TEXT("```");
+
+	const FString Header = FString::Printf(
+		TEXT("**Active Bans — Page 1/%d (%d total)**\n"), TotalPages, Total);
+
+	FString Msg = Header + Body;
+	if (Msg.Len() > 1990)
+		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
+	return Msg;
+}
+
+FString UBanDiscordSubsystem::ExecutePanelPlayers() const
+{
+	UGameInstance* GI = GetGameInstance();
+	UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (!World)
+		return TEXT("❌ No active game world found. Is the server running?");
+
+	TArray<FString> Names;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PC = It->Get();
+		if (!PC) continue;
+		APlayerState* PS = PC->GetPlayerState<APlayerState>();
+		if (!PS) continue;
+		Names.Add(BanDiscordHelpers::EscapeMarkdown(PS->GetPlayerName()));
+	}
+
+	if (Names.IsEmpty())
+		return TEXT("👥 No players are currently connected.");
+
+	FString Msg = FString::Printf(TEXT("👥 **Online Players (%d):**\n"), Names.Num());
+	for (int32 i = 0; i < Names.Num(); ++i)
+		Msg += FString::Printf(TEXT("%d. %s\n"), i + 1, *Names[i]);
+
+	if (Msg.Len() > 1990)
+		Msg = Msg.Left(1960) + TEXT("...");
+	return Msg.TrimEnd();
+}
+
+FString UBanDiscordSubsystem::ExecutePanelStaffList() const
+{
+	const UBanChatCommandsConfig* BccCfg = UBanChatCommandsConfig::Get();
+	if (!BccCfg)
+		return TEXT("❌ Staff list requires the BanChatCommands mod to be installed.");
+
+	UGameInstance* GI = GetGameInstance();
+	UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (!World)
+		return TEXT("❌ No active game world found.");
+
+	TArray<FString> Admins;
+	TArray<FString> Mods;
+
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PC = It->Get();
+		if (!PC) continue;
+		APlayerState* PS = PC->GetPlayerState<APlayerState>();
+		if (!PS) continue;
+
+		FString PUIDStr;
+		if (const FUniqueNetIdRepl& Id = PS->GetUniqueId(); Id.IsValid())
+		{
+			PUIDStr = Id.ToString();
+			FString Platform, RawId;
+			UBanDatabase::ParseUid(PUIDStr, Platform, RawId);
+			if (Platform == TEXT("EOS")) PUIDStr = RawId;
+		}
+		const FString CompoundUid = TEXT("EOS:") + PUIDStr.ToLower();
+		const FString PlayerName  = BanDiscordHelpers::EscapeMarkdown(PS->GetPlayerName());
+
+		if (BccCfg->IsAdminUid(CompoundUid))
+			Admins.Add(PlayerName);
+		else if (BccCfg->IsModeratorUid(CompoundUid))
+			Mods.Add(PlayerName);
+	}
+
+	if (Admins.IsEmpty() && Mods.IsEmpty())
+		return TEXT("📋 No staff are currently online.");
+
+	FString Msg = TEXT("📋 **Online Staff:**\n");
+	if (!Admins.IsEmpty())
+		Msg += FString::Printf(TEXT("🛡️ **Admins:** %s\n"), *FString::Join(Admins, TEXT(", ")));
+	if (!Mods.IsEmpty())
+		Msg += FString::Printf(TEXT("🔧 **Moderators:** %s\n"), *FString::Join(Mods, TEXT(", ")));
+	return Msg.TrimEnd();
+}
+
+FString UBanDiscordSubsystem::ExecutePanelReloadConfig(const FString& SenderName)
+{
+	Config = FBanBridgeConfig::Load();
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: [Panel] Config reloaded by %s."), *SenderName);
+	return FString::Printf(TEXT("✅ BanBridge configuration reloaded by **%s**."), *SenderName);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin panel — Feature 4: Unban / Unmute executors
+// ─────────────────────────────────────────────────────────────────────────────
+
+FString UBanDiscordSubsystem::ExecutePanelUnban(const FString& PlayerArg,
+                                                 const FString& SenderName)
+{
+	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
+	if (!DB)
+		return TEXT("❌ BanSystem is not available on this server.");
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(PlayerArg, Uid, DisplayName, ErrorMsg))
+		return ErrorMsg;
+
+	// Remember linked UIDs before removing so counterpart bans can be cleaned up.
+	FBanEntry BanRecord;
+	const bool bHadRecord = DB->GetBanByUid(Uid, BanRecord);
+
+	if (!DB->RemoveBanByUid(Uid))
+	{
+		const FString Msg = FString::Printf(
+			TEXT("ℹ️ No active ban record found for **%s** (`%s`) — player is already unbanned.\nUnbanned by: %s"),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: [Panel] %s unbanned %s (%s) — no record in DB."),
+		       *SenderName, *DisplayName, *Uid);
+		return Msg;
+	}
+
+	int32 ExtraRemoved = 0;
+	if (bHadRecord)
+		ExtraRemoved = BanDiscordHelpers::RemoveCounterpartBans(this, DB, Uid, BanRecord.LinkedUids);
+
+	FBanDiscordNotifier::NotifyBanRemoved(Uid, DisplayName, SenderName);
+
+	FString Msg = FString::Printf(
+		TEXT("✅ Ban removed for **%s** (`%s`).\nUnbanned by: %s"),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
+	if (ExtraRemoved > 0)
+		Msg += FString::Printf(TEXT("\nAlso removed %d linked ban(s)."), ExtraRemoved);
+
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: [Panel] %s unbanned %s (%s)."),
+	       *SenderName, *DisplayName, *Uid);
+	return Msg;
+}
+
+FString UBanDiscordSubsystem::ExecutePanelUnmute(const FString& PlayerArg,
+                                                  const FString& SenderName)
+{
+	UGameInstance* GI = GetGameInstance();
+	UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
+	if (!MuteReg)
+		return TEXT("❌ Unmute requires the BanChatCommands mod to be installed.");
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(PlayerArg, Uid, DisplayName, ErrorMsg))
+		return ErrorMsg;
+
+	if (!MuteReg->UnmutePlayer(Uid))
+	{
+		return FString::Printf(
+			TEXT("⚠️ **%s** (`%s`) is not currently muted."),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid);
+	}
+
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: [Panel] %s unmuted %s (%s)."),
+	       *SenderName, *DisplayName, *Uid);
+
+	return FString::Printf(
+		TEXT("✅ Unmuted **%s** (`%s`).\nUnmuted by: %s"),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin panel — Feature 6: Ban check executor
+// ─────────────────────────────────────────────────────────────────────────────
+
+FString UBanDiscordSubsystem::ExecutePanelBanCheck(const FString& PlayerArg) const
+{
+	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
+	if (!DB)
+		return TEXT("❌ BanSystem is not available on this server.");
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(PlayerArg, Uid, DisplayName, ErrorMsg))
+		return ErrorMsg;
+
+	DB->ReloadIfChanged();
+
+	FBanEntry Entry;
+	const bool bBanned = DB->IsCurrentlyBannedByAnyId(Uid, Entry);
+
+	FString Msg;
+	if (bBanned)
+	{
+		Msg = FString::Printf(
+			TEXT("🔨 **%s** (`%s`) is **currently banned**.\n"
+			     "Reason: %s\n"
+			     "Banned by: %s\n"
+			     "Ban date: %s UTC\n"
+			     "Expires: %s"),
+			*DisplayName, *Uid,
+			*Entry.Reason,
+			*Entry.BannedBy,
+			*Entry.BanDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")),
+			*BanDiscordHelpers::FormatExpiry(Entry));
+
+		if (Entry.LinkedUids.Num() > 0)
+			Msg += FString::Printf(TEXT("\nLinked UIDs: `%s`"),
+			                       *FString::Join(Entry.LinkedUids, TEXT("`, `")));
+	}
+	else
+	{
+		FBanEntry AnyEntry;
+		if (DB->GetBanByUid(Uid, AnyEntry))
+		{
+			Msg = FString::Printf(
+				TEXT("✅ **%s** (`%s`) is **not currently banned**.\n"
+				     "(Expired ban record: reason: %s, expired: %s)"),
+				*DisplayName, *Uid,
+				*AnyEntry.Reason,
+				*BanDiscordHelpers::FormatExpiry(AnyEntry));
+		}
+		else
+		{
+			Msg = FString::Printf(
+				TEXT("✅ **%s** (`%s`) is **not banned**."),
+				*DisplayName, *Uid);
+		}
+	}
+
+	Msg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
+	if (Msg.Len() > 1990)
+		Msg = Msg.Left(1987) + TEXT("...");
+	return Msg;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin panel — Warn list / Mute check / Mute list / Player history executors
+// ─────────────────────────────────────────────────────────────────────────────
+
+FString UBanDiscordSubsystem::ExecutePanelWarnList(const FString& PlayerArg) const
+{
+	UGameInstance* GI = GetGameInstance();
+	UPlayerWarningRegistry* WarnReg =
+		GI ? GI->GetSubsystem<UPlayerWarningRegistry>() : nullptr;
+	if (!WarnReg)
+		return TEXT("❌ The warnings system requires the BanSystem mod to be installed.");
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(PlayerArg, Uid, DisplayName, ErrorMsg))
+		return ErrorMsg;
+
+	TArray<FWarningEntry> Warnings = WarnReg->GetWarningsForUid(Uid);
+	if (Warnings.IsEmpty())
+	{
+		return FString::Printf(
+			TEXT("✅ No warnings on record for **%s** (`%s`)."),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid);
+	}
+
+	FString Body;
+	Body.Reserve(1400);
+	Body += TEXT("```\n");
+	Body += FString::Printf(TEXT("%-4s  %-20s  %-12s  %s\n"),
+		TEXT("ID"), TEXT("Date (UTC)"), TEXT("By"), TEXT("Reason"));
+	Body += BanDiscordHelpers::SepLine(72) + TEXT("\n");
+
+	const int32 ShowMax = FMath::Min(Warnings.Num(), 15);
+	for (int32 i = 0; i < ShowMax; ++i)
+	{
+		const FWarningEntry& W = Warnings[i];
+		const FString DateStr  = W.WarnDate.ToString(TEXT("%m-%d %H:%M"));
+		const FString ByShort  = BanDiscordHelpers::Truncate(W.WarnedBy, 12);
+		const FString ReasonSh = BanDiscordHelpers::Truncate(W.Reason, 40);
+		Body += FString::Printf(TEXT("%-4lld  %-20s  %-12s  %s\n"),
+			W.Id, *DateStr, *ByShort, *ReasonSh);
+	}
+	Body += TEXT("```");
+
+	FString Header = FString::Printf(
+		TEXT("**Warnings for %s** (`%s`) — %d total\n"),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, Warnings.Num());
+	if (Warnings.Num() > ShowMax)
+		Header += FString::Printf(TEXT("_(Showing first %d)_\n"), ShowMax);
+
+	FString Msg = Header + Body;
+	if (Msg.Len() > 1990)
+		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
+	return Msg;
+}
+
+FString UBanDiscordSubsystem::ExecutePanelMuteCheck(const FString& PlayerArg) const
+{
+	UGameInstance* GI = GetGameInstance();
+	UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
+	if (!MuteReg)
+		return TEXT("❌ Mute check requires the BanChatCommands mod to be installed.");
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(PlayerArg, Uid, DisplayName, ErrorMsg))
+		return ErrorMsg;
+
+	FMuteEntry Entry;
+	if (!MuteReg->GetMuteEntry(Uid, Entry))
+	{
+		return FString::Printf(
+			TEXT("🔊 **%s** (`%s`) is **not currently muted**."),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid);
+	}
+
+	FString ExpiryStr;
+	if (Entry.bIsIndefinite)
+	{
+		ExpiryStr = TEXT("**indefinitely**");
+	}
+	else
+	{
+		const FTimespan Remaining = Entry.ExpireDate - FDateTime::UtcNow();
+		const int32 TotalMins = FMath::Max(0, static_cast<int32>(Remaining.GetTotalMinutes()));
+		ExpiryStr = FString::Printf(TEXT("for **%dm** more (expires %s UTC)"),
+			TotalMins,
+			*Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")));
+	}
+
+	return FString::Printf(
+		TEXT("🔇 **%s** (`%s`) is muted %s.\nReason: %s\nMuted by: %s"),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid,
+		*ExpiryStr, *Entry.Reason, *Entry.MutedBy);
+}
+
+FString UBanDiscordSubsystem::ExecutePanelMuteList() const
+{
+	UGameInstance* GI = GetGameInstance();
+	UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
+	if (!MuteReg)
+		return TEXT("❌ Mute list requires the BanChatCommands mod to be installed.");
+
+	TArray<FMuteEntry> Mutes = MuteReg->GetAllMutes();
+	if (Mutes.IsEmpty())
+		return TEXT("🔊 No players are currently muted.");
+
+	FString Body;
+	Body.Reserve(1400);
+	Body += TEXT("```\n");
+	Body += FString::Printf(TEXT("%-18s  %-30s  %-18s  %s\n"),
+		TEXT("Name"), TEXT("UID (truncated)"), TEXT("Expires"), TEXT("Reason"));
+	Body += BanDiscordHelpers::SepLine(80) + TEXT("\n");
+
+	const int32 ShowMax = FMath::Min(Mutes.Num(), 15);
+	for (int32 i = 0; i < ShowMax; ++i)
+	{
+		const FMuteEntry& M = Mutes[i];
+		const FString NameSh   = BanDiscordHelpers::Truncate(M.PlayerName, 18);
+		const FString UidSh    = BanDiscordHelpers::Truncate(M.Uid, 30);
+		const FString ExpirySh = M.bIsIndefinite
+			? TEXT("permanent")
+			: M.ExpireDate.ToString(TEXT("%m-%d %H:%M UTC"));
+		const FString ReasonSh = BanDiscordHelpers::Truncate(M.Reason, 24);
+		Body += FString::Printf(TEXT("%-18s  %-30s  %-18s  %s\n"),
+			*NameSh, *UidSh, *ExpirySh, *ReasonSh);
+	}
+	Body += TEXT("```");
+
+	FString Header = FString::Printf(TEXT("**Muted Players — %d total**\n"), Mutes.Num());
+	if (Mutes.Num() > ShowMax)
+		Header += FString::Printf(TEXT("_(Showing first %d)_\n"), ShowMax);
+
+	FString Msg = Header + Body;
+	if (Msg.Len() > 1990)
+		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
+	return Msg;
+}
+
+FString UBanDiscordSubsystem::ExecutePanelAppeals() const
+{
+	UGameInstance* GI = GetGameInstance();
+	UBanAppealRegistry* AppealReg = GI ? GI->GetSubsystem<UBanAppealRegistry>() : nullptr;
+	if (!AppealReg)
+		return TEXT("❌ BanAppealRegistry is not available (BanSystem may not be installed).");
+
+	TArray<FBanAppealEntry> AllAppeals = AppealReg->GetAllAppeals();
+
+	// Filter to pending only.
+	TArray<FBanAppealEntry> Pending;
+	for (const FBanAppealEntry& E : AllAppeals)
+	{
+		if (E.Status == EAppealStatus::Pending)
+			Pending.Add(E);
+	}
+
+	if (Pending.IsEmpty())
+		return TEXT("✅ No pending ban appeals.");
+
+	FString Body;
+	Body.Reserve(1400);
+	Body += TEXT("```\n");
+	Body += FString::Printf(TEXT("%-6s  %-36s  %-22s\n"),
+		TEXT("ID"), TEXT("UID"), TEXT("Submitted"));
+	Body += BanDiscordHelpers::SepLine(68) + TEXT("\n");
+
+	const int32 ShowMax = FMath::Min(Pending.Num(), 15);
+	for (int32 i = 0; i < ShowMax; ++i)
+	{
+		const FBanAppealEntry& E = Pending[i];
+		const FString UidSh      = BanDiscordHelpers::Truncate(E.Uid, 36);
+		const FString SubmittedSh = E.SubmittedAt.ToString(TEXT("%m-%d %H:%M UTC"));
+		Body += FString::Printf(TEXT("%-6lld  %-36s  %-22s\n"),
+			E.Id, *UidSh, *SubmittedSh);
+	}
+	Body += TEXT("```");
+
+	FString Header = FString::Printf(TEXT("**Pending Ban Appeals — %d total**\n"), Pending.Num());
+	if (Pending.Num() > ShowMax)
+		Header += FString::Printf(TEXT("_(Showing first %d. Use `/appeal list` for full list.)_\n"), ShowMax);
+
+	FString Msg = Header + Body;
+	if (Msg.Len() > 1990)
+		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
+	return Msg;
+}
+
+FString UBanDiscordSubsystem::ExecutePanelHistory(const FString& PlayerArg) const
+{
+	UPlayerSessionRegistry* Registry = BanDiscordHelpers::GetRegistry(this);
+	if (!Registry)
+		return TEXT("❌ PlayerSessionRegistry is not available on this server.");
+
+	TArray<FPlayerSessionRecord> Results;
+
+	FString Platform, RawId;
+	UBanDatabase::ParseUid(PlayerArg, Platform, RawId);
+	if (Platform == TEXT("EOS") && IsValidEOSPUID(RawId))
+	{
+		FPlayerSessionRecord Record;
+		if (Registry->FindByUid(UBanDatabase::MakeUid(TEXT("EOS"), RawId.ToLower()), Record))
+			Results.Add(Record);
+	}
+	else if (IsValidEOSPUID(PlayerArg))
+	{
+		FPlayerSessionRecord Record;
+		if (Registry->FindByUid(UBanDatabase::MakeUid(TEXT("EOS"), PlayerArg.ToLower()), Record))
+			Results.Add(Record);
+	}
+	else if (IsValidIPQuery(PlayerArg))
+	{
+		const FString IpQuery = (Platform == TEXT("IP")) ? RawId : PlayerArg;
+		Results = Registry->FindByIp(IpQuery);
+	}
+	else
+	{
+		Results = Registry->FindByName(PlayerArg);
+	}
+
+	if (Results.IsEmpty())
+	{
+		return FString::Printf(
+			TEXT("⚠️ No session records found for `%s`."),
+			*BanDiscordHelpers::EscapeMarkdown(PlayerArg));
+	}
+
+	constexpr int32 MaxResults = 10;
+	const int32 ShowCount = FMath::Min(Results.Num(), MaxResults);
+
+	FString Body;
+	Body.Reserve(1500);
+	Body += TEXT("```\n");
+	Body += FString::Printf(TEXT("%-16s  %-40s  %-15s  %-20s\n"),
+		TEXT("Name"), TEXT("UID"), TEXT("IP"), TEXT("Last Seen (UTC)"));
+	Body += BanDiscordHelpers::SepLine(97) + TEXT("\n");
+
+	for (int32 i = 0; i < ShowCount; ++i)
+	{
+		const FPlayerSessionRecord& R = Results[i];
+		const FString NameShort = BanDiscordHelpers::Truncate(R.DisplayName, 16);
+		const FString UidShort  = BanDiscordHelpers::Truncate(R.Uid, 40);
+		const FString IpShort   = R.IpAddress.IsEmpty()
+			? TEXT("—")
+			: BanDiscordHelpers::Truncate(R.IpAddress, 15);
+		const FString LastSeen  = BanDiscordHelpers::Truncate(R.LastSeen, 20);
+		Body += FString::Printf(TEXT("%-16s  %-40s  %-15s  %s\n"),
+			*NameShort, *UidShort, *IpShort, *LastSeen);
+	}
+	Body += TEXT("```");
+
+	FString Header = FString::Printf(
+		TEXT("**Player History for `%s`** (%d record(s))\n"),
+		*BanDiscordHelpers::EscapeMarkdown(PlayerArg), Results.Num());
+	if (Results.Num() > MaxResults)
+		Header += FString::Printf(TEXT("_(Showing first %d of %d results)_\n"),
+			MaxResults, Results.Num());
+
+	FString Msg = Header + Body;
+	if (Msg.Len() > 1990)
+		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
+	return Msg;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /mod freeze  — toggle player movement freeze
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleFreezeCommand(const TArray<FString>& Args,
+                                                const FString& ChannelId,
+                                                const FString& SenderName)
+{
+	if (!CachedProvider) return;
+	if (Args.IsEmpty() || Args[0].IsEmpty())
+	{
+		Respond(ChannelId, TEXT("❌ Usage: `/mod freeze <player|PUID>`"));
+		return;
+	}
+
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
+	{
+		Respond(ChannelId, ErrorMsg);
+		return;
+	}
+
+	UGameInstance* GI = GetGameInstance();
+	UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (!World)
+	{
+		Respond(ChannelId, TEXT("❌ No active game world. Is the server running?"));
+		return;
+	}
+
+	const bool bWasFrozen = AFreezeChatCommand::FrozenPlayerUids.Contains(Uid);
+
+	if (bWasFrozen)
+	{
+		AFreezeChatCommand::FrozenPlayerUids.Remove(Uid);
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* PC = It->Get();
+			if (!PC || !PC->PlayerState) continue;
+			const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+			if (!NetId.IsValid() || NetId.GetType() == FName(TEXT("NONE"))) continue;
+			if (UBanDatabase::MakeUid(TEXT("EOS"), NetId.ToString().ToLower()) == Uid)
+			{
+				PC->SetIgnoreMoveInput(false);
+				break;
+			}
+		}
+		const FString ResultMsg = FString::Printf(
+			TEXT("🔓 **%s** (`%s`) has been **unfrozen** by **%s**."),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
+		Respond(ChannelId, ResultMsg);
+		PostModerationLog(ResultMsg);
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: %s unfroze %s (%s)."),
+		       *SenderName, *DisplayName, *Uid);
+	}
+	else
+	{
+		AFreezeChatCommand::FrozenPlayerUids.Add(Uid);
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* PC = It->Get();
+			if (!PC || !PC->PlayerState) continue;
+			const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+			if (!NetId.IsValid() || NetId.GetType() == FName(TEXT("NONE"))) continue;
+			if (UBanDatabase::MakeUid(TEXT("EOS"), NetId.ToString().ToLower()) == Uid)
+			{
+				PC->SetIgnoreMoveInput(true);
+				break;
+			}
+		}
+		const FString ResultMsg = FString::Printf(
+			TEXT("❄️ **%s** (`%s`) has been **frozen** by **%s**."
+			     " Run `/mod freeze` again to unfreeze."),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
+		Respond(ChannelId, ResultMsg);
+		PostModerationLog(ResultMsg);
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: %s froze %s (%s)."),
+		       *SenderName, *DisplayName, *Uid);
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /admin clearchat  — flush in-game chat and notify staff
+// ─────────────────────────────────────────────────────────────────────────────
+
+void UBanDiscordSubsystem::HandleClearChatCommand(const TArray<FString>& Args,
+                                                   const FString& ChannelId,
+                                                   const FString& SenderName)
+{
+	if (!CachedProvider) return;
+
+	const FString Reason = Args.IsEmpty() || Args[0].IsEmpty()
+		? TEXT("Chat cleared by administrator")
+		: BanDiscordHelpers::JoinArgs(Args, 0);
+
+	UGameInstance* GI = GetGameInstance();
+	UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (!World)
+	{
+		Respond(ChannelId, TEXT("❌ No active game world. Is the server running?"));
+		return;
+	}
+
+	// Broadcast blank lines to visually scroll chat off screen.
+	for (int32 i = 0; i < 30; ++i)
+	{
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			if (APlayerController* PC = It->Get())
+				PC->ClientMessage(TEXT(" "));
+	}
+
+	// Notify all connected players.
+	const FString Notice = FString::Printf(
+		TEXT("Chat has been cleared by %s. Reason: %s"), *SenderName, *Reason);
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		if (APlayerController* PC = It->Get())
+			PC->ClientMessage(Notice);
+
+	const FString ResultMsg = FString::Printf(
+		TEXT("🧹 **Chat cleared** by **%s**.\nReason: %s"), *SenderName, *Reason);
+	Respond(ChannelId, ResultMsg);
+	PostModerationLog(ResultMsg);
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: %s cleared in-game chat. Reason: %s"),
+	       *SenderName, *Reason);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin panel — Freeze / ClearChat executors
+// ─────────────────────────────────────────────────────────────────────────────
+
+FString UBanDiscordSubsystem::ExecutePanelFreeze(const FString& PlayerArg,
+                                                  const FString& SenderName)
+{
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(PlayerArg, Uid, DisplayName, ErrorMsg))
+		return ErrorMsg;
+
+	UGameInstance* GI = GetGameInstance();
+	UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (!World)
+		return TEXT("❌ No active game world. Is the server running?");
+
+	const bool bWasFrozen = AFreezeChatCommand::FrozenPlayerUids.Contains(Uid);
+
+	if (bWasFrozen)
+	{
+		AFreezeChatCommand::FrozenPlayerUids.Remove(Uid);
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* PC = It->Get();
+			if (!PC || !PC->PlayerState) continue;
+			const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+			if (!NetId.IsValid() || NetId.GetType() == FName(TEXT("NONE"))) continue;
+			if (UBanDatabase::MakeUid(TEXT("EOS"), NetId.ToString().ToLower()) == Uid)
+			{
+				PC->SetIgnoreMoveInput(false);
+				break;
+			}
+		}
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: [Panel] %s unfroze %s (%s)."),
+		       *SenderName, *DisplayName, *Uid);
+		return FString::Printf(
+			TEXT("🔓 **%s** (`%s`) has been **unfrozen** by **%s**."),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
+	}
+	else
+	{
+		AFreezeChatCommand::FrozenPlayerUids.Add(Uid);
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* PC = It->Get();
+			if (!PC || !PC->PlayerState) continue;
+			const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+			if (!NetId.IsValid() || NetId.GetType() == FName(TEXT("NONE"))) continue;
+			if (UBanDatabase::MakeUid(TEXT("EOS"), NetId.ToString().ToLower()) == Uid)
+			{
+				PC->SetIgnoreMoveInput(true);
+				break;
+			}
+		}
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanDiscordSubsystem: [Panel] %s froze %s (%s)."),
+		       *SenderName, *DisplayName, *Uid);
+		return FString::Printf(
+			TEXT("❄️ **%s** (`%s`) has been **frozen** by **%s**."
+			     " Use the Freeze button again to unfreeze."),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
+	}
+}
+
+FString UBanDiscordSubsystem::ExecutePanelClearChat(const FString& Reason,
+                                                     const FString& SenderName)
+{
+	UGameInstance* GI = GetGameInstance();
+	UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (!World)
+		return TEXT("❌ No active game world. Is the server running?");
+
+	const FString EffectiveReason = Reason.IsEmpty()
+		? TEXT("Chat cleared by administrator")
+		: Reason;
+
+	// Broadcast blank lines to visually scroll chat off screen.
+	for (int32 i = 0; i < 30; ++i)
+	{
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			if (APlayerController* PC = It->Get())
+				PC->ClientMessage(TEXT(" "));
+	}
+
+	// Notify all connected players.
+	const FString Notice = FString::Printf(
+		TEXT("Chat has been cleared by %s. Reason: %s"), *SenderName, *EffectiveReason);
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		if (APlayerController* PC = It->Get())
+			PC->ClientMessage(Notice);
+
+	UE_LOG(LogBanDiscord, Log,
+	       TEXT("BanDiscordSubsystem: [Panel] %s cleared in-game chat. Reason: %s"),
+	       *SenderName, *EffectiveReason);
+	return FString::Printf(
+		TEXT("🧹 **Chat cleared** by **%s**.\nReason: %s"),
+		*SenderName, *EffectiveReason);
 }

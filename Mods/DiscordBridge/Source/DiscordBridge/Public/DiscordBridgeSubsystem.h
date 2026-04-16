@@ -324,6 +324,30 @@ public:
 	                                           const TArray<TSharedPtr<FJsonValue>>& PermissionOverwrites,
 	                                           TFunction<void(const FString& NewChannelId)> OnCreated) override;
 
+	/** Respond to a Discord interaction with a fully constructed message body
+	 *  (type 4 = CHANNEL_MESSAGE_WITH_SOURCE), supporting embeds and components.
+	 *  Implements IDiscordBridgeProvider::RespondToInteractionWithBody(). */
+	virtual void RespondToInteractionWithBody(const FString& InteractionId,
+	                                          const FString& InteractionToken,
+	                                          const TSharedPtr<FJsonObject>& MessageData,
+	                                          bool bEphemeral) override;
+
+	/** Respond to a Discord button interaction by showing a multi-field modal popup
+	 *  (type 9 = MODAL).  Implements IDiscordBridgeProvider::RespondWithMultiFieldModal(). */
+	virtual void RespondWithMultiFieldModal(const FString& InteractionId,
+	                                        const FString& InteractionToken,
+	                                        const FString& ModalCustomId,
+	                                        const FString& Title,
+	                                        const TArray<FModalField>& Fields) override;
+
+	/** Creates a public thread in @p ChannelId and calls @p OnCreated with the
+	 *  new thread ID (or an empty string if the Discord API request fails).
+	 *  Implements IDiscordBridgeProvider::CreateDiscordThread(). */
+	virtual void CreateDiscordThread(
+		const FString& ChannelId,
+		const FString& ThreadName,
+		TFunction<void(const FString& ThreadId)> OnCreated) override;
+
 	/**
 	 * Called by OnGameChatMessageAdded every time a player-chat message lands
 	 * in the server's history.  Forwards the message to Discord.

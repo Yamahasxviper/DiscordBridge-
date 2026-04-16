@@ -61,6 +61,17 @@ struct DISCORDBRIDGE_API FBanBridgeConfig
 	 */
 	FString ModerationLogChannelId;
 
+	/**
+	 * Optional: Discord channel ID where /admin panel posts the interactive
+	 * admin panel embed.  When empty the panel is sent to the channel in which
+	 * the /admin panel command was issued.  Set this to restrict the panel to a
+	 * dedicated mod-tools channel.
+	 *
+	 * How to get the channel ID: enable Developer Mode, right-click the channel,
+	 * and choose "Copy Channel ID".
+	 */
+	FString AdminPanelChannelId;
+
 	// ── Authorisation helpers ─────────────────────────────────────────────────
 
 	/** Returns true when Roles contains AdminRoleId (full admin access). */

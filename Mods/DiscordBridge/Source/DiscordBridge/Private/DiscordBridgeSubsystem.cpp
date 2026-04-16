@@ -1868,6 +1868,195 @@ void UDiscordBridgeSubsystem::SendMessageBodyToChannel(const FString& TargetChan
 	Request->ProcessRequest();
 }
 
+void UDiscordBridgeSubsystem::RespondToInteractionWithBody(const FString& InteractionId,
+                                                           const FString& InteractionToken,
+                                                           const TSharedPtr<FJsonObject>& MessageData,
+                                                           bool bEphemeral)
+{
+	if (Config.BotToken.IsEmpty() || InteractionId.IsEmpty() || InteractionToken.IsEmpty())
+		return;
+
+	TSharedPtr<FJsonObject> DataObj = MessageData.IsValid()
+		? MakeShared<FJsonObject>(*MessageData)
+		: MakeShared<FJsonObject>();
+
+	if (bEphemeral)
+		DataObj->SetNumberField(TEXT("flags"), 64);
+
+	TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetNumberField(TEXT("type"), 4); // CHANNEL_MESSAGE_WITH_SOURCE
+	Body->SetObjectField(TEXT("data"), DataObj);
+
+	FString BodyString;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
+	FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+
+	const FString Url = FString::Printf(
+		TEXT("%s/interactions/%s/%s/callback"),
+		*DiscordApiBase, *InteractionId, *InteractionToken);
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
+		FHttpModule::Get().CreateRequest();
+	Request->SetURL(Url);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
+	Request->SetHeader(TEXT("Authorization"),
+	                   FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+	Request->SetContentAsString(BodyString);
+
+	Request->OnProcessRequestComplete().BindLambda(
+		[InteractionId](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
+		{
+			if (!bConnected || !Resp.IsValid() ||
+			    (Resp->GetResponseCode() != 200 && Resp->GetResponseCode() != 204))
+			{
+				UE_LOG(LogDiscordBridge, Warning,
+				       TEXT("DiscordBridge: RespondToInteractionWithBody returned HTTP %d (id=%s)."),
+				       Resp.IsValid() ? Resp->GetResponseCode() : 0, *InteractionId);
+			}
+		});
+
+	Request->ProcessRequest();
+}
+
+void UDiscordBridgeSubsystem::RespondWithMultiFieldModal(const FString& InteractionId,
+                                                         const FString& InteractionToken,
+                                                         const FString& ModalCustomId,
+                                                         const FString& Title,
+                                                         const TArray<FModalField>& Fields)
+{
+	if (Config.BotToken.IsEmpty() || InteractionId.IsEmpty() || InteractionToken.IsEmpty()
+		|| Fields.IsEmpty())
+	{
+		return;
+	}
+
+	// Each FModalField becomes one ACTION_ROW containing a single TEXT_INPUT.
+	// Discord allows a maximum of 5 ACTION_ROWs per modal.
+	TArray<TSharedPtr<FJsonValue>> Rows;
+	for (const FModalField& F : Fields)
+	{
+		TSharedPtr<FJsonObject> TextInput = MakeShared<FJsonObject>();
+		TextInput->SetNumberField(TEXT("type"),      4); // TEXT_INPUT
+		TextInput->SetStringField(TEXT("custom_id"), F.CustomId);
+		TextInput->SetNumberField(TEXT("style"),     F.bParagraph ? 2 : 1);
+		TextInput->SetStringField(TEXT("label"),     F.Label);
+		if (!F.Placeholder.IsEmpty())
+			TextInput->SetStringField(TEXT("placeholder"), F.Placeholder);
+		if (!F.DefaultValue.IsEmpty())
+			TextInput->SetStringField(TEXT("value"), F.DefaultValue);
+		TextInput->SetBoolField(TEXT("required"), F.bRequired);
+		if (F.MinLength > 0)
+			TextInput->SetNumberField(TEXT("min_length"), F.MinLength);
+		TextInput->SetNumberField(TEXT("max_length"), F.MaxLength > 0 ? F.MaxLength : 200);
+
+		TSharedPtr<FJsonObject> ActionRow = MakeShared<FJsonObject>();
+		ActionRow->SetNumberField(TEXT("type"), 1); // ACTION_ROW
+		ActionRow->SetArrayField(TEXT("components"),
+			TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(TextInput) });
+
+		Rows.Add(MakeShared<FJsonValueObject>(ActionRow));
+	}
+
+	TSharedPtr<FJsonObject> ModalData = MakeShared<FJsonObject>();
+	ModalData->SetStringField(TEXT("custom_id"),  ModalCustomId);
+	ModalData->SetStringField(TEXT("title"),      Title);
+	ModalData->SetArrayField (TEXT("components"), Rows);
+
+	TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+	Body->SetNumberField(TEXT("type"), 9); // MODAL
+	Body->SetObjectField(TEXT("data"), ModalData);
+
+	FString BodyString;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
+	FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+
+	const FString Url = FString::Printf(
+		TEXT("%s/interactions/%s/%s/callback"),
+		*DiscordApiBase, *InteractionId, *InteractionToken);
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
+		FHttpModule::Get().CreateRequest();
+	Request->SetURL(Url);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
+	Request->SetHeader(TEXT("Authorization"),
+	                   FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+	Request->SetContentAsString(BodyString);
+
+	Request->OnProcessRequestComplete().BindLambda(
+		[InteractionId](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
+		{
+			if (!bConnected || !Resp.IsValid() ||
+			    (Resp->GetResponseCode() != 200 && Resp->GetResponseCode() != 204))
+			{
+				UE_LOG(LogDiscordBridge, Warning,
+				       TEXT("DiscordBridge: RespondWithMultiFieldModal returned HTTP %d (id=%s)."),
+				       Resp.IsValid() ? Resp->GetResponseCode() : 0, *InteractionId);
+			}
+		});
+
+	Request->ProcessRequest();
+}
+
+void UDiscordBridgeSubsystem::CreateDiscordThread(
+	const FString& ChannelId,
+	const FString& ThreadName,
+	TFunction<void(const FString& ThreadId)> OnCreated)
+{
+	if (Config.BotToken.IsEmpty() || ChannelId.IsEmpty() || ThreadName.IsEmpty())
+	{
+		if (OnCreated) OnCreated(FString());
+		return;
+	}
+
+	// Escape the thread name for embedding in JSON.
+	FString SafeName = ThreadName;
+	SafeName.ReplaceInline(TEXT("\\"), TEXT("\\\\"));
+	SafeName.ReplaceInline(TEXT("\""), TEXT("\\\""));
+
+	const FString BodyStr = FString::Printf(
+		TEXT("{\"name\":\"%s\",\"type\":11,\"auto_archive_duration\":10080}"),
+		*SafeName);
+
+	const FString Url = FString::Printf(
+		TEXT("%s/channels/%s/threads"), *DiscordApiBase, *ChannelId);
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
+		FHttpModule::Get().CreateRequest();
+	Request->SetURL(Url);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
+	Request->SetHeader(TEXT("Authorization"),
+	                   FString::Printf(TEXT("Bot %s"), *Config.BotToken));
+	Request->SetContentAsString(BodyStr);
+
+	Request->OnProcessRequestComplete().BindLambda(
+		[OnCreated, ChannelId, ThreadName](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
+		{
+			FString ThreadId;
+			if (bConnected && Resp.IsValid() &&
+			    Resp->GetResponseCode() >= 200 && Resp->GetResponseCode() < 300)
+			{
+				TSharedPtr<FJsonObject> ThreadObj;
+				TSharedRef<TJsonReader<>> Reader =
+					TJsonReaderFactory<>::Create(Resp->GetContentAsString());
+				if (FJsonSerializer::Deserialize(Reader, ThreadObj) && ThreadObj.IsValid())
+					ThreadObj->TryGetStringField(TEXT("id"), ThreadId);
+			}
+			else
+			{
+				UE_LOG(LogDiscordBridge, Warning,
+				       TEXT("DiscordBridge: CreateDiscordThread failed for '%s' in channel %s (HTTP %d)."),
+				       *ThreadName, *ChannelId,
+				       Resp.IsValid() ? Resp->GetResponseCode() : 0);
+			}
+			if (OnCreated) OnCreated(ThreadId);
+		});
+
+	Request->ProcessRequest();
+}
+
 void UDiscordBridgeSubsystem::DeleteDiscordChannel(const FString& ChannelId)
 {
 	if (Config.BotToken.IsEmpty() || ChannelId.IsEmpty())
@@ -5003,7 +5192,9 @@ AddField(TEXT("⚙️ Admin — Server Links & Config"),
 TEXT("`/ban link <uid1> <uid2>`  — Link two UIDs so a ban blocks both\n")
 TEXT("`/ban unlink <uid1> <uid2>`  — Remove a UID link\n")
 TEXT("`/mod mutereason <player> <reason>`  — Update the reason on an active mute\n")
-TEXT("`/admin reloadconfig`  — Hot-reload BanSystem / BanChatCommands config\n\u200b"),
+TEXT("`/admin reloadconfig`  — Hot-reload BanSystem / BanChatCommands config\n")
+TEXT("`/admin panel`  — Post an interactive panel embed with kick/ban/mute/warn buttons\n")
+TEXT("`/admin clearchat [reason]`  — Flush in-game chat and notify staff\n\u200b"),
 false);
 
 // Moderator commands
@@ -5018,7 +5209,8 @@ TEXT("`/mod mutecheck <player>`  — Check if a player is muted\n")
 TEXT("`/mod mutelist`  — List all currently muted players\n")
 TEXT("`/mod announce <message>`  — Broadcast a message to all in-game players\n")
 TEXT("`/mod stafflist`  — List configured admins and moderators\n")
-TEXT("`/mod staffchat <message>`  — Send a message to the staff Discord channel\n\u200b"),
+TEXT("`/mod staffchat <message>`  — Send a message to the staff Discord channel\n")
+TEXT("`/mod freeze <player>`  — Toggle movement freeze for a player (admin)\n\u200b"),
 false);
 
 Embed->SetArrayField(TEXT("fields"), Fields);
@@ -5299,6 +5491,8 @@ Commands.Add(MakeCmd(TEXT("mod"), TEXT("Moderation commands (moderator or admin)
 	MakeSub(TEXT("stafflist"),  TEXT("Show online staff members.")),
 	MakeSub(TEXT("staffchat"),  TEXT("Send a message to online staff only."),
 		{ Str(TEXT("message"),    TEXT("Staff-only message")) }),
+	MakeSub(TEXT("freeze"),     TEXT("Toggle movement freeze for a player (admin only)."),
+		{ StrAC(TEXT("player"),   TEXT("Player name or EOS PUID")) }),
 }));
 
 // ── /player – player information commands (admin) ─────────────────────────
@@ -5341,6 +5535,9 @@ Commands.Add(MakeCmd(TEXT("admin"), TEXT("Admin utility commands."),
 		{ Str(TEXT("question"), TEXT("Poll question")),
 		  Str(TEXT("options"),  TEXT("Pipe-separated options: Yes|No|Maybe")) }),
 	MakeSub(TEXT("reloadconfig"), TEXT("Reload the bridge configuration from disk.")),
+	MakeSub(TEXT("panel"),        TEXT("Post an interactive admin panel with action buttons.")),
+	MakeSub(TEXT("clearchat"),    TEXT("Flush in-game chat and notify staff."),
+		{ StrO(TEXT("reason"),    TEXT("Reason for clearing chat")) }),
 }));
 
 // ── /whitelist – whitelist management (role-restricted) ──────────────────
@@ -5818,10 +6015,10 @@ TEXT("`/online` — Online players embed\n")
 TEXT("`/whitelist on|off|add|remove|list|status|apply|link|search` — Whitelist\n")
 TEXT("`/ban add|temp|remove|check|list|extend|…` — Ban management (admin)\n")
 TEXT("`/warn add|list|clearall|clearone` — Warning management (admin)\n")
-TEXT("`/mod kick|mute|unmute|announce|…` — Moderation (moderator)\n")
+TEXT("`/mod kick|mute|unmute|freeze|announce|…` — Moderation (moderator/admin)\n")
 TEXT("`/player history|note|notes|playtime|…` — Player info (admin)\n")
 TEXT("`/appeal list|approve|deny|dismiss` — Appeal management (admin)\n")
-TEXT("`/admin say|poll|reloadconfig` — Admin utilities (admin)\n")
+TEXT("`/admin say|poll|reloadconfig|panel|clearchat` — Admin utilities (admin)\n")
 TEXT("`/ticket panel|list|assign|claim|…` — Support ticket management");
 RespondToInteraction(InteractionId, InteractionToken, 4, Reply, false);
 return;

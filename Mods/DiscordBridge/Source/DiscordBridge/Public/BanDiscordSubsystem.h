@@ -27,7 +27,7 @@
  *
  * /mod (moderator or admin)
  *   kick, modban, mute, unmute, tempmute, tempunmute, mutecheck,
- *   mutelist, mutereason, announce, stafflist, staffchat
+ *   mutelist, mutereason, announce, stafflist, staffchat, freeze
  *
  * /player (admin)
  *   history, note, notes, reason, playtime, reputation
@@ -36,7 +36,7 @@
  *   list, dismiss, approve, deny
  *
  * /admin (admin)
- *   say, poll, reloadconfig
+ *   say, poll, reloadconfig, panel, clearchat
  *
  * Authorisation
  * =============
@@ -83,7 +83,10 @@ private:
 
 	/** Subscribed to the provider's INTERACTION_CREATE stream via SetProvider().
 	 *  Handles APPLICATION_COMMAND (type 2) slash command interactions for the
-	 *  ban/mod/warn/player/appeal/admin command groups. */
+	 *  ban/mod/warn/player/appeal/admin command groups.
+	 *  Also dispatches MESSAGE_COMPONENT (type 3) and MODAL_SUBMIT (type 5)
+	 *  interactions whose custom_ids begin with "panel:" / "panel_modal:"
+	 *  respectively to the admin panel handlers. */
 	void OnDiscordInteraction(const TSharedPtr<FJsonObject>& InteractionObj);
 
 	// ── Authorisation / extraction helpers ───────────────────────────────────
@@ -93,6 +96,9 @@ private:
 
 	/** Extract the sender's display name (nick > global_name > username). */
 	static FString ExtractSenderName(const TSharedPtr<FJsonObject>& MessageObj);
+
+	/** Extract the Discord user ID (snowflake) of the sender from an interaction object. */
+	static FString ExtractSenderId(const TSharedPtr<FJsonObject>& MessageObj);
 
 	/** Returns true when the member's role list contains Config.AdminRoleId. */
 	bool IsAdminMember(const TArray<FString>& Roles) const;
@@ -343,6 +349,116 @@ private:
 	                           const FString& ChannelId,
 	                           const FString& SenderName);
 
+	/** Handle /mod freeze.  Toggles movement freeze for a player.
+	 *  Usage: /mod freeze <player> */
+	void HandleFreezeCommand(const TArray<FString>& Args,
+	                          const FString& ChannelId,
+	                          const FString& SenderName);
+
+	/** Handle /admin clearchat.  Flushes in-game chat and notifies Discord.
+	 *  Usage: /admin clearchat [reason] */
+	void HandleClearChatCommand(const TArray<FString>& Args,
+	                             const FString& ChannelId,
+	                             const FString& SenderName);
+
+	// ── Admin panel ───────────────────────────────────────────────────────────
+
+	/**
+	 * Handle /admin panel.
+	 * Posts an interactive embed with action-row buttons to ChannelId (or
+	 * AdminPanelChannelId when configured).  The response is sent as a
+	 * non-ephemeral type-4 interaction callback so the panel is visible
+	 * to all users in the channel.
+	 *
+	 * AuthorId is the Discord user snowflake used for per-user rate-limiting.
+	 * Pass an empty string to bypass the rate-limit (e.g. auto-post on startup).
+	 */
+	void HandlePanelCommand(const FString& ChannelId,
+	                        const FString& InteractionId,
+	                        const FString& InteractionToken,
+	                        const TArray<FString>& MemberRoles,
+	                        const FString& SenderName,
+	                        const FString& AuthorId = FString());
+
+	/**
+	 * Handle MESSAGE_COMPONENT (type 3) interactions whose custom_id starts
+	 * with "panel:".  Direct-action buttons produce an immediate ephemeral
+	 * response; input-action buttons open a multi-field modal.
+	 */
+	void HandlePanelButtonInteraction(const TSharedPtr<FJsonObject>& InteractionObj);
+
+	/**
+	 * Handle MODAL_SUBMIT (type 5) interactions whose custom_id starts with
+	 * "panel_modal:".  Extracts field values, executes the requested action,
+	 * and responds ephemerally with the result.
+	 */
+	void HandlePanelModalSubmit(const TSharedPtr<FJsonObject>& InteractionObj);
+
+	/** Build the JSON "data" object for the panel interaction response.
+	 *  Includes the embed (title, description, colour, timestamp, dashboard fields)
+	 *  and three action rows of buttons. */
+	TSharedPtr<FJsonObject> BuildPanelData() const;
+
+	// ── Panel action executors ────────────────────────────────────────────────
+	// Each function performs the core action and returns a human-readable
+	// result string for the ephemeral interaction reply.  The caller is
+	// responsible for posting to ModerationLogChannelId when appropriate.
+
+	/** Kick a player by name/PUID.  Returns the result message. */
+	FString ExecutePanelKick(const FString& PlayerArg, const FString& Reason,
+	                         const FString& SenderName);
+
+	/** Permanently ban a player by name/PUID.  Returns the result message. */
+	FString ExecutePanelBan(const FString& PlayerArg, const FString& Reason,
+	                        const FString& SenderName);
+
+	/** Temporarily ban a player.  Returns the result message. */
+	FString ExecutePanelTempBan(const FString& PlayerArg, const FString& DurationArg,
+	                             const FString& Reason, const FString& SenderName);
+
+	/** Issue a warning to a player.  Returns the result message. */
+	FString ExecutePanelWarn(const FString& PlayerArg, const FString& Reason,
+	                         const FString& SenderName);
+
+	/** Mute a player.  Returns the result message. */
+	FString ExecutePanelMute(const FString& PlayerArg, const FString& DurationArg,
+	                         const FString& Reason, const FString& SenderName);
+
+	/** Broadcast an in-game announcement.  Returns the result message. */
+	FString ExecutePanelAnnounce(const FString& Message, const FString& SenderName);
+
+	/** Return page-1 of the active ban list as a formatted string. */
+	FString ExecutePanelBanList() const;
+
+	/** Return the list of currently connected players as a formatted string. */
+	FString ExecutePanelPlayers() const;
+
+	/** Return the list of online staff members as a formatted string. */
+	FString ExecutePanelStaffList() const;
+
+	/** Reload BanBridge config and return a result message. */
+	FString ExecutePanelReloadConfig(const FString& SenderName);
+
+	/** Remove an active ban by player name/PUID.  Returns the result message. */
+	FString ExecutePanelUnban(const FString& PlayerArg, const FString& SenderName);
+
+	/** Remove an active mute by player name/PUID.  Returns the result message. */
+	FString ExecutePanelUnmute(const FString& PlayerArg, const FString& SenderName);
+
+	/** Look up a player's ban status and return a formatted result string. */
+	FString ExecutePanelBanCheck(const FString& PlayerArg) const;
+	FString ExecutePanelWarnList(const FString& PlayerArg) const;
+	FString ExecutePanelMuteCheck(const FString& PlayerArg) const;
+	FString ExecutePanelMuteList() const;
+	FString ExecutePanelHistory(const FString& PlayerArg) const;
+	FString ExecutePanelAppeals() const;
+
+	/** Toggle movement freeze for a player.  Returns the result message. */
+	FString ExecutePanelFreeze(const FString& PlayerArg, const FString& SenderName);
+
+	/** Flush in-game chat and notify staff.  Returns the result message. */
+	FString ExecutePanelClearChat(const FString& Reason, const FString& SenderName);
+
 	// ── State ─────────────────────────────────────────────────────────────────
 
 	/** Loaded config (populated in Initialize()). */
@@ -363,6 +479,16 @@ private:
 	 * Not persisted across restarts (threads are reused by name-search when missing).
 	 */
 	TMap<FString, FString> PlayerThreadIdCache;
+
+	/**
+	 * Rate-limit tracker for /admin panel: Discord user ID → last post timestamp.
+	 * Prevents a single staff member from spamming AdminPanelChannelId within
+	 * PanelRateLimitSeconds (60 s).
+	 */
+	TMap<FString, FDateTime> LastPanelPostByUser;
+
+	/** Minimum seconds between /admin panel posts from the same Discord user. */
+	static constexpr float PanelRateLimitSeconds = 60.f;
 
 	/**
 	 * Interaction token for the slash command currently being processed.
