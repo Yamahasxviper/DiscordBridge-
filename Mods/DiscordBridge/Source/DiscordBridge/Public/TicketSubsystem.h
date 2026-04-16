@@ -162,7 +162,8 @@ private:
 	                             const FString& ModalCustomId,
 	                             const TSharedPtr<FJsonObject>& DataObj,
 	                             const FString& DiscordUserId,
-	                             const FString& DiscordUsername);
+	                             const FString& DiscordUsername,
+	                             const FString& SourceChannelId);
 
 	/**
 	 * Create a private Discord text channel for a support ticket.
@@ -353,6 +354,9 @@ private:
 
 	/** Ticker handle for the SLA warning check.  Valid only when TicketSlaWarningMinutes > 0. */
 	FTSTicker::FDelegateHandle SlaCheckHandle;
+
+	/** Ticker handle that auto-closes ban-appeal tickets when the ban has expired naturally. */
+	FTSTicker::FDelegateHandle ExpiredBanCheckHandle;
 
 	/** Maps ticket channel ID to the time a scheduled follow-up reminder should fire. */
 	TMap<FString, FDateTime> TicketChannelToReminder;

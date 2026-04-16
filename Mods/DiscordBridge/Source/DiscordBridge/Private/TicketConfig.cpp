@@ -149,6 +149,7 @@ FTicketConfig FTicketConfig::Load()
 		Config.bTicketHelpEnabled       = GetIniBool  (Cfg, TEXT("TicketHelpEnabled"),       true);
 		Config.bTicketReportEnabled     = GetIniBool  (Cfg, TEXT("TicketReportEnabled"),     true);
 		Config.bTicketBanAppealEnabled  = GetIniBool  (Cfg, TEXT("BanAppealEnabled"),        true);
+		Config.bTicketMuteAppealEnabled = GetIniBool  (Cfg, TEXT("MuteAppealEnabled"),       true);
 		Config.TicketNotifyRoleId       = GetIniString(Cfg, TEXT("TicketNotifyRoleId"));
 		Config.TicketPanelChannelId     = GetIniString(Cfg, TEXT("TicketPanelChannelId"));
 		Config.TicketCategoryId         = GetIniString(Cfg, TEXT("TicketCategoryId"));
@@ -158,6 +159,7 @@ FTicketConfig FTicketConfig::Load()
 		Config.HelpCategoryId              = GetIniString(Cfg, TEXT("HelpCategoryId"));
 		Config.ReportCategoryId            = GetIniString(Cfg, TEXT("ReportCategoryId"));
 		Config.AppealCategoryId            = GetIniString(Cfg, TEXT("AppealCategoryId"));
+		Config.MuteAppealCategoryId        = GetIniString(Cfg, TEXT("MuteAppealCategoryId"));
 		Config.bTicketFeedbackEnabled      = GetIniBool  (Cfg, TEXT("TicketFeedbackEnabled"),      false);
 		Config.TicketMacros                = ParseRawIniArray(RawContent, TEXT("TicketMacro"));
 		Config.TicketCooldownMinutes       = static_cast<int32>(GetIniFloat(Cfg, TEXT("TicketCooldownMinutes"), 0.0f));
@@ -170,6 +172,8 @@ FTicketConfig FTicketConfig::Load()
 		Config.TicketEscalationCategoryId  = GetIniString(Cfg, TEXT("TicketEscalationCategoryId"));
 		Config.TicketTemplates             = ParseRawIniArray(RawContent, TEXT("TicketTemplate"));
 		Config.TicketAutoResponses         = ParseRawIniArray(RawContent, TEXT("TicketAutoResponse"));
+		Config.BanAppealCooldownDays       = static_cast<int32>(GetIniFloat(Cfg, TEXT("BanAppealCooldownDays"), 0.0f));
+		Config.MaxLifetimeAppeals          = static_cast<int32>(GetIniFloat(Cfg, TEXT("MaxLifetimeAppeals"), 0.0f));
 
 		UE_LOG(LogTicketSystem, Log,
 		       TEXT("TicketSystem: Loaded config from %s"), *PrimaryPath);
@@ -193,6 +197,7 @@ FTicketConfig FTicketConfig::Load()
 			Config.bTicketHelpEnabled      = GetIniBool  (BackupCfg, TEXT("TicketHelpEnabled"),      true);
 			Config.bTicketReportEnabled    = GetIniBool  (BackupCfg, TEXT("TicketReportEnabled"),    true);
 			Config.bTicketBanAppealEnabled = GetIniBool  (BackupCfg, TEXT("BanAppealEnabled"),       true);
+			Config.bTicketMuteAppealEnabled = GetIniBool (BackupCfg, TEXT("MuteAppealEnabled"),      true);
 			Config.TicketNotifyRoleId      = GetIniString(BackupCfg, TEXT("TicketNotifyRoleId"));
 			Config.TicketPanelChannelId    = GetIniString(BackupCfg, TEXT("TicketPanelChannelId"));
 			Config.TicketCategoryId        = GetIniString(BackupCfg, TEXT("TicketCategoryId"));
@@ -202,6 +207,7 @@ FTicketConfig FTicketConfig::Load()
 			Config.HelpCategoryId              = GetIniString(BackupCfg, TEXT("HelpCategoryId"));
 			Config.ReportCategoryId            = GetIniString(BackupCfg, TEXT("ReportCategoryId"));
 			Config.AppealCategoryId            = GetIniString(BackupCfg, TEXT("AppealCategoryId"));
+			Config.MuteAppealCategoryId        = GetIniString(BackupCfg, TEXT("MuteAppealCategoryId"));
 			Config.bTicketFeedbackEnabled      = GetIniBool  (BackupCfg, TEXT("TicketFeedbackEnabled"),      false);
 			Config.TicketMacros                = ParseRawIniArray(BackupRaw, TEXT("TicketMacro"));
 			Config.TicketCooldownMinutes       = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("TicketCooldownMinutes"), 0.0f));
@@ -214,6 +220,8 @@ FTicketConfig FTicketConfig::Load()
 			Config.TicketEscalationCategoryId  = GetIniString(BackupCfg, TEXT("TicketEscalationCategoryId"));
 			Config.TicketTemplates             = ParseRawIniArray(BackupRaw, TEXT("TicketTemplate"));
 			Config.TicketAutoResponses         = ParseRawIniArray(BackupRaw, TEXT("TicketAutoResponse"));
+			Config.BanAppealCooldownDays       = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("BanAppealCooldownDays"), 0.0f));
+			Config.MaxLifetimeAppeals          = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("MaxLifetimeAppeals"), 0.0f));
 
 			UE_LOG(LogTicketSystem, Log,
 			       TEXT("TicketSystem: Primary config not found at '%s' – restored from backup."),
@@ -242,6 +250,7 @@ FTicketConfig FTicketConfig::Load()
 		BackupContent += FString::Printf(TEXT("TicketHelpEnabled=%s\n"),      Config.bTicketHelpEnabled      ? TEXT("True") : TEXT("False"));
 		BackupContent += FString::Printf(TEXT("TicketReportEnabled=%s\n"),    Config.bTicketReportEnabled    ? TEXT("True") : TEXT("False"));
 		BackupContent += FString::Printf(TEXT("BanAppealEnabled=%s\n"),       Config.bTicketBanAppealEnabled ? TEXT("True") : TEXT("False"));
+		BackupContent += FString::Printf(TEXT("MuteAppealEnabled=%s\n"),      Config.bTicketMuteAppealEnabled ? TEXT("True") : TEXT("False"));
 		BackupContent += FString::Printf(TEXT("TicketNotifyRoleId=%s\n"),     *Config.TicketNotifyRoleId);
 		BackupContent += FString::Printf(TEXT("TicketPanelChannelId=%s\n"),   *Config.TicketPanelChannelId);
 		BackupContent += FString::Printf(TEXT("TicketCategoryId=%s\n"),       *Config.TicketCategoryId);
@@ -255,6 +264,7 @@ FTicketConfig FTicketConfig::Load()
 		BackupContent += FString::Printf(TEXT("HelpCategoryId=%s\n"),              *Config.HelpCategoryId);
 		BackupContent += FString::Printf(TEXT("ReportCategoryId=%s\n"),            *Config.ReportCategoryId);
 		BackupContent += FString::Printf(TEXT("AppealCategoryId=%s\n"),            *Config.AppealCategoryId);
+		BackupContent += FString::Printf(TEXT("MuteAppealCategoryId=%s\n"),        *Config.MuteAppealCategoryId);
 		BackupContent += FString::Printf(TEXT("TicketFeedbackEnabled=%s\n"),       Config.bTicketFeedbackEnabled      ? TEXT("True") : TEXT("False"));
 		BackupContent += FString::Printf(TEXT("TicketCooldownMinutes=%d\n"),       Config.TicketCooldownMinutes);
 		BackupContent += FString::Printf(TEXT("TicketReopenGracePeriodMinutes=%d\n"), Config.TicketReopenGracePeriodMinutes);
@@ -276,6 +286,8 @@ FTicketConfig FTicketConfig::Load()
 		{
 			BackupContent += FString::Printf(TEXT("TicketMacro=%s\n"), *Macro);
 		}
+		BackupContent += FString::Printf(TEXT("BanAppealCooldownDays=%d\n"),       Config.BanAppealCooldownDays);
+		BackupContent += FString::Printf(TEXT("MaxLifetimeAppeals=%d\n"),           Config.MaxLifetimeAppeals);
 
 		PlatformFile.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
 		if (FFileHelper::SaveStringToFile(BackupContent, *BackupPath,
@@ -352,6 +364,8 @@ void FTicketConfig::RestoreDefaultConfigIfNeeded()
 		TEXT("TicketHelpEnabled=True\n")
 		TEXT("TicketReportEnabled=True\n")
 		TEXT("BanAppealEnabled=True\n")
+		TEXT("# Set to False to hide the Mute Appeal button from the ticket panel.\n")
+		TEXT("MuteAppealEnabled=True\n")
 		TEXT("\n")
 		TEXT("# ------------------------------------------------------------------------------\n")
 		TEXT("# ADMIN NOTIFICATIONS\n")
@@ -375,6 +389,8 @@ void FTicketConfig::RestoreDefaultConfigIfNeeded()
 		TEXT("HelpCategoryId=\n")
 		TEXT("ReportCategoryId=\n")
 		TEXT("AppealCategoryId=\n")
+		TEXT("# Optional Discord category ID to place mute appeal ticket channels under.\n")
+		TEXT("MuteAppealCategoryId=\n")
 		TEXT("\n")
 		TEXT("# ------------------------------------------------------------------------------\n")
 		TEXT("# CUSTOM TICKET REASONS\n")
@@ -447,7 +463,20 @@ void FTicketConfig::RestoreDefaultConfigIfNeeded()
 		TEXT("# Format: TicketAutoResponse=TypeSlug|Auto-response message text\n")
 		TEXT("# Example:\n")
 		TEXT("#   TicketAutoResponse=whitelist|Please provide your in-game name and how you found the server.\n")
-		TEXT("#   TicketAutoResponse=report|Please include the player name, what happened, and any evidence.\n");
+		TEXT("#   TicketAutoResponse=report|Please include the player name, what happened, and any evidence.\n")
+		TEXT("\n")
+		TEXT("# ------------------------------------------------------------------------------\n")
+		TEXT("# BAN APPEAL RATE-LIMITING\n")
+		TEXT("# ------------------------------------------------------------------------------\n")
+		TEXT("# Days a player must wait after a denied appeal before submitting another.\n")
+		TEXT("# Set to 0 (default) to disable the cooldown.\n")
+		TEXT("# Example: BanAppealCooldownDays=7\n")
+		TEXT("BanAppealCooldownDays=0\n")
+		TEXT("\n")
+		TEXT("# Maximum number of lifetime denied ban appeals a player may submit.\n")
+		TEXT("# Once reached, further appeal tickets are blocked. 0 = disabled.\n")
+		TEXT("# Example: MaxLifetimeAppeals=3\n")
+		TEXT("MaxLifetimeAppeals=0\n");
 
 	PlatformFile.CreateDirectoryTree(*FPaths::GetPath(PrimaryPath));
 	if (FFileHelper::SaveStringToFile(Template, *PrimaryPath,

@@ -16,6 +16,8 @@
 #include "Interfaces/IHttpResponse.h"
 #include "BanAppealRegistry.h"
 #include "BanDatabase.h"
+#include "PlayerWarningRegistry.h"
+#include "MuteRegistry.h"
 #include "WhitelistManager.h"
 #include "Containers/Ticker.h"
 
@@ -208,6 +210,43 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		}),
 		60.0f);
 
+	// Start the expired-ban ticker: auto-close banappeal tickets when the opener's
+	// ban has expired naturally (e.g. a temp-ban that ran out).  Runs every 5 min.
+	ExpiredBanCheckHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
+		{
+			if (UGameInstance* GI = GetGameInstance())
+			{
+				if (UBanDatabase* BanDb = GI->GetSubsystem<UBanDatabase>())
+				{
+					TArray<FString> ToAutoClose;
+					for (const TPair<FString, FString>& TypePair : TicketChannelToType)
+					{
+						if (TypePair.Value != TEXT("banappeal")) continue;
+						const FString* OpenerId = TicketChannelToOpener.Find(TypePair.Key);
+						if (!OpenerId || OpenerId->IsEmpty()) continue;
+						const FString DiscordUid = FString::Printf(TEXT("Discord:%s"), **OpenerId);
+						FBanEntry Dummy;
+						if (!BanDb->IsCurrentlyBannedByAnyId(DiscordUid, Dummy))
+						{
+							ToAutoClose.Add(*OpenerId);
+						}
+					}
+					for (const FString& OpenerId : ToAutoClose)
+					{
+						UE_LOG(LogTicketSystem, Log,
+						       TEXT("TicketSystem: Ban expired for Discord user %s — auto-closing appeal ticket."),
+						       *OpenerId);
+						CloseAppealTicketForOpener(OpenerId,
+							TEXT(":white_check_mark: Your temporary ban has expired. "
+							     "This appeal ticket has been resolved automatically."));
+					}
+				}
+			}
+			return true;
+		}),
+		5.0f * 60.0f);
+
 	// Load the ticket blacklist.
 	LoadTicketBlacklist();
 }
@@ -233,6 +272,13 @@ void UTicketSubsystem::Deinitialize()
 	{
 		FTSTicker::GetCoreTicker().RemoveTicker(ReminderCheckHandle);
 		ReminderCheckHandle.Reset();
+	}
+
+	// Stop the expired-ban check ticker.
+	if (ExpiredBanCheckHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(ExpiredBanCheckHandle);
+		ExpiredBanCheckHandle.Reset();
 	}
 
 	// Detach from the provider (unsubscribes delegates, clears CachedProvider).
@@ -392,10 +438,20 @@ TSharedPtr<FJsonObject> UTicketSubsystem::MakeCloseButtonMessage(const FString& 
 	CloseButton->SetStringField(TEXT("custom_id"),
 		FString::Printf(TEXT("ticket_close:%s"), *OpenerUserId));
 
+	TSharedPtr<FJsonObject> BanCheckBtn = MakeShared<FJsonObject>();
+	BanCheckBtn->SetNumberField(TEXT("type"),  2); // BUTTON
+	BanCheckBtn->SetNumberField(TEXT("style"), 2); // SECONDARY (grey)
+	BanCheckBtn->SetStringField(TEXT("label"), TEXT("Check Bans"));
+	BanCheckBtn->SetStringField(TEXT("custom_id"),
+		FString::Printf(TEXT("ticket_bancheck:%s"), *OpenerUserId));
+
 	TSharedPtr<FJsonObject> ActionRow = MakeShared<FJsonObject>();
 	ActionRow->SetNumberField(TEXT("type"), 1); // ACTION_ROW
 	ActionRow->SetArrayField(TEXT("components"),
-		TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(CloseButton) });
+		TArray<TSharedPtr<FJsonValue>>{
+			MakeShared<FJsonValueObject>(CloseButton),
+			MakeShared<FJsonValueObject>(BanCheckBtn)
+		});
 
 	TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
 	Body->SetStringField(TEXT("content"),
@@ -512,7 +568,7 @@ void UTicketSubsystem::OnInteractionReceived(const TSharedPtr<FJsonObject>& Data
 	{
 		HandleTicketModalSubmit(InteractionId, InteractionToken, CustomId,
 		                        *InteractionDataPtr,
-		                        DiscordUserId, DiscordUsername);
+		                        DiscordUserId, DiscordUsername, SourceChannelId);
 	}
 	else // MESSAGE_COMPONENT (type 3)
 	{
@@ -772,6 +828,24 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 
 		Bridge->RespondToInteraction(InteractionId, InteractionToken, 4, DenyResponse, false);
 
+		// Feature 3: if this is a temp ban, inform the player of its natural expiry.
+		if (UGameInstance* GI3 = GetGameInstance())
+		{
+			if (UBanDatabase* BanDb3 = GI3->GetSubsystem<UBanDatabase>())
+			{
+				const FString DiscordUidDeny = FString::Printf(TEXT("Discord:%s"), *AppealOpenerId);
+				FBanEntry DenyBanRecord;
+				if (BanDb3->IsCurrentlyBannedByAnyId(DiscordUidDeny, DenyBanRecord) && !DenyBanRecord.bIsPermanent)
+				{
+					const FString ExpiryMsg = FString::Printf(
+						TEXT(":calendar: Your temporary ban will expire naturally on **%s UTC** "
+						     "if no further action is taken."),
+						*DenyBanRecord.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M")));
+					Bridge->SendDiscordChannelMessage(SourceChannelId, ExpiryMsg);
+				}
+			}
+		}
+
 		// Mark the appeal entry as denied in the registry if one exists.
 		if (UGameInstance* GI = GetGameInstance())
 		{
@@ -922,6 +996,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		// If this was a ban-appeal ticket, dismiss the pending registry entry so
 		// it doesn't accumulate as "pending" after the ticket is closed without
 		// a formal approve/deny decision.
+		FString CloseAppealReviewNote;
 		if (RemovedType == TEXT("banappeal") && !RemovedOpener.IsEmpty())
 		{
 			if (UGameInstance* GI = GetGameInstance())
@@ -931,13 +1006,18 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 					const FString AppealUid = FString::Printf(TEXT("Discord:%s"), *RemovedOpener);
 					for (const FBanAppealEntry& E : AppealReg->GetAllAppeals())
 					{
-						if (E.Uid == AppealUid && E.Status == EAppealStatus::Pending)
+						if (E.Uid == AppealUid)
 						{
-							AppealReg->DeleteAppeal(E.Id);
-							OpenerToAppealId.Remove(RemovedOpener);
-							UE_LOG(LogTicketSystem, Log,
-							       TEXT("TicketSystem: Auto-dismissed pending appeal id=%lld for Discord user %s on ticket close."),
-							       E.Id, *RemovedOpener);
+							// Capture review note for transcript regardless of status.
+							CloseAppealReviewNote = E.ReviewNote;
+							if (E.Status == EAppealStatus::Pending)
+							{
+								AppealReg->DeleteAppeal(E.Id);
+								OpenerToAppealId.Remove(RemovedOpener);
+								UE_LOG(LogTicketSystem, Log,
+								       TEXT("TicketSystem: Auto-dismissed pending appeal id=%lld for Discord user %s on ticket close."),
+								       E.Id, *RemovedOpener);
+							}
 							break;
 						}
 					}
@@ -991,6 +1071,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 			const FString ClosedChannelId  = SourceChannelId;
 			const FString OpenerIdForLog   = RemovedOpener.IsEmpty() ? OpenerUserId : RemovedOpener;
 			const FString ClosedAt         = FDateTime::UtcNow().ToString(TEXT("%Y-%m-%d"));
+			const FString ReviewNoteCopy   = CloseAppealReviewNote;
 
 			TWeakObjectPtr<UTicketSubsystem> WeakThis(this);
 
@@ -1007,7 +1088,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 
 			FetchReq->OnProcessRequestComplete().BindWeakLambda(
 				WeakThis.Get(),
-				[WeakThis, LogChannelId, BotToken, OpenerIdForLog, ClosedAt, ClosedChannelId, CloseNotesForLog]
+				[WeakThis, LogChannelId, BotToken, OpenerIdForLog, ClosedAt, ClosedChannelId, CloseNotesForLog, ReviewNoteCopy]
 				(FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bOk) mutable
 				{
 					UTicketSubsystem* Self = WeakThis.Get();
@@ -1074,6 +1155,13 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 						TranscriptText += TEXT("\n**Staff Notes (internal):**\n");
 						for (const FString& N : CloseNotesForLog)
 							TranscriptText += FString::Printf(TEXT("- %s\n"), *N);
+					}
+
+					// Feature 8: append admin review note from appeal registry if present.
+					if (!ReviewNoteCopy.IsEmpty())
+					{
+						TranscriptText += FString::Printf(
+							TEXT("\n**Appeal Review Note:** %s"), *ReviewNoteCopy);
 					}
 
 					// Discord messages have a 2000-char limit; truncate if necessary.
@@ -1213,6 +1301,206 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 			Label.Left(45),
 			TEXT("Provide any details about your request (optional)"));
 	}
+	else if (CustomId == TEXT("ticket_muteappeal"))
+	{
+		// ── Mute Appeal button ─────────────────────────────────────────────────
+		if (!Config.bTicketMuteAppealEnabled)
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
+				TEXT(":no_entry: Mute appeal tickets are currently disabled."),
+				/*bEphemeral=*/true);
+			return;
+		}
+		ShowTicketReasonModal(InteractionId, InteractionToken,
+			TEXT("ticket_modal:muteappeal"),
+			TEXT("Mute Appeal"),
+			TEXT("Explain why the mute should be lifted (optional)"));
+	}
+	else if (CustomId.StartsWith(TEXT("ticket_bancheck:")))
+	{
+		// ── Ban-Check button ───────────────────────────────────────────────────
+		// Staff-only: ephemeral ban / warning / appeal summary for the ticket opener.
+		const FString CheckOpenerId = CustomId.Mid(FCString::Strlen(TEXT("ticket_bancheck:")));
+
+		bool bIsAdmin = false;
+		if (!Config.TicketNotifyRoleId.IsEmpty())
+			bIsAdmin = MemberRoles.Contains(Config.TicketNotifyRoleId);
+		if (!bIsAdmin && !Bridge->GetGuildOwnerId().IsEmpty())
+			bIsAdmin = (DiscordUserId == Bridge->GetGuildOwnerId());
+		if (!bIsAdmin)
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT(":no_entry: Only staff with the support role can use the Ban-Check button."),
+				true);
+			return;
+		}
+
+		FString ReportText = FString::Printf(
+			TEXT(":mag: **Ban / Appeal check for <@%s>**\n\n"), *CheckOpenerId);
+		const FString DiscordUid = FString::Printf(TEXT("Discord:%s"), *CheckOpenerId);
+
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UBanDatabase* BanDb = GI->GetSubsystem<UBanDatabase>())
+			{
+				FBanEntry BanRecord;
+				if (BanDb->IsCurrentlyBannedByAnyId(DiscordUid, BanRecord))
+				{
+					const FString DurStr = BanRecord.bIsPermanent
+						? TEXT("Permanent")
+						: FString::Printf(TEXT("Until %s UTC"),
+							*BanRecord.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M")));
+					ReportText += FString::Printf(
+						TEXT(":no_entry_sign: **Active ban found**\n```\n"
+						     "Player  : %s\nReason  : %s\nBy      : %s\n"
+						     "Date    : %s UTC\nDuration: %s\n```\n"),
+						*BanRecord.PlayerName, *BanRecord.Reason, *BanRecord.BannedBy,
+						*BanRecord.BanDate.ToString(TEXT("%Y-%m-%d %H:%M")), *DurStr);
+				}
+				else
+				{
+					ReportText += TEXT(":white_check_mark: No active ban found for this Discord account.\n");
+				}
+			}
+
+			if (UBanAppealRegistry* AppealReg = GI->GetSubsystem<UBanAppealRegistry>())
+			{
+				int32 Approved = 0, Denied = 0, Pending = 0;
+				for (const FBanAppealEntry& E : AppealReg->GetAllAppeals())
+				{
+					if (E.Uid == DiscordUid)
+					{
+						if      (E.Status == EAppealStatus::Approved) ++Approved;
+						else if (E.Status == EAppealStatus::Denied)   ++Denied;
+						else                                           ++Pending;
+					}
+				}
+				if (Approved + Denied + Pending > 0)
+				{
+					ReportText += FString::Printf(
+						TEXT(":scroll: **Prior appeals:** %d approved, %d denied, %d pending"),
+						Approved, Denied, Pending);
+				}
+				else
+				{
+					ReportText += TEXT(":scroll: No prior appeals on record.");
+				}
+			}
+		}
+		else
+		{
+			ReportText += TEXT(":warning: BanSystem unavailable — cannot check bans.");
+		}
+
+		Bridge->RespondToInteraction(InteractionId, InteractionToken, 4, ReportText, true);
+		return;
+	}
+	else if (CustomId.StartsWith(TEXT("ticket_lift_mute:")))
+	{
+		// ── Lift Mute button ───────────────────────────────────────────────────
+		// Staff-only: shows a modal asking for the player's EOS UID to unmute.
+		bool bIsAdminLift = false;
+		if (!Config.TicketNotifyRoleId.IsEmpty())
+			bIsAdminLift = MemberRoles.Contains(Config.TicketNotifyRoleId);
+		if (!bIsAdminLift && !Bridge->GetGuildOwnerId().IsEmpty())
+			bIsAdminLift = (DiscordUserId == Bridge->GetGuildOwnerId());
+		if (!bIsAdminLift)
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT(":no_entry: Only staff with the support role can lift mutes."), true);
+			return;
+		}
+
+		FModalField UidField;
+		UidField.Label       = TEXT("Player EOS UID");
+		UidField.CustomId    = TEXT("lift_mute_uid");
+		UidField.Placeholder = TEXT("EOS:00020aed...");
+		UidField.bRequired   = true;
+		UidField.MinLength   = 4;
+		UidField.MaxLength   = 100;
+
+		Bridge->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("ticket_modal:lift_mute"),
+			TEXT("Lift Mute"),
+			{ UidField });
+		return;
+	}
+	else if (CustomId.StartsWith(TEXT("ticket_deny_mute:")))
+	{
+		// ── Deny Mute Appeal button ────────────────────────────────────────────
+		const FString MuteOpenerId = CustomId.Mid(FCString::Strlen(TEXT("ticket_deny_mute:")));
+
+		bool bIsAdminDenyMute = false;
+		if (!Config.TicketNotifyRoleId.IsEmpty())
+			bIsAdminDenyMute = MemberRoles.Contains(Config.TicketNotifyRoleId);
+		if (!bIsAdminDenyMute)
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT(":no_entry: Only staff with the support role can deny mute appeals."), true);
+			return;
+		}
+
+		FString MuteOpenerName;
+		if (const FString* MN = TicketChannelToOpenerName.Find(SourceChannelId))
+			MuteOpenerName = *MN;
+
+		const FString DenyMuteResponse = FString::Printf(
+			TEXT(":x: Mute appeal **denied** by <@%s>.\nThe mute for %s remains in place."),
+			*DiscordUserId,
+			MuteOpenerName.IsEmpty() ? TEXT("this player") : *MuteOpenerName);
+
+		Bridge->RespondToInteraction(InteractionId, InteractionToken, 4, DenyMuteResponse, false);
+
+		// Close the mute appeal ticket.
+		CloseAppealTicketForOpener(MuteOpenerId,
+			FString::Printf(TEXT(":x: Mute appeal denied by <@%s>."), *DiscordUserId));
+		return;
+	}
+	else if (CustomId.StartsWith(TEXT("ticket_issue_warn:")))
+	{
+		// ── Issue Warning button ───────────────────────────────────────────────
+		// Staff-only: shows a modal to issue a warning to a reported player.
+		bool bIsAdminWarn = false;
+		if (!Config.TicketNotifyRoleId.IsEmpty())
+			bIsAdminWarn = MemberRoles.Contains(Config.TicketNotifyRoleId);
+		if (!bIsAdminWarn && !Bridge->GetGuildOwnerId().IsEmpty())
+			bIsAdminWarn = (DiscordUserId == Bridge->GetGuildOwnerId());
+		if (!bIsAdminWarn)
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
+				TEXT(":no_entry: Only staff with the support role can issue warnings."), true);
+			return;
+		}
+
+		FModalField WarnUidField;
+		WarnUidField.Label       = TEXT("Player EOS UID");
+		WarnUidField.CustomId    = TEXT("warn_uid");
+		WarnUidField.Placeholder = TEXT("EOS:00020aed...");
+		WarnUidField.bRequired   = true;
+		WarnUidField.MinLength   = 4;
+		WarnUidField.MaxLength   = 100;
+
+		FModalField WarnNameField;
+		WarnNameField.Label       = TEXT("Player Name (optional)");
+		WarnNameField.CustomId    = TEXT("warn_name");
+		WarnNameField.Placeholder = TEXT("In-game name");
+		WarnNameField.bRequired   = false;
+		WarnNameField.MaxLength   = 80;
+
+		FModalField WarnReasonField;
+		WarnReasonField.Label       = TEXT("Warning Reason");
+		WarnReasonField.CustomId    = TEXT("warn_reason");
+		WarnReasonField.Placeholder = TEXT("Describe the rule violation");
+		WarnReasonField.bRequired   = true;
+		WarnReasonField.bParagraph  = true;
+		WarnReasonField.MaxLength   = 500;
+
+		Bridge->RespondWithMultiFieldModal(InteractionId, InteractionToken,
+			TEXT("ticket_modal:issuewarn"),
+			TEXT("Issue Warning"),
+			{ WarnUidField, WarnNameField, WarnReasonField });
+		return;
+	}
 	else
 	{
 		UE_LOG(LogTicketSystem, Warning,
@@ -1250,7 +1538,8 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 	const FString& ModalCustomId,
 	const TSharedPtr<FJsonObject>& ModalData,
 	const FString& DiscordUserId,
-	const FString& DiscordUsername)
+	const FString& DiscordUsername,
+	const FString& SourceChannelId)
 {
 	UE_LOG(LogTicketSystem, Log,
 	       TEXT("TicketSystem: Ticket modal '%s' submitted by '%s' (%s)"),
@@ -1262,8 +1551,8 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 		return;
 	}
 
-	// Extract the user-supplied reason.
-	FString Reason;
+	// Extract ALL modal field values into a map keyed by the component custom_id.
+	TMap<FString, FString> ModalFields;
 	const TArray<TSharedPtr<FJsonValue>>* Rows = nullptr;
 	if (ModalData->TryGetArrayField(TEXT("components"), Rows) && Rows)
 	{
@@ -1280,16 +1569,18 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 				const TSharedPtr<FJsonObject>* InputObj = nullptr;
 				if (!InputVal->TryGetObject(InputObj) || !InputObj) { continue; }
 
-				FString InputCustomId;
+				FString InputCustomId, InputValue;
 				(*InputObj)->TryGetStringField(TEXT("custom_id"), InputCustomId);
-				if (InputCustomId == TEXT("ticket_reason"))
-				{
-					(*InputObj)->TryGetStringField(TEXT("value"), Reason);
-					Reason.TrimStartAndEndInline();
-				}
+				(*InputObj)->TryGetStringField(TEXT("value"),     InputValue);
+				InputValue.TrimStartAndEndInline();
+				if (!InputCustomId.IsEmpty())
+					ModalFields.Add(InputCustomId, InputValue);
 			}
 		}
 	}
+
+	// Backward-compatible single-field reason.
+	FString Reason = ModalFields.FindRef(TEXT("ticket_reason"));
 
 	// Prevent duplicate tickets.
 	if (OpenerToTicketChannel.Contains(DiscordUserId))
@@ -1363,6 +1654,61 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 			return;
 		}
 
+		// Feature 4 & 7: cooldown / repeat-offender guard.
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UBanAppealRegistry* AppealReg = GI->GetSubsystem<UBanAppealRegistry>())
+			{
+				const FString AppealUid = FString::Printf(TEXT("Discord:%s"), *DiscordUserId);
+				int32 DeniedCount = 0;
+				FDateTime MostRecentDenialDate = FDateTime(0);
+
+				for (const FBanAppealEntry& E : AppealReg->GetAllAppeals())
+				{
+					if (E.Uid != AppealUid) continue;
+					if (E.Status == EAppealStatus::Denied)
+					{
+						++DeniedCount;
+						if (E.ReviewedAt > MostRecentDenialDate)
+							MostRecentDenialDate = E.ReviewedAt;
+					}
+				}
+
+				// Feature 7: max lifetime denied appeals.
+				if (Config.MaxLifetimeAppeals > 0 && DeniedCount >= Config.MaxLifetimeAppeals)
+				{
+					Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
+						FString::Printf(
+							TEXT(":no_entry: You have reached the maximum number of allowed ban appeals (%d).\n"
+							     "No further appeals will be accepted. "
+							     "Please contact server staff directly if you believe this is an error."),
+							Config.MaxLifetimeAppeals),
+						/*bEphemeral=*/true);
+					return;
+				}
+
+				// Feature 4: cooldown after a denial.
+				if (Config.BanAppealCooldownDays > 0 && MostRecentDenialDate.GetTicks() > 0)
+				{
+					const FDateTime CooldownExpiry = MostRecentDenialDate +
+						FTimespan::FromDays(static_cast<double>(Config.BanAppealCooldownDays));
+					if (FDateTime::UtcNow() < CooldownExpiry)
+					{
+						Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
+							FString::Printf(
+								TEXT(":hourglass: Your last appeal was denied on **%s UTC**.\n"
+								     "You must wait **%d day(s)** before submitting another appeal.\n"
+								     "You may reapply after **%s UTC**."),
+								*MostRecentDenialDate.ToString(TEXT("%Y-%m-%d")),
+								Config.BanAppealCooldownDays,
+								*CooldownExpiry.ToString(TEXT("%Y-%m-%d %H:%M"))),
+							/*bEphemeral=*/true);
+						return;
+					}
+				}
+			}
+		}
+
 		// Save to BanAppealRegistry if BanSystem is installed.
 		// Use "Discord:<userId>" as the appeal UID so the registry can persist
 		// and retrieve the entry.  Admins can resolve the EOS UID from the
@@ -1393,6 +1739,130 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 			/*bEphemeral=*/true);
 		CreateTicketChannel(DiscordUserId, DiscordUsername, TEXT("banappeal"), Reason,
 		                    TEXT(""), TEXT(""));
+	}
+	else if (ModalCustomId == TEXT("ticket_modal:muteappeal"))
+	{
+		// ── Mute Appeal modal ──────────────────────────────────────────────────
+		if (!Config.bTicketMuteAppealEnabled)
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
+				TEXT(":no_entry: Mute appeal tickets are currently disabled."),
+				/*bEphemeral=*/true);
+			return;
+		}
+		Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
+			TEXT(":white_check_mark: Opening your mute appeal ticket…  "
+			     "A private channel will appear shortly."),
+			/*bEphemeral=*/true);
+		CreateTicketChannel(DiscordUserId, DiscordUsername, TEXT("muteappeal"), Reason,
+		                    TEXT(""), TEXT(""));
+	}
+	else if (ModalCustomId == TEXT("ticket_modal:lift_mute"))
+	{
+		// ── Lift Mute modal submit (staff-initiated) ───────────────────────────
+		// SourceChannelId is the mute appeal ticket channel where the button was clicked.
+		const FString EosUid = ModalFields.FindRef(TEXT("lift_mute_uid"));
+		if (EosUid.IsEmpty())
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
+				TEXT(":warning: No EOS UID supplied — mute could not be lifted."),
+				/*bEphemeral=*/true);
+			return;
+		}
+
+		FString LiftResult;
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UMuteRegistry* MuteReg = GI->GetSubsystem<UMuteRegistry>())
+			{
+				if (MuteReg->UnmutePlayer(EosUid))
+				{
+					LiftResult = FString::Printf(
+						TEXT(":white_check_mark: Mute lifted for `%s` by <@%s>."),
+						*EosUid, *DiscordUserId);
+				}
+				else
+				{
+					LiftResult = FString::Printf(
+						TEXT(":information_source: No active mute found for `%s`. "
+						     "It may have already expired or been removed."),
+						*EosUid);
+				}
+			}
+			else
+			{
+				LiftResult = TEXT(":x: MuteRegistry is unavailable on this server.");
+			}
+		}
+		else
+		{
+			LiftResult = TEXT(":x: GameInstance unavailable — cannot lift mute.");
+		}
+
+		Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
+			LiftResult, /*bEphemeral=*/false);
+
+		// Close the mute appeal ticket if we have a channel to close.
+		if (!SourceChannelId.IsEmpty())
+		{
+			const FString* OpenerId = TicketChannelToOpener.Find(SourceChannelId);
+			if (OpenerId && !OpenerId->IsEmpty())
+			{
+				CloseAppealTicketForOpener(*OpenerId,
+					FString::Printf(TEXT(":white_check_mark: Mute lifted by <@%s>. This ticket is now resolved."),
+						*DiscordUserId));
+			}
+		}
+	}
+	else if (ModalCustomId == TEXT("ticket_modal:issuewarn"))
+	{
+		// ── Issue Warning modal submit (staff-initiated) ───────────────────────
+		// SourceChannelId is the report ticket channel where the button was clicked.
+		const FString WarnUid    = ModalFields.FindRef(TEXT("warn_uid"));
+		const FString WarnName   = ModalFields.FindRef(TEXT("warn_name"));
+		const FString WarnReason = ModalFields.FindRef(TEXT("warn_reason"));
+
+		if (WarnUid.IsEmpty() || WarnReason.IsEmpty())
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
+				TEXT(":warning: EOS UID and Reason are required to issue a warning."),
+				/*bEphemeral=*/true);
+			return;
+		}
+
+		FString WarnResult;
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UPlayerWarningRegistry* WarnReg = GI->GetSubsystem<UPlayerWarningRegistry>())
+			{
+				WarnReg->AddWarning(WarnUid,
+					WarnName.IsEmpty() ? TEXT("Unknown") : WarnName,
+					WarnReason, DiscordUsername, /*ExpiryMinutes=*/0);
+
+				const int32 TotalWarnings = WarnReg->GetWarningCount(WarnUid);
+				WarnResult = FString::Printf(
+					TEXT(":warning: Warning issued for `%s` (%s) by <@%s>.\n"
+					     "Reason: %s\n"
+					     "Total warnings for this player: **%d**"),
+					*WarnUid,
+					WarnName.IsEmpty() ? TEXT("Unknown") : *WarnName,
+					*DiscordUserId,
+					*WarnReason,
+					TotalWarnings);
+			}
+			else
+			{
+				WarnResult = TEXT(":x: PlayerWarningRegistry is unavailable — BanSystem may not be installed.");
+			}
+		}
+		else
+		{
+			WarnResult = TEXT(":x: GameInstance unavailable — cannot issue warning.");
+		}
+
+		Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
+			WarnResult, /*bEphemeral=*/false);
+	}
 	}
 	else if (ModalCustomId.StartsWith(TEXT("ticket_modal:cr_")))
 	{
@@ -1513,6 +1983,8 @@ void UTicketSubsystem::CreateTicketChannel(
 		CategoryIdCopy = Config.ReportCategoryId.IsEmpty() ? Config.TicketCategoryId : Config.ReportCategoryId;
 	else if (TicketType == TEXT("banappeal"))
 		CategoryIdCopy = Config.AppealCategoryId.IsEmpty() ? Config.TicketCategoryId : Config.AppealCategoryId;
+	else if (TicketType == TEXT("muteappeal"))
+		CategoryIdCopy = Config.MuteAppealCategoryId.IsEmpty() ? Config.TicketCategoryId : Config.MuteAppealCategoryId;
 	else
 		CategoryIdCopy = Config.TicketCategoryId;
 
@@ -1617,47 +2089,109 @@ void UTicketSubsystem::CreateTicketChannel(
 					const FString DiscordUid = FString::Printf(TEXT("Discord:%s"), *OpenerUserIdCopy);
 					if (UGameInstance* GI = Self->GetGameInstance())
 					{
+						FString BanEosUid;
 						if (UBanDatabase* BanDb = GI->GetSubsystem<UBanDatabase>())
 						{
 							FBanEntry BanRecord;
 							if (BanDb->IsCurrentlyBannedByAnyId(DiscordUid, BanRecord))
 							{
-								const FString DurationStr = BanRecord.bIsPermanent
-									? TEXT("Permanent")
-									: FString::Printf(TEXT("Until %s"),
-										*BanRecord.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M UTC")));
+								BanEosUid = BanRecord.Uid;
+								const bool bTempBan = !BanRecord.bIsPermanent;
+								FString DurationStr;
+								if (BanRecord.bIsPermanent)
+								{
+									DurationStr = TEXT("Permanent");
+								}
+								else
+								{
+									const FTimespan Remaining = BanRecord.ExpireDate - FDateTime::UtcNow();
+									const int64 TotalMinutes  = FMath::Max(0LL, static_cast<int64>(Remaining.GetTotalMinutes()));
+									const int64 Days          = TotalMinutes / 1440;
+									const int64 Hours         = (TotalMinutes % 1440) / 60;
+									const int64 Mins          = TotalMinutes % 60;
+									if (Days > 0)
+										DurationStr = FString::Printf(TEXT("Until %s UTC (~%lld day(s), %lld h remaining)"),
+											*BanRecord.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M")), Days, Hours);
+									else if (Hours > 0)
+										DurationStr = FString::Printf(TEXT("Until %s UTC (~%lld h %lld min remaining)"),
+											*BanRecord.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M")), Hours, Mins);
+									else
+										DurationStr = FString::Printf(TEXT("Until %s UTC (~%lld min remaining)"),
+											*BanRecord.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M")), Mins);
+								}
 								WelcomeContent += FString::Printf(
 									TEXT("\n\n:bookmark: **Ban on record**\n"
 									     "```\n"
-									     "Player : %s\n"
-									     "Reason : %s\n"
-									     "Banned by: %s\n"
-									     "Date   : %s\n"
+									     "Player  : %s\n"
+									     "Reason  : %s\n"
+									     "By      : %s\n"
+									     "Date    : %s UTC\n"
 									     "Duration: %s\n"
 									     "```"),
 									*BanRecord.PlayerName,
 									*BanRecord.Reason,
 									*BanRecord.BannedBy,
-									*BanRecord.BanDate.ToString(TEXT("%Y-%m-%d %H:%M UTC")),
+									*BanRecord.BanDate.ToString(TEXT("%Y-%m-%d %H:%M")),
 									*DurationStr);
+							}
+						}
+
+						// Feature 2: show warning history for the EOS UID from the ban record.
+						if (!BanEosUid.IsEmpty())
+						{
+							if (UPlayerWarningRegistry* WarnReg = GI->GetSubsystem<UPlayerWarningRegistry>())
+							{
+								const TArray<FWarningEntry> Warnings = WarnReg->GetWarningsForUid(BanEosUid);
+								if (!Warnings.IsEmpty())
+								{
+									WelcomeContent += FString::Printf(
+										TEXT("\n\n:warning: **Prior warnings on record:** %d"),
+										Warnings.Num());
+									for (const FWarningEntry& W : Warnings)
+									{
+										if (!W.IsExpired())
+										{
+											WelcomeContent += FString::Printf(
+												TEXT("\n- **%s** — _%s_ (by %s, %s)"),
+												*W.Reason, *W.PlayerName, *W.WarnedBy,
+												*W.WarnDate.ToString(TEXT("%Y-%m-%d")));
+										}
+									}
+								}
 							}
 						}
 					}
 				}
 			}
-			else
+			else if (TicketTypeCopy == TEXT("muteappeal"))
 			{
-				const FString LabelDisplay =
-					DisplayLabelCopy.IsEmpty() ? TicketTypeCopy : DisplayLabelCopy;
-				WelcomeContent = FString::Printf(
-					TEXT("%s:ticket: **%s** from %s\n\n"),
-					*MentionPrefix, *LabelDisplay, *UserMention);
-				if (!DisplayDescCopy.IsEmpty())
+				// Look up active mute info to show context.
+				FString MuteContext;
+				if (!OpenerUserIdCopy.IsEmpty())
 				{
-					WelcomeContent += DisplayDescCopy + TEXT("\n\n");
+					if (UGameInstance* GI = Self->GetGameInstance())
+					{
+						if (UMuteRegistry* MuteReg = GI->GetSubsystem<UMuteRegistry>())
+						{
+							if (MuteReg->GetAllMutes().Num() > 0)
+							{
+								MuteContext = TEXT("\n\n:information_source: **Note:** Please provide your "
+									"**in-game name** and **EOS Player UID** so staff can locate your "
+									"mute record. Run `/whoami` in-game to find your EOS UID.");
+							}
+						}
+					}
 				}
-				WelcomeContent += TEXT(":information_source: An admin will be with you shortly. "
-				                       "Please describe your request here.");
+
+				WelcomeContent = FString::Printf(
+					TEXT("%s:mute: **Mute Appeal** from %s\n\n"
+					     "To help admins review your case, please provide:\n"
+					     "- Your **in-game name**\n"
+					     "- Your **EOS Player UID** (run `/whoami` in-game)\n"
+					     "- A **reason** why the mute should be lifted\n\n"
+					     ":information_source: An admin will review your appeal here.%s"),
+					*MentionPrefix, *UserMention,
+					MuteContext.IsEmpty() ? TEXT("") : *MuteContext);
 			}
 
 			if (!ExtraInfoCopy.IsEmpty())
@@ -1739,17 +2273,114 @@ void UTicketSubsystem::CreateTicketChannel(
 					if (B3) B3->SendMessageBodyToChannel(NewChannelId, AppealActionsBody);
 				}
 
+				// Lift Mute / Deny buttons for muteappeal tickets.
+				if (TicketTypeCopy == TEXT("muteappeal") && !OpenerUserIdCopy.IsEmpty())
+				{
+					TSharedPtr<FJsonObject> LiftBtn = MakeShared<FJsonObject>();
+					LiftBtn->SetNumberField(TEXT("type"), 2);
+					LiftBtn->SetNumberField(TEXT("style"), 3); // SUCCESS (green)
+					LiftBtn->SetStringField(TEXT("label"), TEXT("🔊 Lift Mute"));
+					LiftBtn->SetStringField(TEXT("custom_id"),
+						FString::Printf(TEXT("ticket_lift_mute:%s"), *OpenerUserIdCopy));
+
+					TSharedPtr<FJsonObject> DenyMuteBtn = MakeShared<FJsonObject>();
+					DenyMuteBtn->SetNumberField(TEXT("type"), 2);
+					DenyMuteBtn->SetNumberField(TEXT("style"), 4); // DANGER (red)
+					DenyMuteBtn->SetStringField(TEXT("label"), TEXT("❌ Deny Appeal"));
+					DenyMuteBtn->SetStringField(TEXT("custom_id"),
+						FString::Printf(TEXT("ticket_deny_mute:%s"), *OpenerUserIdCopy));
+
+					TSharedPtr<FJsonObject> MuteRow = MakeShared<FJsonObject>();
+					MuteRow->SetNumberField(TEXT("type"), 1);
+					MuteRow->SetArrayField(TEXT("components"),
+						TArray<TSharedPtr<FJsonValue>>{
+							MakeShared<FJsonValueObject>(LiftBtn),
+							MakeShared<FJsonValueObject>(DenyMuteBtn)});
+
+					TSharedPtr<FJsonObject> MuteBody = MakeShared<FJsonObject>();
+					MuteBody->SetStringField(TEXT("content"),
+						TEXT(":sound: **Mute Appeal Actions** — Only staff may use these buttons.\n"
+						     "**Lift Mute** will prompt for the player's EOS UID."));
+					MuteBody->SetArrayField(TEXT("components"),
+						TArray<TSharedPtr<FJsonValue>>{MakeShared<FJsonValueObject>(MuteRow)});
+
+					IDiscordBridgeProvider* BMute = Self->GetBridge();
+					if (BMute) BMute->SendMessageBodyToChannel(NewChannelId, MuteBody);
+				}
+
+				// Issue Warning button for report tickets (Feature 9).
+				if (TicketTypeCopy == TEXT("report") && !OpenerUserIdCopy.IsEmpty())
+				{
+					TSharedPtr<FJsonObject> IssueWarnBtn = MakeShared<FJsonObject>();
+					IssueWarnBtn->SetNumberField(TEXT("type"), 2);
+					IssueWarnBtn->SetNumberField(TEXT("style"), 4); // DANGER (red)
+					IssueWarnBtn->SetStringField(TEXT("label"), TEXT("⚠️ Issue Warning"));
+					IssueWarnBtn->SetStringField(TEXT("custom_id"),
+						FString::Printf(TEXT("ticket_issue_warn:%s"), *OpenerUserIdCopy));
+
+					TSharedPtr<FJsonObject> WarnRow = MakeShared<FJsonObject>();
+					WarnRow->SetNumberField(TEXT("type"), 1);
+					WarnRow->SetArrayField(TEXT("components"),
+						TArray<TSharedPtr<FJsonValue>>{MakeShared<FJsonValueObject>(IssueWarnBtn)});
+
+					TSharedPtr<FJsonObject> WarnBody = MakeShared<FJsonObject>();
+					WarnBody->SetStringField(TEXT("content"),
+						TEXT(":warning: **Report Actions** — Only staff may use this button.\n"
+						     "**Issue Warning** will prompt for the reported player's EOS UID and reason."));
+					WarnBody->SetArrayField(TEXT("components"),
+						TArray<TSharedPtr<FJsonValue>>{MakeShared<FJsonValueObject>(WarnRow)});
+
+					IDiscordBridgeProvider* BWarn = Self->GetBridge();
+					if (BWarn) BWarn->SendMessageBodyToChannel(NewChannelId, WarnBody);
+				}
+
 				// Notify EVERY configured admin/ticket channel (not just the first).
 				const TArray<FString> TicketChans =
 					FTicketConfig::ParseChannelIds(TicketChannelCopy);
 				const FString NoticeTypeName = DisplayLabelCopy.IsEmpty()
 					? TicketTypeCopy : DisplayLabelCopy;
-				const FString AdminNotice = FString::Printf(
-					TEXT("%s:new: New **%s** ticket from %s: <#%s>"),
-					NotifyRoleIdCopy.IsEmpty()
-						? TEXT("")
-						: *FString::Printf(TEXT("<@&%s> "), *NotifyRoleIdCopy),
-					*NoticeTypeName, *UserMention, *NewChannelId);
+
+				// Feature 5: enhanced admin notification for ban appeal tickets with severity badge.
+				FString AdminNotice;
+				if (TicketTypeCopy == TEXT("banappeal"))
+				{
+					// Count prior denied appeals for severity rating.
+					FString SeverityBadge = TEXT("🟡 First Appeal");
+					if (UGameInstance* GI = Self->GetGameInstance())
+					{
+						if (UBanAppealRegistry* AppealReg = GI->GetSubsystem<UBanAppealRegistry>())
+						{
+							const FString CheckUid = FString::Printf(TEXT("Discord:%s"), *OpenerUserIdCopy);
+							int32 PriorDenied = 0;
+							for (const FBanAppealEntry& E : AppealReg->GetAllAppeals())
+							{
+								if (E.Uid == CheckUid && E.Status == EAppealStatus::Denied)
+									++PriorDenied;
+							}
+							if (PriorDenied == 0)
+								SeverityBadge = TEXT("🟡 First Appeal");
+							else if (PriorDenied == 1)
+								SeverityBadge = TEXT("🟠 2nd Appeal (1 prior denial)");
+							else
+								SeverityBadge = FString::Printf(TEXT("🔴 Repeat Appellant (%d prior denials)"), PriorDenied);
+						}
+					}
+					AdminNotice = FString::Printf(
+						TEXT("%s:scales: New **Ban Appeal** ticket from %s: <#%s>\n%s"),
+						NotifyRoleIdCopy.IsEmpty()
+							? TEXT("")
+							: *FString::Printf(TEXT("<@&%s> "), *NotifyRoleIdCopy),
+						*UserMention, *NewChannelId, *SeverityBadge);
+				}
+				else
+				{
+					AdminNotice = FString::Printf(
+						TEXT("%s:new: New **%s** ticket from %s: <#%s>"),
+						NotifyRoleIdCopy.IsEmpty()
+							? TEXT("")
+							: *FString::Printf(TEXT("<@&%s> "), *NotifyRoleIdCopy),
+						*NoticeTypeName, *UserMention, *NewChannelId);
+				}
 
 				for (const FString& AdminChanId : TicketChans)
 				{
@@ -1825,6 +2456,10 @@ void UTicketSubsystem::PostTicketPanel(
 	{
 		PanelContent += TEXT(":scales: **Ban Appeal** – appeal a ban issued on this server\n");
 	}
+	if (Config.bTicketMuteAppealEnabled)
+	{
+		PanelContent += TEXT(":mute: **Mute Appeal** – appeal an in-game mute issued on this server\n");
+	}
 	for (int32 i = 0; i < Config.CustomTicketReasons.Num(); ++i)
 	{
 		FString Label, Desc;
@@ -1868,6 +2503,10 @@ void UTicketSubsystem::PostTicketPanel(
 	if (Config.bTicketBanAppealEnabled)
 	{
 		AddButton(TEXT("Ban Appeal"), TEXT("ticket_appeal"), 2); // SECONDARY
+	}
+	if (Config.bTicketMuteAppealEnabled)
+	{
+		AddButton(TEXT("Mute Appeal"), TEXT("ticket_muteappeal"), 2); // SECONDARY
 	}
 	for (int32 i = 0; i < Config.CustomTicketReasons.Num() && AllButtons.Num() < 25; ++i)
 	{
@@ -3469,6 +4108,22 @@ void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
 	TicketChannelToOpener.RemoveAndCopyValue(ChannelId, RemovedOpener);
 	if (!RemovedOpener.IsEmpty())
 		OpenerToTicketChannel.Remove(RemovedOpener);
+
+	// Feature 8: capture ReviewNote from appeal entry before clearing the ID map.
+	FString AppealReviewNote;
+	if (UGameInstance* GI8 = GetGameInstance())
+	{
+		if (UBanAppealRegistry* AppealReg = GI8->GetSubsystem<UBanAppealRegistry>())
+		{
+			const int64* AppealIdPtr = OpenerToAppealId.Find(DiscordUserId);
+			if (AppealIdPtr && *AppealIdPtr > 0)
+			{
+				const FBanAppealEntry Entry = AppealReg->GetAppealById(*AppealIdPtr);
+				if (Entry.Id > 0)
+					AppealReviewNote = Entry.ReviewNote;
+			}
+		}
+	}
 	OpenerToAppealId.Remove(DiscordUserId);
 
 	FString RemovedType;
@@ -3504,6 +4159,7 @@ void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
 		const FString ClosedChannelId = ChannelId;
 		const FString OpenerIdForLog  = RemovedOpener;
 		const FString ClosedAt        = FDateTime::UtcNow().ToString(TEXT("%Y-%m-%d"));
+		const FString ReviewNoteCopy  = AppealReviewNote;
 
 		TWeakObjectPtr<UTicketSubsystem> WeakThis(this);
 
@@ -3520,7 +4176,7 @@ void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
 
 		FetchReq->OnProcessRequestComplete().BindWeakLambda(
 			WeakThis.Get(),
-			[WeakThis, LogChannelId, BotToken, OpenerIdForLog, ClosedAt, ClosedChannelId]
+			[WeakThis, LogChannelId, BotToken, OpenerIdForLog, ClosedAt, ClosedChannelId, ReviewNoteCopy]
 			(FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bOk) mutable
 			{
 				UTicketSubsystem* Self = WeakThis.Get();
@@ -3529,7 +4185,7 @@ void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
 				if (!B) return;
 
 				FString TranscriptText = FString::Printf(
-					TEXT(":scroll: **Ban Appeal Ticket Resolved**\n")
+					TEXT(":scroll: **Appeal Ticket Resolved**\n")
 					TEXT("Opener: %s\n")
 					TEXT("Date closed: %s\n\n"),
 					OpenerIdForLog.IsEmpty()
@@ -3566,6 +4222,13 @@ void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
 							}
 						}
 					}
+				}
+
+				// Feature 8: include admin review note from appeal entry.
+				if (!ReviewNoteCopy.IsEmpty())
+				{
+					TranscriptText += FString::Printf(
+						TEXT("\n**Appeal Review Note:** %s"), *ReviewNoteCopy);
 				}
 
 				B->SendDiscordChannelMessage(LogChannelId, TranscriptText);
