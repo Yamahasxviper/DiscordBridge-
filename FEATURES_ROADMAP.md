@@ -1,6 +1,6 @@
 # Features Roadmap
 
-> **Last updated:** 2026-04-17 (pass 7)  
+> **Last updated:** 2026-04-17 (pass 8)  
 > This file is maintained by Copilot and updated whenever you ask for a fresh suggestions pass.  
 > ✅ **Server-side only** — no client download required for any feature in this file.
 
@@ -969,3 +969,89 @@ Each suggested item also carries:
 |--------|---------|--------|------------|
 | ⚪ **Later** | **Incident timeline auto-generation** — when a raid-mode or mass-incident event ends, automatically compile a timestamped timeline embed (join spike, rule hits, actions taken, resolution) and post it to the admin channel | 🔴 High | M |
 | ⚪ **Later** | **Predictive high-risk period alerts** — use historical hourly violation counts (stored in the audit log) to forecast the next likely high-violation window; post an advance-warning embed to the staff channel before it begins | 🟡 Med | L |
+
+---
+
+## Extended Feature Backlog (Pass 8)
+
+> Added 2026-04-17. All items are ⚪ **Later** (unscheduled). Server-side only — no client download required.  
+> † = a related item already exists in the sections above.
+
+---
+
+### Moderation / Enforcement
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Appeal reputation score** — track the ratio of denied to approved appeals per player; serial appeal abusers automatically receive an extended appeal cooldown and a staff-channel alert on their next submission | 🔴 High | S |
+| ⚪ **Later** | **Moderator cooldown-bypass audit log** — when a senior admin overrides another admin's panel or command cooldown, create a dedicated audit-log entry recording the bypassing admin, the bypassed admin, and the action taken | 🟡 Med | S |
+| ⚪ **Later** | **Auto-silence for new accounts after N reports** — if a player who has never been punished accumulates N unresolved player reports within a configurable window, apply a short automatic mute and post a review embed for staff | 🔴 High | S |
+| ⚪ **Later** | **"Why this action?" rationale enforcement for high-risk commands** — `/ban permanent`, `/unlinkbans`, and ban-reason edits require an additional free-text rationale field (via modal); rationale is stored in the audit log alongside the action | 🟡 Med | S |
+| ⚪ **Later** | **Emergency lockdown mode** — `/lockdown on/off` simultaneously freezes in-game chat relay, queues new joins, and sets all auto-action thresholds to their strictest configured values; reverts fully on off with a delay-release audit entry | �� High | M |
+
+---
+
+### Chat & Anti-Abuse
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Real-time profanity heatmap dashboard** — a bot-managed Discord embed updated on a configurable interval showing per-phrase filter-hit counts for the current server session; helps admins identify which rules fire most and tune thresholds without waiting for the weekly digest | 🟡 Med | M |
+| ⚪ **Later** | **Scam phrase pattern packs (hot-loadable)** — loadable INI array sections per threat category (e.g. `+PhishingPhrases=`, `+CryptoScamPhrases=`) merged with the base chat filter at startup and reloadable via `/admin reloadconfig` without a restart | 🔴 High | S |
+| ⚪ **Later** | **Slowmode auto-enable during raids** †— when raid mode activates, automatically apply a per-player chat rate limit (configurable messages per minute); reverts when raid mode turns off | 🔴 High | S |
+| ⚪ **Later** | **"First offense warn, second mute" policy engine** — a dedicated multi-step policy table (separate from `WarnEscalationTiers`) that maps specific chat-filter rule IDs to a 2-step ladder: first match → warn, second match within a window → mute, third → ban; configurable per rule | 🔴 High | M |
+| ⚪ **Later** | **Auto-redact PII from forwarded chat** — before relaying a player message to Discord, strip patterns matching configured regexes (IP addresses, email patterns, phone-number formats) and replace with `[REDACTED]`; log the original to the audit trail | 🔴 High | M |
+
+---
+
+### DiscordBridge & Tickets
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Auto-summarize long tickets** — when a ticket channel reaches a configurable message count, have the bridge bot post (and pin) a summary embed in the ticket channel listing the current status, key actions taken, and any open questions; refreshed each time the threshold is crossed again | 🟡 Med | M |
+| ⚪ **Later** | **Closed-ticket quality scoring (resolution tags)** — on ticket close, staff must choose a resolution tag (Resolved / Unresolved / Escalated / Duplicate / No Action) via a dropdown; tag distribution per category and per staff member is surfaced in `/ticket stats` and the weekly digest | 🟡 Med | M |
+| ⚪ **Later** | **Ticket category routing by keyword** — config rules (`+TicketRoute=keyword|category`) that automatically set the ticket type or priority when the opener's reason message contains a configured keyword; reduces misrouted tickets | 🔴 High | S |
+| ⚪ **Later** | **Staff handoff notes inside ticket metadata** — `/ticketnote <text>` posts a styled staff-only embed inside the ticket channel and also stores the note in ticket state so it persists across restarts and appears in the transcript export | 🟡 Med | S |
+
+---
+
+### Security / Integrity
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Signed inbound webhook payload validation** — validate Discord interaction payloads using the `X-Signature-Ed25519` / `X-Signature-Timestamp` headers and the registered application public key; reject requests that fail signature verification before any processing occurs | 🔴 High | M |
+| ⚪ **Later** | **"Impossible account travel" detection** — flag when two sessions sharing the same EOS PUID originate from GeoIP regions that are geographically implausible within the time delta between sessions; post an alert embed listing both sessions' IPs, regions, and timestamps | 🔴 High | M |
+| ⚪ **Later** | **Privilege drift detector** — on each `/admin reloadconfig`, compare the current `AdminEosPUIDs` and `ModeratorEosPUIDs` lists against the snapshot from the previous load; post a Discord alert listing any IDs that were added or removed since the last reload | 🔴 High | S |
+| ⚪ **Later** | **API key rotation reminders with grace window** — config key `ApiKeyExpiryDays` that causes a reminder embed to post to the admin channel N days before the configured expiry; a `ApiKeyGraceDays` window accepts both old and new keys simultaneously during rotation | 🟡 Med | S |
+
+---
+
+### Gameplay / Server Health
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Dynamic AFK timeout by player count** — automatically increase the AFK kick timeout when the online player count is below a configurable floor (fewer players → more lenient); reverts to the base timeout as the count recovers | 🟡 Med | S |
+| ⚪ **Later** | **Automated restart recommendation** — track consecutive-uptime hours (and optionally server-side tick-rate degradation) against configurable thresholds; when both are breached, post a "consider restarting" embed to the admin channel with current metrics | 🟡 Med | M |
+| ⚪ **Later** | **Scheduled maintenance warning pipeline** — `/schedulemaintenance <datetime> <duration_minutes> <message>` queues a series of progressively spaced in-game broadcasts and Discord announcements (60 min / 30 min / 10 min / now) counting down to a planned maintenance window; cancellable via `/cancelmaintenance` | 🔴 High | M |
+| ⚪ **Later** | **Inactive-player structure decay helper** — periodic background job that cross-references the session registry for players absent more than a configurable number of days and posts a report embed to the admin channel listing each player's last-seen date; helps admins identify decay candidates | 🟡 Med | S |
+| ⚪ **Later** | **Team-size compliance checks** — configurable maximum team or ally-group size (based on linked UIDs or IP-range grouping); when a group exceeds the limit, auto-alert the admin channel with the group members and risk score so staff can investigate | 🟡 Med | M |
+
+---
+
+### Analytics & Reporting
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **"Top recurring issues" topic clustering** — weekly digest section that groups warning and ban reasons by keyword similarity into thematic clusters and surfaces the most-repeated offense themes (e.g. "profanity — 38 cases", "griefing — 14 cases") to guide rule tuning | 🟡 Med | M |
+| ⚪ **Later** | **Config effectiveness comparison report** — when a chat-filter rule or escalation tier is modified (tracked via config-reload diff), the next weekly digest includes a before/after auto-action count comparison for the affected rule to quantify the change's impact | 🟡 Med | S |
+| ⚪ **Later** | **New vs. veteran violation rate comparison** — weekly digest side-by-side embed comparing violation and auto-action rates for players with fewer than a configurable session count vs. those above it; helps calibrate new-player leniency settings | ⚪ Low | S |
+
+---
+
+### Moderator UX / Quality of Life
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Guided moderation command wizard** — `/wizard` opens an interactive Discord button flow that walks a staff member through selecting an action type, choosing a player from a dropdown of online players, picking a reason template, and confirming; produces the identical result as the full text command and is audit-logged the same way | 🔴 High | L |
+| ⚪ **Later** | **Moderator follow-up reminders** — `/remind <case_id|player> <hours> [note]` schedules a personal reminder for the acting admin; when the timer fires, a DM or admin-channel ping is posted referencing the original case with the optional note | 🟡 Med | M |
+| ⚪ **Later** | **Case linking** — `/linkcase <id_1> <id_2>` creates a bidirectional reference between two case IDs (bans, tickets, or audit incidents); linked cases are shown as cross-references in `/case` output and the ticket transcript so staff can follow related chains of events | 🔴 High | S |
+| ⚪ **Later** | **Bulk action mode with safeguards** †— `/bulkaction <action> <player_list>` accepts a comma-separated list of player names or PUIDs and applies the same action to all; requires a modal confirmation listing every affected player and the total count before executing | 🔴 High | M |
