@@ -1,6 +1,6 @@
 # Features Roadmap
 
-> **Last updated:** 2026-04-16 (pass 6)  
+> **Last updated:** 2026-04-17 (pass 7)  
 > This file is maintained by Copilot and updated whenever you ask for a fresh suggestions pass.  
 > ✅ **Server-side only** — no client download required for any feature in this file.
 
@@ -868,3 +868,104 @@ Each suggested item also carries:
 | ⚪ **Later** | **Trade / transfer scam pattern detection** — detect rapid repeated resource-transfer sequences involving the same two players and flag to staff for review | 🔴 High | M |
 | ⚪ **Later** | **Base griefing behaviour anomaly alerts** — alert when a player's demolition or interaction rate against other players' structures exceeds a configurable threshold per session | 🔴 High | M |
 | ⚪ **Later** | **Shared trust network between partner servers** — federated trust-score sharing where a positive or negative reputation score from a partner server is factored into the local risk assessment on join | 🟡 Med | L |
+
+---
+
+## Extended Feature Backlog (Pass 7)
+
+> Added 2026-04-17. All items are ⚪ **Later** (unscheduled). Server-side only — no client download required.  
+> † = a related item already exists in the sections above.
+
+---
+
+### Chat & Messaging Controls
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **First-join chat cooldown** — new players cannot send in-game chat (or have messages relayed to Discord) until they have been connected for a configurable number of seconds; staff chat bypass available | 🔴 High | S |
+| ⚪ **Later** | **Link-only channel enforcement** — configurable in-game chat "channel" (prefix) that accepts only messages containing a URL; non-URL messages are silently dropped with a private notice to the sender | 🟡 Med | S |
+| ⚪ **Later** | **Profanity severity tiers per channel** — each named in-game chat channel (configured by prefix or tag) can declare its own profanity-tier threshold, allowing stricter rules in public chat and looser rules in staff channels | 🟡 Med | M |
+| ⚪ **Later** | **Language-specific chat filter profiles** — loadable per-language filter phrase packs; the active pack is selected via a config key and merged with the base filter at startup | 🟡 Med | M |
+| ⚪ **Later** | **Nickname policy enforcement** — reject joins (or auto-kick post-join) from players whose display name violates a configurable policy (min/max length, regex denylist, reserved prefixes); post a policy-violation embed to the admin channel | 🔴 High | M |
+| ⚪ **Later** | **Staff name impersonation detection** — on join, fuzzy-compare the display name against a configured list of protected staff names; flag high-similarity matches and optionally block the join | 🔴 High | S |
+| ⚪ **Later** | **Invite-link policy engine** — configurable rules (allow/deny/warn) per detected invite-link pattern (Discord invites, referral codes, competitor URLs) with per-pattern escalation actions, beyond a simple blocker | 🟡 Med | M |
+| ⚪ **Later** | **Attachment / media scanning hooks** — when a Discord→game relay message contains an attachment or embed URL, run it through a configurable denylist of MIME types or domain patterns before relaying | 🟡 Med | M |
+| ⚪ **Later** | **Scheduled rule reminder broadcasts** — configurable list of server-rule reminder messages that are broadcast in-game and posted to a Discord channel on a schedule (daily/weekly, configurable times) | ⚪ Low | S |
+| ⚪ **Later** | **Announcement targeting by player segment** — `/announce` command accepts an optional `--segment` flag (e.g. `new`, `veteran`, `staff`) so broadcasts are delivered only to matching players in-game | 🟡 Med | M |
+
+---
+
+### Moderation / Enforcement
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Auto-tempban for repeated mute violations** — if a player accumulates N mutes within a rolling window, automatically escalate to a short temporary ban; configurable per window and ban duration | 🔴 High | M |
+| ⚪ **Later** | **Mute appeal queue** — dedicated ticket category (or Discord channel) for mute appeals, separate from ban appeals; includes mute context (reason, admin, duration) in the welcome embed and Approve/Deny buttons | 🔴 High | M |
+| ⚪ **Later** | **Warning forgiveness tokens** — `/warnpardon <player>` lets an authorized admin grant a one-time forgiveness that subtracts one warn from the escalation counter without using `/clearwarn`; logged with a pardon reason | 🟡 Med | S |
+| ⚪ **Later** | **Staff-only hidden warning categories** — warn categories tagged `internal` are recorded in the database and visible in `/bancheck` to staff tiers only; they do not appear in player-facing ban-kick messages or public embeds | 🟡 Med | S |
+| ⚪ **Later** | **Action taxonomy config** — declare a structured list of named offense categories in config (e.g. `toxicity`, `griefing`, `exploiting`, `spam`) that are shared across ban templates, escalation tiers, and chat-filter rules for consistent labeling | 🟡 Med | M |
+| ⚪ **Later** | **Session anomaly detection (rapid account switching)** — flag when multiple different EOS PUIDs share the same IP address in a short time window; post an alert embed to the admin channel with all matching PUIDs and session timestamps | 🔴 High | M |
+| ⚪ **Later** | **Per-world / per-mode moderation profiles** — named config profiles (e.g. `PvP`, `Creative`, `Event`) that override spam thresholds, AFK timeouts, and auto-action settings; activated via in-game or Discord command | 🔴 High | M |
+| ⚪ **Later** | **Cross-server warning sync** — when a warning is issued on one server, replicate it to all peers via the existing `PeerWebSocketUrls` channel so escalation ladders advance consistently across the network | 🔴 High | M |
+| ⚪ **Later** | **Shared moderator notes across servers** — notes added via `/note` are broadcast to all peer servers and stored locally so any server's staff can read the full note history for a player | 🟡 Med | M |
+
+---
+
+### Trust & Verification
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Gradual permission unlock by trust level** — as a player's trust level increases (from onboarding trust tiers), additional in-game capabilities (e.g. URL posting, faster chat rate) unlock automatically without staff intervention | 🔴 High | M |
+| ⚪ **Later** | **Manual verification queue with SLA timers** — unverified players are held in a pending-join state; staff see a queue embed with waiting players and time-in-queue; SLA breach pings the on-call role | 🔴 High | M |
+
+---
+
+### Tickets & Appeals
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **"Known issue" auto-responder in tickets** — config-defined keyword patterns that, when matched in a new ticket's opening message, auto-post a pre-written response embed inside the ticket channel explaining the known issue and ETA | 🔴 High | S |
+| ⚪ **Later** | **Appeal evidence checklist enforcement** — configurable checklist of required evidence fields (e.g. "ban reason acknowledged", "evidence URL provided") shown in the appeal ticket; appeal cannot be submitted as Approve until all boxes are checked by staff | 🟡 Med | M |
+| ⚪ **Later** | **Appeal outcome consistency checker** — weekly automated scan that compares recent appeal decisions (Approve/Deny) for the same offense category and ban duration; posts a digest to a staff channel flagging statistically inconsistent outcomes | 🟡 Med | M |
+| ⚪ **Later** | **Ban reason normalization tool** — `/normalizereason <ban_id>` suggests a standardized reason string based on the configured action taxonomy; staff confirm and the original reason is preserved in an edit-history entry | 🟡 Med | M |
+
+---
+
+### Server Rules & Onboarding
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Server rules versioning + acceptance log** — rules are stored as versioned entries in a config file; when the version increments, returning players are prompted in-game to re-accept; acceptance timestamps are audit-logged per player per version | 🔴 High | M |
+
+---
+
+### Whitelist & Access Control
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Whitelist capacity forecasting** — periodic job that projects days until `MaxSlots` is reached based on recent add-rate; posts a forecast embed to the admin channel when capacity is projected to be full within N days | 🟡 Med | S |
+| ⚪ **Later** | **Join queue priority ordering** — when the join queue is active, players in higher whitelist tiers or with lower risk scores are admitted ahead of those in lower tiers, rather than strict FIFO | 🟡 Med | M |
+| ⚪ **Later** | **Queue abuse detection** — flag players who join and immediately disconnect more than N times within T minutes while in the join queue; auto-remove them from the queue and post an alert embed | 🔴 High | S |
+| ⚪ **Later** | **Live join queue status panel** — a Discord embed in a configured channel that auto-updates with current queue position count, estimated wait time, and next-to-admit player tier; refreshed on each queue change | 🟡 Med | M |
+
+---
+
+### REST API & Security
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Scoped API keys with rotation** — support multiple `RestApiKey` entries each scoped to a subset of endpoints (e.g. read-only key vs. full-write key); keys can be rotated via a config reload without a server restart | 🔴 High | M |
+| ⚪ **Later** | **IP-based API rate limiting** — enforce a configurable request-per-minute cap per calling IP address on the REST API, independent of the existing per-admin ban rate limit; excess requests receive HTTP 429 | 🔴 High | M |
+| ⚪ **Later** | **Command abuse detection** — track in-game and Discord panel command invocation rates per user; if any user exceeds a configurable threshold across any command family within a short window, auto-suspend their panel access and post an alert | 🔴 High | M |
+| ⚪ **Later** | **Secret redaction in exported logs** — when any audit record or export bundle is generated, automatically scan for and redact strings matching configured secret patterns (API keys, tokens, IP addresses) before writing to file or posting to Discord | 🔴 High | M |
+| ⚪ **Later** | **Signed moderation export bundles** — `/export` and `/caseexport` outputs include an HMAC signature computed from the RestApiKey so recipients can verify the bundle has not been tampered with after export | 🟡 Med | M |
+| ⚪ **Later** | **Compliance export mode** — `/complianceexport <player>` generates a structured, audit-ready package (all bans, warns, notes, sessions, appeals, chat snippets) formatted for legal / compliance review requests; access gated to the admin tier | 🔴 High | M |
+
+---
+
+### Analytics & Reporting
+
+| Status | Feature | Impact | Complexity |
+|--------|---------|--------|------------|
+| ⚪ **Later** | **Incident timeline auto-generation** — when a raid-mode or mass-incident event ends, automatically compile a timestamped timeline embed (join spike, rule hits, actions taken, resolution) and post it to the admin channel | 🔴 High | M |
+| ⚪ **Later** | **Predictive high-risk period alerts** — use historical hourly violation counts (stored in the audit log) to forecast the next likely high-violation window; post an advance-warning embed to the staff channel before it begins | 🟡 Med | L |
