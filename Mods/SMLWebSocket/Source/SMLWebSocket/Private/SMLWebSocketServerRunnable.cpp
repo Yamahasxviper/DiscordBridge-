@@ -160,10 +160,37 @@ uint32 FSMLWebSocketServerRunnable::Run()
                 if (Pending == 0) continue;
 
                 const int32 OldLen = C.RecvBuffer.Num();
-                C.RecvBuffer.SetNum(OldLen + static_cast<int32>(Pending));
-                int32 Read = 0;
-                if (!C.Socket->Recv(C.RecvBuffer.GetData() + OldLen, static_cast<int32>(Pending), Read))
+                if (Pending > static_cast<uint32>(MAX_int32))
                 {
+                    UE_LOG(LogWSServer, Error,
+                        TEXT("WSServer: pending read too large (%u bytes) – dropping client"),
+                        Pending);
+                    ToRemove.Add(KV.Key);
+                    continue;
+                }
+
+                const int32 Pending32 = static_cast<int32>(Pending);
+                if (OldLen > (MAX_int32 - Pending32))
+                {
+                    UE_LOG(LogWSServer, Error,
+                        TEXT("WSServer: receive buffer growth overflow (old=%d, pending=%u) – dropping client"),
+                        OldLen, Pending);
+                    ToRemove.Add(KV.Key);
+                    continue;
+                }
+
+                C.RecvBuffer.SetNum(OldLen + Pending32);
+                int32 Read = 0;
+                if (!C.Socket->Recv(C.RecvBuffer.GetData() + OldLen, Pending32, Read))
+                {
+                    ToRemove.Add(KV.Key);
+                    continue;
+                }
+                if (Read < 0 || Read > Pending32)
+                {
+                    UE_LOG(LogWSServer, Error,
+                        TEXT("WSServer: socket returned invalid read size (%d, pending=%d) – dropping client"),
+                        Read, Pending32);
                     ToRemove.Add(KV.Key);
                     continue;
                 }
