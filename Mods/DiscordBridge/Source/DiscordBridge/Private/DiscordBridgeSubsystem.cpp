@@ -10,6 +10,7 @@
 #include "PlayerWarningRegistry.h"
 
 #include "Player/SMLRemoteCallObject.h"
+#include "ModLoading/ModLoadingLibrary.h"
 #include "FGPlayerController.h"
 
 #include "Dom/JsonObject.h"
@@ -4771,8 +4772,18 @@ bAllBound = false;
 // Bind to UMuteRegistry delegates when bNotifyMuteEvents=true.
 if (!bBoundMuteEvents && Config.bNotifyMuteEvents)
 {
-UWorld* W = GetWorld();
-UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
+UGameInstance* GI = GetGameInstance();
+UModLoadingLibrary* ModLib = GI ? GI->GetSubsystem<UModLoadingLibrary>() : nullptr;
+if (ModLib && !ModLib->IsModLoaded(TEXT("BanChatCommands")))
+{
+// BanChatCommands is not installed — UMuteRegistry will never become available.
+// Mark as done so the deferred-bind ticker is not held open indefinitely.
+bBoundMuteEvents = true;
+UE_LOG(LogDiscordBridge, Log,
+TEXT("DiscordBridge: BanChatCommands not installed — mute event notifications disabled."));
+}
+else
+{
 UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr;
 if (MuteReg)
 {
@@ -4791,7 +4802,8 @@ UE_LOG(LogDiscordBridge, Log, TEXT("DiscordBridge: Bound to UMuteRegistry mute-e
 }
 else
 {
-bAllBound = false; // keep ticking until BanChatCommands loads
+bAllBound = false; // BanChatCommands installed but UMuteRegistry not yet ready — keep ticking
+}
 }
 }
 
