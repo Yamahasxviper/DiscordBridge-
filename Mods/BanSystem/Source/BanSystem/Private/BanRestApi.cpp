@@ -1155,13 +1155,17 @@ void UBanRestApi::RegisterRoutes()
                 return A.Timestamp > B.Timestamp;
             });
 
-            const int32 Total  = Entries.Num();
-            const int32 Offset = (Page - 1) * Limit;
-            const int32 End    = FMath::Min(Offset + Limit, Total);
+            const int32 Total     = Entries.Num();
+            // Use int64 arithmetic to avoid int32 overflow when Page is very large.
+            const int64 Offset64  = static_cast<int64>(Page - 1) * static_cast<int64>(Limit);
+            const int64 End64     = FMath::Min(Offset64 + static_cast<int64>(Limit), static_cast<int64>(Total));
 
             TArray<TSharedPtr<FJsonValue>> Arr;
-            if (Offset < Total)
+            if (Offset64 < static_cast<int64>(Total))
             {
+                // Offset64 is in [0, Total-1] here so both casts to int32 are safe.
+                const int32 Offset = static_cast<int32>(Offset64);
+                const int32 End    = static_cast<int32>(End64);
                 Arr.Reserve(End - Offset);
                 for (int32 i = Offset; i < End; ++i)
                     Arr.Add(MakeShared<FJsonValueObject>(BanJson::AuditToJson(Entries[i])));
