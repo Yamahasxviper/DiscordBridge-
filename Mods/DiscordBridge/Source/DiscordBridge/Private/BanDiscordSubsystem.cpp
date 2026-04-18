@@ -28,6 +28,7 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
+#include "ModLoading/ModLoadingLibrary.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal namespace helpers
@@ -4156,10 +4157,22 @@ TSharedPtr<FJsonObject> UBanDiscordSubsystem::BuildPanelData() const
 	// ISO 8601 timestamp shown in the embed footer.
 	Embed->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
 
+	// Look up the installed DiscordBridge mod version to display in the footer.
+	FString DiscordBridgeVersion;
+	if (GI)
+	{
+		if (UModLoadingLibrary* ModLib = GI->GetSubsystem<UModLoadingLibrary>())
+		{
+			FModInfo ModInfo;
+			if (ModLib->GetLoadedModInfo(TEXT("DiscordBridge"), ModInfo))
+				DiscordBridgeVersion = FString::Printf(TEXT(" v%s"), *ModInfo.Version.ToString());
+		}
+	}
+
 	TSharedPtr<FJsonObject> Footer = MakeShared<FJsonObject>();
 	const FString FooterText = ServerName.IsEmpty()
-		? TEXT("DiscordBridge Admin Panel")
-		: FString::Printf(TEXT("DiscordBridge Admin Panel · %s"), *ServerName);
+		? FString::Printf(TEXT("DiscordBridge%s Admin Panel"), *DiscordBridgeVersion)
+		: FString::Printf(TEXT("DiscordBridge%s Admin Panel · %s"), *DiscordBridgeVersion, *ServerName);
 	Footer->SetStringField(TEXT("text"), FooterText);
 	Embed->SetObjectField(TEXT("footer"), Footer);
 
