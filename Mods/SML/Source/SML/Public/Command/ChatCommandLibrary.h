@@ -1,5 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "FGPlayerController.h"
 #include "Command/ChatCommandInstance.h"
 #include "Subsystem/ModSubsystem.h"
 #include "ChatCommandLibrary.generated.h"
