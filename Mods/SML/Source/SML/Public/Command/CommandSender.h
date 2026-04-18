@@ -1,6 +1,5 @@
 #pragma once
 #include "CoreMinimal.h"
-#include "FGPlayerController.h"
 #include "CommandSender.generated.h"
 
 /**
