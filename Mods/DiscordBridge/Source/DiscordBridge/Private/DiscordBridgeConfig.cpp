@@ -1174,11 +1174,8 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				PatchLine(TEXT("PlayerLeaveMessage"),            Config.PlayerLeaveMessage);
 				PatchLine(TEXT("PlayerTimeoutMessage"),          Config.PlayerTimeoutMessage);
 				PatchLine(TEXT("UseEmbedsForPlayerEvents"),      Config.bUseEmbedsForPlayerEvents ? TEXT("True") : TEXT("False"));
-				PatchLine(TEXT("PlayersCommandPrefix"),          Config.PlayersCommandPrefix);
 				PatchLine(TEXT("PlayersCommandChannelId"),       Config.PlayersCommandChannelId);
 				PatchLine(TEXT("DiscordInviteUrl"),              Config.DiscordInviteUrl);
-				PatchLine(TEXT("StatsCommandPrefix"),            Config.StatsCommandPrefix);
-				PatchLine(TEXT("PlayerStatsCommandPrefix"),      Config.PlayerStatsCommandPrefix);
 				PatchLine(TEXT("PhaseEventsChannelId"),          Config.PhaseEventsChannelId);
 				PatchLine(TEXT("SchematicEventsChannelId"),      Config.SchematicEventsChannelId);
 				PatchLine(TEXT("BanEventsChannelId"),            Config.BanEventsChannelId);

@@ -1863,7 +1863,6 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 		Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
 			WarnResult, /*bEphemeral=*/false);
 	}
-	}
 	else if (ModalCustomId.StartsWith(TEXT("ticket_modal:cr_")))
 	{
 		const int32 ReasonIndex =
@@ -2721,7 +2720,7 @@ void UTicketSubsystem::HandleSlashTicketCommand(const TSharedPtr<FJsonObject>& D
 
 	// Copy the member object so role checks and name extraction work.
 	if (MemberPtr)
-		SynthMsg->SetObjectField(TEXT("member"), (*MemberPtr)->IsValid() ? MakeShared<FJsonObject>(**MemberPtr) : MakeShared<FJsonObject>());
+		SynthMsg->SetObjectField(TEXT("member"), (*MemberPtr).IsValid() ? MakeShared<FJsonObject>(**MemberPtr) : MakeShared<FJsonObject>());
 
 	// Copy author object for name extraction fallback.
 	const TSharedPtr<FJsonObject>* AuthorPtr = nullptr;

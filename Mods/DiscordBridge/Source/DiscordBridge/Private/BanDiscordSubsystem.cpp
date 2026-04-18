@@ -869,7 +869,7 @@ void UBanDiscordSubsystem::HandleBanCheckCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/ban check <PUID|name>`");
+			TEXT("Usage: `/ban check <PUID|name>`"));
 		return;
 	}
 
@@ -1452,7 +1452,7 @@ void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/ban byname <name_substring> [reason]`");
+			TEXT("Usage: `/ban byname <name_substring> [reason]`"));
 		return;
 	}
 
@@ -1580,7 +1580,7 @@ void UBanDiscordSubsystem::HandleBanReasonCommand(const TArray<FString>& Args,
 	if (Args.Num() < 2)
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/ban reason <PUID|name> <new reason...>`");
+			TEXT("Usage: `/ban reason <PUID|name> <new reason...>`"));
 		return;
 	}
 
@@ -1699,7 +1699,7 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 	if (Args.Num() < 2)
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/ban extend <PUID|name> <minutes>`");
+			TEXT("Usage: `/ban extend <PUID|name> <minutes>`"));
 		return;
 	}
 
@@ -1767,7 +1767,7 @@ void UBanDiscordSubsystem::HandleDurationCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/ban duration <PUID|name>`");
+			TEXT("Usage: `/ban duration <PUID|name>`"));
 		return;
 	}
 
@@ -1828,7 +1828,7 @@ void UBanDiscordSubsystem::HandleWarningsCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/warn list <PUID|name>`");
+			TEXT("Usage: `/warn list <PUID|name>`"));
 		return;
 	}
 
@@ -1901,7 +1901,7 @@ void UBanDiscordSubsystem::HandleClearWarnsCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/warn clearall <PUID|name>`");
+			TEXT("Usage: `/warn clearall <PUID|name>`"));
 		return;
 	}
 
@@ -1995,7 +1995,7 @@ void UBanDiscordSubsystem::HandleNoteCommand(const TArray<FString>& Args,
 	if (Args.Num() < 2)
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/player note <PUID|name> <text...>`");
+			TEXT("Usage: `/player note <PUID|name> <text...>`"));
 		return;
 	}
 
@@ -2035,7 +2035,7 @@ void UBanDiscordSubsystem::HandleNotesCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/player notes <PUID|name>`");
+			TEXT("Usage: `/player notes <PUID|name>`"));
 		return;
 	}
 
@@ -2113,7 +2113,7 @@ void UBanDiscordSubsystem::HandleReasonCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/ban reason <UID>`");
+			TEXT("Usage: `/ban reason <UID>`"));
 		return;
 	}
 
@@ -2178,7 +2178,7 @@ void UBanDiscordSubsystem::HandleModBanCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/mod ban <PUID|name> [reason]`");
+			TEXT("Usage: `/mod ban <PUID|name> [reason]`"));
 		return;
 	}
 
@@ -2305,7 +2305,7 @@ void UBanDiscordSubsystem::HandleMuteCheckCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/mod mutecheck <PUID|name>`");
+			TEXT("Usage: `/mod mutecheck <PUID|name>`"));
 		return;
 	}
 
@@ -2483,7 +2483,7 @@ void UBanDiscordSubsystem::HandleMuteReasonCommand(const TArray<FString>& Args,
 	if (Args.Num() < 2)
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/mod mutereason <PUID|name> <new reason...>`");
+			TEXT("Usage: `/mod mutereason <PUID|name> <new reason...>`"));
 		return;
 	}
 
@@ -2605,7 +2605,7 @@ void UBanDiscordSubsystem::HandleStaffChatCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/mod staffchat <message...>`");
+			TEXT("Usage: `/mod staffchat <message...>`"));
 		return;
 	}
 
@@ -2870,7 +2870,7 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 		const FString AppealDiscordId = Entry.Uid.Mid(FCString::Strlen(TEXT("Discord:")));
 		if (!AppealDiscordId.IsEmpty())
 		{
-			if (UGameInstance* GI = GetGameInstance())
+			if (GI)
 			{
 				if (UTicketSubsystem* TicketSys = GI->GetSubsystem<UTicketSubsystem>())
 				{
@@ -2952,7 +2952,7 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 		const FString AppealDiscordId = Entry.Uid.Mid(FCString::Strlen(TEXT("Discord:")));
 		if (!AppealDiscordId.IsEmpty())
 		{
-			if (UGameInstance* GI = GetGameInstance())
+			if (GI)
 			{
 				if (UTicketSubsystem* TicketSys = GI->GetSubsystem<UTicketSubsystem>())
 				{
@@ -2982,7 +2982,7 @@ if (!CachedProvider) return;
 if (Args.IsEmpty())
 {
 Respond(ChannelId,
-TEXT("Usage: `/player playtime <player|PUID>`");
+TEXT("Usage: `/player playtime <player|PUID>`"));
 return;
 }
 
