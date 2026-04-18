@@ -6,6 +6,9 @@
 #include "Engine/GameInstance.h"
 #include "BanChatCommandsConfig.h"
 #include "BanDatabase.h"
+// Full definition required for Cast<> on the AFGPlayerController* returned by
+// UCommandSender::GetPlayer(); UE Cast<> static_asserts complete types (Casts.h:85).
+#include "FGPlayerController.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/OnlineReplStructs.h"
