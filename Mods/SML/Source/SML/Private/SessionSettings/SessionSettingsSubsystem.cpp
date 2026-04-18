@@ -39,14 +39,8 @@ void ASessionSettingsSubsystem::OnSessionSettingUpdated(const FString StrID, FVa
 		Multicast_SessionSettingUpdated(StrID, USessionSettingsManager::VariantToString(value));
 	} else {
 		// We're a client, so we only have our own player controller
-		AFGPlayerController* PlayerController = GetWorld()->GetFirstPlayerController<AFGPlayerController>();
-		if (!PlayerController) {
-			return;
-		}
+		AFGPlayerController* PlayerController = Cast<AFGPlayerController>(GetWorld()->GetFirstPlayerController());
 		USMLSessionSettingsRemoteCallObject* RCO = PlayerController->GetRemoteCallObjectOfClass<USMLSessionSettingsRemoteCallObject>();
-		if (!RCO) {
-			return;
-		}
 		RCO->Server_RequestSessionSettingUpdate(StrID, USessionSettingsManager::VariantToString(value));
 	}
 }
