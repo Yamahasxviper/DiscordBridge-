@@ -2757,6 +2757,17 @@ void UTicketSubsystem::HandleSlashTicketCommand(const TSharedPtr<FJsonObject>& D
 	IDiscordBridgeProvider* Bridge = GetBridge();
 	if (!Bridge) return;
 
+	FString InteractionToken;
+	DataObj->TryGetStringField(TEXT("token"), InteractionToken);
+
+	const auto SendSlashFollowUp = [&](const FString& Message)
+	{
+		if (!InteractionToken.IsEmpty())
+		{
+			Bridge->FollowUpInteraction(InteractionToken, Message, /*bEphemeral=*/true);
+		}
+	};
+
 	// Synthesize an internal "!ticket-<subcmd> <args>" routing string (never
 	// shown to users) and construct a
 	// minimal message JSON that OnRawDiscordMessage can process directly.
@@ -2808,7 +2819,10 @@ void UTicketSubsystem::HandleSlashTicketCommand(const TSharedPtr<FJsonObject>& D
 	else if (SubCmdName == TEXT("merge"))
 		SynthContent = FString::Printf(TEXT("!ticket-merge %s"), *GetOpt(TEXT("ticket_id")));
 	else
+	{
+		SendSlashFollowUp(TEXT(":warning: Unknown `/ticket` subcommand."));
 		return;
+	}
 
 	// Build a synthetic MESSAGE_CREATE JSON and route through OnRawDiscordMessage.
 	TSharedPtr<FJsonObject> SynthMsg = MakeShared<FJsonObject>();
@@ -2832,6 +2846,9 @@ void UTicketSubsystem::HandleSlashTicketCommand(const TSharedPtr<FJsonObject>& D
 	}
 
 	OnRawDiscordMessage(SynthMsg);
+	SendSlashFollowUp(FString::Printf(
+		TEXT(":white_check_mark: Processing `/ticket %s` command."),
+		*SubCmdName));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
