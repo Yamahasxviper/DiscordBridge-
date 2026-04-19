@@ -568,6 +568,19 @@ void UTicketSubsystem::OnInteractionReceived(const TSharedPtr<FJsonObject>& Data
 			}
 		}
 	}
+	bool bMemberHasAdministratorPermission = false;
+	if (MemberPtr && (*MemberPtr).IsValid())
+	{
+		FString MemberPermissions;
+		if ((*MemberPtr)->TryGetStringField(TEXT("permissions"), MemberPermissions) &&
+		    !MemberPermissions.IsEmpty())
+		{
+			constexpr uint64 AdministratorPermissionBit = (1ull << 3); // Discord ADMINISTRATOR bit
+			const uint64 ParsedPermissions = FCString::Strtoui64(*MemberPermissions, nullptr, 10);
+			bMemberHasAdministratorPermission =
+				((ParsedPermissions & AdministratorPermissionBit) != 0ull);
+		}
+	}
 
 	FString SourceChannelId;
 	DataObj->TryGetStringField(TEXT("channel_id"), SourceChannelId);
@@ -582,7 +595,8 @@ void UTicketSubsystem::OnInteractionReceived(const TSharedPtr<FJsonObject>& Data
 	{
 		HandleTicketButtonInteraction(InteractionId, InteractionToken, CustomId,
 		                              DiscordUserId, DiscordUsername,
-		                              MemberRoles, SourceChannelId);
+		                              MemberRoles, bMemberHasAdministratorPermission,
+		                              SourceChannelId);
 	}
 }
 
@@ -597,6 +611,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 	const FString& DiscordUserId,
 	const FString& DiscordUsername,
 	const TArray<FString>& MemberRoles,
+	bool bMemberHasAdministratorPermission,
 	const FString& SourceChannelId)
 {
 	UE_LOG(LogTicketSystem, Log,
@@ -608,6 +623,23 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 	{
 		return;
 	}
+
+	const auto IsStaffAuthorized = [&]() -> bool
+	{
+		if (bMemberHasAdministratorPermission)
+		{
+			return true;
+		}
+		if (!Config.TicketNotifyRoleId.IsEmpty() && MemberRoles.Contains(Config.TicketNotifyRoleId))
+		{
+			return true;
+		}
+		if (!Bridge->GetGuildOwnerId().IsEmpty() && DiscordUserId == Bridge->GetGuildOwnerId())
+		{
+			return true;
+		}
+		return false;
+	};
 
 	// ── Reopen-ticket button ──────────────────────────────────────────────────
 	if (CustomId.StartsWith(TEXT("ticket_reopen:")))
@@ -1392,12 +1424,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		// Staff-only: ephemeral ban / warning / appeal summary for the ticket opener.
 		const FString CheckOpenerId = CustomId.Mid(FCString::Strlen(TEXT("ticket_bancheck:")));
 
-		bool bIsAdmin = false;
-		if (!Config.TicketNotifyRoleId.IsEmpty())
-			bIsAdmin = MemberRoles.Contains(Config.TicketNotifyRoleId);
-		if (!bIsAdmin && !Bridge->GetGuildOwnerId().IsEmpty())
-			bIsAdmin = (DiscordUserId == Bridge->GetGuildOwnerId());
-		if (!bIsAdmin)
+		if (!IsStaffAuthorized())
 		{
 			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
 				TEXT(":no_entry: Only staff with the support role can use the Ban-Check button."),
@@ -1469,12 +1496,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 	{
 		// ── Lift Mute button ───────────────────────────────────────────────────
 		// Staff-only: shows a modal asking for the player's EOS UID to unmute.
-		bool bIsAdminLift = false;
-		if (!Config.TicketNotifyRoleId.IsEmpty())
-			bIsAdminLift = MemberRoles.Contains(Config.TicketNotifyRoleId);
-		if (!bIsAdminLift && !Bridge->GetGuildOwnerId().IsEmpty())
-			bIsAdminLift = (DiscordUserId == Bridge->GetGuildOwnerId());
-		if (!bIsAdminLift)
+		if (!IsStaffAuthorized())
 		{
 			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
 				TEXT(":no_entry: Only staff with the support role can lift mutes."), true);
@@ -1500,10 +1522,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		// ── Deny Mute Appeal button ────────────────────────────────────────────
 		const FString MuteOpenerId = CustomId.Mid(FCString::Strlen(TEXT("ticket_deny_mute:")));
 
-		bool bIsAdminDenyMute = false;
-		if (!Config.TicketNotifyRoleId.IsEmpty())
-			bIsAdminDenyMute = MemberRoles.Contains(Config.TicketNotifyRoleId);
-		if (!bIsAdminDenyMute)
+		if (!IsStaffAuthorized())
 		{
 			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
 				TEXT(":no_entry: Only staff with the support role can deny mute appeals."), true);
