@@ -3,7 +3,6 @@
 #pragma once
 
 #include "FactoryGame.h"
-#include "FGPlayerController.h"
 #include "FGPowerCircuit.h"
 #include "FGSubsystem.h"
 #include "FGSaveInterface.h"

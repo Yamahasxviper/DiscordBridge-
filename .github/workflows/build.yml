@@ -66,23 +66,3 @@ jobs:
         with:
           name: sml
           path: C:\\SML\\SML\\Saved\\ArchivedPlugins\\SML\\*.zip
-
-      - name: Package SMLWebSocket Mod
-        run: .\\ue\\Engine\\Build\\BatchFiles\\RunUAT.bat -ScriptsForProject="C:\\SML\\SML\\FactoryGame.uproject" PackagePlugin -Project="C:\\SML\\SML\\FactoryGame.uproject" -dlcname=SMLWebSocket -merge -build -server -clientconfig=Shipping -serverconfig=Shipping -platform=Win64 -serverplatform=Win64+Linux -nocompileeditor -installed
-
-      - name: Archive SMLWebSocket artifact
-        uses: actions/upload-artifact@v4
-        if: ${{ github.event_name == 'push' }}
-        with:
-          name: smlwebsocket
-          path: C:\\SML\\SML\\Saved\\ArchivedPlugins\\SMLWebSocket\\*.zip
-
-      - name: Package DiscordBridge Mod
-        run: .\\ue\\Engine\\Build\\BatchFiles\\RunUAT.bat -ScriptsForProject="C:\\SML\\SML\\FactoryGame.uproject" PackagePlugin -Project="C:\\SML\\SML\\FactoryGame.uproject" -dlcname=DiscordBridge -merge -build -server -clientconfig=Shipping -serverconfig=Shipping -platform=Win64 -serverplatform=Win64+Linux -nocompileeditor -installed
-
-      - name: Archive DiscordBridge artifact
-        uses: actions/upload-artifact@v4
-        if: ${{ github.event_name == 'push' }}
-        with:
-          name: discordbridge
-          path: C:\\SML\\SML\\Saved\\ArchivedPlugins\\DiscordBridge\\*.zip

@@ -1,7 +1,5 @@
 // Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
-#pragma warning disable CS0162 // Unreachable code detected - intentional platform guards commented out for modding
-
 using UnrealBuildTool;
 using System;
 using System.Linq;
