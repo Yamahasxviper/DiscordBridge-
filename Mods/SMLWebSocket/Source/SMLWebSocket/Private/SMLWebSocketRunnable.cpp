@@ -1323,6 +1323,23 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 	}
 	case WsOpcode::Continuation:
 	{
+		// Guard against the accumulated fragmented message exceeding TArray's int32
+		// size limit.  Each individual fragment is already bounded by EffectiveMax,
+		// but nothing previously prevented many fragments from summing to 2^31 bytes
+		// (e.g. 32 × 64 MB = exactly 2,147,483,648), which triggers the fatal
+		// "Trying to resize TArray to an invalid size" crash.
+		{
+			const int64 NewTotalSize = static_cast<int64>(FragmentBuffer.Num()) + static_cast<int64>(Payload.Num());
+			if (NewTotalSize > static_cast<int64>(MAX_int32) || NewTotalSize > static_cast<int64>(EffectiveMax))
+			{
+				UE_LOG(LogSMLWebSocket, Error,
+				       TEXT("SMLWebSocket: Fragmented message accumulated size (%lld bytes) exceeds limit – closing connection"),
+				       NewTotalSize);
+				FragmentBuffer.Empty();
+				bFragmentIsBinary = false;
+				return false;
+			}
+		}
 		FragmentBuffer.Append(Payload);
 		if (bFin)
 		{
