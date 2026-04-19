@@ -103,14 +103,7 @@ bool UPlayerNoteRegistry::DeleteNote(int64 Id)
 
 FString UPlayerNoteRegistry::GetRegistryPath() const
 {
-    const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
-    FString BaseDir;
-    if (Cfg && !Cfg->DatabasePath.IsEmpty())
-        BaseDir = FPaths::GetPath(Cfg->DatabasePath);
-    else
-        BaseDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("BanSystem"));
-
-    return FPaths::Combine(BaseDir, TEXT("notes.json"));
+    return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("BanChatCommands"), TEXT("notes.json"));
 }
 
 void UPlayerNoteRegistry::LoadFromFile()
@@ -120,7 +113,18 @@ void UPlayerNoteRegistry::LoadFromFile()
 
     FString RawJson;
     if (!FFileHelper::LoadFileToString(RawJson, *FilePath))
-        return;
+    {
+        // Backward compatibility: legacy location under Saved/BanSystem/.
+        const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+        const FString LegacyBaseDir = (Cfg && !Cfg->DatabasePath.IsEmpty())
+            ? FPaths::GetPath(Cfg->DatabasePath)
+            : FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("BanSystem"));
+        const FString LegacyPath = FPaths::Combine(LegacyBaseDir, TEXT("notes.json"));
+        if (LegacyPath == FilePath || !FFileHelper::LoadFileToString(RawJson, *LegacyPath))
+        {
+            return;
+        }
+    }
 
     TSharedPtr<FJsonObject> Root;
     TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(RawJson);

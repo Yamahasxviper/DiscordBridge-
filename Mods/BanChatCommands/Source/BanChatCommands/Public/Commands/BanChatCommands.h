@@ -888,7 +888,7 @@ struct BANCHATCOMMANDS_API FPlayerNoteEntry
  * UPlayerNoteRegistry
  *
  * GameInstance subsystem that stores private admin notes about players.
- * Persists notes to notes.json (same directory as bans.json).
+ * Persists notes to Saved/BanChatCommands/notes.json.
  * Notes are NOT shown to players and do NOT count toward warning thresholds.
  *
  * Thread-safe: all public methods acquire the internal Mutex.

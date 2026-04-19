@@ -77,7 +77,7 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FOnPlayerUnmutedDelegate,
  * UMuteRegistry
  *
  * GameInstance subsystem that tracks in-game chat mutes.
- * Persists state to mutes.json (same directory as bans.json) so mutes
+ * Persists state to Saved/BanChatCommands/mutes.json so mutes
  * survive server restarts.  Timed mutes auto-expire via TickExpiry().
  *
  * Thread-safe: all public methods acquire the internal Mutex.

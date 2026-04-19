@@ -23,6 +23,33 @@
 
 DEFINE_LOG_CATEGORY(LogTicketSystem);
 
+namespace
+{
+	FString GetTicketSystemDataDir()
+	{
+		return FPaths::ProjectSavedDir() / TEXT("DiscordBridge/TicketSystem");
+	}
+
+	FString GetLegacyTicketSystemDataDir()
+	{
+		return FPaths::ProjectSavedDir() / TEXT("Config/TicketSystem");
+	}
+
+	bool LoadTicketSystemFileWithLegacyFallback(
+		const FString& CurrentPath,
+		const FString& LegacyFileName,
+		FString& OutContent)
+	{
+		if (FFileHelper::LoadFileToString(OutContent, *CurrentPath))
+		{
+			return true;
+		}
+
+		const FString LegacyPath = GetLegacyTicketSystemDataDir() / LegacyFileName;
+		return FFileHelper::LoadFileToString(OutContent, *LegacyPath);
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // USubsystem lifetime
 // ─────────────────────────────────────────────────────────────────────────────
@@ -875,7 +902,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 			const FString StatsPath = GetStatsFilePath();
 			FString StatsJson;
 			TSharedPtr<FJsonObject> Stats = MakeShared<FJsonObject>();
-			if (FFileHelper::LoadFileToString(StatsJson, *StatsPath))
+			if (LoadTicketSystemFileWithLegacyFallback(StatsPath, TEXT("TicketStats.json"), StatsJson))
 			{
 				TSharedRef<TJsonReader<>> SR = TJsonReaderFactory<>::Create(StatsJson);
 				TSharedPtr<FJsonObject> Loaded;
@@ -3201,7 +3228,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		const FString StatsPath = GetStatsFilePath();
 		FString StatsJson;
 		TSharedPtr<FJsonObject> Stats = MakeShared<FJsonObject>();
-		if (FFileHelper::LoadFileToString(StatsJson, *StatsPath))
+		if (LoadTicketSystemFileWithLegacyFallback(StatsPath, TEXT("TicketStats.json"), StatsJson))
 		{
 			TSharedRef<TJsonReader<>> SR = TJsonReaderFactory<>::Create(StatsJson);
 			TSharedPtr<FJsonObject> Loaded;
@@ -3264,7 +3291,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		const FString StatsPathRpt = GetStatsFilePath();
 		FString StatsJsonRpt;
 		TSharedPtr<FJsonObject> StatsRpt = MakeShared<FJsonObject>();
-		if (FFileHelper::LoadFileToString(StatsJsonRpt, *StatsPathRpt))
+		if (LoadTicketSystemFileWithLegacyFallback(StatsPathRpt, TEXT("TicketStats.json"), StatsJsonRpt))
 		{
 			TSharedRef<TJsonReader<>> SR2 = TJsonReaderFactory<>::Create(StatsJsonRpt);
 			TSharedPtr<FJsonObject> Loaded2;
@@ -3767,7 +3794,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 void UTicketSubsystem::SaveTicketState() const
 {
 	// Build the directory path and ensure it exists.
-	const FString StateDir  = FPaths::ProjectSavedDir() / TEXT("Config/TicketSystem");
+	const FString StateDir  = GetTicketSystemDataDir();
 	const FString StatePath = StateDir / TEXT("ActiveTickets.json");
 
 	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
@@ -3883,11 +3910,9 @@ void UTicketSubsystem::SaveTicketState() const
 
 void UTicketSubsystem::LoadTicketState()
 {
-	const FString StatePath =
-		FPaths::ProjectSavedDir() / TEXT("Config/TicketSystem/ActiveTickets.json");
-
 	FString JsonContent;
-	if (!FFileHelper::LoadFileToString(JsonContent, *StatePath))
+	const FString StatePath = GetTicketSystemDataDir() / TEXT("ActiveTickets.json");
+	if (!LoadTicketSystemFileWithLegacyFallback(StatePath, TEXT("ActiveTickets.json"), JsonContent))
 	{
 		// No state file is fine – this is a clean first run.
 		return;
@@ -4073,7 +4098,7 @@ void UTicketSubsystem::LoadTicketState()
 
 FString UTicketSubsystem::GetStatsFilePath()
 {
-	return FPaths::ProjectSavedDir() / TEXT("Config/TicketSystem/TicketStats.json");
+	return GetTicketSystemDataDir() / TEXT("TicketStats.json");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4423,17 +4448,17 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 
 FString UTicketSubsystem::GetBlacklistFilePath()
 {
-return FPaths::ProjectSavedDir() / TEXT("Config/TicketSystem/TicketBlacklist.json");
+return GetTicketSystemDataDir() / TEXT("TicketBlacklist.json");
 }
 
 void UTicketSubsystem::LoadTicketBlacklist()
 {
 const FString Path = GetBlacklistFilePath();
 FString JsonContent;
-if (!FFileHelper::LoadFileToString(JsonContent, *Path))
+if (!LoadTicketSystemFileWithLegacyFallback(Path, TEXT("TicketBlacklist.json"), JsonContent))
 {
-// No file on first run is fine.
-return;
+	// No file on first run is fine.
+	return;
 }
 
 TSharedPtr<FJsonObject> Root;
