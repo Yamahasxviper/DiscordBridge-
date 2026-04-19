@@ -691,10 +691,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 	{
 		const FString ApproveOpenerId = CustomId.Mid(FCString::Strlen(TEXT("ticket_approve_wl:")));
 
-		bool bIsAdminApprove = false;
-		if (!Config.TicketNotifyRoleId.IsEmpty())
-			bIsAdminApprove = MemberRoles.Contains(Config.TicketNotifyRoleId);
-		if (!bIsAdminApprove)
+		if (!IsStaffAuthorized())
 		{
 			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
 				TEXT(":no_entry: Only admins with the support role can approve whitelist requests."),
@@ -761,10 +758,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 	{
 		const FString AppealOpenerId = CustomId.Mid(FCString::Strlen(TEXT("ticket_approve_ban:")));
 
-		bool bIsAdminApprove = false;
-		if (!Config.TicketNotifyRoleId.IsEmpty())
-			bIsAdminApprove = MemberRoles.Contains(Config.TicketNotifyRoleId);
-		if (!bIsAdminApprove)
+		if (!IsStaffAuthorized())
 		{
 			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
 				TEXT(":no_entry: Only staff with the support role can approve ban appeals."), true);
@@ -847,10 +841,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 	{
 		const FString AppealOpenerId = CustomId.Mid(FCString::Strlen(TEXT("ticket_deny_ban:")));
 
-		bool bIsAdminDeny = false;
-		if (!Config.TicketNotifyRoleId.IsEmpty())
-			bIsAdminDeny = MemberRoles.Contains(Config.TicketNotifyRoleId);
-		if (!bIsAdminDeny)
+		if (!IsStaffAuthorized())
 		{
 			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
 				TEXT(":no_entry: Only staff with the support role can deny ban appeals."), true);
@@ -970,12 +961,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 
 		// Authorisation: opener OR admin role OR guild owner.
 		const bool bIsOpener = (!DiscordUserId.IsEmpty() && DiscordUserId == OpenerUserId);
-		bool bIsAdmin = (!Bridge->GetGuildOwnerId().IsEmpty() &&
-		                  DiscordUserId == Bridge->GetGuildOwnerId());
-		if (!bIsAdmin && !Config.TicketNotifyRoleId.IsEmpty())
-		{
-			bIsAdmin = MemberRoles.Contains(Config.TicketNotifyRoleId);
-		}
+		const bool bIsAdmin = IsStaffAuthorized();
 
 		if (!bIsOpener && !bIsAdmin)
 		{
@@ -1549,12 +1535,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 	{
 		// ── Issue Warning button ───────────────────────────────────────────────
 		// Staff-only: shows a modal to issue a warning to a reported player.
-		bool bIsAdminWarn = false;
-		if (!Config.TicketNotifyRoleId.IsEmpty())
-			bIsAdminWarn = MemberRoles.Contains(Config.TicketNotifyRoleId);
-		if (!bIsAdminWarn && !Bridge->GetGuildOwnerId().IsEmpty())
-			bIsAdminWarn = (DiscordUserId == Bridge->GetGuildOwnerId());
-		if (!bIsAdminWarn)
+		if (!IsStaffAuthorized())
 		{
 			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
 				TEXT(":no_entry: Only staff with the support role can issue warnings."), true);
@@ -2756,23 +2737,6 @@ void UTicketSubsystem::HandleSlashTicketCommand(const TSharedPtr<FJsonObject>& D
 	}
 	if (SenderName.IsEmpty()) SenderName = TEXT("Staff");
 
-	// Check sender has TicketNotifyRoleId.
-	auto SenderHasNotifyRole = [&]() -> bool
-	{
-		if (Config.TicketNotifyRoleId.IsEmpty()) return false;
-		if (!MemberPtr) return false;
-		const TArray<TSharedPtr<FJsonValue>>* Roles = nullptr;
-		if (!(*MemberPtr)->TryGetArrayField(TEXT("roles"), Roles) || !Roles)
-			return false;
-		for (const TSharedPtr<FJsonValue>& R : *Roles)
-		{
-			FString RId;
-			if (R->TryGetString(RId) && RId == Config.TicketNotifyRoleId)
-				return true;
-		}
-		return false;
-	};
-
 	IDiscordBridgeProvider* Bridge = GetBridge();
 	if (!Bridge) return;
 
@@ -2866,13 +2830,58 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	MessageObj->TryGetStringField(TEXT("content"), Content);
 	Content.TrimStartAndEndInline();
 
-	// ── Verify sender has TicketNotifyRoleId (required for all ticket commands) ─
-	auto SenderHasNotifyRole = [&]() -> bool
+	IDiscordBridgeProvider* Bridge = GetBridge();
+
+	// ── Verify sender is staff (admin permission, support role, or guild owner) ─
+	auto SenderIsStaff = [&]() -> bool
 	{
-		if (Config.TicketNotifyRoleId.IsEmpty()) return false;
-		const TSharedPtr<FJsonObject>* MemberPtrLocal = nullptr;
-		if (!MessageObj->TryGetObjectField(TEXT("member"), MemberPtrLocal) || !MemberPtrLocal)
+		if (!Bridge)
+		{
 			return false;
+		}
+
+		const TSharedPtr<FJsonObject>* MemberPtrLocal = nullptr;
+		if (!MessageObj->TryGetObjectField(TEXT("member"), MemberPtrLocal) || !MemberPtrLocal || !(*MemberPtrLocal).IsValid())
+			return false;
+
+		FString SenderId;
+		const TSharedPtr<FJsonObject>* UserPtrLocal = nullptr;
+		if ((*MemberPtrLocal)->TryGetObjectField(TEXT("user"), UserPtrLocal) && UserPtrLocal)
+		{
+			(*UserPtrLocal)->TryGetStringField(TEXT("id"), SenderId);
+		}
+		if (SenderId.IsEmpty())
+		{
+			const TSharedPtr<FJsonObject>* AuthorPtrLocal = nullptr;
+			if (MessageObj->TryGetObjectField(TEXT("author"), AuthorPtrLocal) && AuthorPtrLocal)
+			{
+				(*AuthorPtrLocal)->TryGetStringField(TEXT("id"), SenderId);
+			}
+		}
+
+		FString MemberPermissions;
+		if ((*MemberPtrLocal)->TryGetStringField(TEXT("permissions"), MemberPermissions) &&
+		    !MemberPermissions.IsEmpty())
+		{
+			constexpr uint64 AdministratorPermissionBit = (1ull << 3); // Discord ADMINISTRATOR bit
+			const uint64 ParsedPermissions = FCString::Strtoui64(*MemberPermissions, nullptr, 10);
+			if ((ParsedPermissions & AdministratorPermissionBit) != 0ull)
+			{
+				return true;
+			}
+		}
+
+		if (!Bridge->GetGuildOwnerId().IsEmpty() && !SenderId.IsEmpty() &&
+		    SenderId == Bridge->GetGuildOwnerId())
+		{
+			return true;
+		}
+
+		if (Config.TicketNotifyRoleId.IsEmpty())
+		{
+			return false;
+		}
+
 		const TArray<TSharedPtr<FJsonValue>>* Roles = nullptr;
 		if (!(*MemberPtrLocal)->TryGetArrayField(TEXT("roles"), Roles) || !Roles)
 			return false;
@@ -2913,15 +2922,13 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		TicketChannelToLastActivity.Add(SourceChannelId, FDateTime::UtcNow());
 
 		// Track first staff reply for SLA monitoring.
-		if (SenderHasNotifyRole())
+		if (SenderIsStaff())
 		{
 			bool* bSlaReplied = TicketChannelStaffReplied.Find(SourceChannelId);
 			if (!bSlaReplied || !*bSlaReplied)
 				TicketChannelStaffReplied.Add(SourceChannelId, true);
 		}
 	}
-
-	IDiscordBridgeProvider* Bridge = GetBridge();
 
 	// All ticket commands are now handled exclusively via Discord slash commands
 	// (/ticket subcommand).  HandleSlashTicketCommand synthesises an internal
@@ -2946,7 +2953,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!TicketChannelToOpener.Contains(SourceChannelId))
 			return; // Silently ignore when not in a ticket channel.
 
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can assign tickets."));
@@ -2994,7 +3001,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	{
 		if (!Bridge) return;
 
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can view the ticket list."));
@@ -3104,7 +3111,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	{
 		if (!Bridge) return;
 		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can claim tickets."));
@@ -3128,7 +3135,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	{
 		if (!Bridge) return;
 		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can unclaim tickets."));
@@ -3147,7 +3154,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	{
 		if (!Bridge) return;
 		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can transfer tickets."));
@@ -3184,7 +3191,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	{
 		if (!Bridge) return;
 		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can set ticket priority."));
@@ -3238,7 +3245,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	if (Content.Equals(TEXT("!ticket-macros"), ESearchCase::IgnoreCase))
 	{
 		if (!Bridge) return;
-		if (!SenderHasNotifyRole()) return;
+		if (!SenderIsStaff()) return;
 		if (Config.TicketMacros.Num() == 0)
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
@@ -3261,7 +3268,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	{
 		if (!Bridge) return;
 		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can use macros."));
@@ -3308,7 +3315,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	if (Content.Equals(TEXT("!ticket-stats"), ESearchCase::IgnoreCase))
 	{
 		if (!Bridge) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can view ticket stats."));
@@ -3364,7 +3371,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	if (Content.StartsWith(TEXT("!ticket-report"), ESearchCase::IgnoreCase))
 	{
 		if (!Bridge) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can view ticket reports."));
@@ -3452,7 +3459,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	{
 		if (!Bridge) return;
 		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can remove tags."));
@@ -3482,7 +3489,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	{
 		if (!Bridge) return;
 		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can tag tickets."));
@@ -3509,7 +3516,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	{
 		if (!Bridge) return;
 		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can view ticket notes."));
@@ -3536,7 +3543,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	{
 		if (!Bridge) return;
 		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can add notes."));
@@ -3561,7 +3568,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	{
 		if (!Bridge) return;
 		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can escalate tickets."));
@@ -3600,7 +3607,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	{
 		if (!Bridge) return;
 		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can set reminders."));
@@ -3647,7 +3654,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	if (Content.Equals(TEXT("!ticket-blacklist-list"), ESearchCase::IgnoreCase))
 	{
 		if (!Bridge) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can view the blacklist."));
@@ -3673,7 +3680,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	if (Content.StartsWith(TEXT("!ticket-blacklist"), ESearchCase::IgnoreCase))
 	{
 		if (!Bridge) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can blacklist users."));
@@ -3714,7 +3721,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	if (Content.StartsWith(TEXT("!ticket-unblacklist"), ESearchCase::IgnoreCase))
 	{
 		if (!Bridge) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can unblacklist users."));
@@ -3759,7 +3766,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	{
 		if (!Bridge) return;
 		if (!TicketChannelToOpener.Contains(SourceChannelId)) return;
-		if (!SenderHasNotifyRole())
+		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
 				TEXT(":no_entry: Only members with the support role can merge tickets."));
@@ -3863,8 +3870,8 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		return;
 	}
 
-	// Verify the sender holds TicketNotifyRoleId.
-	if (!SenderHasNotifyRole())
+	// Verify the sender is staff (admin permission, support role, or guild owner).
+	if (!SenderIsStaff())
 	{
 		return;
 	}
