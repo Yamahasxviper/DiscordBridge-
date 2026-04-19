@@ -27,7 +27,7 @@ int32                          FWhitelistManager::MaxSlots  = 0;
 
 FString FWhitelistManager::GetFilePath()
 {
-return FPaths::ProjectSavedDir() / TEXT("ServerWhitelist.json");
+return FPaths::ProjectSavedDir() / TEXT("DiscordBridge") / TEXT("ServerWhitelist.json");
 }
 
 // ---------------------------------------------------------------------------
