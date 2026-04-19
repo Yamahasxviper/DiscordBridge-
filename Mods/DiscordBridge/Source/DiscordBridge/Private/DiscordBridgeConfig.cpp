@@ -1034,6 +1034,39 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		// Chat relay filter (array field – parse from raw backup content)
 		Config.ChatRelayBlocklist = ParseRawIniArray(BackupFileContent, TEXT("DiscordBridge"), TEXT("ChatRelayBlocklist"));
 
+		// Chat relay replacements (array field – parse from raw backup content)
+		{
+			TArray<FString> RawRepl = ParseRawIniArray(BackupFileContent, TEXT("DiscordBridge"), TEXT("ChatRelayBlocklistReplacements"));
+			for (const FString& Line : RawRepl)
+			{
+				FString Cleaned = Line.TrimStartAndEnd();
+				if (Cleaned.StartsWith(TEXT("("))) Cleaned = Cleaned.Mid(1);
+				if (Cleaned.EndsWith(TEXT(")")))   Cleaned = Cleaned.LeftChop(1);
+
+				FString PatStr, ReplStr;
+				auto ExtractQuoted = [&](const FString& Key, FString& Out) -> bool
+				{
+					const FString Search = Key + TEXT("=\"");
+					const int32   Idx    = Cleaned.Find(Search, ESearchCase::IgnoreCase);
+					if (Idx == INDEX_NONE) return false;
+					const int32 Start = Idx + Search.Len();
+					const int32 End   = Cleaned.Find(TEXT("\""), ESearchCase::IgnoreCase, ESearchDir::FromStart, Start);
+					if (End == INDEX_NONE) return false;
+					Out = Cleaned.Mid(Start, End - Start);
+					return true;
+				};
+
+				if (ExtractQuoted(TEXT("Pattern"),     PatStr) &&
+				    ExtractQuoted(TEXT("Replacement"), ReplStr))
+				{
+					FChatRelayReplacement R;
+					R.Pattern     = PatStr;
+					R.Replacement = ReplStr;
+					Config.ChatRelayBlocklistReplacements.Add(R);
+				}
+			}
+		}
+
 		// Bot commands
 		Config.PlayersCommandChannelId = GetRawStringOrDefault (BackupValues, TEXT("PlayersCommandChannelId"), Config.PlayersCommandChannelId);
 		Config.DiscordInviteUrl        = GetRawStringOrDefault (BackupValues, TEXT("DiscordInviteUrl"),        Config.DiscordInviteUrl);
@@ -1229,6 +1262,68 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						Rebuilt += TEXT("\n");
 					for (const FString& Item : Config.ChatRelayBlocklist)
 						Rebuilt += PlusPfx + Item + TEXT("\n");
+					PrimaryContent = MoveTemp(Rebuilt);
+				}
+
+				// ChatRelayBlocklistReplacements is a multi-value array field.
+				{
+					const FString PlainPfx = TEXT("ChatRelayBlocklistReplacements=");
+					const FString PlusPfx  = TEXT("+ChatRelayBlocklistReplacements=");
+					FString Rebuilt;
+					Rebuilt.Reserve(PrimaryContent.Len());
+					int32 Pos = 0;
+					while (Pos <= PrimaryContent.Len())
+					{
+						const int32 NL = PrimaryContent.Find(
+							TEXT("\n"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Pos);
+						const bool  bLast   = (NL == INDEX_NONE);
+						const int32 LineEnd = bLast ? PrimaryContent.Len() : NL;
+						const FString RawLine = PrimaryContent.Mid(Pos, LineEnd - Pos);
+						Pos = bLast ? (PrimaryContent.Len() + 1) : (NL + 1);
+						FString Cmp = RawLine;
+						if (!Cmp.IsEmpty() && Cmp[Cmp.Len()-1] == TEXT('\r'))
+							Cmp.RemoveAt(Cmp.Len()-1, 1, /*bAllowShrinking=*/false);
+						if (!Cmp.StartsWith(PlainPfx) && !Cmp.StartsWith(PlusPfx))
+						{
+							Rebuilt += RawLine;
+							if (!bLast) Rebuilt += TEXT("\n");
+						}
+					}
+					if (!Rebuilt.IsEmpty() && Rebuilt[Rebuilt.Len()-1] != TEXT('\n'))
+						Rebuilt += TEXT("\n");
+					for (const FChatRelayReplacement& R : Config.ChatRelayBlocklistReplacements)
+						Rebuilt += PlusPfx + TEXT("(Pattern=\"") + R.Pattern + TEXT("\",Replacement=\"") + R.Replacement + TEXT("\")\n");
+					PrimaryContent = MoveTemp(Rebuilt);
+				}
+
+				// DiscordRoleLabels is a multi-value array field.
+				{
+					const FString PlainPfx = TEXT("DiscordRoleLabels=");
+					const FString PlusPfx  = TEXT("+DiscordRoleLabels=");
+					FString Rebuilt;
+					Rebuilt.Reserve(PrimaryContent.Len());
+					int32 Pos = 0;
+					while (Pos <= PrimaryContent.Len())
+					{
+						const int32 NL = PrimaryContent.Find(
+							TEXT("\n"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Pos);
+						const bool  bLast   = (NL == INDEX_NONE);
+						const int32 LineEnd = bLast ? PrimaryContent.Len() : NL;
+						const FString RawLine = PrimaryContent.Mid(Pos, LineEnd - Pos);
+						Pos = bLast ? (PrimaryContent.Len() + 1) : (NL + 1);
+						FString Cmp = RawLine;
+						if (!Cmp.IsEmpty() && Cmp[Cmp.Len()-1] == TEXT('\r'))
+							Cmp.RemoveAt(Cmp.Len()-1, 1, /*bAllowShrinking=*/false);
+						if (!Cmp.StartsWith(PlainPfx) && !Cmp.StartsWith(PlusPfx))
+						{
+							Rebuilt += RawLine;
+							if (!bLast) Rebuilt += TEXT("\n");
+						}
+					}
+					if (!Rebuilt.IsEmpty() && Rebuilt[Rebuilt.Len()-1] != TEXT('\n'))
+						Rebuilt += TEXT("\n");
+					for (const FString& Entry : Config.DiscordRoleLabels)
+						Rebuilt += PlusPfx + Entry + TEXT("\n");
 					PrimaryContent = MoveTemp(Rebuilt);
 				}
 
