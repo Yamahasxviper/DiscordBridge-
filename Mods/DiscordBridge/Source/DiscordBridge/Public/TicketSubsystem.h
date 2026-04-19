@@ -135,6 +135,7 @@ private:
 	                                   const FString& DiscordUserId,
 	                                   const FString& DiscordUsername,
 	                                   const TArray<FString>& MemberRoles,
+	                                   bool bMemberHasAdministratorPermission,
 	                                   const FString& SourceChannelId);
 
 	/**
