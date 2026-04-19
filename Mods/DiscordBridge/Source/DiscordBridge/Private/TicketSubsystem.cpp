@@ -1273,10 +1273,41 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 				/*bEphemeral=*/true);
 			return;
 		}
-		ShowTicketReasonModal(InteractionId, InteractionToken,
+
+		FModalField AppealIgnField;
+		AppealIgnField.Label       = TEXT("In-Game Name");
+		AppealIgnField.CustomId    = TEXT("appeal_ign");
+		AppealIgnField.Placeholder = TEXT("Your in-game name when banned");
+		AppealIgnField.bRequired   = true;
+		AppealIgnField.MaxLength   = 80;
+
+		FModalField AppealUidField;
+		AppealUidField.Label       = TEXT("EOS Player UID");
+		AppealUidField.CustomId    = TEXT("appeal_eos_uid");
+		AppealUidField.Placeholder = TEXT("Run /whoami in-game, or use your ban notice");
+		AppealUidField.bRequired   = true;
+		AppealUidField.MinLength   = 4;
+		AppealUidField.MaxLength   = 100;
+
+		FModalField AppealIpField;
+		AppealIpField.Label       = TEXT("IP Address (if known)");
+		AppealIpField.CustomId    = TEXT("appeal_ip");
+		AppealIpField.Placeholder = TEXT("e.g. 123.45.67.89");
+		AppealIpField.bRequired   = false;
+		AppealIpField.MaxLength   = 64;
+
+		FModalField AppealReasonField;
+		AppealReasonField.Label       = TEXT("Reason for Unban");
+		AppealReasonField.CustomId    = TEXT("appeal_reason");
+		AppealReasonField.Placeholder = TEXT("Explain why your ban should be lifted");
+		AppealReasonField.bRequired   = true;
+		AppealReasonField.bParagraph  = true;
+		AppealReasonField.MaxLength   = 600;
+
+		Bridge->RespondWithMultiFieldModal(InteractionId, InteractionToken,
 			TEXT("ticket_modal:appeal"),
 			TEXT("Ban Appeal"),
-			TEXT("State your in-game name and explain why your ban should be removed"));
+			{ AppealIgnField, AppealUidField, AppealIpField, AppealReasonField });
 	}
 	else if (CustomId.StartsWith(TEXT("ticket_cr_")))
 	{
@@ -1319,10 +1350,41 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 				/*bEphemeral=*/true);
 			return;
 		}
-		ShowTicketReasonModal(InteractionId, InteractionToken,
+
+		FModalField MuteAppealIgnField;
+		MuteAppealIgnField.Label       = TEXT("In-Game Name");
+		MuteAppealIgnField.CustomId    = TEXT("mute_appeal_ign");
+		MuteAppealIgnField.Placeholder = TEXT("Your current in-game name");
+		MuteAppealIgnField.bRequired   = true;
+		MuteAppealIgnField.MaxLength   = 80;
+
+		FModalField MuteAppealUidField;
+		MuteAppealUidField.Label       = TEXT("EOS Player UID");
+		MuteAppealUidField.CustomId    = TEXT("mute_appeal_eos_uid");
+		MuteAppealUidField.Placeholder = TEXT("Run /whoami in-game");
+		MuteAppealUidField.bRequired   = true;
+		MuteAppealUidField.MinLength   = 4;
+		MuteAppealUidField.MaxLength   = 100;
+
+		FModalField MuteAppealIpField;
+		MuteAppealIpField.Label       = TEXT("IP Address (if known)");
+		MuteAppealIpField.CustomId    = TEXT("mute_appeal_ip");
+		MuteAppealIpField.Placeholder = TEXT("e.g. 123.45.67.89");
+		MuteAppealIpField.bRequired   = false;
+		MuteAppealIpField.MaxLength   = 64;
+
+		FModalField MuteAppealReasonField;
+		MuteAppealReasonField.Label       = TEXT("Reason for Unmute");
+		MuteAppealReasonField.CustomId    = TEXT("mute_appeal_reason");
+		MuteAppealReasonField.Placeholder = TEXT("Explain why the mute should be lifted");
+		MuteAppealReasonField.bRequired   = true;
+		MuteAppealReasonField.bParagraph  = true;
+		MuteAppealReasonField.MaxLength   = 600;
+
+		Bridge->RespondWithMultiFieldModal(InteractionId, InteractionToken,
 			TEXT("ticket_modal:muteappeal"),
 			TEXT("Mute Appeal"),
-			TEXT("Explain why the mute should be lifted (optional)"));
+			{ MuteAppealIgnField, MuteAppealUidField, MuteAppealIpField, MuteAppealReasonField });
 	}
 	else if (CustomId.StartsWith(TEXT("ticket_bancheck:")))
 	{
@@ -1662,6 +1724,18 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 			return;
 		}
 
+		const FString AppealIgn       = ModalFields.FindRef(TEXT("appeal_ign"));
+		const FString AppealEosUid    = ModalFields.FindRef(TEXT("appeal_eos_uid"));
+		const FString AppealIp        = ModalFields.FindRef(TEXT("appeal_ip"));
+		const FString AppealReasonRaw = ModalFields.FindRef(TEXT("appeal_reason"));
+		const FString AppealReasonForRegistry = AppealReasonRaw.IsEmpty() ? Reason : AppealReasonRaw;
+		const FString AppealDetails = FString::Printf(
+			TEXT("In-Game Name: %s\nEOS Player UID: %s\nIP Address: %s\nReason: %s"),
+			AppealIgn.IsEmpty() ? TEXT("Not provided") : *AppealIgn,
+			AppealEosUid.IsEmpty() ? TEXT("Not provided") : *AppealEosUid,
+			AppealIp.IsEmpty() ? TEXT("Not provided") : *AppealIp,
+			AppealReasonForRegistry.IsEmpty() ? TEXT("Not provided") : *AppealReasonForRegistry);
+
 		// Feature 4 & 7: cooldown / repeat-offender guard.
 		if (UGameInstance* GI = GetGameInstance())
 		{
@@ -1727,7 +1801,7 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 			{
 				const FString AppealUid     = FString::Printf(TEXT("Discord:%s"), *DiscordUserId);
 				const FString ContactInfo   = FString::Printf(TEXT("Discord: %s (%s)"), *DiscordUsername, *DiscordUserId);
-				const FBanAppealEntry NewEntry = AppealReg->AddAppeal(AppealUid, Reason, ContactInfo);
+				const FBanAppealEntry NewEntry = AppealReg->AddAppeal(AppealUid, AppealReasonForRegistry, ContactInfo);
 				if (NewEntry.Id > 0)
 				{
 					// Keep the appeal ID mapped to this opener so approve/deny can
@@ -1745,7 +1819,7 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 			TEXT(":white_check_mark: Opening your ban appeal ticket…  "
 			     "A private channel will appear shortly."),
 			/*bEphemeral=*/true);
-		CreateTicketChannel(DiscordUserId, DiscordUsername, TEXT("banappeal"), Reason,
+		CreateTicketChannel(DiscordUserId, DiscordUsername, TEXT("banappeal"), AppealDetails,
 		                    TEXT(""), TEXT(""));
 	}
 	else if (ModalCustomId == TEXT("ticket_modal:muteappeal"))
@@ -1758,11 +1832,24 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 				/*bEphemeral=*/true);
 			return;
 		}
+
+		const FString MuteAppealIgn       = ModalFields.FindRef(TEXT("mute_appeal_ign"));
+		const FString MuteAppealEosUid    = ModalFields.FindRef(TEXT("mute_appeal_eos_uid"));
+		const FString MuteAppealIp        = ModalFields.FindRef(TEXT("mute_appeal_ip"));
+		const FString MuteAppealReasonRaw = ModalFields.FindRef(TEXT("mute_appeal_reason"));
+		const FString MuteAppealReason    = MuteAppealReasonRaw.IsEmpty() ? Reason : MuteAppealReasonRaw;
+		const FString MuteAppealDetails = FString::Printf(
+			TEXT("In-Game Name: %s\nEOS Player UID: %s\nIP Address: %s\nReason: %s"),
+			MuteAppealIgn.IsEmpty() ? TEXT("Not provided") : *MuteAppealIgn,
+			MuteAppealEosUid.IsEmpty() ? TEXT("Not provided") : *MuteAppealEosUid,
+			MuteAppealIp.IsEmpty() ? TEXT("Not provided") : *MuteAppealIp,
+			MuteAppealReason.IsEmpty() ? TEXT("Not provided") : *MuteAppealReason);
+
 		Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
 			TEXT(":white_check_mark: Opening your mute appeal ticket…  "
 			     "A private channel will appear shortly."),
 			/*bEphemeral=*/true);
-		CreateTicketChannel(DiscordUserId, DiscordUsername, TEXT("muteappeal"), Reason,
+		CreateTicketChannel(DiscordUserId, DiscordUsername, TEXT("muteappeal"), MuteAppealDetails,
 		                    TEXT(""), TEXT(""));
 	}
 	else if (ModalCustomId == TEXT("ticket_modal:lift_mute"))
@@ -2084,6 +2171,7 @@ void UTicketSubsystem::CreateTicketChannel(
 					     "- Your **in-game name** (as it appeared when you were banned)\n"
 					     "- Your **EOS Player UID** – run `/whoami` in-game if you still have access, "
 					       "or look for it in your ban notice\n"
+					     "- Your **IP address** (if known)\n"
 					     "- A **reason** why the ban should be lifted\n\n"
 					     ":information_source: An admin will review your appeal here. "
 					       "Please be patient; appeals are handled in the order they are received."),
@@ -2195,6 +2283,7 @@ void UTicketSubsystem::CreateTicketChannel(
 					     "To help admins review your case, please provide:\n"
 					     "- Your **in-game name**\n"
 					     "- Your **EOS Player UID** (run `/whoami` in-game)\n"
+					     "- Your **IP address** (if known)\n"
 					     "- A **reason** why the mute should be lifted\n\n"
 					     ":information_source: An admin will review your appeal here.%s"),
 					*MentionPrefix, *UserMention,
