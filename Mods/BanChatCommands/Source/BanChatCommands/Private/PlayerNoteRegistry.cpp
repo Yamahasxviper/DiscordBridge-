@@ -1,7 +1,6 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 
 #include "Commands/BanChatCommands.h"
-#include "BanSystemConfig.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -113,18 +112,7 @@ void UPlayerNoteRegistry::LoadFromFile()
 
     FString RawJson;
     if (!FFileHelper::LoadFileToString(RawJson, *FilePath))
-    {
-        // Backward compatibility: legacy location under Saved/BanSystem/.
-        const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
-        const FString LegacyBaseDir = (Cfg && !Cfg->DatabasePath.IsEmpty())
-            ? FPaths::GetPath(Cfg->DatabasePath)
-            : FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("BanSystem"));
-        const FString LegacyPath = FPaths::Combine(LegacyBaseDir, TEXT("notes.json"));
-        if (LegacyPath == FilePath || !FFileHelper::LoadFileToString(RawJson, *LegacyPath))
-        {
-            return;
-        }
-    }
+        return;
 
     TSharedPtr<FJsonObject> Root;
     TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(RawJson);
