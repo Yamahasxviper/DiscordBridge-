@@ -9,9 +9,9 @@
 
 DEFINE_LOG_CATEGORY(LogInGameMessagesConfig);
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // BOM helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 /** Strip a leading UTF-8 BOM (EF BB BF) from a file on disk. */
 static void CleanInGameMessagesConfigBOM(const FString& FilePath)
@@ -31,9 +31,9 @@ static void CleanInGameMessagesConfigBOM(const FString& FilePath)
 	}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Internal helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 static const TCHAR* IGMSection = TEXT("InGameMessages");
 
@@ -59,9 +59,9 @@ static bool GetIGMBool(const FConfigFile& Cfg, const FString& Key, bool Default)
 	return Value;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Raw INI array parser (same approach as DiscordBridgeConfig ParseRawIniArray)
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 static TArray<FString> ParseRawIniArrayIGM(const FString& RawContent,
                                            const FString& Section,
@@ -120,9 +120,9 @@ static TArray<FString> ParseRawIniArrayIGM(const FString& RawContent,
 	return Result;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Struct field extraction from parenthesised tuple
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 /**
  * Extract a quoted string field from a cleaned INI tuple line.
@@ -159,9 +159,9 @@ static int32 ExtractIntField(const FString& Cleaned, const FString& FieldName, i
 	return FCString::Atoi(*Rest.TrimStartAndEnd());
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // FInGameMessagesConfig
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 FString FInGameMessagesConfig::GetConfigFilePath()
 {
@@ -192,7 +192,7 @@ FInGameMessagesConfig FInGameMessagesConfig::Load()
 	if (PF.FileExists(*BackupPath))
 		CleanInGameMessagesConfigBOM(BackupPath);
 
-	// ── Load scalar fields via FConfigFile ───────────────────────────────────
+	// -- Load scalar fields via FConfigFile -----------------------------------
 	FConfigFile Cfg;
 	bool bLoaded = false;
 	FString RawFileContent;
@@ -227,7 +227,7 @@ FInGameMessagesConfig FInGameMessagesConfig::Load()
 	Out.bEnabled          = GetIGMBool  (Cfg, TEXT("Enabled"),          Out.bEnabled);
 	Out.DefaultSenderName = GetIGMString(Cfg, TEXT("DefaultSenderName"), Out.DefaultSenderName);
 
-	// ── Parse +Messages=(...) array ──────────────────────────────────────────
+	// -- Parse +Messages=(...) array ------------------------------------------
 	{
 		const TArray<FString> MsgLines = ParseRawIniArrayIGM(
 			RawFileContent, TEXT("InGameMessages"), TEXT("Messages"));
@@ -263,7 +263,7 @@ FInGameMessagesConfig FInGameMessagesConfig::Load()
 	       *Out.DefaultSenderName,
 	       Out.Messages.Num());
 
-	// ── Write backup ─────────────────────────────────────────────────────────
+	// -- Write backup ---------------------------------------------------------
 	{
 		FString BackupContent =
 			FString(TEXT("[InGameMessages]\n"))
@@ -296,9 +296,9 @@ FInGameMessagesConfig FInGameMessagesConfig::Load()
 	return Out;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Template restoration
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 void FInGameMessagesConfig::RestoreDefaultConfigIfNeeded()
 {
@@ -320,10 +320,10 @@ void FInGameMessagesConfig::RestoreDefaultConfigIfNeeded()
 	// File is missing or was stripped of comments by Alpakit — write the
 	// annotated template so operators can see setting descriptions.
 	const FString Template =
-		TEXT("# DiscordBridge \u2013 In-Game Broadcast Messages\n")
-		TEXT("# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
+		TEXT("# DiscordBridge - In-Game Broadcast Messages\n")
+		TEXT("# -----------------------------------------------------------------------------\n")
 		TEXT("# Scheduled messages that the bot broadcasts to in-game chat on a timer.\n")
-		TEXT("# Add as many +Messages entries as you like \u2013 each one runs on its own\n")
+		TEXT("# Add as many +Messages entries as you like - each one runs on its own\n")
 		TEXT("# independent timer.  Messages can contain web links, server invite links,\n")
 		TEXT("# and emoji characters (Unicode or copy-paste from Discord).\n")
 		TEXT("#\n")
@@ -332,35 +332,35 @@ void FInGameMessagesConfig::RestoreDefaultConfigIfNeeded()
 		TEXT("#   <ServerRoot>/FactoryGame/Saved/DiscordBridge/InGameMessages.ini\n")
 		TEXT("#   on every server start so messages survive primary file deletion.\n")
 		TEXT("#\n")
-		TEXT("# \u2500\u2500 SETTINGS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
+		TEXT("# -- SETTINGS ------------------------------------------------------------------\n")
 		TEXT("#\n")
-		TEXT("# Enabled             \u2013 Master on/off switch (True/False). Default: True.\n")
-		TEXT("# DefaultSenderName   \u2013 Sender name if a message omits SenderName. Default: [Server].\n")
-		TEXT("# +Messages=(...)     \u2013 One broadcast message entry. Add as many as you want.\n")
+		TEXT("# Enabled             - Master on/off switch (True/False). Default: True.\n")
+		TEXT("# DefaultSenderName   - Sender name if a message omits SenderName. Default: [Server].\n")
+		TEXT("# +Messages=(...)     - One broadcast message entry. Add as many as you want.\n")
 		TEXT("#\n")
-		TEXT("# \u2500\u2500 MESSAGE FORMAT \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
+		TEXT("# -- MESSAGE FORMAT -------------------------------------------------------------\n")
 		TEXT("#\n")
 		TEXT("# Each +Messages entry has three fields:\n")
-		TEXT("#   IntervalMinutes  \u2013 How often (in minutes) this message is sent. Required.\n")
-		TEXT("#   SenderName       \u2013 Name shown in chat (e.g. \"[Server]\"). Optional, uses DefaultSenderName.\n")
-		TEXT("#   Message          \u2013 The text to broadcast. Required. Supports:\n")
-		TEXT("#                      \u2022 Web links:    https://example.com\n")
-		TEXT("#                      \u2022 Discord links: https://discord.gg/yourserver\n")
-		TEXT("#                      \u2022 Emoji:        Copy-paste Unicode emoji directly\n")
+		TEXT("#   IntervalMinutes  - How often (in minutes) this message is sent. Required.\n")
+		TEXT("#   SenderName       - Name shown in chat (e.g. \"[Server]\"). Optional, uses DefaultSenderName.\n")
+		TEXT("#   Message          - The text to broadcast. Required. Supports:\n")
+		TEXT("#                      - Web links:    https://example.com\n")
+		TEXT("#                      - Discord links: https://discord.gg/yourserver\n")
+		TEXT("#                      - Emoji:        Copy-paste Unicode emoji directly\n")
 		TEXT("#\n")
-		TEXT("# \u2500\u2500 EXAMPLES \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
+		TEXT("# -- EXAMPLES -------------------------------------------------------------------\n")
 		TEXT("#\n")
 		TEXT("#   +Messages=(IntervalMinutes=15,SenderName=\"[Server]\",Message=\"Welcome! Check the rules at https://example.com/rules\")\n")
 		TEXT("#   +Messages=(IntervalMinutes=30,SenderName=\"[Admin]\",Message=\"Join our Discord: https://discord.gg/yourserver\")\n")
 		TEXT("#   +Messages=(IntervalMinutes=60,Message=\"Remember to save your game!\")\n")
 		TEXT("#\n")
-		TEXT("# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
+		TEXT("# -----------------------------------------------------------------------------\n")
 		TEXT("# To apply changes: restart the server (or delete this file to regenerate it).\n")
-		TEXT("# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
+		TEXT("# -----------------------------------------------------------------------------\n")
 		TEXT("\n")
 		TEXT("[InGameMessages]\n")
 		TEXT("\n")
-		TEXT("# Master switch \u2013 set to False to disable all scheduled in-game messages.\n")
+		TEXT("# Master switch - set to False to disable all scheduled in-game messages.\n")
 		TEXT("Enabled=True\n")
 		TEXT("\n")
 		TEXT("# Default sender name shown in chat when a message entry omits SenderName.\n")
