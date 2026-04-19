@@ -577,6 +577,17 @@ void FReliableDataTransferProtocolReader<Base>::ParseMessageHeader(FArchive& Ar)
 		RDTProtocol::FMessageHeader MessageHeader;
 		Ar << MessageHeader;
 		check(!Ar.IsError());
+
+		const uint64 MessageLength = static_cast<uint64>(MessageHeader.Length);
+		if (MessageLength > static_cast<uint64>(MAX_int32))
+		{
+			Ar.SetError();
+			UE_LOG(LogReliableMessaging, Error,
+				TEXT("Received message header with invalid length (%llu). Closing connection."),
+				MessageLength);
+			static_cast<BaseType&>(*this).CloseConnection();
+			return;
+		}
 		
 		if (PerChannelData.Num() < MessageHeader.ChannelId + 1)
 		{
