@@ -465,8 +465,7 @@ TSharedPtr<FJsonObject> UTicketSubsystem::MakeCloseButtonMessage(const FString& 
 	Body->SetStringField(TEXT("content"),
 		TEXT(":lock: Click **Close Ticket** when the issue is resolved. "
 		     "The channel will be deleted automatically.\n"
-		     ":information_source: The ticket opener and any member with the "
-		     "admin/support role can close this ticket."));
+		     ":information_source: The ticket opener, any admin, or any mod can close this ticket."));
 	Body->SetArrayField(TEXT("components"),
 		TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(ActionRow) });
 
@@ -694,7 +693,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		if (!IsStaffAuthorized())
 		{
 			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
-				TEXT(":no_entry: Only admins with the support role can approve whitelist requests."),
+				TEXT(":no_entry: Only admins or mods can approve whitelist requests."),
 				true);
 			return;
 		}
@@ -761,7 +760,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		if (!IsStaffAuthorized())
 		{
 			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
-				TEXT(":no_entry: Only staff with the support role can approve ban appeals."), true);
+				TEXT(":no_entry: Only admins or mods can approve ban appeals."), true);
 			return;
 		}
 
@@ -844,7 +843,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		if (!IsStaffAuthorized())
 		{
 			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
-				TEXT(":no_entry: Only staff with the support role can deny ban appeals."), true);
+				TEXT(":no_entry: Only admins or mods can deny ban appeals."), true);
 			return;
 		}
 
@@ -967,8 +966,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		{
 			Bridge->RespondToInteraction(InteractionId, InteractionToken,
 				/*type=*/4,
-				TEXT(":no_entry: Only the ticket opener or an admin with the support "
-				     "role can close this ticket."),
+				TEXT(":no_entry: Only the ticket opener, an admin, or a mod can close this ticket."),
 				/*bEphemeral=*/true);
 			return;
 		}
@@ -1413,7 +1411,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		if (!IsStaffAuthorized())
 		{
 			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
-				TEXT(":no_entry: Only staff with the support role can use the Ban-Check button."),
+				TEXT(":no_entry: Only admins or mods can use the Ban-Check button."),
 				true);
 			return;
 		}
@@ -1485,7 +1483,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		if (!IsStaffAuthorized())
 		{
 			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
-				TEXT(":no_entry: Only staff with the support role can lift mutes."), true);
+				TEXT(":no_entry: Only admins or mods can lift mutes."), true);
 			return;
 		}
 
@@ -1511,7 +1509,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		if (!IsStaffAuthorized())
 		{
 			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
-				TEXT(":no_entry: Only staff with the support role can deny mute appeals."), true);
+				TEXT(":no_entry: Only admins or mods can deny mute appeals."), true);
 			return;
 		}
 
@@ -1538,7 +1536,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		if (!IsStaffAuthorized())
 		{
 			Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
-				TEXT(":no_entry: Only staff with the support role can issue warnings."), true);
+				TEXT(":no_entry: Only admins or mods can issue warnings."), true);
 			return;
 		}
 
@@ -2956,7 +2954,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can assign tickets."));
+				TEXT(":no_entry: Only admins or mods can assign tickets."));
 			return;
 		}
 
@@ -3004,7 +3002,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can view the ticket list."));
+				TEXT(":no_entry: Only admins or mods can view the ticket list."));
 			return;
 		}
 
@@ -3114,7 +3112,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can claim tickets."));
+				TEXT(":no_entry: Only admins or mods can claim tickets."));
 			return;
 		}
 		FString SenderId;
@@ -3138,7 +3136,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can unclaim tickets."));
+				TEXT(":no_entry: Only admins or mods can unclaim tickets."));
 			return;
 		}
 		TicketChannelToAssignee.Remove(SourceChannelId);
@@ -3157,7 +3155,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can transfer tickets."));
+				TEXT(":no_entry: Only admins or mods can transfer tickets."));
 			return;
 		}
 		FString MentionPart = Content.Mid(FCString::Strlen(TEXT("!ticket-transfer"))).TrimStartAndEnd();
@@ -3194,7 +3192,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can set ticket priority."));
+				TEXT(":no_entry: Only admins or mods can set ticket priority."));
 			return;
 		}
 		FString PriorityArg = Content.Mid(FCString::Strlen(TEXT("!ticket-priority"))).TrimStartAndEnd();
@@ -3271,7 +3269,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can use macros."));
+				TEXT(":no_entry: Only admins or mods can use macros."));
 			return;
 		}
 		const FString MacroName = Content.Mid(FCString::Strlen(TEXT("!ticket-macro"))).TrimStartAndEnd();
@@ -3318,7 +3316,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can view ticket stats."));
+				TEXT(":no_entry: Only admins or mods can view ticket stats."));
 			return;
 		}
 		const FString StatsPath = GetStatsFilePath();
@@ -3374,7 +3372,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can view ticket reports."));
+				TEXT(":no_entry: Only admins or mods can view ticket reports."));
 			return;
 		}
 		const FString PeriodArg = Content.Mid(FCString::Strlen(TEXT("!ticket-report"))).TrimStartAndEnd();
@@ -3462,7 +3460,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can remove tags."));
+				TEXT(":no_entry: Only admins or mods can remove tags."));
 			return;
 		}
 		const FString UntagArg = Content.Mid(FCString::Strlen(TEXT("!ticket-untag"))).TrimStartAndEnd();
@@ -3492,7 +3490,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can tag tickets."));
+				TEXT(":no_entry: Only admins or mods can tag tickets."));
 			return;
 		}
 		const FString TagArg = Content.Mid(FCString::Strlen(TEXT("!ticket-tag"))).TrimStartAndEnd();
@@ -3519,7 +3517,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can view ticket notes."));
+				TEXT(":no_entry: Only admins or mods can view ticket notes."));
 			return;
 		}
 		const TArray<FString>* NotesView = TicketChannelToNotes.Find(SourceChannelId);
@@ -3546,7 +3544,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can add notes."));
+				TEXT(":no_entry: Only admins or mods can add notes."));
 			return;
 		}
 		const FString NoteText = Content.Mid(FCString::Strlen(TEXT("!ticket-note"))).TrimStartAndEnd();
@@ -3571,7 +3569,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can escalate tickets."));
+				TEXT(":no_entry: Only admins or mods can escalate tickets."));
 			return;
 		}
 		TicketChannelToPriority.Add(SourceChannelId, TEXT("Urgent"));
@@ -3610,7 +3608,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can set reminders."));
+				TEXT(":no_entry: Only admins or mods can set reminders."));
 			return;
 		}
 		const FString RemindArg = Content.Mid(FCString::Strlen(TEXT("!ticket-remind"))).TrimStartAndEnd();
@@ -3657,7 +3655,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can view the blacklist."));
+				TEXT(":no_entry: Only admins or mods can view the blacklist."));
 			return;
 		}
 		if (TicketBlacklist.Num() == 0)
@@ -3683,7 +3681,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can blacklist users."));
+				TEXT(":no_entry: Only admins or mods can blacklist users."));
 			return;
 		}
 		FString BLArg = Content.Mid(FCString::Strlen(TEXT("!ticket-blacklist"))).TrimStartAndEnd();
@@ -3724,7 +3722,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can unblacklist users."));
+				TEXT(":no_entry: Only admins or mods can unblacklist users."));
 			return;
 		}
 		FString UBLArg = Content.Mid(FCString::Strlen(TEXT("!ticket-unblacklist"))).TrimStartAndEnd();
@@ -3769,7 +3767,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		if (!SenderIsStaff())
 		{
 			Bridge->SendDiscordChannelMessage(SourceChannelId,
-				TEXT(":no_entry: Only members with the support role can merge tickets."));
+				TEXT(":no_entry: Only admins or mods can merge tickets."));
 			return;
 		}
 		FString MergeArg = Content.Mid(FCString::Strlen(TEXT("!ticket-merge"))).TrimStartAndEnd();
