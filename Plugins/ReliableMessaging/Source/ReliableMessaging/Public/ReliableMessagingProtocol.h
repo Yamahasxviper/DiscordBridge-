@@ -434,15 +434,6 @@ void FReliableDataTransferProtocolReader<Base>::ReadCycle()
 	int32 BytesRead = 0;
 	while(static_cast<BaseType&>(*this).ReadData(GetParseBuffer().GetData(), GetParseBuffer().Num(), BytesRead) && BytesRead > 0)
 	{
-		if (ReadBufferOffset > (MAX_int32 - BytesRead))
-		{
-			UE_LOG(LogReliableMessaging, Error,
-				TEXT("Read buffer overflow while receiving packet (offset=%d, bytes=%d). Closing connection."),
-				ReadBufferOffset, BytesRead);
-			static_cast<BaseType&>(*this).CloseConnection();
-			return;
-		}
-		
 		// Resize the buffer to the actual size of the data within
 		ReadBuffer.SetNum(ReadBufferOffset + BytesRead, false);
 
@@ -508,14 +499,6 @@ void FReliableDataTransferProtocolReader<Base>::ParsePacket()
 		// And record the position so we don't overwrite these bytes until we've processed them
 		ReadBufferOffset = ReadBuffer.Num();
 		// Ultimately make sure the read buffer has enough room for next read
-		if (ReadBufferOffset > (MAX_int32 - ReadBufferLength))
-		{
-			UE_LOG(LogReliableMessaging, Error,
-				TEXT("Read buffer overflow while preserving unread bytes (offset=%d, length=%d). Closing connection."),
-				ReadBufferOffset, ReadBufferLength);
-			static_cast<BaseType&>(*this).CloseConnection();
-			return;
-		}
 		ReadBuffer.SetNumUninitialized(ReadBufferOffset + ReadBufferLength, false);
 	}
 	else
@@ -594,16 +577,6 @@ void FReliableDataTransferProtocolReader<Base>::ParseMessageHeader(FArchive& Ar)
 		RDTProtocol::FMessageHeader MessageHeader;
 		Ar << MessageHeader;
 		check(!Ar.IsError());
-
-		if (MessageHeader.Length < 0)
-		{
-			Ar.SetError();
-			UE_LOG(LogReliableMessaging, Error,
-				TEXT("Received message header with invalid negative length (%d). Closing connection."),
-				MessageHeader.Length);
-			static_cast<BaseType&>(*this).CloseConnection();
-			return;
-		}
 		
 		if (PerChannelData.Num() < MessageHeader.ChannelId + 1)
 		{
@@ -680,44 +653,15 @@ void FReliableDataTransferProtocolReader<Base>::ParseChunk(FArchive& Ar)
 	}
 
 	{
-		if (PendingChunk->Length < 0)
-		{
-			Ar.SetError();
-			UE_LOG(LogReliableMessaging, Error,
-				TEXT("Received chunk header with invalid negative length (%d). Closing connection."),
-				PendingChunk->Length);
-			static_cast<BaseType&>(*this).CloseConnection();
-			return;
-		}
-
-		if (PendingChunk->Offset < 0 || PendingChunk->Offset > PendingChunk->Length)
-		{
-			Ar.SetError();
-			UE_LOG(LogReliableMessaging, Error,
-				TEXT("Chunk parser entered invalid offset state (offset=%d, length=%d). Closing connection."),
-				PendingChunk->Offset, PendingChunk->Length);
-			static_cast<BaseType&>(*this).CloseConnection();
-			return;
-		}
-
 		// Make sure the length of this chunk does not exceed the length of the message. This would be an unrecoverable error. 
-		const RDTProtocol::SizeType RemainingChunkBytes = PendingChunk->Length - PendingChunk->Offset;
-		if (RemainingChunkBytes > PendingChunk->PendingMessagePtr->GetRemainingBytes())
+		if ((PendingChunk->Length - PendingChunk->Offset) > PendingChunk->PendingMessagePtr->GetRemainingBytes())
 		{
 			Ar.SetError();
 			UE_LOG(LogReliableMessaging, Error, TEXT("Chunk length is greater than remaining message length. Closing connection."));
 			static_cast<BaseType&>(*this).CloseConnection();
 			return;
 		}
-		const int64 RemainingSerializedBytes = Ar.TotalSize() - Ar.Tell();
-		if (RemainingSerializedBytes < 0)
-		{
-			Ar.SetError();
-			UE_LOG(LogReliableMessaging, Error, TEXT("Chunk parser encountered invalid archive cursor state. Closing connection."));
-			static_cast<BaseType&>(*this).CloseConnection();
-			return;
-		}
-		const RDTProtocol::SizeType ReadLen = FMath::Min(RemainingChunkBytes, static_cast<RDTProtocol::SizeType>(RemainingSerializedBytes));
+		const RDTProtocol::SizeType ReadLen = FMath::Min(PendingChunk->Length - PendingChunk->Offset, Ar.TotalSize() - Ar.Tell());
 		uint8* ReadPosition = PendingChunk->PendingMessagePtr->Data.GetData() + PendingChunk->PendingMessagePtr->Offset;
 		Ar.Serialize(ReadPosition, ReadLen);
 		check(!Ar.IsError());
