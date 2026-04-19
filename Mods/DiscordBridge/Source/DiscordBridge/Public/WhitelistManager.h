@@ -24,7 +24,7 @@ FString   Target;
 
 /**
  * Manages the server whitelist for the DiscordBridge mod.
- * Config stored at <ProjectSavedDir>/ServerWhitelist.json.
+ * Config stored at <ProjectSavedDir>/DiscordBridge/ServerWhitelist.json.
  */
 class DISCORDBRIDGE_API FWhitelistManager
 {
