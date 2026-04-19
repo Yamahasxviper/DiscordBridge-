@@ -232,7 +232,7 @@ private:
 	/**
 	 * Persist TicketChannelToOpener (and its reverse map) to disk so active
 	 * tickets survive server restarts.  Written to:
-	 *   <ProjectSavedDir>/Config/TicketSystem/ActiveTickets.json
+	 *   <ProjectSavedDir>/DiscordBridge/TicketSystem/ActiveTickets.json
 	 *
 	 * Called every time the map is mutated (channel created, ticket closed).
 	 */

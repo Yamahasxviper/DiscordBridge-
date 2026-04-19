@@ -23,6 +23,14 @@
 
 DEFINE_LOG_CATEGORY(LogTicketSystem);
 
+namespace
+{
+	FString GetTicketSystemDataDir()
+	{
+		return FPaths::ProjectSavedDir() / TEXT("DiscordBridge/TicketSystem");
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // USubsystem lifetime
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3767,7 +3775,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 void UTicketSubsystem::SaveTicketState() const
 {
 	// Build the directory path and ensure it exists.
-	const FString StateDir  = FPaths::ProjectSavedDir() / TEXT("Config/TicketSystem");
+	const FString StateDir  = GetTicketSystemDataDir();
 	const FString StatePath = StateDir / TEXT("ActiveTickets.json");
 
 	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
@@ -3883,10 +3891,8 @@ void UTicketSubsystem::SaveTicketState() const
 
 void UTicketSubsystem::LoadTicketState()
 {
-	const FString StatePath =
-		FPaths::ProjectSavedDir() / TEXT("Config/TicketSystem/ActiveTickets.json");
-
 	FString JsonContent;
+	const FString StatePath = GetTicketSystemDataDir() / TEXT("ActiveTickets.json");
 	if (!FFileHelper::LoadFileToString(JsonContent, *StatePath))
 	{
 		// No state file is fine – this is a clean first run.
@@ -4073,7 +4079,7 @@ void UTicketSubsystem::LoadTicketState()
 
 FString UTicketSubsystem::GetStatsFilePath()
 {
-	return FPaths::ProjectSavedDir() / TEXT("Config/TicketSystem/TicketStats.json");
+	return GetTicketSystemDataDir() / TEXT("TicketStats.json");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4423,7 +4429,7 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 
 FString UTicketSubsystem::GetBlacklistFilePath()
 {
-return FPaths::ProjectSavedDir() / TEXT("Config/TicketSystem/TicketBlacklist.json");
+return GetTicketSystemDataDir() / TEXT("TicketBlacklist.json");
 }
 
 void UTicketSubsystem::LoadTicketBlacklist()
@@ -4432,8 +4438,8 @@ const FString Path = GetBlacklistFilePath();
 FString JsonContent;
 if (!FFileHelper::LoadFileToString(JsonContent, *Path))
 {
-// No file on first run is fine.
-return;
+	// No file on first run is fine.
+	return;
 }
 
 TSharedPtr<FJsonObject> Root;

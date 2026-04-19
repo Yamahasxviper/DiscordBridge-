@@ -1,7 +1,6 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 
 #include "MuteRegistry.h"
-#include "BanSystemConfig.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
@@ -191,14 +190,7 @@ void UMuteRegistry::TickExpiry()
 
 FString UMuteRegistry::GetRegistryPath() const
 {
-    const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
-    FString BaseDir;
-    if (Cfg && !Cfg->DatabasePath.IsEmpty())
-        BaseDir = FPaths::GetPath(Cfg->DatabasePath);
-    else
-        BaseDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("BanSystem"));
-
-    return FPaths::Combine(BaseDir, TEXT("mutes.json"));
+    return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("BanChatCommands"), TEXT("mutes.json"));
 }
 
 void UMuteRegistry::LoadFromFile()
