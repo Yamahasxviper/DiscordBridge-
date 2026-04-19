@@ -107,18 +107,6 @@
 		{
 			"Name": "GameplayEvents",
 			"Enabled": true
-		},
-		{
-			"Name": "EOSShared",
-			"Enabled": true
-		},
-		{
-			"Name": "OnlineSubsystemUtils",
-			"Enabled": true
-		},
-		{
-			"Name": "OnlineSubsystem",
-			"Enabled": true
 		}
 	]
 }

@@ -206,10 +206,7 @@
 		},
 		{
 			"Name": "MfMedia",
-			"Enabled": true,
-			"SupportedTargetPlatforms": [
-				"Win64"
-			]
+			"Enabled": true
 		},
 		{
 			"Name": "Takes",
@@ -381,9 +378,6 @@
 				"Win64"
 			]
 		}
-	],
-	"AdditionalPluginDirectories": [
-		"Mods"
 	],
 	"TargetPlatforms": [
 		"Win64",

@@ -1,4 +1,3 @@
-#pragma warning disable CS0162 // Unreachable code detected - intentional platform guards commented out for modding
 using UnrealBuildTool;
 
 public class FactoryDedicatedClient : ModuleRules
