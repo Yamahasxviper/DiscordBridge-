@@ -9,9 +9,9 @@
 
 DEFINE_LOG_CATEGORY(LogBanDiscord);
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // BOM helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 /** Strip a leading UTF-8 BOM (EF BB BF) from a file on disk. */
 static void CleanBanBridgeConfigBOM(const FString& FilePath)
@@ -31,9 +31,9 @@ static void CleanBanBridgeConfigBOM(const FString& FilePath)
 	}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Internal helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 static FString GetIniBridgeString(const FConfigFile& Cfg, const FString& Key,
                                    const FString& Default = TEXT(""))
@@ -47,9 +47,9 @@ static FString GetIniBridgeString(const FConfigFile& Cfg, const FString& Key,
 	return Default;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // FBanBridgeConfig
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 FString FBanBridgeConfig::GetConfigFilePath()
 {
@@ -138,7 +138,7 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 		       Out.AdminPanelChannelId.IsEmpty() ? TEXT("(command channel)") : *Out.AdminPanelChannelId);
 	}
 
-	// ── Write backup ─────────────────────────────────────────────────────────
+	// -- Write backup ---------------------------------------------------------
 	// Mirror the pattern used by DiscordBridgeConfig and TicketConfig: on every
 	// server start write the current settings to Saved/DiscordBridge/BanBridge.ini
 	// so they survive any future deletion or reset of the primary config file.
@@ -170,9 +170,9 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 	return Out;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Authorisation helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 bool FBanBridgeConfig::IsAdminRole(const TArray<FString>& Roles) const
 {
@@ -186,16 +186,16 @@ bool FBanBridgeConfig::IsModeratorRole(const TArray<FString>& Roles) const
 	return !ModeratorRoleId.IsEmpty() && Roles.Contains(ModeratorRoleId);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Template restoration
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 void FBanBridgeConfig::RestoreDefaultConfigIfNeeded()
 {
 	const FString PrimaryPath = GetConfigFilePath();
 	IPlatformFile& PF = FPlatformFileManager::Get().GetPlatformFile();
 
-	// Leave the file as-is if it already contains comment lines — that means
+	// Leave the file as-is if it already contains comment lines - that means
 	// it was either hand-edited or previously written by this function.
 	if (PF.FileExists(*PrimaryPath))
 	{
@@ -205,12 +205,12 @@ void FBanBridgeConfig::RestoreDefaultConfigIfNeeded()
 			return;
 	}
 
-	// File is missing or was stripped of comments by Alpakit — write the
+	// File is missing or was stripped of comments by Alpakit - write the
 	// annotated template so operators can see setting descriptions.
 	// This content mirrors DefaultBanBridge.ini shipped in the repository.
 	const FString Template =
-		TEXT("# DiscordBridge – BanSystem integration settings\n")
-		TEXT("# ─────────────────────────────────────────────────────────────────────────────\n")
+		TEXT("# DiscordBridge - BanSystem integration settings\n")
+		TEXT("# -----------------------------------------------------------------------------\n")
 		TEXT("# Configure the Discord role and channel IDs for ban/moderation commands.\n")
 		TEXT("#\n")
 		TEXT("# NOTE: this file is NOT overwritten by mod updates. Your settings persist\n")
@@ -222,8 +222,8 @@ void FBanBridgeConfig::RestoreDefaultConfigIfNeeded()
 		TEXT("\n")
 		TEXT("# Discord role ID whose members may run ALL ban/moderation commands.\n")
 		TEXT("# Leave empty to disable all Discord ban commands.\n")
-		TEXT("# How to get: Discord Settings → Advanced → Developer Mode,\n")
-		TEXT("# then right-click the role in Server Settings → Roles → Copy Role ID.\n")
+		TEXT("# How to get: Discord Settings -> Advanced -> Developer Mode,\n")
+		TEXT("# then right-click the role in Server Settings -> Roles -> Copy Role ID.\n")
 		TEXT("AdminRoleId=\n")
 		TEXT("\n")
 		TEXT("# Optional: Discord role ID for moderators with limited command access.\n")

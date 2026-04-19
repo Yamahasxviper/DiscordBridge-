@@ -9,9 +9,9 @@
 
 DEFINE_LOG_CATEGORY(LogWhitelistConfig);
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // BOM helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 /** Strip a leading UTF-8 BOM (EF BB BF) from a file on disk. */
 static void CleanWhitelistConfigBOM(const FString& FilePath)
@@ -31,9 +31,9 @@ static void CleanWhitelistConfigBOM(const FString& FilePath)
 	}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Internal helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 static const TCHAR* WLSection = TEXT("Whitelist");
 
@@ -82,9 +82,9 @@ static float GetWLFloat(const FConfigFile& Cfg, const FString& Key, float Defaul
 	return Default;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // FWhitelistConfig
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 FString FWhitelistConfig::GetConfigFilePath()
 {
@@ -179,7 +179,7 @@ FWhitelistConfig FWhitelistConfig::Load()
 	UE_LOG(LogWhitelistConfig, Log,
 	       TEXT("Whitelist: WhitelistVerification      = %s"), Out.bWhitelistVerificationEnabled ? TEXT("True") : TEXT("False"));
 
-	// ── Write backup ─────────────────────────────────────────────────────────
+	// -- Write backup ---------------------------------------------------------
 	{
 		const FString BackupContent =
 			FString(TEXT("[Whitelist]\n"))
@@ -218,16 +218,16 @@ FWhitelistConfig FWhitelistConfig::Load()
 	return Out;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Template restoration
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 void FWhitelistConfig::RestoreDefaultConfigIfNeeded()
 {
 	const FString PrimaryPath = GetConfigFilePath();
 	IPlatformFile& PF = FPlatformFileManager::Get().GetPlatformFile();
 
-	// Leave the file as-is if it already contains comment lines — that means
+	// Leave the file as-is if it already contains comment lines - that means
 	// it was either hand-edited or previously written by this function.
 	// Check for both '# ' (current) and '; ' (legacy) comment markers so
 	// that configs from any version are recognised and preserved.
@@ -239,11 +239,11 @@ void FWhitelistConfig::RestoreDefaultConfigIfNeeded()
 			return;
 	}
 
-	// File is missing or was stripped of comments by Alpakit — write the
+	// File is missing or was stripped of comments by Alpakit - write the
 	// annotated template so operators can see setting descriptions.
 	const FString Template =
-		TEXT("# DiscordBridge \u2013 Whitelist Settings\n")
-		TEXT("# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
+		TEXT("# DiscordBridge - Whitelist Settings\n")
+		TEXT("# -----------------------------------------------------------------------------\n")
 		TEXT("# All whitelist settings are configured here.  Edit this file, then restart\n")
 		TEXT("# the server for changes to take effect.\n")
 		TEXT("# Note: this file is NOT overwritten by mod updates, so your settings persist\n")
@@ -251,27 +251,27 @@ void FWhitelistConfig::RestoreDefaultConfigIfNeeded()
 		TEXT("#   <ServerRoot>/FactoryGame/Saved/DiscordBridge/Whitelist.ini\n")
 		TEXT("#   on every server start so settings survive primary file deletion.\n")
 		TEXT("#\n")
-		TEXT("# \u2500\u2500 SETTINGS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
+		TEXT("# -- SETTINGS ------------------------------------------------------------------\n")
 		TEXT("#\n")
-		TEXT("# WhitelistEnabled          \u2013 Whether the whitelist is active (True/False).\n")
-		TEXT("# WhitelistCommandRoleId    \u2013 Discord role ID for /whitelist command access.\n")
-		TEXT("# WhitelistRoleId           \u2013 Discord role ID assigned to whitelisted members.\n")
-		TEXT("# WhitelistChannelId        \u2013 Channel restricted to whitelisted members.\n")
-		TEXT("# WhitelistKickDiscordMessage \u2013 Message posted when a non-whitelisted player is kicked.\n")
-		TEXT("# WhitelistKickReason       \u2013 In-game reason shown to kicked players.\n")
-		TEXT("# WhitelistEventsChannelId  \u2013 Channel for whitelist event notifications.\n")
-		TEXT("# MaxWhitelistSlots         \u2013 Max whitelist slots (0 = unlimited).\n")
-		TEXT("# SyncWhitelistWithRole     \u2013 Auto-sync whitelist with Discord role membership.\n")
-		TEXT("# WhitelistApplicationChannelId \u2013 Channel for whitelist application embeds.\n")
-		TEXT("# WhitelistApplyEnabled     \u2013 Allow /whitelist apply for all Discord users.\n")
-		TEXT("# WhitelistApprovedDmMessage \u2013 DM sent to user when approved.\n")
-		TEXT("# WhitelistExpiryWarningHours \u2013 Hours before expiry to warn (0 = disabled).\n")
-		TEXT("# WhitelistVerificationEnabled \u2013 Enable /whitelist link and /verify linking.\n")
-		TEXT("# WhitelistVerificationChannelId \u2013 Channel for /whitelist link commands.\n")
+		TEXT("# WhitelistEnabled          - Whether the whitelist is active (True/False).\n")
+		TEXT("# WhitelistCommandRoleId    - Discord role ID for /whitelist command access.\n")
+		TEXT("# WhitelistRoleId           - Discord role ID assigned to whitelisted members.\n")
+		TEXT("# WhitelistChannelId        - Channel restricted to whitelisted members.\n")
+		TEXT("# WhitelistKickDiscordMessage - Message posted when a non-whitelisted player is kicked.\n")
+		TEXT("# WhitelistKickReason       - In-game reason shown to kicked players.\n")
+		TEXT("# WhitelistEventsChannelId  - Channel for whitelist event notifications.\n")
+		TEXT("# MaxWhitelistSlots         - Max whitelist slots (0 = unlimited).\n")
+		TEXT("# SyncWhitelistWithRole     - Auto-sync whitelist with Discord role membership.\n")
+		TEXT("# WhitelistApplicationChannelId - Channel for whitelist application embeds.\n")
+		TEXT("# WhitelistApplyEnabled     - Allow /whitelist apply for all Discord users.\n")
+		TEXT("# WhitelistApprovedDmMessage - DM sent to user when approved.\n")
+		TEXT("# WhitelistExpiryWarningHours - Hours before expiry to warn (0 = disabled).\n")
+		TEXT("# WhitelistVerificationEnabled - Enable /whitelist link and /verify linking.\n")
+		TEXT("# WhitelistVerificationChannelId - Channel for /whitelist link commands.\n")
 		TEXT("#\n")
-		TEXT("# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
+		TEXT("# -----------------------------------------------------------------------------\n")
 		TEXT("# To apply changes: restart the server (or delete this file to regenerate it).\n")
-		TEXT("# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
+		TEXT("# -----------------------------------------------------------------------------\n")
 		TEXT("\n")
 		TEXT("[Whitelist]\n")
 		TEXT("\n")
