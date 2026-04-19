@@ -195,7 +195,7 @@ void FBanBridgeConfig::RestoreDefaultConfigIfNeeded()
 	const FString PrimaryPath = GetConfigFilePath();
 	IPlatformFile& PF = FPlatformFileManager::Get().GetPlatformFile();
 
-	// Leave the file as-is if it already contains comment lines — that means
+	// Leave the file as-is if it already contains comment lines - that means
 	// it was either hand-edited or previously written by this function.
 	if (PF.FileExists(*PrimaryPath))
 	{
@@ -205,7 +205,7 @@ void FBanBridgeConfig::RestoreDefaultConfigIfNeeded()
 			return;
 	}
 
-	// File is missing or was stripped of comments by Alpakit — write the
+	// File is missing or was stripped of comments by Alpakit - write the
 	// annotated template so operators can see setting descriptions.
 	// This content mirrors DefaultBanBridge.ini shipped in the repository.
 	const FString Template =
@@ -222,8 +222,8 @@ void FBanBridgeConfig::RestoreDefaultConfigIfNeeded()
 		TEXT("\n")
 		TEXT("# Discord role ID whose members may run ALL ban/moderation commands.\n")
 		TEXT("# Leave empty to disable all Discord ban commands.\n")
-		TEXT("# How to get: Discord Settings → Advanced → Developer Mode,\n")
-		TEXT("# then right-click the role in Server Settings → Roles → Copy Role ID.\n")
+		TEXT("# How to get: Discord Settings -> Advanced -> Developer Mode,\n")
+		TEXT("# then right-click the role in Server Settings -> Roles -> Copy Role ID.\n")
 		TEXT("AdminRoleId=\n")
 		TEXT("\n")
 		TEXT("# Optional: Discord role ID for moderators with limited command access.\n")

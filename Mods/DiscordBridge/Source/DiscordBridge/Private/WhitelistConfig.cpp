@@ -227,7 +227,7 @@ void FWhitelistConfig::RestoreDefaultConfigIfNeeded()
 	const FString PrimaryPath = GetConfigFilePath();
 	IPlatformFile& PF = FPlatformFileManager::Get().GetPlatformFile();
 
-	// Leave the file as-is if it already contains comment lines — that means
+	// Leave the file as-is if it already contains comment lines - that means
 	// it was either hand-edited or previously written by this function.
 	// Check for both '# ' (current) and '; ' (legacy) comment markers so
 	// that configs from any version are recognised and preserved.
@@ -239,7 +239,7 @@ void FWhitelistConfig::RestoreDefaultConfigIfNeeded()
 			return;
 	}
 
-	// File is missing or was stripped of comments by Alpakit — write the
+	// File is missing or was stripped of comments by Alpakit - write the
 	// annotated template so operators can see setting descriptions.
 	const FString Template =
 		TEXT("# DiscordBridge - Whitelist Settings\n")
