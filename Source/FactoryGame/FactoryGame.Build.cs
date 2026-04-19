@@ -100,50 +100,15 @@ public class FactoryGame : ModuleRules
 		}
 
 
-		//<FL>[KonradA] Binding SceLibPad for windows to use dual sense speakers
-		// Use reflection to allow type not to exist if console code is not present
-		if (/*Target.Platform == UnrealTargetPlatform.Win64 && Target.Type != TargetType.Server*/ false)
-		{
-			PrivateDefinitions.Add("PAD_LIB_SUPPORT=1");
-			AddEngineThirdPartyPrivateStaticDependencies(Target, "LibScePad");
-			string[] Includes = new string[1];
-			Includes[0] = "ApplicationCore_Sony";
-
-			PrivateIncludePathModuleNames.AddRange(Includes);
-		}
-		//</FL>
-
 		// <FL> [PfaffN] EOS does not compile on PS5 or XSX, they are not compatible
 		// Game EOS: 4.27
 		// PS5 & XSX EOS: 5.1.1
 		// [ZolotukhinN:24/01/2024] Exclude EOSShared on dedicated server, it's not enabled as a plugin for the dedicated server so we cannot depend on it
 		if (Target.Type != TargetType.Server)
 		{
-			if (/*Target.Platform != UnrealTargetPlatform.PS5 &&
-			    Target.Platform != UnrealTargetPlatform.XSX*/ true)
-			{
-				PublicDependencyModuleNames.AddRange(new string[] {
-					"OnlineSubsystemSteam",
-				});
-			}
-			else
-			{
-				PublicDependencyModuleNames.AddRange(new string[] {
-					"EOSShared" // <FL> [WuttkeP] Required to setup the overlay UI on consoles.
-				});
-			}
-		}
-		// <FL> [WuttkeP] Additional dependencies that are required to run the game on XSX.
-		if (/*Target.Platform == UnrealTargetPlatform.XSX*/ false)
-		{
-			PublicDependencyModuleNames.AddRange(new string[]
-			{
-				"LensDistortion",
-				"MfMedia",
-				"MfMediaFactory",
+			PublicDependencyModuleNames.AddRange(new string[] {
+				"OnlineSubsystemSteam",
 			});
-
-			PublicSystemIncludePaths.Add(System.IO.Path.Combine(EngineDirectory, "Platforms/XSX/Source/Runtime/D3D12RHI/Private"));
 		}
 		// <FL> [KohnhorstT] Include DebugUI plugin in non-shipping builds.
 		// [PfaffN] Exclude DebugUI from server
@@ -155,12 +120,6 @@ public class FactoryGame : ModuleRules
 			// });
 		}
 		// </FL>
-		// <FL> [PfaffN] TODO: PS5 does not compile with WITH_SHOWVAR, we disable it until
-		// we know if it is necessary for the build.
-		if (/*Target.Platform == UnrealTargetPlatform.PS5*/ false)
-		{
-			PrivateDefinitions.Add("WITH_SHOWVAR=0");
-		}
 
 		PrivateDependencyModuleNames.AddRange( new string[] { 
             "ReplicationGraph",
@@ -191,16 +150,7 @@ public class FactoryGame : ModuleRules
 		}
 
 		// <FL> [PfaffN] Disable telemetry for consoles
-		if (/*Target.Platform == UnrealTargetPlatform.PS5 ||
-		    Target.Platform == UnrealTargetPlatform.XSX*/ true)
-		{
-			PrivateDefinitions.Add($"WITH_TELEMETRY=0");
-		}
-		else
-		{
-			PublicDependencyModuleNames.Add("DSTelemetry");
-			PrivateDefinitions.Add($"WITH_TELEMETRY=1");
-		}
+		PrivateDefinitions.Add($"WITH_TELEMETRY=0");
 
 		bool isPublicBuild = true; // MODDING EDIT: we always target public builds
 		string isPublicBuildVersion = System.Environment.GetEnvironmentVariable("IS_PUBLIC_BUILD");
