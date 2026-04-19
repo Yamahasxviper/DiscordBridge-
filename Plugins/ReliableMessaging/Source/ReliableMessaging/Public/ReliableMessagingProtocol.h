@@ -713,7 +713,10 @@ void FReliableDataTransferProtocolReader<Base>::ParseChunk(FArchive& Ar)
 		if (RemainingSerializedBytes < 0)
 		{
 			Ar.SetError();
-			UE_LOG(LogReliableMessaging, Error, TEXT("Chunk parser encountered invalid archive cursor state. Closing connection."));
+			UE_LOG(LogReliableMessaging, Error,
+				TEXT("Chunk parser encountered invalid archive cursor state (tell=%lld, total=%lld). Closing connection."),
+				static_cast<long long>(Ar.Tell()),
+				static_cast<long long>(Ar.TotalSize()));
 			static_cast<BaseType&>(*this).CloseConnection();
 			return;
 		}
