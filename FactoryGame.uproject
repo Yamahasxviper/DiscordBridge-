@@ -206,7 +206,10 @@
 		},
 		{
 			"Name": "MfMedia",
-			"Enabled": true
+			"Enabled": true,
+			"TargetDenyList": [
+				"Server"
+			]
 		},
 		{
 			"Name": "Takes",
