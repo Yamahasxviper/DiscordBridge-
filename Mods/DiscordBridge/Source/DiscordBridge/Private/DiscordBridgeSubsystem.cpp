@@ -5429,36 +5429,36 @@ Commands.Add(MakeCmd(TEXT("help"),    TEXT("Show the bot command reference.")));
 Commands.Add(MakeCmd(TEXT("ban"), TEXT("Ban management commands."),
 {
 	MakeSub(TEXT("add"),        TEXT("Permanently ban a player."),
-		{ StrAC(TEXT("player"), TEXT("Player name or EOS PUID")), StrO(TEXT("reason"), TEXT("Ban reason")) }),
+		{ StrAC(TEXT("player"), TEXT("Name, EOS:<puid>, or IP:<addr>")), StrO(TEXT("reason"), TEXT("Ban reason")) }),
 	MakeSub(TEXT("temp"),       TEXT("Temporarily ban a player."),
-		{ StrAC(TEXT("player"), TEXT("Player name or EOS PUID")), Str(TEXT("duration"), TEXT("Duration: 30m 2h 1d 1w")), StrO(TEXT("reason"), TEXT("Ban reason")) }),
+		{ StrAC(TEXT("player"), TEXT("Name, EOS:<puid>, or IP:<addr>")), Str(TEXT("duration"), TEXT("Duration: 30m 2h 1d 1w")), StrO(TEXT("reason"), TEXT("Ban reason")) }),
 	MakeSub(TEXT("remove"),     TEXT("Remove a ban by player UID."),
-		{ Str(TEXT("uid"),    TEXT("Player compound UID")) }),
+		{ StrAC(TEXT("uid"),  TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("removename"), TEXT("Remove a ban by display name."),
 		{ StrAC(TEXT("name"),   TEXT("Player display name")) }),
 	MakeSub(TEXT("byname"),     TEXT("Ban a player by display name."),
 		{ StrAC(TEXT("name"),   TEXT("Player display name")), StrO(TEXT("reason"), TEXT("Ban reason")) }),
 	MakeSub(TEXT("check"),      TEXT("Check a player's ban status."),
-		{ StrAC(TEXT("player"), TEXT("Player name or EOS PUID")) }),
+		{ StrAC(TEXT("player"), TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("reason"),     TEXT("Edit the reason on an active ban."),
-		{ StrAC(TEXT("player"),     TEXT("Player name or EOS PUID")), Str(TEXT("new_reason"), TEXT("New ban reason")) }),
+		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")), Str(TEXT("new_reason"), TEXT("New ban reason")) }),
 	MakeSub(TEXT("list"),       TEXT("List all active bans (10 per page)."),
 		{ IntO(TEXT("page"),  TEXT("Page number (default 1)")) }),
 	MakeSub(TEXT("extend"),     TEXT("Extend a temporary ban."),
-		{ StrAC(TEXT("player"), TEXT("Player name or EOS PUID")), Str(TEXT("duration"), TEXT("Extra time: 30m 2h 1d")) }),
+		{ StrAC(TEXT("player"), TEXT("Name, EOS:<puid>, or IP:<addr>")), Str(TEXT("duration"), TEXT("Extra time: 30m 2h 1d")) }),
 	MakeSub(TEXT("duration"),   TEXT("Show remaining time on a temp ban."),
-		{ StrAC(TEXT("player"), TEXT("Player name or EOS PUID")) }),
+		{ StrAC(TEXT("player"), TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("link"),       TEXT("Link two UIDs so a ban blocks both."),
 		{ Str(TEXT("uid1"),   TEXT("First compound UID")), Str(TEXT("uid2"), TEXT("Second compound UID")) }),
 	MakeSub(TEXT("unlink"),     TEXT("Remove a link between two UIDs."),
 		{ Str(TEXT("uid1"),   TEXT("First compound UID")), Str(TEXT("uid2"), TEXT("Second compound UID")) }),
 	MakeSub(TEXT("schedule"),   TEXT("Schedule a delayed ban."),
-		{ StrAC(TEXT("player"),       TEXT("Player name or EOS PUID")),
+		{ StrAC(TEXT("player"),       TEXT("Name, EOS:<puid>, or IP:<addr>")),
 		  Str(TEXT("delay"),        TEXT("Delay before ban: 30m 2h")),
 		  StrO(TEXT("ban_duration"),TEXT("Ban length (omit for permanent)")),
 		  StrO(TEXT("reason"),      TEXT("Ban reason")) }),
 	MakeSub(TEXT("quick"),      TEXT("Apply a pre-defined ban template."),
-		{ Str(TEXT("template"), TEXT("Template slug")), StrAC(TEXT("player"), TEXT("Player name or EOS PUID")) }),
+		{ Str(TEXT("template"), TEXT("Template slug")), StrAC(TEXT("player"), TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("bulk"),       TEXT("Ban multiple players at once."),
 		{ Str(TEXT("players"), TEXT("Space-separated UIDs")), Str(TEXT("reason"), TEXT("Reason for all targets")) }),
 }));
@@ -5467,11 +5467,11 @@ Commands.Add(MakeCmd(TEXT("ban"), TEXT("Ban management commands."),
 Commands.Add(MakeCmd(TEXT("warn"), TEXT("Warning management commands."),
 {
 	MakeSub(TEXT("add"),      TEXT("Issue a formal warning."),
-		{ StrAC(TEXT("player"),     TEXT("Player name or EOS PUID")), Str(TEXT("reason"), TEXT("Warning reason")) }),
+		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")), Str(TEXT("reason"), TEXT("Warning reason")) }),
 	MakeSub(TEXT("list"),     TEXT("List all warnings for a player."),
-		{ StrAC(TEXT("player"),     TEXT("Player name or EOS PUID")) }),
+		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("clearall"), TEXT("Remove all warnings for a player."),
-		{ StrAC(TEXT("player"),     TEXT("Player name or EOS PUID")) }),
+		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("clearone"), TEXT("Remove a single warning by ID."),
 		{ Int(TEXT("warning_id"), TEXT("Warning integer ID")) }),
 }));
@@ -5480,31 +5480,31 @@ Commands.Add(MakeCmd(TEXT("warn"), TEXT("Warning management commands."),
 Commands.Add(MakeCmd(TEXT("mod"), TEXT("Moderation commands (moderator or admin)."),
 {
 	MakeSub(TEXT("kick"),       TEXT("Kick a connected player."),
-		{ StrAC(TEXT("player"),     TEXT("Player name or EOS PUID")), StrO(TEXT("reason"), TEXT("Kick reason")) }),
+		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")), StrO(TEXT("reason"), TEXT("Kick reason")) }),
 	MakeSub(TEXT("modban"),     TEXT("Temporarily ban a player (mod action)."),
-		{ StrAC(TEXT("player"),     TEXT("Player name or EOS PUID")), StrO(TEXT("reason"), TEXT("Ban reason")) }),
+		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")), StrO(TEXT("reason"), TEXT("Ban reason")) }),
 	MakeSub(TEXT("mute"),       TEXT("Mute a player's in-game chat."),
-		{ StrAC(TEXT("player"),     TEXT("Player name or EOS PUID")),
+		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")),
 		  IntO(TEXT("minutes"),   TEXT("Duration in minutes (0=indefinite)")),
 		  StrO(TEXT("reason"),    TEXT("Mute reason")) }),
 	MakeSub(TEXT("unmute"),     TEXT("Lift a mute from a player."),
-		{ StrAC(TEXT("player"),     TEXT("Player name or EOS PUID")) }),
+		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("tempmute"),   TEXT("Apply a timed mute."),
-		{ StrAC(TEXT("player"),     TEXT("Player name or EOS PUID")), Int(TEXT("minutes"), TEXT("Duration in minutes")) }),
+		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")), Int(TEXT("minutes"), TEXT("Duration in minutes")) }),
 	MakeSub(TEXT("tempunmute"), TEXT("Lift a timed mute."),
-		{ StrAC(TEXT("player"),     TEXT("Player name or EOS PUID")) }),
+		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("mutecheck"),  TEXT("Check mute status and expiry."),
-		{ StrAC(TEXT("player"),     TEXT("Player name or EOS PUID")) }),
+		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("mutelist"),   TEXT("List all currently muted players.")),
 	MakeSub(TEXT("mutereason"), TEXT("Update the reason on an active mute."),
-		{ StrAC(TEXT("player"),     TEXT("Player name or EOS PUID")), Str(TEXT("new_reason"), TEXT("New mute reason")) }),
+		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")), Str(TEXT("new_reason"), TEXT("New mute reason")) }),
 	MakeSub(TEXT("announce"),   TEXT("Broadcast a message to in-game players."),
 		{ Str(TEXT("message"),    TEXT("Message to broadcast")) }),
 	MakeSub(TEXT("stafflist"),  TEXT("Show online staff members.")),
 	MakeSub(TEXT("staffchat"),  TEXT("Send a message to online staff only."),
 		{ Str(TEXT("message"),    TEXT("Staff-only message")) }),
 	MakeSub(TEXT("freeze"),     TEXT("Toggle movement freeze for a player (admin only)."),
-		{ StrAC(TEXT("player"),   TEXT("Player name or EOS PUID")) }),
+		{ StrAC(TEXT("player"),   TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 }));
 
 // ── /player – player information commands (admin) ─────────────────────────
@@ -5513,17 +5513,17 @@ Commands.Add(MakeCmd(TEXT("player"), TEXT("Player information and note commands.
 	MakeSub(TEXT("history"),    TEXT("Show known session records for a player."),
 		{ StrAC(TEXT("query"),   TEXT("Player name, EOS PUID, or IP address")) }),
 	MakeSub(TEXT("note"),       TEXT("Add a private admin note."),
-		{ StrAC(TEXT("player"),  TEXT("Player name or EOS PUID")), Str(TEXT("text"), TEXT("Note text")) }),
+		{ StrAC(TEXT("player"),  TEXT("Name, EOS:<puid>, or IP:<addr>")), Str(TEXT("text"), TEXT("Note text")) }),
 	MakeSub(TEXT("notes"),      TEXT("List all admin notes for a player."),
-		{ StrAC(TEXT("player"),  TEXT("Player name or EOS PUID")) }),
+		{ StrAC(TEXT("player"),  TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("reason"),     TEXT("Show the ban reason for a UID."),
 		{ Str(TEXT("uid"),     TEXT("Player compound UID")) }),
 	MakeSub(TEXT("playtime"),   TEXT("Show a player's server playtime."),
-		{ StrAC(TEXT("player"),  TEXT("Player name or EOS PUID")) }),
+		{ StrAC(TEXT("player"),  TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("stats"),      TEXT("Show per-player build and item stats."),
 		{ StrAC(TEXT("name"),    TEXT("Player display name")) }),
 	MakeSub(TEXT("reputation"), TEXT("Show a player's reputation score."),
-		{ StrAC(TEXT("player"),  TEXT("Player name or EOS PUID")) }),
+		{ StrAC(TEXT("player"),  TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 }));
 
 // ── /appeal – ban appeal management (admin) ───────────────────────────────
@@ -5778,13 +5778,38 @@ void UDiscordBridgeSubsystem::HandleAutocompleteInteraction(
 
 		if (FocusedValue.IsEmpty())
 		{
-			// Empty input: show the most recently seen players by display name.
-			TSet<FString> SeenNames;
+			// Empty input: show the most recently seen players with name, EOS,
+			// and IP choices so all three identifier types are immediately
+			// accessible without needing to type anything first.
+			TSet<FString> SeenValues;
 			for (const FPlayerSessionRecord& Rec : Registry->GetAllRecords())
 			{
-				if (SeenNames.Contains(Rec.DisplayName)) continue;
-				SeenNames.Add(Rec.DisplayName);
-				AddChoice(Rec.DisplayName, Rec.DisplayName);
+				// 1. Display name choice.
+				if (!SeenValues.Contains(Rec.DisplayName))
+				{
+					SeenValues.Add(Rec.DisplayName);
+					AddChoice(Rec.DisplayName, Rec.DisplayName);
+				}
+				// 2. EOS UID choice.
+				if (!Rec.Uid.IsEmpty() && !SeenValues.Contains(Rec.Uid))
+				{
+					SeenValues.Add(Rec.Uid);
+					const FString Label = FString::Printf(
+						TEXT("%s (%s)"), *Rec.DisplayName, *Rec.Uid);
+					AddChoice(Label, Rec.Uid);
+				}
+				// 3. IP address choice.
+				if (!Rec.IpAddress.IsEmpty())
+				{
+					const FString IpUid = TEXT("IP:") + Rec.IpAddress;
+					if (!SeenValues.Contains(IpUid))
+					{
+						SeenValues.Add(IpUid);
+						const FString Label = FString::Printf(
+							TEXT("%s (IP: %s)"), *Rec.DisplayName, *Rec.IpAddress);
+						AddChoice(Label, IpUid);
+					}
+				}
 				if (Choices.Num() >= 25) break;
 			}
 		}
@@ -6025,7 +6050,7 @@ TEXT("`/stats` — Server statistics\n")
 TEXT("`/server` — Server info\n")
 TEXT("`/online` — Online players embed\n")
 TEXT("`/whitelist on|off|add|remove|list|status|apply|link|search` — Whitelist\n")
-TEXT("`/ban add|temp|remove|check|list|extend|…` — Ban management (admin)\n")
+TEXT("`/ban add|temp|remove|check|list|extend|…` — Ban by name, EOS UID, or IP (admin)\n")
 TEXT("`/warn add|list|clearall|clearone` — Warning management (admin)\n")
 TEXT("`/mod kick|mute|unmute|freeze|announce|…` — Moderation (moderator/admin)\n")
 TEXT("`/player history|note|notes|playtime|…` — Player info (admin)\n")
