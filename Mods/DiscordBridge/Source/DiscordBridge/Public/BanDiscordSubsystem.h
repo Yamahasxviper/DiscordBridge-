@@ -9,6 +9,8 @@
 #include "BanBridgeConfig.h"
 #include "BanDiscordSubsystem.generated.h"
 
+class AGameModeBase;
+
 /**
  * UBanDiscordSubsystem
  *
@@ -105,6 +107,9 @@ private:
 
 	/** Returns true when the member's role list contains AdminRoleId or ModeratorRoleId. */
 	bool IsModeratorMember(const TArray<FString>& Roles) const;
+
+	/** Post-login hook used to remind players of active moderation status on rejoin. */
+	void OnPostLoginModerationReminder(AGameModeBase* GameMode, APlayerController* Controller);
 
 	// ── Target resolution ─────────────────────────────────────────────────────
 
@@ -506,4 +511,13 @@ private:
 	 * message.
 	 */
 	void Respond(const FString& ChannelId, const FString& Message);
+
+	/** Broadcast a moderation notice to in-game chat (all connected players). */
+	void BroadcastInGameModerationNotice(const FString& Message) const;
+
+	/** Send a moderation notice to a specific connected player (by compound UID). */
+	void SendInGameModerationNoticeToUid(const FString& Uid, const FString& Message) const;
+
+	/** FGameModeEvents::GameModePostLoginEvent delegate for rejoin reminders. */
+	FDelegateHandle PostLoginHandle;
 };
