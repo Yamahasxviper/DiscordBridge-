@@ -114,6 +114,7 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 	Out.BanCommandChannelId    = GetIniBridgeString(Cfg, TEXT("BanCommandChannelId"));
 	Out.ModerationLogChannelId = GetIniBridgeString(Cfg, TEXT("ModerationLogChannelId"));
 	Out.AdminPanelChannelId    = GetIniBridgeString(Cfg, TEXT("AdminPanelChannelId"));
+	Out.StaffChatChannelId     = GetIniBridgeString(Cfg, TEXT("StaffChatChannelId"));
 
 	if (Out.AdminRoleId.IsEmpty())
 	{
@@ -136,6 +137,9 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 		UE_LOG(LogBanDiscord, Log,
 		       TEXT("BanBridge: AdminPanelChannelId    = \"%s\""),
 		       Out.AdminPanelChannelId.IsEmpty() ? TEXT("(command channel)") : *Out.AdminPanelChannelId);
+		UE_LOG(LogBanDiscord, Log,
+		       TEXT("BanBridge: StaffChatChannelId     = \"%s\""),
+		       Out.StaffChatChannelId.IsEmpty() ? TEXT("(disabled)") : *Out.StaffChatChannelId);
 	}
 
 	// -- Write backup ---------------------------------------------------------
@@ -151,7 +155,8 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 			+ TEXT("ModeratorRoleId=")        + Out.ModeratorRoleId        + TEXT("\n")
 			+ TEXT("BanCommandChannelId=")    + Out.BanCommandChannelId    + TEXT("\n")
 			+ TEXT("ModerationLogChannelId=") + Out.ModerationLogChannelId + TEXT("\n")
-			+ TEXT("AdminPanelChannelId=")    + Out.AdminPanelChannelId    + TEXT("\n");
+			+ TEXT("AdminPanelChannelId=")    + Out.AdminPanelChannelId    + TEXT("\n")
+			+ TEXT("StaffChatChannelId=")     + Out.StaffChatChannelId     + TEXT("\n");
 
 		PF.CreateDirectoryTree(*FPaths::GetPath(BackupPath));
 		if (FFileHelper::SaveStringToFile(BackupContent, *BackupPath,
@@ -243,7 +248,15 @@ void FBanBridgeConfig::RestoreDefaultConfigIfNeeded()
 		TEXT("AdminPanelChannelId=\n")
 		TEXT("# Optional: Discord channel ID where /admin panel posts the interactive\n")
 		TEXT("# admin panel embed. When empty the panel is sent to the channel in which\n")
-		TEXT("# the /admin panel command was issued.\n");
+		TEXT("# the /admin panel command was issued.\n")
+		TEXT("\n")
+		TEXT("StaffChatChannelId=\n")
+		TEXT("# Optional: Discord channel ID for the bidirectional staff-chat bridge.\n")
+		TEXT("# When set:\n")
+		TEXT("#   - In-game /staffchat messages are mirrored to this Discord channel.\n")
+		TEXT("#   - Regular messages posted to this channel by Discord staff are\n")
+		TEXT("#     relayed to all online admin/moderator players in-game.\n")
+		TEXT("# Leave empty to disable the staff-chat bridge (default).\n");
 
 	PF.CreateDirectoryTree(*FPaths::GetPath(PrimaryPath));
 	if (FFileHelper::SaveStringToFile(Template, *PrimaryPath,

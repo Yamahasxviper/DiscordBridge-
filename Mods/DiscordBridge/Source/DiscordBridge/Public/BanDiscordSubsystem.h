@@ -9,6 +9,8 @@
 #include "BanBridgeConfig.h"
 #include "BanDiscordSubsystem.generated.h"
 
+class AGameModeBase;
+
 /**
  * UBanDiscordSubsystem
  *
@@ -106,6 +108,17 @@ private:
 	/** Returns true when the member's role list contains AdminRoleId or ModeratorRoleId. */
 	bool IsModeratorMember(const TArray<FString>& Roles) const;
 
+	/**
+	 * Resolve the in-game broadcast prefix for a staff action based on the
+	 * acting member's Discord roles.
+	 * Returns "[Admin]" for admins, "[Moderator]" for mods-only, "[Staff]" as
+	 * a safe fallback (should not occur in practice since commands are gated).
+	 */
+	FString ResolveStaffPrefix(const TArray<FString>& Roles) const;
+
+	/** Post-login hook used to remind players of active moderation status on rejoin. */
+	void OnPostLoginModerationReminder(AGameModeBase* GameMode, APlayerController* Controller);
+
 	// ── Target resolution ─────────────────────────────────────────────────────
 
 	/**
@@ -151,12 +164,14 @@ private:
 	void HandleBanCommand(const TArray<FString>& Args,
 	                      const FString& ChannelId,
 	                      const FString& SenderName,
-	                      bool bTemporary);
+	                      bool bTemporary,
+	                      const FString& StaffPrefix);
 
 	/** Handle /ban remove. Usage: /ban remove <uid> */
 	void HandleUnbanCommand(const TArray<FString>& Args,
 	                        const FString& ChannelId,
-	                        const FString& SenderName);
+	                        const FString& SenderName,
+	                        const FString& StaffPrefix);
 
 	/** Handle /ban removename. Usage: /ban removename <name> */
 	void HandleUnbanNameCommand(const TArray<FString>& Args,
@@ -199,7 +214,8 @@ private:
 	/** Handle /warn add. Usage: /warn add <player> <reason> */
 	void HandleWarnCommand(const TArray<FString>& Args,
 	                       const FString& ChannelId,
-	                       const FString& SenderName);
+	                       const FString& SenderName,
+	                       const FString& StaffPrefix);
 
 	/** Handle /warn list. Usage: /warn list <player> */
 	void HandleWarningsCommand(const TArray<FString>& Args, const FString& ChannelId);
@@ -253,7 +269,7 @@ private:
 	void HandleDismissAppealCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
 
 	/** Handle /mod kick. Usage: /mod kick <player> [reason] */
-	void HandleKickCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
+	void HandleKickCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName, const FString& StaffPrefix);
 
 	/** Handle /mod modban. Usage: /mod modban <player> [reason] */
 	void HandleModBanCommand(const TArray<FString>& Args,
@@ -261,12 +277,13 @@ private:
 	                          const FString& SenderName);
 
 	/** Handle /mod mute and /mod unmute. Usage: /mod mute <player> [minutes] [reason] */
-	void HandleMuteCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName, bool bMute);
+	void HandleMuteCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName, bool bMute, const FString& StaffPrefix);
 
 	/** Handle /mod tempmute. Usage: /mod tempmute <player> <minutes> */
 	void HandleTempMuteCommand(const TArray<FString>& Args,
 	                            const FString& ChannelId,
-	                            const FString& SenderName);
+	                            const FString& SenderName,
+	                            const FString& StaffPrefix);
 
 	/** Handle /mod mutecheck. Usage: /mod mutecheck <player> */
 	void HandleMuteCheckCommand(const TArray<FString>& Args, const FString& ChannelId);
@@ -282,7 +299,8 @@ private:
 	 */
 	void HandleTempUnmuteCommand(const TArray<FString>& Args,
 	                              const FString& ChannelId,
-	                              const FString& SenderName);
+	                              const FString& SenderName,
+	                              const FString& StaffPrefix);
 
 	/**
 	 * Handle /mod mutereason.
@@ -291,7 +309,8 @@ private:
 	 */
 	void HandleMuteReasonCommand(const TArray<FString>& Args,
 	                              const FString& ChannelId,
-	                              const FString& SenderName);
+	                              const FString& SenderName,
+	                              const FString& StaffPrefix);
 
 	/** Handle /mod announce. Usage: /mod announce <message> */
 	void HandleAnnounceCommand(const TArray<FString>& Args, const FString& ChannelId, const FString& SenderName);
@@ -406,23 +425,25 @@ private:
 
 	/** Kick a player by name/PUID.  Returns the result message. */
 	FString ExecutePanelKick(const FString& PlayerArg, const FString& Reason,
-	                         const FString& SenderName);
+	                         const FString& SenderName, const FString& StaffPrefix);
 
 	/** Permanently ban a player by name/PUID.  Returns the result message. */
 	FString ExecutePanelBan(const FString& PlayerArg, const FString& Reason,
-	                        const FString& SenderName);
+	                        const FString& SenderName, const FString& StaffPrefix);
 
 	/** Temporarily ban a player.  Returns the result message. */
 	FString ExecutePanelTempBan(const FString& PlayerArg, const FString& DurationArg,
-	                             const FString& Reason, const FString& SenderName);
+	                             const FString& Reason, const FString& SenderName,
+	                             const FString& StaffPrefix);
 
 	/** Issue a warning to a player.  Returns the result message. */
 	FString ExecutePanelWarn(const FString& PlayerArg, const FString& Reason,
-	                         const FString& SenderName);
+	                         const FString& SenderName, const FString& StaffPrefix);
 
 	/** Mute a player.  Returns the result message. */
 	FString ExecutePanelMute(const FString& PlayerArg, const FString& DurationArg,
-	                         const FString& Reason, const FString& SenderName);
+	                         const FString& Reason, const FString& SenderName,
+	                         const FString& StaffPrefix);
 
 	/** Broadcast an in-game announcement.  Returns the result message. */
 	FString ExecutePanelAnnounce(const FString& Message, const FString& SenderName);
@@ -440,10 +461,10 @@ private:
 	FString ExecutePanelReloadConfig(const FString& SenderName);
 
 	/** Remove an active ban by player name/PUID.  Returns the result message. */
-	FString ExecutePanelUnban(const FString& PlayerArg, const FString& SenderName);
+	FString ExecutePanelUnban(const FString& PlayerArg, const FString& SenderName, const FString& StaffPrefix);
 
 	/** Remove an active mute by player name/PUID.  Returns the result message. */
-	FString ExecutePanelUnmute(const FString& PlayerArg, const FString& SenderName);
+	FString ExecutePanelUnmute(const FString& PlayerArg, const FString& SenderName, const FString& StaffPrefix);
 
 	/** Look up a player's ban status and return a formatted result string. */
 	FString ExecutePanelBanCheck(const FString& PlayerArg) const;
@@ -472,6 +493,14 @@ private:
 
 	/** Handle for the UBanAppealRegistry::OnBanAppealSubmitted subscription. */
 	FDelegateHandle AppealSubmittedDelegateHandle;
+
+	/** Handle for the AStaffChatCommand::OnInGameStaffChat subscription.
+	 *  Active when CachedProvider is set and StaffChatChannelId is non-empty. */
+	FDelegateHandle StaffChatDelegateHandle;
+
+	/** Handle for the raw Discord MESSAGE_CREATE subscription used to relay
+	 *  messages from StaffChatChannelId to in-game staff. */
+	FDelegateHandle RawMessageDelegateHandle;
 
 	/**
 	 * Cache of player thread IDs: "PlayerUID" → Discord thread channel ID.
@@ -506,4 +535,13 @@ private:
 	 * message.
 	 */
 	void Respond(const FString& ChannelId, const FString& Message);
+
+	/** Broadcast a moderation notice to in-game chat (all connected players). */
+	void BroadcastInGameModerationNotice(const FString& Message) const;
+
+	/** Send a moderation notice to a specific connected player (by compound UID). */
+	void SendInGameModerationNoticeToUid(const FString& Uid, const FString& Message) const;
+
+	/** FGameModeEvents::GameModePostLoginEvent delegate for rejoin reminders. */
+	FDelegateHandle PostLoginHandle;
 };
