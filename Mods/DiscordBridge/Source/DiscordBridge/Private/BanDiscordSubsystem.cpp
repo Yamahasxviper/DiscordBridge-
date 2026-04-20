@@ -515,17 +515,6 @@ void UBanDiscordSubsystem::BroadcastInGameModerationNotice(const FString& Messag
 		if (APlayerController* PC = It->Get())
 			PC->ClientMessage(Message);
 	}
-
-	// Also broadcast to the Satisfactory game chat window so the notice is
-	// visible in the chat box and not only in the HUD system channel.
-	if (AFGChatManager* ChatManager = AFGChatManager::Get(World))
-	{
-		FChatMessageStruct ChatMsg;
-		ChatMsg.MessageType   = EFGChatMessageType::CMT_CustomMessage;
-		ChatMsg.MessageSender = FText::GetEmpty();
-		ChatMsg.MessageText   = FText::FromString(Message);
-		ChatManager->BroadcastChatMessage(ChatMsg);
-	}
 }
 
 void UBanDiscordSubsystem::SendInGameModerationNoticeToUid(const FString& Uid, const FString& Message) const
@@ -922,7 +911,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 		: FString::Printf(
 			TEXT("%s Permanently banned @%s. Reason: %s. By: %s."),
 			*StaffPrefix, *DisplayName, *Entry.Reason, *SenderName);
-	BroadcastInGameModerationNotice(InGameBanNotice);
+	SendInGameModerationNoticeToUid(Uid, InGameBanNotice);
 	PostToPlayerModerationThread(DisplayName, Uid, Msg);
 }
 
@@ -1000,7 +989,7 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 	       *SenderName, *DisplayName, *Uid);
 
 	Respond(ChannelId, Msg);
-	BroadcastInGameModerationNotice(FString::Printf(
+	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Unbanned @%s. By: %s."),
 		*StaffPrefix, *DisplayName, *SenderName));
 	PostToPlayerModerationThread(DisplayName, Uid, Msg);
@@ -1317,7 +1306,7 @@ void UBanDiscordSubsystem::HandleKickCommand(const TArray<FString>& Args,
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *Reason, *SenderName);
 		KickMsg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
 		Respond(ChannelId, KickMsg);
-		BroadcastInGameModerationNotice(FString::Printf(
+		SendInGameModerationNoticeToUid(Uid, FString::Printf(
 			TEXT("%s Kicked @%s. Reason: %s. By: %s."),
 			*StaffPrefix, *DisplayName, *Reason, *SenderName));
 		PostToPlayerModerationThread(DisplayName, Uid, KickMsg);
@@ -1380,7 +1369,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 			TEXT("✅ Unmuted **%s** (`%s`).\nUnmuted by: %s"),
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
 		Respond(ChannelId, UnmuteMsg);
-		BroadcastInGameModerationNotice(FString::Printf(
+		SendInGameModerationNoticeToUid(Uid, FString::Printf(
 			TEXT("%s Unmuted @%s. By: %s."),
 			*StaffPrefix, *DisplayName, *SenderName));
 		PostToPlayerModerationThread(DisplayName, Uid, UnmuteMsg);
@@ -1413,7 +1402,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 		TEXT("🔇 Muted **%s** (`%s`)%s.\nReason: %s\nMuted by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *DurStr, *Reason, *SenderName);
 	Respond(ChannelId, MuteMsg);
-	BroadcastInGameModerationNotice(FString::Printf(
+	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Muted @%s%s. Reason: %s. By: %s."),
 		*StaffPrefix, *DisplayName, *DurStr, *Reason, *SenderName));
 	PostToPlayerModerationThread(DisplayName, Uid, MuteMsg);
@@ -1463,7 +1452,7 @@ void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
 		TEXT("⚠️ Warned **%s** (`%s`).\nReason: %s\nTotal warnings: **%d**\nWarned by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *Reason, WarnCount, *SenderName);
 	Respond(ChannelId, WarnMsg);
-	BroadcastInGameModerationNotice(FString::Printf(
+	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Warned @%s. Reason: %s. Total warnings: %d. By: %s."),
 		*StaffPrefix, *DisplayName, *Reason, WarnCount, *SenderName));
 	PostToPlayerModerationThread(DisplayName, Uid, WarnMsg);
@@ -2463,7 +2452,7 @@ void UBanDiscordSubsystem::HandleTempMuteCommand(const TArray<FString>& Args,
 		TEXT("🔇 Timed mute applied to **%s** (`%s`) for **%d minute(s)**.\nMuted by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, Minutes, *SenderName);
 	Respond(ChannelId, Msg);
-	BroadcastInGameModerationNotice(FString::Printf(
+	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Timed mute applied to @%s for %d minute(s). Reason: Timed mute via Discord. By: %s."),
 		*StaffPrefix, *DisplayName, Minutes, *SenderName));
 	PostModerationLog(Msg);
@@ -2644,7 +2633,7 @@ void UBanDiscordSubsystem::HandleTempUnmuteCommand(const TArray<FString>& Args,
 		TEXT("🔊 Timed mute lifted from **%s** (`%s`) early.\nUnmuted by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
 	Respond(ChannelId, UnmuteMsg);
-	BroadcastInGameModerationNotice(FString::Printf(
+	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Timed mute lifted for @%s. By: %s."),
 		*StaffPrefix, *DisplayName, *SenderName));
 	PostModerationLog(UnmuteMsg);
@@ -2698,7 +2687,7 @@ void UBanDiscordSubsystem::HandleMuteReasonCommand(const TArray<FString>& Args,
 		TEXT("✏️ Mute reason updated for **%s** (`%s`).\nNew reason: %s\nUpdated by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *NewReason, *SenderName);
 	Respond(ChannelId, Msg);
-	BroadcastInGameModerationNotice(FString::Printf(
+	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Updated mute reason for @%s. New reason: %s. By: %s."),
 		*StaffPrefix, *DisplayName, *NewReason, *SenderName));
 	PostModerationLog(Msg);
@@ -5212,7 +5201,7 @@ FString UBanDiscordSubsystem::ExecutePanelKick(const FString& PlayerArg,
 		UE_LOG(LogBanDiscord, Log,
 		       TEXT("BanDiscordSubsystem: [Panel] %s kicked %s (%s). Reason: %s"),
 		       *SenderName, *DisplayName, *Uid, *KickReason);
-		BroadcastInGameModerationNotice(FString::Printf(
+		SendInGameModerationNoticeToUid(Uid, FString::Printf(
 			TEXT("%s Kicked @%s. Reason: %s. By: %s."),
 			*StaffPrefix, *DisplayName, *KickReason, *SenderName));
 		return Msg;
@@ -5264,7 +5253,7 @@ FString UBanDiscordSubsystem::ExecutePanelBan(const FString& PlayerArg,
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: [Panel] %s permanently banned %s (%s). Reason: %s"),
 	       *SenderName, *DisplayName, *Uid, *Entry.Reason);
-	BroadcastInGameModerationNotice(FString::Printf(
+	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Permanently banned @%s. Reason: %s. By: %s."),
 		*StaffPrefix, *DisplayName, *Entry.Reason, *SenderName));
 	return Msg;
@@ -5323,7 +5312,7 @@ FString UBanDiscordSubsystem::ExecutePanelTempBan(const FString& PlayerArg,
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: [Panel] %s temp-banned %s (%s) for %d min. Reason: %s"),
 	       *SenderName, *DisplayName, *Uid, DurationMinutes, *Entry.Reason);
-	BroadcastInGameModerationNotice(FString::Printf(
+	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Temporarily banned @%s for %d minute(s). Reason: %s. By: %s."),
 		*StaffPrefix, *DisplayName, DurationMinutes, *Entry.Reason, *SenderName));
 	return Msg;
@@ -5352,7 +5341,7 @@ FString UBanDiscordSubsystem::ExecutePanelWarn(const FString& PlayerArg,
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: [Panel] %s warned %s (%s). Reason: %s"),
 	       *SenderName, *DisplayName, *Uid, *Reason);
-	BroadcastInGameModerationNotice(FString::Printf(
+	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Warned @%s. Reason: %s. Total warnings: %d. By: %s."),
 		*StaffPrefix, *DisplayName, *Reason, WarnCount, *SenderName));
 
@@ -5401,7 +5390,7 @@ FString UBanDiscordSubsystem::ExecutePanelMute(const FString& PlayerArg,
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: [Panel] %s muted %s (%s) for %s. Reason: %s"),
 	       *SenderName, *DisplayName, *Uid, *DurStr, *MuteReason);
-	BroadcastInGameModerationNotice(FString::Printf(
+	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Muted @%s for %s. Reason: %s. By: %s."),
 		*StaffPrefix, *DisplayName, *DurStr, *MuteReason, *SenderName));
 
@@ -5618,7 +5607,7 @@ FString UBanDiscordSubsystem::ExecutePanelUnban(const FString& PlayerArg,
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: [Panel] %s unbanned %s (%s)."),
 	       *SenderName, *DisplayName, *Uid);
-	BroadcastInGameModerationNotice(FString::Printf(
+	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Unbanned @%s. By: %s."),
 		*StaffPrefix, *DisplayName, *SenderName));
 	return Msg;
@@ -5647,7 +5636,7 @@ FString UBanDiscordSubsystem::ExecutePanelUnmute(const FString& PlayerArg,
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: [Panel] %s unmuted %s (%s)."),
 	       *SenderName, *DisplayName, *Uid);
-	BroadcastInGameModerationNotice(FString::Printf(
+	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Unmuted @%s. By: %s."),
 		*StaffPrefix, *DisplayName, *SenderName));
 
