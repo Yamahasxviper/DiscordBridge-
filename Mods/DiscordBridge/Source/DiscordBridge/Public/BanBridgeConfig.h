@@ -72,6 +72,21 @@ struct DISCORDBRIDGE_API FBanBridgeConfig
 	 */
 	FString AdminPanelChannelId;
 
+	/**
+	 * Optional: Discord channel ID for the bidirectional staff-chat bridge.
+	 *
+	 * When set:
+	 *   - In-game /staffchat messages are mirrored to this Discord channel.
+	 *   - Regular (non-bot) messages posted to this Discord channel by staff
+	 *     members are relayed to all online admin/moderator players in-game.
+	 * The /mod staffchat slash command continues to work independently.
+	 * Leave empty to disable the staff-chat bridge (default).
+	 *
+	 * How to get the channel ID: enable Developer Mode, right-click the channel,
+	 * and choose "Copy Channel ID".
+	 */
+	FString StaffChatChannelId;
+
 	// ── Authorisation helpers ─────────────────────────────────────────────────
 
 	/** Returns true when Roles contains AdminRoleId (full admin access). */

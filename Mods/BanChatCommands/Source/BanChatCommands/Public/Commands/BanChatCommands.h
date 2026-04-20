@@ -825,6 +825,14 @@ public:
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Fired whenever a staff member sends a /staffchat message in-game.
+ *  Param 1: sender display name.
+ *  Param 2: message text.
+ * DiscordBridge (UBanDiscordSubsystem) subscribes to mirror messages to Discord.
+ */
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnInGameStaffChat, const FString&, const FString&);
+
+/**
  * /staffchat <message...>
  *
  * Sends a chat message visible ONLY to online admins and moderators.
@@ -843,6 +851,12 @@ public:
         UCommandSender* Sender,
         const TArray<FString>& Arguments,
         const FString& Label) override;
+
+    /**
+     * Broadcast after every successful in-game /staffchat delivery.
+     * External systems (DiscordBridge) bind here to mirror messages to Discord.
+     */
+    static FOnInGameStaffChat OnInGameStaffChat;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

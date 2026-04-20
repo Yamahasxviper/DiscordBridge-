@@ -340,6 +340,20 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 		InteractionDelegateHandle.Reset();
 	}
 
+	// Detach raw-message listener before clearing the provider.
+	if (CachedProvider && RawMessageDelegateHandle.IsValid())
+	{
+		CachedProvider->UnsubscribeRawMessage(RawMessageDelegateHandle);
+		RawMessageDelegateHandle.Reset();
+	}
+
+	// Detach in-game staff-chat listener.
+	if (StaffChatDelegateHandle.IsValid())
+	{
+		AStaffChatCommand::OnInGameStaffChat.Remove(StaffChatDelegateHandle);
+		StaffChatDelegateHandle.Reset();
+	}
+
 	// Unbind appeal-submitted notification when clearing the provider.
 	if (AppealSubmittedDelegateHandle.IsValid())
 	{
@@ -398,6 +412,93 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 		       (Config.AdminRoleId.IsEmpty() && Config.ModeratorRoleId.IsEmpty())
 		           ? TEXT("DISABLED (neither AdminRoleId nor ModeratorRoleId is set)")
 		           : TEXT("enabled"));
+
+		// ── Staff-chat bridge ─────────────────────────────────────────────────
+
+		// In-game → Discord: mirror /staffchat messages to StaffChatChannelId.
+		StaffChatDelegateHandle = AStaffChatCommand::OnInGameStaffChat.AddLambda(
+			[WeakThis](const FString& SenderName, const FString& Message)
+			{
+				UBanDiscordSubsystem* Self = WeakThis.Get();
+				if (!Self || !Self->CachedProvider) return;
+				if (Self->Config.StaffChatChannelId.IsEmpty()) return;
+
+				const FString Formatted = FString::Printf(
+					TEXT("[In-Game Staff] %s: %s"), *SenderName, *Message);
+				Self->CachedProvider->SendDiscordChannelMessage(
+					Self->Config.StaffChatChannelId, Formatted);
+			});
+
+		// Discord → in-game: relay human messages from StaffChatChannelId to staff.
+		RawMessageDelegateHandle = CachedProvider->SubscribeRawMessage(
+			[WeakThis](const TSharedPtr<FJsonObject>& MsgObj)
+			{
+				UBanDiscordSubsystem* Self = WeakThis.Get();
+				if (!Self || !Self->CachedProvider) return;
+				if (Self->Config.StaffChatChannelId.IsEmpty()) return;
+
+				// Only process messages from the configured staff-chat channel.
+				FString MsgChannelId;
+				if (!MsgObj->TryGetStringField(TEXT("channel_id"), MsgChannelId))
+					return;
+				if (MsgChannelId != Self->Config.StaffChatChannelId)
+					return;
+
+				// Skip bot messages (including the bot's own in-game echo posts).
+				const TSharedPtr<FJsonObject>* AuthorPtr = nullptr;
+				if (!MsgObj->TryGetObjectField(TEXT("author"), AuthorPtr) || !AuthorPtr)
+					return;
+				bool bIsBot = false;
+				(*AuthorPtr)->TryGetBoolField(TEXT("bot"), bIsBot);
+				if (bIsBot) return;
+
+				// Extract display name: nick > global_name > username.
+				FString DisplayName;
+				const TSharedPtr<FJsonObject>* MemberPtr = nullptr;
+				if (MsgObj->TryGetObjectField(TEXT("member"), MemberPtr) && MemberPtr)
+					(*MemberPtr)->TryGetStringField(TEXT("nick"), DisplayName);
+				if (DisplayName.IsEmpty())
+					if (!(*AuthorPtr)->TryGetStringField(TEXT("global_name"), DisplayName)
+					    || DisplayName.IsEmpty())
+						(*AuthorPtr)->TryGetStringField(TEXT("username"), DisplayName);
+				if (DisplayName.IsEmpty())
+					DisplayName = TEXT("Discord Staff");
+
+				// Extract message content.
+				FString Content;
+				if (!MsgObj->TryGetStringField(TEXT("content"), Content) || Content.IsEmpty())
+					return;
+
+				const FString Formatted = FString::Printf(
+					TEXT("[Discord Staff] %s: %s"), *DisplayName, *Content);
+
+				// Deliver to all online admin/moderator players.
+				const UBanChatCommandsConfig* BccCfg = UBanChatCommandsConfig::Get();
+				UWorld* World = Self->GetGameInstance()
+					? Self->GetGameInstance()->GetWorld() : nullptr;
+				if (!World) return;
+
+				for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+				{
+					APlayerController* PC = It->Get();
+					if (!PC) continue;
+					APlayerState* PS = PC->GetPlayerState<APlayerState>();
+					if (!PS) continue;
+
+					FString PUIDStr;
+					if (const FUniqueNetIdRepl& Id = PS->GetUniqueId(); Id.IsValid())
+					{
+						PUIDStr = Id.ToString();
+						FString Platform, RawId;
+						UBanDatabase::ParseUid(PUIDStr, Platform, RawId);
+						if (Platform == TEXT("EOS")) PUIDStr = RawId;
+					}
+
+					const FString CompoundUid = TEXT("EOS:") + PUIDStr.ToLower();
+					if (BccCfg && BccCfg->IsModeratorUid(CompoundUid))
+						PC->ClientMessage(Formatted);
+				}
+			});
 
 		// Feature 9: Auto-post the panel to AdminPanelChannelId on startup.
 		// Empty AuthorId bypasses the per-user rate-limit.

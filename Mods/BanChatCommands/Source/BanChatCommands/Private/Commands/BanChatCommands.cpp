@@ -2805,6 +2805,8 @@ EExecutionStatus ABanReasonChatCommand::ExecuteCommand_Implementation(
 //  AStaffChatCommand  — /staffchat
 // ─────────────────────────────────────────────────────────────────────────────
 
+FOnInGameStaffChat AStaffChatCommand::OnInGameStaffChat;
+
 AStaffChatCommand::AStaffChatCommand()
 {
     CommandName          = TEXT("staffchat");
@@ -2872,6 +2874,10 @@ EExecutionStatus AStaffChatCommand::ExecuteCommand_Implementation(
 
     // Also echo back to the sender (in case they're console and not in world).
     Sender->SendChatMessage(Formatted, StaffColor);
+
+    // Notify external systems (e.g. DiscordBridge) so the message can be
+    // mirrored to a Discord staff-chat channel.
+    AStaffChatCommand::OnInGameStaffChat.Broadcast(Sender->GetSenderName(), Message);
 
     return EExecutionStatus::COMPLETED;
 }

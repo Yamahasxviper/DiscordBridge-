@@ -494,6 +494,14 @@ private:
 	/** Handle for the UBanAppealRegistry::OnBanAppealSubmitted subscription. */
 	FDelegateHandle AppealSubmittedDelegateHandle;
 
+	/** Handle for the AStaffChatCommand::OnInGameStaffChat subscription.
+	 *  Active when CachedProvider is set and StaffChatChannelId is non-empty. */
+	FDelegateHandle StaffChatDelegateHandle;
+
+	/** Handle for the raw Discord MESSAGE_CREATE subscription used to relay
+	 *  messages from StaffChatChannelId to in-game staff. */
+	FDelegateHandle RawMessageDelegateHandle;
+
 	/**
 	 * Cache of player thread IDs: "PlayerUID" → Discord thread channel ID.
 	 * Populated lazily when PostToPlayerModerationThread creates a new thread.
