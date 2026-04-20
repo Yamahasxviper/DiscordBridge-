@@ -22,6 +22,7 @@
 // DiscordBridge config (ServerName for panel embed)
 #include "DiscordBridgeConfig.h"
 #include "TicketSubsystem.h"
+#include "FGChatManager.h"
 
 #include "Misc/DefaultValueHelper.h"
 #include "Engine/GameInstance.h"
@@ -513,6 +514,17 @@ void UBanDiscordSubsystem::BroadcastInGameModerationNotice(const FString& Messag
 	{
 		if (APlayerController* PC = It->Get())
 			PC->ClientMessage(Message);
+	}
+
+	// Also broadcast to the Satisfactory game chat window so the notice is
+	// visible in the chat box and not only in the HUD system channel.
+	if (AFGChatManager* ChatManager = AFGChatManager::Get(World))
+	{
+		FChatMessageStruct ChatMsg;
+		ChatMsg.MessageType   = EFGChatMessageType::CMT_CustomMessage;
+		ChatMsg.MessageSender = FText::GetEmpty();
+		ChatMsg.MessageText   = FText::FromString(Message);
+		ChatManager->BroadcastChatMessage(ChatMsg);
 	}
 }
 
