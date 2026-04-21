@@ -577,6 +577,16 @@ void FReliableDataTransferProtocolReader<Base>::ParseMessageHeader(FArchive& Ar)
 		RDTProtocol::FMessageHeader MessageHeader;
 		Ar << MessageHeader;
 		check(!Ar.IsError());
+
+		const int64 MessageLength = static_cast<int64>(MessageHeader.Length);
+		if (MessageLength < 0)
+		{
+			Ar.SetError();
+			UE_LOG(LogReliableMessaging, Error,
+				TEXT("Received a message header with an invalid negative length. Closing connection."));
+			static_cast<BaseType&>(*this).CloseConnection();
+			return;
+		}
 		
 		if (PerChannelData.Num() < MessageHeader.ChannelId + 1)
 		{
@@ -617,6 +627,16 @@ void FReliableDataTransferProtocolReader<Base>::ParseChunk(FArchive& Ar)
 			Ar << ChunkHeader;
 			check(!Ar.IsError());
 
+			const int64 ChunkLength = static_cast<int64>(ChunkHeader.Length);
+			if (ChunkLength < 0)
+			{
+				Ar.SetError();
+				UE_LOG(LogReliableMessaging, Error,
+					TEXT("Received a chunk header with an invalid negative length. Closing connection."));
+				static_cast<BaseType&>(*this).CloseConnection();
+				return;
+			}
+
 			// Make sure this chunk was expected at this time. 
 			if (!PerChannelData.IsValidIndex(ChunkHeader.ChannelId))
 			{
@@ -654,14 +674,24 @@ void FReliableDataTransferProtocolReader<Base>::ParseChunk(FArchive& Ar)
 
 	{
 		// Make sure the length of this chunk does not exceed the length of the message. This would be an unrecoverable error. 
-		if ((PendingChunk->Length - PendingChunk->Offset) > PendingChunk->PendingMessagePtr->GetRemainingBytes())
+		const int64 RemainingChunkBytes = static_cast<int64>(PendingChunk->Length) - static_cast<int64>(PendingChunk->Offset);
+		if (RemainingChunkBytes < 0)
+		{
+			Ar.SetError();
+			UE_LOG(LogReliableMessaging, Error, TEXT("Chunk offset exceeded chunk length. Closing connection."));
+			static_cast<BaseType&>(*this).CloseConnection();
+			return;
+		}
+
+		if (RemainingChunkBytes > static_cast<int64>(PendingChunk->PendingMessagePtr->GetRemainingBytes()))
 		{
 			Ar.SetError();
 			UE_LOG(LogReliableMessaging, Error, TEXT("Chunk length is greater than remaining message length. Closing connection."));
 			static_cast<BaseType&>(*this).CloseConnection();
 			return;
 		}
-		const RDTProtocol::SizeType ReadLen = FMath::Min(PendingChunk->Length - PendingChunk->Offset, Ar.TotalSize() - Ar.Tell());
+		const int64 RemainingArchiveBytes = Ar.TotalSize() - Ar.Tell();
+		const RDTProtocol::SizeType ReadLen = static_cast<RDTProtocol::SizeType>(FMath::Min(RemainingChunkBytes, RemainingArchiveBytes));
 		uint8* ReadPosition = PendingChunk->PendingMessagePtr->Data.GetData() + PendingChunk->PendingMessagePtr->Offset;
 		Ar.Serialize(ReadPosition, ReadLen);
 		check(!Ar.IsError());
