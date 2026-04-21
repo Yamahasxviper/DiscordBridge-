@@ -578,8 +578,7 @@ void FReliableDataTransferProtocolReader<Base>::ParseMessageHeader(FArchive& Ar)
 		Ar << MessageHeader;
 		check(!Ar.IsError());
 
-		const int64 MessageLength = static_cast<int64>(MessageHeader.Length);
-		if (MessageLength < 0)
+		if (static_cast<int64>(MessageHeader.Length) < 0)
 		{
 			Ar.SetError();
 			UE_LOG(LogReliableMessaging, Error,
@@ -627,8 +626,7 @@ void FReliableDataTransferProtocolReader<Base>::ParseChunk(FArchive& Ar)
 			Ar << ChunkHeader;
 			check(!Ar.IsError());
 
-			const int64 ChunkLength = static_cast<int64>(ChunkHeader.Length);
-			if (ChunkLength < 0)
+			if (static_cast<int64>(ChunkHeader.Length) < 0)
 			{
 				Ar.SetError();
 				UE_LOG(LogReliableMessaging, Error,
@@ -691,7 +689,15 @@ void FReliableDataTransferProtocolReader<Base>::ParseChunk(FArchive& Ar)
 			return;
 		}
 		const int64 RemainingArchiveBytes = Ar.TotalSize() - Ar.Tell();
-		const RDTProtocol::SizeType ReadLen = static_cast<RDTProtocol::SizeType>(FMath::Min(RemainingChunkBytes, RemainingArchiveBytes));
+		const int64 ReadLen64 = FMath::Min(RemainingChunkBytes, RemainingArchiveBytes);
+		if (ReadLen64 > static_cast<int64>(TNumericLimits<RDTProtocol::SizeType>::Max()))
+		{
+			Ar.SetError();
+			UE_LOG(LogReliableMessaging, Error, TEXT("Chunk read length overflowed protocol size type. Closing connection."));
+			static_cast<BaseType&>(*this).CloseConnection();
+			return;
+		}
+		const RDTProtocol::SizeType ReadLen = static_cast<RDTProtocol::SizeType>(ReadLen64);
 		uint8* ReadPosition = PendingChunk->PendingMessagePtr->Data.GetData() + PendingChunk->PendingMessagePtr->Offset;
 		Ar.Serialize(ReadPosition, ReadLen);
 		check(!Ar.IsError());
