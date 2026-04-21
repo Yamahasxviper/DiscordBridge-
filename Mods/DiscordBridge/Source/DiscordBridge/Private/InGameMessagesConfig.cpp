@@ -263,6 +263,48 @@ FInGameMessagesConfig FInGameMessagesConfig::Load()
 	       *Out.DefaultSenderName,
 	       Out.Messages.Num());
 
+	// Secondary restore: if the Messages array is empty after reading the primary
+	// (e.g. a mod update reset DefaultInGameMessages.ini to the blank template),
+	// check the backup and restore all fields so broadcast messages keep running.
+	if (Out.Messages.IsEmpty() && PF.FileExists(*BackupPath))
+	{
+		FString BackupRaw;
+		FFileHelper::LoadFileToString(BackupRaw, *BackupPath);
+		FConfigFile BackupCfg;
+		BackupCfg.Read(BackupPath);
+		if (BackupCfg.Contains(IGMSection))
+		{
+			const TArray<FString> BackupMsgLines =
+				ParseRawIniArrayIGM(BackupRaw, TEXT("InGameMessages"), TEXT("Messages"));
+			if (!BackupMsgLines.IsEmpty())
+			{
+				Out.bEnabled          = GetIGMBool  (BackupCfg, TEXT("Enabled"),          Out.bEnabled);
+				Out.DefaultSenderName = GetIGMString(BackupCfg, TEXT("DefaultSenderName"), Out.DefaultSenderName);
+				Out.Messages.Reset();
+				for (const FString& Line : BackupMsgLines)
+				{
+					FString Cleaned = Line.TrimStartAndEnd();
+					if (Cleaned.StartsWith(TEXT("("))) Cleaned = Cleaned.Mid(1);
+					if (Cleaned.EndsWith(TEXT(")")))   Cleaned = Cleaned.LeftChop(1);
+
+					FInGameBroadcastMessage Entry;
+					Entry.IntervalMinutes = ExtractIntField(Cleaned, TEXT("IntervalMinutes"), 0);
+					Entry.Message         = ExtractQuotedField(Cleaned, TEXT("Message"));
+					Entry.SenderName      = ExtractQuotedField(Cleaned, TEXT("SenderName"));
+					if (Entry.SenderName.IsEmpty())
+						Entry.SenderName = Out.DefaultSenderName;
+
+					if (Entry.IntervalMinutes > 0 && !Entry.Message.IsEmpty())
+						Out.Messages.Add(Entry);
+				}
+				UE_LOG(LogInGameMessagesConfig, Log,
+				       TEXT("InGameMessages: Primary config had no +Messages entries — restored "
+				            "%d message(s) from backup '%s'."),
+				       Out.Messages.Num(), *BackupPath);
+			}
+		}
+	}
+
 	// -- Write backup ---------------------------------------------------------
 	{
 		FString BackupContent =

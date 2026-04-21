@@ -157,6 +157,42 @@ FWhitelistConfig FWhitelistConfig::Load()
 	Out.bWhitelistVerificationEnabled    = GetWLBool  (Cfg, TEXT("WhitelistVerificationEnabled"),    Out.bWhitelistVerificationEnabled);
 	Out.WhitelistVerificationChannelId   = GetWLString(Cfg, TEXT("WhitelistVerificationChannelId"));
 
+	// Secondary restore: if WhitelistCommandRoleId is empty after loading the
+	// primary config (e.g. a mod update reset DefaultWhitelist.ini to the blank
+	// template), check the backup for a previously configured value and restore
+	// all fields so the whitelist keeps working without operator intervention.
+	if (Out.WhitelistCommandRoleId.IsEmpty() && PF.FileExists(*BackupPath))
+	{
+		FConfigFile BackupCfg;
+		BackupCfg.Read(BackupPath);
+		if (BackupCfg.Contains(WLSection))
+		{
+			const FString BackupRoleId = GetWLString(BackupCfg, TEXT("WhitelistCommandRoleId"));
+			if (!BackupRoleId.IsEmpty())
+			{
+				Out.bWhitelistEnabled             = GetWLBool          (BackupCfg, TEXT("WhitelistEnabled"),             Out.bWhitelistEnabled);
+				Out.WhitelistCommandRoleId        = BackupRoleId;
+				Out.WhitelistRoleId               = GetWLString        (BackupCfg, TEXT("WhitelistRoleId"));
+				Out.WhitelistChannelId            = GetWLString        (BackupCfg, TEXT("WhitelistChannelId"));
+				Out.WhitelistKickDiscordMessage   = GetWLString        (BackupCfg, TEXT("WhitelistKickDiscordMessage"),  Out.WhitelistKickDiscordMessage);
+				Out.WhitelistKickReason           = GetWLStringOrFallback(BackupCfg, TEXT("WhitelistKickReason"),        Out.WhitelistKickReason);
+				Out.WhitelistEventsChannelId      = GetWLString        (BackupCfg, TEXT("WhitelistEventsChannelId"));
+				Out.MaxWhitelistSlots             = GetWLInt           (BackupCfg, TEXT("MaxWhitelistSlots"),            Out.MaxWhitelistSlots);
+				Out.bSyncWhitelistWithRole        = GetWLBool          (BackupCfg, TEXT("SyncWhitelistWithRole"),        Out.bSyncWhitelistWithRole);
+				Out.WhitelistApplicationChannelId = GetWLString        (BackupCfg, TEXT("WhitelistApplicationChannelId"));
+				Out.bWhitelistApplyEnabled        = GetWLBool          (BackupCfg, TEXT("WhitelistApplyEnabled"),        Out.bWhitelistApplyEnabled);
+				Out.WhitelistApprovedDmMessage    = GetWLString        (BackupCfg, TEXT("WhitelistApprovedDmMessage"));
+				Out.WhitelistExpiryWarningHours   = GetWLFloat         (BackupCfg, TEXT("WhitelistExpiryWarningHours"),  Out.WhitelistExpiryWarningHours);
+				Out.bWhitelistVerificationEnabled = GetWLBool          (BackupCfg, TEXT("WhitelistVerificationEnabled"), Out.bWhitelistVerificationEnabled);
+				Out.WhitelistVerificationChannelId= GetWLString        (BackupCfg, TEXT("WhitelistVerificationChannelId"));
+				UE_LOG(LogWhitelistConfig, Log,
+				       TEXT("Whitelist: Primary config had no WhitelistCommandRoleId — restored all "
+				            "settings from backup '%s'. Settings will persist once the primary is updated."),
+				       *BackupPath);
+			}
+		}
+	}
+
 	UE_LOG(LogWhitelistConfig, Log,
 	       TEXT("Whitelist: WhitelistEnabled           = %s"), Out.bWhitelistEnabled ? TEXT("True") : TEXT("False"));
 	UE_LOG(LogWhitelistConfig, Log,

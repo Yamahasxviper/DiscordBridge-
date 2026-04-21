@@ -24,6 +24,12 @@ private:
      *  Alpakit's staging step. */
     static void RestoreDefaultConfigIfNeeded();
 
+    /** Called from StartupModule before RestoreDefaultConfigIfNeeded.
+     *  If DefaultBanSystem.ini has been reset by a mod update (no # comments) AND
+     *  the persistent backup has operator settings, writes the backup back to the
+     *  primary file and reloads the CDO so settings are immediately active. */
+    static void MaybeRestoreFromBackup();
+
     /** Ticker callback that fires at BackupIntervalHours to trigger a scheduled backup. */
     bool OnBackupTick(float DeltaTime);
 

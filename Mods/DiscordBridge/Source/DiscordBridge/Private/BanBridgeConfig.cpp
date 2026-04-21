@@ -116,6 +116,32 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 	Out.AdminPanelChannelId    = GetIniBridgeString(Cfg, TEXT("AdminPanelChannelId"));
 	Out.StaffChatChannelId     = GetIniBridgeString(Cfg, TEXT("StaffChatChannelId"));
 
+	// Secondary restore: if AdminRoleId is empty after loading the primary config
+	// (e.g. a mod update reset DefaultBanBridge.ini to the blank template), check
+	// the persistent backup for a previously configured value and restore all fields.
+	if (Out.AdminRoleId.IsEmpty() && PF.FileExists(*BackupPath))
+	{
+		FConfigFile BackupCfg;
+		BackupCfg.Read(BackupPath);
+		if (BackupCfg.Contains(TEXT("BanBridge")))
+		{
+			const FString BackupAdminRoleId = GetIniBridgeString(BackupCfg, TEXT("AdminRoleId"));
+			if (!BackupAdminRoleId.IsEmpty())
+			{
+				Out.AdminRoleId            = BackupAdminRoleId;
+				Out.ModeratorRoleId        = GetIniBridgeString(BackupCfg, TEXT("ModeratorRoleId"));
+				Out.BanCommandChannelId    = GetIniBridgeString(BackupCfg, TEXT("BanCommandChannelId"));
+				Out.ModerationLogChannelId = GetIniBridgeString(BackupCfg, TEXT("ModerationLogChannelId"));
+				Out.AdminPanelChannelId    = GetIniBridgeString(BackupCfg, TEXT("AdminPanelChannelId"));
+				Out.StaffChatChannelId     = GetIniBridgeString(BackupCfg, TEXT("StaffChatChannelId"));
+				UE_LOG(LogBanDiscord, Log,
+				       TEXT("BanBridge: Primary config had no AdminRoleId — restored all settings "
+				            "from backup '%s'. Settings will persist once AdminRoleId is set in the primary."),
+				       *BackupPath);
+			}
+		}
+	}
+
 	if (Out.AdminRoleId.IsEmpty())
 	{
 		UE_LOG(LogBanDiscord, Log,

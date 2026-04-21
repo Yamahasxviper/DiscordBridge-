@@ -48,6 +48,12 @@ public:
      *  by Alpakit's staging step. */
     static void RestoreDefaultConfigIfNeeded();
 
+    /** Called from StartupModule before RestoreDefaultConfigIfNeeded.
+     *  If DefaultBanChatCommands.ini has been reset by a mod update (no # comments)
+     *  AND the persistent backup has admin UIDs, writes the backup content back to
+     *  the primary file and reloads the CDO so the admin list is immediately active. */
+    static void MaybeRestoreFromBackup();
+
 private:
     FDelegateHandle WorldInitHandle;
     /** Handle for the game-mode logout event — removes disconnected players from FrozenPlayerUids. */

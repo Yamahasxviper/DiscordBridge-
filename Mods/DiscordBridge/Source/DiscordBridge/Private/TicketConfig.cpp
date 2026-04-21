@@ -175,6 +175,62 @@ FTicketConfig FTicketConfig::Load()
 		Config.BanAppealCooldownDays       = static_cast<int32>(GetIniFloat(Cfg, TEXT("BanAppealCooldownDays"), 0.0f));
 		Config.MaxLifetimeAppeals          = static_cast<int32>(GetIniFloat(Cfg, TEXT("MaxLifetimeAppeals"), 0.0f));
 
+		// Secondary restore: if TicketNotifyRoleId and TicketPanelChannelId are
+		// both empty after reading the primary (e.g. a mod update reset
+		// DefaultTickets.ini to the blank template), fall back to the backup so
+		// the ticket system keeps running without operator intervention.
+		if (Config.TicketNotifyRoleId.IsEmpty() && Config.TicketPanelChannelId.IsEmpty()
+		    && PlatformFile.FileExists(*BackupPath))
+		{
+			FString BackupRaw;
+			FFileHelper::LoadFileToString(BackupRaw, *BackupPath);
+			FConfigFile BackupCfg;
+			BackupCfg.Read(BackupPath);
+
+			const FString BackupNotifyRoleId   = GetIniString(BackupCfg, TEXT("TicketNotifyRoleId"));
+			const FString BackupPanelChannelId = GetIniString(BackupCfg, TEXT("TicketPanelChannelId"));
+			if (!BackupNotifyRoleId.IsEmpty() || !BackupPanelChannelId.IsEmpty())
+			{
+				Config.BotToken                    = GetIniString(BackupCfg, TEXT("BotToken"));
+				Config.GuildId                     = GetIniString(BackupCfg, TEXT("GuildId"));
+				Config.TicketChannelId             = GetIniString(BackupCfg, TEXT("TicketChannelId"));
+				Config.TicketLogChannelId          = GetIniString(BackupCfg, TEXT("TicketLogChannelId"));
+				Config.bTicketWhitelistEnabled     = GetIniBool  (BackupCfg, TEXT("TicketWhitelistEnabled"),  true);
+				Config.bTicketHelpEnabled          = GetIniBool  (BackupCfg, TEXT("TicketHelpEnabled"),       true);
+				Config.bTicketReportEnabled        = GetIniBool  (BackupCfg, TEXT("TicketReportEnabled"),     true);
+				Config.bTicketBanAppealEnabled     = GetIniBool  (BackupCfg, TEXT("BanAppealEnabled"),        true);
+				Config.bTicketMuteAppealEnabled    = GetIniBool  (BackupCfg, TEXT("MuteAppealEnabled"),       true);
+				Config.TicketNotifyRoleId          = BackupNotifyRoleId;
+				Config.TicketPanelChannelId        = BackupPanelChannelId;
+				Config.TicketCategoryId            = GetIniString(BackupCfg, TEXT("TicketCategoryId"));
+				Config.CustomTicketReasons         = ParseRawIniArray(BackupRaw, TEXT("TicketReason"));
+				Config.InactiveTicketTimeoutHours  = GetIniFloat (BackupCfg, TEXT("InactiveTicketTimeoutHours"), 0.0f);
+				Config.WhitelistCategoryId         = GetIniString(BackupCfg, TEXT("WhitelistCategoryId"));
+				Config.HelpCategoryId              = GetIniString(BackupCfg, TEXT("HelpCategoryId"));
+				Config.ReportCategoryId            = GetIniString(BackupCfg, TEXT("ReportCategoryId"));
+				Config.AppealCategoryId            = GetIniString(BackupCfg, TEXT("AppealCategoryId"));
+				Config.MuteAppealCategoryId        = GetIniString(BackupCfg, TEXT("MuteAppealCategoryId"));
+				Config.bTicketFeedbackEnabled      = GetIniBool  (BackupCfg, TEXT("TicketFeedbackEnabled"),      false);
+				Config.TicketMacros                = ParseRawIniArray(BackupRaw, TEXT("TicketMacro"));
+				Config.TicketCooldownMinutes       = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("TicketCooldownMinutes"), 0.0f));
+				Config.TicketReopenGracePeriodMinutes = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("TicketReopenGracePeriodMinutes"), 0.0f));
+				Config.bAllowMultipleTicketTypes   = GetIniBool  (BackupCfg, TEXT("AllowMultipleTicketTypes"),   false);
+				Config.bAutoRefreshPanel           = GetIniBool  (BackupCfg, TEXT("AutoRefreshPanel"),           false);
+				Config.bDmOpenerOnStaffReply       = GetIniBool  (BackupCfg, TEXT("DmOpenerOnStaffReply"),       false);
+				Config.TicketSlaWarningMinutes     = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("TicketSlaWarningMinutes"), 0.0f));
+				Config.TicketEscalationRoleId      = GetIniString(BackupCfg, TEXT("TicketEscalationRoleId"));
+				Config.TicketEscalationCategoryId  = GetIniString(BackupCfg, TEXT("TicketEscalationCategoryId"));
+				Config.TicketTemplates             = ParseRawIniArray(BackupRaw, TEXT("TicketTemplate"));
+				Config.TicketAutoResponses         = ParseRawIniArray(BackupRaw, TEXT("TicketAutoResponse"));
+				Config.BanAppealCooldownDays       = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("BanAppealCooldownDays"), 0.0f));
+				Config.MaxLifetimeAppeals          = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("MaxLifetimeAppeals"), 0.0f));
+				UE_LOG(LogTicketSystem, Log,
+				       TEXT("TicketSystem: Primary config had no TicketNotifyRoleId/TicketPanelChannelId "
+				            "— restored all settings from backup '%s'."),
+				       *BackupPath);
+			}
+		}
+
 		UE_LOG(LogTicketSystem, Log,
 		       TEXT("TicketSystem: Loaded config from %s"), *PrimaryPath);
 	}

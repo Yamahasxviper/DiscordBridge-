@@ -24,6 +24,13 @@ void FBanChatCommandsModule::StartupModule()
 {
     UE_LOG(LogBanChatCommands, Log, TEXT("BanChatCommands module starting up."));
 
+    // If DefaultBanChatCommands.ini was reset by a mod update, restore the admin
+    // list from the persistent backup BEFORE writing the annotated template.
+    // Without this, RestoreDefaultConfigIfNeeded writes blank defaults, then
+    // BackupConfigIfNeeded overwrites the backup with those blank defaults,
+    // permanently erasing the operator's saved admin/moderator lists.
+    MaybeRestoreFromBackup();
+
     // Restore the annotated Default*.ini so operators can always read the
     // setting descriptions even after a mod update or fresh install.
     RestoreDefaultConfigIfNeeded();
@@ -221,6 +228,71 @@ bool FBanChatCommandsModule::OnConfigPollTick(float /*DeltaTime*/)
     }
 
     return true; // keep ticking
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Backup restore (pre-flight — called before RestoreDefaultConfigIfNeeded)
+// ─────────────────────────────────────────────────────────────────────────────
+
+void FBanChatCommandsModule::MaybeRestoreFromBackup()
+{
+    const FString DefaultIniPath = FPaths::Combine(
+        FPaths::ProjectDir(),
+        TEXT("Mods"), TEXT("BanChatCommands"),
+        TEXT("Config"), TEXT("DefaultBanChatCommands.ini"));
+
+    const FString BackupPath = FPaths::Combine(
+        FPaths::ProjectSavedDir(),
+        TEXT("BanChatCommands"),
+        TEXT("BanChatCommands.ini"));
+
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+
+    // Only restore when the primary has been reset (no # comment lines —
+    // Alpakit's staging step strips all comments from Default*.ini files).
+    if (PlatformFile.FileExists(*DefaultIniPath))
+    {
+        FString Existing;
+        FFileHelper::LoadFileToString(Existing, *DefaultIniPath);
+        if (Existing.Contains(TEXT("# ")))
+            return; // primary has comments — not reset, nothing to do
+    }
+
+    // Primary has been reset.  Check whether the backup has admin/moderator UIDs.
+    if (!PlatformFile.FileExists(*BackupPath))
+        return;
+
+    FString BackupRaw;
+    FFileHelper::LoadFileToString(BackupRaw, *BackupPath);
+
+    if (!BackupRaw.Contains(TEXT("+AdminEosPUIDs=")) &&
+        !BackupRaw.Contains(TEXT("+ModeratorEosPUIDs=")))
+        return; // backup has no admin/mod UIDs — nothing meaningful to restore
+
+    // Write the backup to DefaultBanChatCommands.ini (prefixed with a # comment
+    // so RestoreDefaultConfigIfNeeded will not overwrite it again this run).
+    const FString RestoredContent =
+        FString(TEXT("# Restored from backup after mod update — admin list preserved.\n"))
+        + BackupRaw;
+
+    PlatformFile.CreateDirectoryTree(*FPaths::GetPath(DefaultIniPath));
+    if (FFileHelper::SaveStringToFile(RestoredContent, *DefaultIniPath,
+        FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+    {
+        // Reload the CDO so AdminEosPUIDs/ModeratorEosPUIDs are active this run.
+        GetMutableDefault<UBanChatCommandsConfig>()->ReloadConfig();
+        const int32 AdminCount = UBanChatCommandsConfig::Get()->AdminEosPUIDs.Num();
+        UE_LOG(LogBanChatCommands, Log,
+            TEXT("BanChatCommands: DefaultBanChatCommands.ini was reset — restored admin list "
+                 "from backup '%s'. %d admin(s) now active."),
+            *BackupPath, AdminCount);
+    }
+    else
+    {
+        UE_LOG(LogBanChatCommands, Warning,
+            TEXT("BanChatCommands: Could not restore backup to '%s'. Admin list may be lost."),
+            *DefaultIniPath);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

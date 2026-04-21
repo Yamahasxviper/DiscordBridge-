@@ -25,6 +25,13 @@ void FBanSystemModule::StartupModule()
     // subclasses and initialise automatically when the game instance starts.
     // No manual setup is required here.
 
+    // If DefaultBanSystem.ini was reset by a mod update, restore operator settings
+    // from the persistent backup BEFORE writing the annotated template.  Without
+    // this, RestoreDefaultConfigIfNeeded would write blank defaults, then
+    // BackupConfigIfNeeded would overwrite the backup with those blank defaults,
+    // permanently erasing the operator's saved configuration.
+    MaybeRestoreFromBackup();
+
     // Restore the annotated Default*.ini so operators can always read the
     // setting descriptions even after a mod update or fresh install.
     RestoreDefaultConfigIfNeeded();
@@ -101,6 +108,103 @@ void FBanSystemModule::StartupModule()
         ConfigPollIntervalSeconds);
 
     UE_LOG(LogBanSystem, Log, TEXT("BanSystem module started."));
+}
+
+void FBanSystemModule::MaybeRestoreFromBackup()
+{
+    const FString DefaultIniPath = FPaths::Combine(
+        FPaths::ProjectDir(),
+        TEXT("Mods"), TEXT("BanSystem"),
+        TEXT("Config"), TEXT("DefaultBanSystem.ini"));
+
+    const FString BackupPath = FPaths::Combine(
+        FPaths::ProjectSavedDir(),
+        TEXT("BanSystem"),
+        TEXT("BanSystem.ini"));
+
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+
+    // Only attempt a restore when the primary has been reset (i.e. no # comment
+    // lines — Alpakit's staging strips all comments).  If the primary still has
+    // comments it was either untouched or previously restored; leave it as-is.
+    if (PlatformFile.FileExists(*DefaultIniPath))
+    {
+        FString Existing;
+        FFileHelper::LoadFileToString(Existing, *DefaultIniPath);
+        if (Existing.Contains(TEXT("# ")))
+            return; // primary has comments — not reset, nothing to do
+    }
+
+    // Primary has been reset.  Check whether the backup has any operator settings
+    // that are worth restoring (non-empty webhook, API key, database path, etc.,
+    // or array entries like WarnEscalationTiers / BanTemplates / PeerWebSocketUrls).
+    if (!PlatformFile.FileExists(*BackupPath))
+        return;
+
+    FString BackupRaw;
+    FFileHelper::LoadFileToString(BackupRaw, *BackupPath);
+
+    // Detect meaningful operator-customised content in the backup.
+    bool bHasCustomSettings = false;
+    {
+        TArray<FString> Lines;
+        BackupRaw.ParseIntoArrayLines(Lines);
+        for (const FString& RawLine : Lines)
+        {
+            const FString Line = RawLine.TrimStart();
+            if (Line.IsEmpty() || Line.StartsWith(TEXT(";")) || Line.StartsWith(TEXT("#")))
+                continue;
+            if (Line.StartsWith(TEXT("+")))
+            {
+                bHasCustomSettings = true; // any +Array= entry is a custom setting
+                break;
+            }
+            // Scalar fields that require explicit operator configuration.
+            static const TCHAR* const CustomKeys[] = {
+                TEXT("DiscordWebhookUrl="), TEXT("RestApiKey="), TEXT("DatabasePath="),
+                TEXT("AppealUrl="), TEXT("GeoIpApiUrl="), nullptr };
+            for (int32 i = 0; CustomKeys[i]; ++i)
+            {
+                if (Line.StartsWith(CustomKeys[i]))
+                {
+                    const FString Val = Line.Mid(FCString::Strlen(CustomKeys[i])).TrimStartAndEnd();
+                    if (!Val.IsEmpty())
+                    {
+                        bHasCustomSettings = true;
+                        break;
+                    }
+                }
+            }
+            if (bHasCustomSettings) break;
+        }
+    }
+
+    if (!bHasCustomSettings)
+        return; // backup only has default values — no need to restore
+
+    // Write the backup content to DefaultBanSystem.ini (prefixed with a # comment
+    // so RestoreDefaultConfigIfNeeded will not overwrite it again this run).
+    const FString RestoredContent =
+        FString(TEXT("# Restored from backup after mod update — operator settings preserved.\n"))
+        + BackupRaw;
+
+    PlatformFile.CreateDirectoryTree(*FPaths::GetPath(DefaultIniPath));
+    if (FFileHelper::SaveStringToFile(RestoredContent, *DefaultIniPath,
+        FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+    {
+        // Reload the CDO so it picks up the restored values for this server run.
+        GetMutableDefault<UBanSystemConfig>()->ReloadConfig();
+        UE_LOG(LogBanSystem, Log,
+            TEXT("BanSystem: DefaultBanSystem.ini was reset — restored operator settings "
+                 "from backup '%s' and reloaded config."),
+            *BackupPath);
+    }
+    else
+    {
+        UE_LOG(LogBanSystem, Warning,
+            TEXT("BanSystem: Could not restore backup to '%s'. Operator settings may be lost."),
+            *DefaultIniPath);
+    }
 }
 
 void FBanSystemModule::BackupConfigIfNeeded()
