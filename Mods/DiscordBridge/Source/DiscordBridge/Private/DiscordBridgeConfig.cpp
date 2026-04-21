@@ -3,7 +3,6 @@
 #include "DiscordBridgeConfig.h"
 
 #include "HAL/PlatformFileManager.h"
-#include "Misc/ConfigCacheIni.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -48,71 +47,15 @@ namespace
 		}
 	}
 
-	// Returns the INI value when the key exists (including empty string values).
-	// Use for optional settings where an empty value intentionally disables the feature.
-	FString GetIniStringOrDefault(const FConfigFile& Cfg,
-	                              const FString& Key,
-	                              const FString& Default)
-	{
-		FString Value;
-		return Cfg.GetString(ConfigSection, *Key, Value) ? Value : Default;
-	}
-
-	// Returns the INI value only when non-empty; falls back to Default otherwise.
-	// Use for format/reason strings where leaving a setting blank means "use the default".
-	FString GetIniStringOrFallback(const FConfigFile& Cfg,
-	                               const FString& Key,
-	                               const FString& Default)
-	{
-		FString Value;
-		return (Cfg.GetString(ConfigSection, *Key, Value) && !Value.IsEmpty()) ? Value : Default;
-	}
-
-	bool GetIniBoolOrDefault(const FConfigFile& Cfg,
-	                         const FString& Key,
-	                         bool Default)
-	{
-		FString StrValue;
-		if (!Cfg.GetString(ConfigSection, *Key, StrValue) || StrValue.IsEmpty())
-			return Default;
-		bool Value = Default;
-		Cfg.GetBool(ConfigSection, *Key, Value);
-		return Value;
-	}
-
-	float GetIniFloatOrDefault(const FConfigFile& Cfg,
-	                           const FString& Key,
-	                           float Default)
-	{
-		FString Value;
-		if (Cfg.GetString(ConfigSection, *Key, Value) && !Value.IsEmpty())
-		{
-			return FCString::Atof(*Value);
-		}
-		return Default;
-	}
-
-	int32 GetIniIntOrDefault(const FConfigFile& Cfg,
-	                         const FString& Key,
-	                         int32 Default)
-	{
-		FString Value;
-		if (Cfg.GetString(ConfigSection, *Key, Value) && !Value.IsEmpty())
-		{
-			return FCString::Atoi(*Value);
-		}
-		return Default;
-	}
-
-	// ── Raw INI readers (used for the backup file) ────────────────────────────
-	// FConfigFile::GetString can expand %property% references in values, which
-	// corrupts user-defined format strings that intentionally use %placeholders%
-	// (e.g. %ServerName%, %PlayerName%, %Message%).  Since ServerName IS a key
-	// in [DiscordBridge], FConfigFile would silently replace %ServerName% with
-	// the current server name when reading back the backup, and PatchLine would
-	// then write that expanded (corrupted) value permanently into the primary
-	// config.  Reading the backup with raw string operations avoids all such
-	// processing and guarantees values are preserved exactly as written.
+	// ── Raw INI readers (used for both primary and backup files) ────────────────
+	// FConfigFile::Read() / GetString() can trigger a TArray crash in certain
+	// UE4 engine builds when parsing specific file content.  It also expands
+	// %property% references in values, silently corrupting user-defined format
+	// strings that contain placeholders (e.g. %ServerName%, %PlayerName%,
+	// %Message%).  Because ServerName IS a key in [DiscordBridge], FConfigFile
+	// would replace %ServerName% with the actual server name, permanently
+	// destroying the placeholder the next time PatchLine writes the config back.
+	// Raw string operations avoid all of this and preserve values verbatim.
 
 	// Parses the named section of a raw INI file content string into a key→value
 	// map.  Values are stored verbatim (no escape-sequence or %property%
@@ -167,7 +110,7 @@ namespace
 		return Result;
 	}
 
-	// Raw-map equivalents of the FConfigFile helpers above.
+	// Raw-map scalar readers.
 
 	FString GetRawStringOrDefault(const TMap<FString, FString>& Raw,
 	                              const FString& Key,
@@ -333,22 +276,31 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 	bool bLoadedFromMod = false;
 	if (PlatformFile.FileExists(*ModFilePath))
 	{
-		FConfigFile ConfigFile;
-		ConfigFile.Read(ModFilePath);
+		// Load the primary config file as a raw string once and parse all settings
+		// from it using the same raw-parsing path used for the backup.  This avoids
+		// FConfigFile::Read(), which can trigger a TArray crash in certain UE4 engine
+		// builds when parsing specific file content, and also prevents %property%
+		// expansion from corrupting format strings (e.g. %ServerName% in
+		// GameToDiscordFormat would be silently replaced by the server name value).
+		FString RawPrimary;
+		FFileHelper::LoadFileToString(RawPrimary, *ModFilePath);
+		StripBOM(RawPrimary);
+		const TMap<FString, FString> PrimaryValues =
+			ParseRawIniSection(RawPrimary, TEXT("DiscordBridge"));
 
-		Config.BotToken             = GetIniStringOrDefault(ConfigFile, TEXT("BotToken"),             TEXT(""));
-		Config.ChannelId            = GetIniStringOrDefault(ConfigFile, TEXT("ChannelId"),            TEXT(""));
-		Config.ServerName           = GetIniStringOrDefault(ConfigFile, TEXT("ServerName"),           Config.ServerName);
-		Config.GameToDiscordFormat  = GetIniStringOrFallback(ConfigFile, TEXT("GameToDiscordFormat"),  Config.GameToDiscordFormat);
-		Config.DiscordToGameFormat  = GetIniStringOrFallback(ConfigFile, TEXT("DiscordToGameFormat"),  Config.DiscordToGameFormat);
+		Config.BotToken             = GetRawStringOrDefault(PrimaryValues, TEXT("BotToken"),             TEXT(""));
+		Config.ChannelId            = GetRawStringOrDefault(PrimaryValues, TEXT("ChannelId"),            TEXT(""));
+		Config.ServerName           = GetRawStringOrDefault(PrimaryValues, TEXT("ServerName"),           Config.ServerName);
+		Config.GameToDiscordFormat  = GetRawStringOrFallback(PrimaryValues, TEXT("GameToDiscordFormat"),  Config.GameToDiscordFormat);
+		Config.DiscordToGameFormat  = GetRawStringOrFallback(PrimaryValues, TEXT("DiscordToGameFormat"),  Config.DiscordToGameFormat);
 
 		// Backward compatibility: if the old separate DiscordSenderFormat key is
 		// present and the operator has not overridden DiscordToGameFormat to a value
 		// that already mentions %Message%, synthesise a combined format so existing
 		// configs continue to render as before.
 		{
-			FString OldSenderFmt;
-			if (ConfigFile.GetString(ConfigSection, TEXT("DiscordSenderFormat"), OldSenderFmt) && !OldSenderFmt.IsEmpty())
+			const FString OldSenderFmt = GetRawStringOrDefault(PrimaryValues, TEXT("DiscordSenderFormat"), TEXT(""));
+			if (!OldSenderFmt.IsEmpty())
 			{
 				// Only auto-combine when DiscordToGameFormat is still the default
 				// (i.e. the operator has not explicitly customised it).
@@ -362,36 +314,33 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				            "Effective format is now: \"%s\""), *Config.DiscordToGameFormat);
 			}
 		}
-		Config.bIgnoreBotMessages   = GetIniBoolOrDefault  (ConfigFile, TEXT("IgnoreBotMessages"),
-		                              GetIniBoolOrDefault  (ConfigFile, TEXT("bIgnoreBotMessages"),   Config.bIgnoreBotMessages));
-		Config.bServerStatusMessagesEnabled = GetIniBoolOrDefault(ConfigFile, TEXT("ServerStatusMessagesEnabled"), Config.bServerStatusMessagesEnabled);
-		Config.StatusChannelId      = GetIniStringOrDefault(ConfigFile, TEXT("StatusChannelId"),      Config.StatusChannelId);
-		Config.ServerOnlineMessage  = GetIniStringOrDefault(ConfigFile, TEXT("ServerOnlineMessage"),  Config.ServerOnlineMessage);
-		Config.ServerOfflineMessage = GetIniStringOrDefault(ConfigFile, TEXT("ServerOfflineMessage"), Config.ServerOfflineMessage);
-		Config.bShowPlayerCountInPresence      = GetIniBoolOrDefault  (ConfigFile, TEXT("ShowPlayerCountInPresence"),
-		                                         GetIniBoolOrDefault  (ConfigFile, TEXT("bShowPlayerCountInPresence"),      Config.bShowPlayerCountInPresence));
-		Config.PlayerCountPresenceFormat       = GetIniStringOrFallback(ConfigFile, TEXT("PlayerCountPresenceFormat"),       Config.PlayerCountPresenceFormat);
-		Config.PlayerCountUpdateIntervalSeconds = GetIniFloatOrDefault (ConfigFile, TEXT("PlayerCountUpdateIntervalSeconds"), Config.PlayerCountUpdateIntervalSeconds);
-		Config.PlayerCountActivityType         = GetIniIntOrDefault   (ConfigFile, TEXT("PlayerCountActivityType"),         Config.PlayerCountActivityType);
+		Config.bIgnoreBotMessages   = GetRawBoolOrDefault  (PrimaryValues, TEXT("IgnoreBotMessages"),
+		                              GetRawBoolOrDefault  (PrimaryValues, TEXT("bIgnoreBotMessages"),   Config.bIgnoreBotMessages));
+		Config.bServerStatusMessagesEnabled = GetRawBoolOrDefault(PrimaryValues, TEXT("ServerStatusMessagesEnabled"), Config.bServerStatusMessagesEnabled);
+		Config.StatusChannelId      = GetRawStringOrDefault(PrimaryValues, TEXT("StatusChannelId"),      Config.StatusChannelId);
+		Config.ServerOnlineMessage  = GetRawStringOrDefault(PrimaryValues, TEXT("ServerOnlineMessage"),  Config.ServerOnlineMessage);
+		Config.ServerOfflineMessage = GetRawStringOrDefault(PrimaryValues, TEXT("ServerOfflineMessage"), Config.ServerOfflineMessage);
+		Config.bShowPlayerCountInPresence      = GetRawBoolOrDefault  (PrimaryValues, TEXT("ShowPlayerCountInPresence"),
+		                                         GetRawBoolOrDefault  (PrimaryValues, TEXT("bShowPlayerCountInPresence"),      Config.bShowPlayerCountInPresence));
+		Config.PlayerCountPresenceFormat       = GetRawStringOrFallback(PrimaryValues, TEXT("PlayerCountPresenceFormat"),       Config.PlayerCountPresenceFormat);
+		Config.PlayerCountUpdateIntervalSeconds = GetRawFloatOrDefault (PrimaryValues, TEXT("PlayerCountUpdateIntervalSeconds"), Config.PlayerCountUpdateIntervalSeconds);
+		Config.PlayerCountActivityType         = GetRawIntOrDefault   (PrimaryValues, TEXT("PlayerCountActivityType"),         Config.PlayerCountActivityType);
 
 		// Whitelist settings have moved to a separate config file
 		// (DefaultWhitelist.ini) loaded by FWhitelistConfig::Load().
 
 		// Player event notification settings
-		Config.bPlayerEventsEnabled   = GetIniBoolOrDefault  (ConfigFile, TEXT("PlayerEventsEnabled"),   Config.bPlayerEventsEnabled);
-		Config.PlayerEventsChannelId  = GetIniStringOrDefault(ConfigFile, TEXT("PlayerEventsChannelId"),  Config.PlayerEventsChannelId);
-		Config.PlayerJoinMessage      = GetIniStringOrDefault(ConfigFile, TEXT("PlayerJoinMessage"),      Config.PlayerJoinMessage);
-		Config.PlayerJoinAdminChannelId = GetIniStringOrDefault(ConfigFile, TEXT("PlayerJoinAdminChannelId"), Config.PlayerJoinAdminChannelId);
-		Config.PlayerJoinAdminMessage   = GetIniStringOrDefault(ConfigFile, TEXT("PlayerJoinAdminMessage"),   Config.PlayerJoinAdminMessage);
-		Config.PlayerLeaveMessage     = GetIniStringOrDefault(ConfigFile, TEXT("PlayerLeaveMessage"),     Config.PlayerLeaveMessage);
-		Config.PlayerTimeoutMessage   = GetIniStringOrDefault(ConfigFile, TEXT("PlayerTimeoutMessage"),   Config.PlayerTimeoutMessage);
-		Config.bUseEmbedsForPlayerEvents = GetIniBoolOrDefault(ConfigFile, TEXT("UseEmbedsForPlayerEvents"), Config.bUseEmbedsForPlayerEvents);
+		Config.bPlayerEventsEnabled   = GetRawBoolOrDefault  (PrimaryValues, TEXT("PlayerEventsEnabled"),   Config.bPlayerEventsEnabled);
+		Config.PlayerEventsChannelId  = GetRawStringOrDefault(PrimaryValues, TEXT("PlayerEventsChannelId"),  Config.PlayerEventsChannelId);
+		Config.PlayerJoinMessage      = GetRawStringOrDefault(PrimaryValues, TEXT("PlayerJoinMessage"),      Config.PlayerJoinMessage);
+		Config.PlayerJoinAdminChannelId = GetRawStringOrDefault(PrimaryValues, TEXT("PlayerJoinAdminChannelId"), Config.PlayerJoinAdminChannelId);
+		Config.PlayerJoinAdminMessage   = GetRawStringOrDefault(PrimaryValues, TEXT("PlayerJoinAdminMessage"),   Config.PlayerJoinAdminMessage);
+		Config.PlayerLeaveMessage     = GetRawStringOrDefault(PrimaryValues, TEXT("PlayerLeaveMessage"),     Config.PlayerLeaveMessage);
+		Config.PlayerTimeoutMessage   = GetRawStringOrDefault(PrimaryValues, TEXT("PlayerTimeoutMessage"),   Config.PlayerTimeoutMessage);
+		Config.bUseEmbedsForPlayerEvents = GetRawBoolOrDefault(PrimaryValues, TEXT("UseEmbedsForPlayerEvents"), Config.bUseEmbedsForPlayerEvents);
 
-		// Chat relay filter – use raw file parsing to support +Key= array syntax.
+		// Chat relay filter – parse from the already-loaded raw content.
 		{
-			FString RawPrimary;
-			FFileHelper::LoadFileToString(RawPrimary, *ModFilePath);
-			StripBOM(RawPrimary);
 			Config.ChatRelayBlocklist = ParseRawIniArray(RawPrimary, TEXT("DiscordBridge"), TEXT("ChatRelayBlocklist"));
 
 			// Parse ChatRelayBlocklistReplacements array entries.
@@ -430,74 +379,66 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		}
 
 		// Bot commands
-		Config.PlayersCommandChannelId = GetIniStringOrDefault (ConfigFile, TEXT("PlayersCommandChannelId"), Config.PlayersCommandChannelId);
-		Config.DiscordInviteUrl        = GetIniStringOrDefault (ConfigFile, TEXT("DiscordInviteUrl"),        Config.DiscordInviteUrl);
+		Config.PlayersCommandChannelId = GetRawStringOrDefault (PrimaryValues, TEXT("PlayersCommandChannelId"), Config.PlayersCommandChannelId);
+		Config.DiscordInviteUrl        = GetRawStringOrDefault (PrimaryValues, TEXT("DiscordInviteUrl"),        Config.DiscordInviteUrl);
 
 		// New commands
 
 		// Per-event channel routing
-		Config.PhaseEventsChannelId    = GetIniStringOrDefault(ConfigFile, TEXT("PhaseEventsChannelId"),    Config.PhaseEventsChannelId);
-		Config.SchematicEventsChannelId = GetIniStringOrDefault(ConfigFile, TEXT("SchematicEventsChannelId"), Config.SchematicEventsChannelId);
-		Config.BanEventsChannelId       = GetIniStringOrDefault(ConfigFile, TEXT("BanEventsChannelId"),       Config.BanEventsChannelId);
+		Config.PhaseEventsChannelId    = GetRawStringOrDefault(PrimaryValues, TEXT("PhaseEventsChannelId"),    Config.PhaseEventsChannelId);
+		Config.SchematicEventsChannelId = GetRawStringOrDefault(PrimaryValues, TEXT("SchematicEventsChannelId"), Config.SchematicEventsChannelId);
+		Config.BanEventsChannelId       = GetRawStringOrDefault(PrimaryValues, TEXT("BanEventsChannelId"),       Config.BanEventsChannelId);
 
 		// Reaction voting
-		Config.bEnableJoinReactionVoting = GetIniBoolOrDefault(ConfigFile, TEXT("EnableJoinReactionVoting"), Config.bEnableJoinReactionVoting);
-		Config.VoteKickThreshold         = GetIniIntOrDefault (ConfigFile, TEXT("VoteKickThreshold"),         Config.VoteKickThreshold);
-		Config.VoteWindowMinutes         = GetIniIntOrDefault (ConfigFile, TEXT("VoteWindowMinutes"),         Config.VoteWindowMinutes);
+		Config.bEnableJoinReactionVoting = GetRawBoolOrDefault(PrimaryValues, TEXT("EnableJoinReactionVoting"), Config.bEnableJoinReactionVoting);
+		Config.VoteKickThreshold         = GetRawIntOrDefault (PrimaryValues, TEXT("VoteKickThreshold"),         Config.VoteKickThreshold);
+		Config.VoteWindowMinutes         = GetRawIntOrDefault (PrimaryValues, TEXT("VoteWindowMinutes"),         Config.VoteWindowMinutes);
 
 		// AFK kick
-		Config.AfkKickMinutes = GetIniIntOrDefault   (ConfigFile, TEXT("AfkKickMinutes"), Config.AfkKickMinutes);
-		Config.AfkKickReason  = GetIniStringOrDefault(ConfigFile, TEXT("AfkKickReason"),  Config.AfkKickReason);
+		Config.AfkKickMinutes = GetRawIntOrDefault   (PrimaryValues, TEXT("AfkKickMinutes"), Config.AfkKickMinutes);
+		Config.AfkKickReason  = GetRawStringOrDefault(PrimaryValues, TEXT("AfkKickReason"),  Config.AfkKickReason);
 
 		// Scheduled announcements
-		Config.AnnouncementIntervalMinutes = GetIniIntOrDefault   (ConfigFile, TEXT("AnnouncementIntervalMinutes"), Config.AnnouncementIntervalMinutes);
-		Config.AnnouncementMessage         = GetIniStringOrDefault(ConfigFile, TEXT("AnnouncementMessage"),         Config.AnnouncementMessage);
-		Config.AnnouncementChannelId       = GetIniStringOrDefault(ConfigFile, TEXT("AnnouncementChannelId"),       Config.AnnouncementChannelId);
+		Config.AnnouncementIntervalMinutes = GetRawIntOrDefault   (PrimaryValues, TEXT("AnnouncementIntervalMinutes"), Config.AnnouncementIntervalMinutes);
+		Config.AnnouncementMessage         = GetRawStringOrDefault(PrimaryValues, TEXT("AnnouncementMessage"),         Config.AnnouncementMessage);
+		Config.AnnouncementChannelId       = GetRawStringOrDefault(PrimaryValues, TEXT("AnnouncementChannelId"),       Config.AnnouncementChannelId);
 
 		// Embed mode flags
-		Config.bUseEmbedsForPhaseEvents     = GetIniBoolOrDefault(ConfigFile, TEXT("UseEmbedsForPhaseEvents"),     Config.bUseEmbedsForPhaseEvents);
-		Config.bUseEmbedsForSchematicEvents = GetIniBoolOrDefault(ConfigFile, TEXT("UseEmbedsForSchematicEvents"), Config.bUseEmbedsForSchematicEvents);
+		Config.bUseEmbedsForPhaseEvents     = GetRawBoolOrDefault(PrimaryValues, TEXT("UseEmbedsForPhaseEvents"),     Config.bUseEmbedsForPhaseEvents);
+		Config.bUseEmbedsForSchematicEvents = GetRawBoolOrDefault(PrimaryValues, TEXT("UseEmbedsForSchematicEvents"), Config.bUseEmbedsForSchematicEvents);
 
 		// Webhook fallback
-		Config.FallbackWebhookUrl = GetIniStringOrDefault(ConfigFile, TEXT("FallbackWebhookUrl"), Config.FallbackWebhookUrl);
+		Config.FallbackWebhookUrl = GetRawStringOrDefault(PrimaryValues, TEXT("FallbackWebhookUrl"), Config.FallbackWebhookUrl);
 
 		// Slash commands
-		Config.bEnableSlashCommands = GetIniBoolOrDefault(ConfigFile, TEXT("EnableSlashCommands"), Config.bEnableSlashCommands);
+		Config.bEnableSlashCommands = GetRawBoolOrDefault(PrimaryValues, TEXT("EnableSlashCommands"), Config.bEnableSlashCommands);
 
 		// Mute notifications
-		Config.bNotifyMuteEvents  = GetIniBoolOrDefault  (ConfigFile, TEXT("NotifyMuteEvents"),  Config.bNotifyMuteEvents);
-		Config.ModeratorChannelId = GetIniStringOrDefault(ConfigFile, TEXT("ModeratorChannelId"), Config.ModeratorChannelId);
+		Config.bNotifyMuteEvents  = GetRawBoolOrDefault  (PrimaryValues, TEXT("NotifyMuteEvents"),  Config.bNotifyMuteEvents);
+		Config.ModeratorChannelId = GetRawStringOrDefault(PrimaryValues, TEXT("ModeratorChannelId"), Config.ModeratorChannelId);
 
 		// Moderation log channel
-		Config.ModerationLogChannelId = GetIniStringOrDefault(ConfigFile, TEXT("ModerationLogChannelId"), Config.ModerationLogChannelId);
+		Config.ModerationLogChannelId = GetRawStringOrDefault(PrimaryValues, TEXT("ModerationLogChannelId"), Config.ModerationLogChannelId);
 
 		// Bot info / help channel
-		Config.BotInfoChannelId = GetIniStringOrDefault(ConfigFile, TEXT("BotInfoChannelId"), Config.BotInfoChannelId);
+		Config.BotInfoChannelId = GetRawStringOrDefault(PrimaryValues, TEXT("BotInfoChannelId"), Config.BotInfoChannelId);
 
 		// On-join DM welcome message
-		Config.WelcomeMessageDM = GetIniStringOrDefault(ConfigFile, TEXT("WelcomeMessageDM"), Config.WelcomeMessageDM);
+		Config.WelcomeMessageDM = GetRawStringOrDefault(PrimaryValues, TEXT("WelcomeMessageDM"), Config.WelcomeMessageDM);
 
 		// On-join in-game hint message (sent privately to the joining player)
-		Config.JoinHintMessage = GetIniStringOrDefault(ConfigFile, TEXT("JoinHintMessage"), Config.JoinHintMessage);
+		Config.JoinHintMessage = GetRawStringOrDefault(PrimaryValues, TEXT("JoinHintMessage"), Config.JoinHintMessage);
 
 		// On-join broadcast message (sent to all players in game chat)
-		Config.bInGameJoinBroadcastEnabled = GetIniBoolOrDefault(ConfigFile, TEXT("InGameJoinBroadcastEnabled"), Config.bInGameJoinBroadcastEnabled);
-		Config.InGameJoinBroadcast = GetIniStringOrDefault(ConfigFile, TEXT("InGameJoinBroadcast"), Config.InGameJoinBroadcast);
+		Config.bInGameJoinBroadcastEnabled = GetRawBoolOrDefault(PrimaryValues, TEXT("InGameJoinBroadcastEnabled"), Config.bInGameJoinBroadcastEnabled);
+		Config.InGameJoinBroadcast = GetRawStringOrDefault(PrimaryValues, TEXT("InGameJoinBroadcast"), Config.InGameJoinBroadcast);
 
 		// DiscordRoleLabels array (used for %Role% placeholder in DiscordToGameFormat)
-		{
-			FString PrimaryRawForRoles;
-			FFileHelper::LoadFileToString(PrimaryRawForRoles, *ModFilePath);
-			StripBOM(PrimaryRawForRoles);
-			Config.DiscordRoleLabels = ParseRawIniArray(PrimaryRawForRoles, TEXT("DiscordBridge"), TEXT("DiscordRoleLabels"));
-		}
+		Config.DiscordRoleLabels = ParseRawIniArray(RawPrimary, TEXT("DiscordBridge"), TEXT("DiscordRoleLabels"));
 
 		// Multi-slot scheduled announcements (array field)
 		{
-			FString PrimaryRaw;
-			FFileHelper::LoadFileToString(PrimaryRaw, *ModFilePath);
-			StripBOM(PrimaryRaw);
-			const TArray<FString> SALines = ParseRawIniArray(PrimaryRaw, TEXT("DiscordBridge"), TEXT("ScheduledAnnouncements"));
+			const TArray<FString> SALines = ParseRawIniArray(RawPrimary, TEXT("DiscordBridge"), TEXT("ScheduledAnnouncements"));
 			for (const FString& Line : SALines)
 			{
 				FString Cleaned = Line.TrimStartAndEnd();
@@ -565,10 +506,8 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		// BotToken has not been filled in yet.
 		if (Config.BotToken.IsEmpty())
 		{
-			FString ModFileRaw;
-			FFileHelper::LoadFileToString(ModFileRaw, *ModFilePath);
-			StripBOM(ModFileRaw);
-			if (!ModFileRaw.Contains(TEXT("#")))
+			// RawPrimary is already loaded above – no need to re-read the file.
+			if (!RawPrimary.Contains(TEXT("#")))
 			{
 				UE_LOG(LogTemp, Log,
 				       TEXT("DiscordBridge: Config at '%s' has no BotToken and no comment "
@@ -592,10 +531,9 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			// but may be absent from older configs.
 			// Only appends the specific missing keys so no existing custom values are lost.
 			{
-				FString TmpVal;
 				FString AppendContent2;
 
-				if (!ConfigFile.GetString(ConfigSection, TEXT("ServerStatusMessagesEnabled"), TmpVal))
+				if (!PrimaryValues.Contains(TEXT("ServerStatusMessagesEnabled")))
 				{
 					AppendContent2 +=
 						TEXT("\n")
@@ -606,7 +544,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("ServerStatusMessagesEnabled=True\n");
 				}
 
-				if (!ConfigFile.GetString(ConfigSection, TEXT("StatusChannelId"), TmpVal))
+				if (!PrimaryValues.Contains(TEXT("StatusChannelId")))
 				{
 					AppendContent2 +=
 						TEXT("\n")
@@ -616,7 +554,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("StatusChannelId=\n");
 				}
 
-				if (!ConfigFile.GetString(ConfigSection, TEXT("PlayerEventsEnabled"), TmpVal))
+				if (!PrimaryValues.Contains(TEXT("PlayerEventsEnabled")))
 				{
 					AppendContent2 +=
 						TEXT("\n")
@@ -653,7 +591,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				}
 
 				// New fields added in the chat-filter / bot-commands / embed update.
-				if (!ConfigFile.GetString(ConfigSection, TEXT("UseEmbedsForPlayerEvents"), TmpVal))
+				if (!PrimaryValues.Contains(TEXT("UseEmbedsForPlayerEvents")))
 				{
 					AppendContent2 +=
 						TEXT("\n")
@@ -663,26 +601,21 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("UseEmbedsForPlayerEvents=False\n");
 				}
 
+				// ChatRelayBlocklist is an array field (multi-line +Key=value).
+				// Use the already-loaded RawPrimary to check for its presence.
+				if (!RawPrimary.Contains(TEXT("ChatRelayBlocklist")))
 				{
-					// ChatRelayBlocklist is an array field (multi-line +Key=value).
-					// Check for its presence in the raw file rather than via FConfigFile.
-					FString UpgradeRaw;
-					FFileHelper::LoadFileToString(UpgradeRaw, *ModFilePath);
-					StripBOM(UpgradeRaw);
-					if (!UpgradeRaw.Contains(TEXT("ChatRelayBlocklist")))
-					{
-						AppendContent2 +=
-							TEXT("\n")
-							TEXT("# -- CHAT RELAY FILTER (added by mod update) --------------------------\n")
-							TEXT("# Block in-game chat keywords from being relayed to Discord.\n")
-							TEXT("# Add one keyword per line using: +ChatRelayBlocklist=keyword\n")
-							TEXT("# Matching is case-insensitive. Leave empty to relay all messages.\n")
-							TEXT("# Example:\n")
-							TEXT("# +ChatRelayBlocklist=spam\n");
-					}
+					AppendContent2 +=
+						TEXT("\n")
+						TEXT("# -- CHAT RELAY FILTER (added by mod update) --------------------------\n")
+						TEXT("# Block in-game chat keywords from being relayed to Discord.\n")
+						TEXT("# Add one keyword per line using: +ChatRelayBlocklist=keyword\n")
+						TEXT("# Matching is case-insensitive. Leave empty to relay all messages.\n")
+						TEXT("# Example:\n")
+						TEXT("# +ChatRelayBlocklist=spam\n");
 				}
 
-				if (!ConfigFile.GetString(ConfigSection, TEXT("PlayersCommandPrefix"), TmpVal))
+				if (!PrimaryValues.Contains(TEXT("PlayersCommandPrefix")))
 				{
 					AppendContent2 +=
 						TEXT("\n")
@@ -697,7 +630,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("DiscordInviteUrl=\n");
 				}
 
-				if (!ConfigFile.GetString(ConfigSection, TEXT("JoinHintMessage"), TmpVal))
+				if (!PrimaryValues.Contains(TEXT("JoinHintMessage")))
 				{
 					AppendContent2 +=
 						TEXT("\n")
@@ -708,7 +641,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("JoinHintMessage=\n");
 				}
 
-				if (!ConfigFile.GetString(ConfigSection, TEXT("InGameJoinBroadcast"), TmpVal))
+				if (!PrimaryValues.Contains(TEXT("InGameJoinBroadcast")))
 				{
 					AppendContent2 +=
 						TEXT("\n")
@@ -728,11 +661,8 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 					            "(older version detected). Appending missing entries."),
 					       *ModFilePath);
 
-					FString ExistingContent2;
-					FFileHelper::LoadFileToString(ExistingContent2, *ModFilePath);
-					StripBOM(ExistingContent2);
-
-					if (FFileHelper::SaveStringToFile(ExistingContent2 + AppendContent2, *ModFilePath,
+					// Use the already-loaded RawPrimary so the file is not re-read.
+					if (FFileHelper::SaveStringToFile(RawPrimary + AppendContent2, *ModFilePath,
 					    FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 					{
 						UE_LOG(LogTemp, Log,
@@ -985,13 +915,10 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 	// line below AND a PatchLine call further down AND update Steps 1 and 3.
 	//
 	// IMPORTANT: the backup is read with raw string parsing (ParseRawIniSection)
-	// instead of FConfigFile::Read + GetString.  FConfigFile expands %property%
-	// references in values against keys in the same section.  Because ServerName
-	// IS a key in [DiscordBridge], any format string that contains %ServerName%
-	// (e.g. GameToDiscordFormat=**[%ServerName%] %PlayerName%**: %Message%) would
-	// have %ServerName% silently replaced with the actual server name.  PatchLine
-	// would then write that expanded value permanently into the primary config,
-	// destroying the dynamic placeholder.  Raw parsing avoids all such processing.
+	// for the same reasons the primary config is – see the comment at the top of
+	// the ParseRawIniSection helper.  In particular, FConfigFile expands
+	// %property% references which would corrupt format strings that use
+	// %PlayerName%, %ServerName%, etc. as dynamic placeholders.
 	if ((Config.BotToken.IsEmpty() || Config.ChannelId.IsEmpty()) &&
 	    PlatformFile.FileExists(*BackupFilePath))
 	{

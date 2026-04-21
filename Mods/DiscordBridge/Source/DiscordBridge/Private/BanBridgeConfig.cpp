@@ -2,7 +2,6 @@
 
 #include "BanBridgeConfig.h"
 
-#include "Misc/ConfigCacheIni.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -35,16 +34,58 @@ static void CleanBanBridgeConfigBOM(const FString& FilePath)
 // Internal helpers
 // -----------------------------------------------------------------------------
 
-static FString GetIniBridgeString(const FConfigFile& Cfg, const FString& Key,
-                                   const FString& Default = TEXT(""))
+/** Parse the named INI section from a raw file string into a key→value map. */
+static TMap<FString, FString> ParseRawBanSection(const FString& RawContent,
+                                                   const FString& Section)
 {
-	FString Value;
-	if (Cfg.GetString(TEXT("BanBridge"), *Key, Value))
+	TMap<FString, FString> Result;
+	const FString Header = FString(TEXT("[")) + Section + TEXT("]");
+	bool bInSection = false;
+	int32 Pos = 0;
+	while (Pos < RawContent.Len())
 	{
-		Value.TrimStartAndEndInline();
-		return Value;
+		int32 LineEnd = RawContent.Find(TEXT("\n"), ESearchCase::CaseSensitive,
+		                                ESearchDir::FromStart, Pos);
+		const bool bLast = (LineEnd == INDEX_NONE);
+		if (bLast) LineEnd = RawContent.Len();
+
+		FString Line = RawContent.Mid(Pos, LineEnd - Pos);
+		if (!Line.IsEmpty() && Line[Line.Len() - 1] == TEXT('\r'))
+			Line.RemoveAt(Line.Len() - 1, 1, false);
+		Pos = bLast ? RawContent.Len() : (LineEnd + 1);
+
+		const FString Trimmed = Line.TrimStart();
+		if (Trimmed.IsEmpty() ||
+		    Trimmed.StartsWith(TEXT(";")) ||
+		    Trimmed.StartsWith(TEXT("#")))
+			continue;
+		if (Trimmed.StartsWith(TEXT("[")))
+		{
+			bInSection = (Trimmed.TrimEnd() == Header);
+			continue;
+		}
+		if (bInSection)
+		{
+			int32 EqPos = INDEX_NONE;
+			if (Line.FindChar(TEXT('='), EqPos))
+			{
+				const FString Key   = Line.Left(EqPos).TrimStartAndEnd();
+				const FString Value = Line.Mid(EqPos + 1).TrimStartAndEnd();
+				if (!Key.IsEmpty())
+					Result.Add(Key, Value);
+			}
+		}
 	}
-	return Default;
+	return Result;
+}
+
+/** Get a string value from a parsed section map, or return Default. */
+static FString GetRawBanStr(const TMap<FString, FString>& Values,
+                             const FString& Key,
+                             const FString& Default = TEXT(""))
+{
+	const FString* Found = Values.Find(Key);
+	return Found ? *Found : Default;
 }
 
 // -----------------------------------------------------------------------------
@@ -83,21 +124,24 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 	if (PF.FileExists(*BackupPath))
 		CleanBanBridgeConfigBOM(BackupPath);
 
-	FConfigFile Cfg;
+	// Load raw content from primary first, then fall back to backup.
+	// Raw string parsing is used (instead of FConfigFile::Read) to avoid a
+	// TArray crash in certain UE4 builds and to prevent %property% expansion.
+	FString RawContent;
 	bool bLoaded = false;
 
 	// Try primary config file first.
 	if (PF.FileExists(*PrimaryPath))
 	{
-		Cfg.Read(PrimaryPath);
-		bLoaded = Cfg.Contains(TEXT("BanBridge"));
+		FFileHelper::LoadFileToString(RawContent, *PrimaryPath);
+		bLoaded = RawContent.Contains(TEXT("[BanBridge]"));
 	}
 
 	// Fall back to the backup copy if primary is missing or empty.
 	if (!bLoaded && PF.FileExists(*BackupPath))
 	{
-		Cfg.Read(BackupPath);
-		bLoaded = Cfg.Contains(TEXT("BanBridge"));
+		FFileHelper::LoadFileToString(RawContent, *BackupPath);
+		bLoaded = RawContent.Contains(TEXT("[BanBridge]"));
 	}
 
 	if (!bLoaded)
@@ -109,12 +153,14 @@ FBanBridgeConfig FBanBridgeConfig::Load()
 		return Out;
 	}
 
-	Out.AdminRoleId            = GetIniBridgeString(Cfg, TEXT("AdminRoleId"));
-	Out.ModeratorRoleId        = GetIniBridgeString(Cfg, TEXT("ModeratorRoleId"));
-	Out.BanCommandChannelId    = GetIniBridgeString(Cfg, TEXT("BanCommandChannelId"));
-	Out.ModerationLogChannelId = GetIniBridgeString(Cfg, TEXT("ModerationLogChannelId"));
-	Out.AdminPanelChannelId    = GetIniBridgeString(Cfg, TEXT("AdminPanelChannelId"));
-	Out.StaffChatChannelId     = GetIniBridgeString(Cfg, TEXT("StaffChatChannelId"));
+	const TMap<FString, FString> Values = ParseRawBanSection(RawContent, TEXT("BanBridge"));
+
+	Out.AdminRoleId            = GetRawBanStr(Values, TEXT("AdminRoleId"));
+	Out.ModeratorRoleId        = GetRawBanStr(Values, TEXT("ModeratorRoleId"));
+	Out.BanCommandChannelId    = GetRawBanStr(Values, TEXT("BanCommandChannelId"));
+	Out.ModerationLogChannelId = GetRawBanStr(Values, TEXT("ModerationLogChannelId"));
+	Out.AdminPanelChannelId    = GetRawBanStr(Values, TEXT("AdminPanelChannelId"));
+	Out.StaffChatChannelId     = GetRawBanStr(Values, TEXT("StaffChatChannelId"));
 
 	if (Out.AdminRoleId.IsEmpty())
 	{

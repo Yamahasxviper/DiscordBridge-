@@ -2,7 +2,6 @@
 
 #include "TicketConfig.h"
 
-#include "Misc/ConfigCacheIni.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -11,38 +10,75 @@
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-static FString GetIniString(const FConfigFile& Cfg, const FString& Key,
-                            const FString& Default = TEXT(""))
+/** Parse the named INI section from a raw file string into a key→value map. */
+static TMap<FString, FString> ParseRawTicketSection(const FString& RawContent,
+                                                     const FString& Section)
 {
-	FString Value;
-	if (Cfg.GetString(TEXT("TicketSystem"), *Key, Value))
+	TMap<FString, FString> Result;
+	const FString Header = FString(TEXT("[")) + Section + TEXT("]");
+	bool bInSection = false;
+	int32 Pos = 0;
+	while (Pos < RawContent.Len())
 	{
-		Value.TrimStartAndEndInline();
-		return Value;
+		int32 LineEnd = RawContent.Find(TEXT("\n"), ESearchCase::CaseSensitive,
+		                                ESearchDir::FromStart, Pos);
+		const bool bLast = (LineEnd == INDEX_NONE);
+		if (bLast) LineEnd = RawContent.Len();
+
+		FString Line = RawContent.Mid(Pos, LineEnd - Pos);
+		if (!Line.IsEmpty() && Line[Line.Len() - 1] == TEXT('\r'))
+			Line.RemoveAt(Line.Len() - 1, 1, false);
+		Pos = bLast ? RawContent.Len() : (LineEnd + 1);
+
+		const FString Trimmed = Line.TrimStart();
+		if (Trimmed.IsEmpty() ||
+		    Trimmed.StartsWith(TEXT(";")) ||
+		    Trimmed.StartsWith(TEXT("#")))
+			continue;
+		if (Trimmed.StartsWith(TEXT("[")))
+		{
+			bInSection = (Trimmed.TrimEnd() == Header);
+			continue;
+		}
+		if (bInSection)
+		{
+			int32 EqPos = INDEX_NONE;
+			if (Line.FindChar(TEXT('='), EqPos))
+			{
+				const FString Key   = Line.Left(EqPos).TrimStartAndEnd();
+				const FString Value = Line.Mid(EqPos + 1).TrimStartAndEnd();
+				if (!Key.IsEmpty())
+					Result.Add(Key, Value);
+			}
+		}
 	}
+	return Result;
+}
+
+static FString GetRawTicketStr(const TMap<FString, FString>& Values,
+                                const FString& Key,
+                                const FString& Default = TEXT(""))
+{
+	const FString* Found = Values.Find(Key);
+	return Found ? *Found : Default;
+}
+
+static bool GetRawTicketBool(const TMap<FString, FString>& Values,
+                              const FString& Key, bool Default)
+{
+	const FString* Found = Values.Find(Key);
+	if (!Found || Found->IsEmpty()) return Default;
+	const FString T = Found->TrimStartAndEnd();
+	if (T.Equals(TEXT("True"),  ESearchCase::IgnoreCase) || T == TEXT("1")) return true;
+	if (T.Equals(TEXT("False"), ESearchCase::IgnoreCase) || T == TEXT("0")) return false;
 	return Default;
 }
 
-static bool GetIniBool(const FConfigFile& Cfg, const FString& Key, bool Default)
+static float GetRawTicketFloat(const TMap<FString, FString>& Values,
+                                const FString& Key, float Default)
 {
-	bool Value;
-	if (Cfg.GetBool(TEXT("TicketSystem"), *Key, Value))
-	{
-		return Value;
-	}
-	return Default;
-}
-
-static float GetIniFloat(const FConfigFile& Cfg, const FString& Key, float Default)
-{
-	FString StrVal;
-	if (Cfg.GetString(TEXT("TicketSystem"), *Key, StrVal))
-	{
-		StrVal.TrimStartAndEndInline();
-		if (!StrVal.IsEmpty())
-			return FCString::Atof(*StrVal);
-	}
-	return Default;
+	const FString* Found = Values.Find(Key);
+	return (Found && !Found->IsEmpty()) ? FCString::Atof(**Found) : Default;
 }
 
 /** Strip a leading UTF-8 BOM (EF BB BF) from a file on disk. */
@@ -131,49 +167,49 @@ FTicketConfig FTicketConfig::Load()
 		CleanTicketConfigBOM(BackupPath);
 
 	// ── Try to load the primary config file ───────────────────────────────────
+	// Raw string parsing is used (instead of FConfigFile::Read) to avoid a
+	// TArray crash in certain UE4 builds and to prevent %property% expansion.
 	const bool bPrimaryExists = PlatformFile.FileExists(*PrimaryPath);
 
 	if (bPrimaryExists)
 	{
 		FString RawContent;
 		FFileHelper::LoadFileToString(RawContent, *PrimaryPath);
+		const TMap<FString, FString> Cfg = ParseRawTicketSection(RawContent, TEXT("TicketSystem"));
 
-		FConfigFile Cfg;
-		Cfg.Read(PrimaryPath);
-
-		Config.BotToken                 = GetIniString(Cfg, TEXT("BotToken"));
-		Config.GuildId                  = GetIniString(Cfg, TEXT("GuildId"));
-		Config.TicketChannelId          = GetIniString(Cfg, TEXT("TicketChannelId"));
-		Config.TicketLogChannelId       = GetIniString(Cfg, TEXT("TicketLogChannelId"));
-		Config.bTicketWhitelistEnabled  = GetIniBool  (Cfg, TEXT("TicketWhitelistEnabled"),  true);
-		Config.bTicketHelpEnabled       = GetIniBool  (Cfg, TEXT("TicketHelpEnabled"),       true);
-		Config.bTicketReportEnabled     = GetIniBool  (Cfg, TEXT("TicketReportEnabled"),     true);
-		Config.bTicketBanAppealEnabled  = GetIniBool  (Cfg, TEXT("BanAppealEnabled"),        true);
-		Config.bTicketMuteAppealEnabled = GetIniBool  (Cfg, TEXT("MuteAppealEnabled"),       true);
-		Config.TicketNotifyRoleId       = GetIniString(Cfg, TEXT("TicketNotifyRoleId"));
-		Config.TicketPanelChannelId     = GetIniString(Cfg, TEXT("TicketPanelChannelId"));
-		Config.TicketCategoryId         = GetIniString(Cfg, TEXT("TicketCategoryId"));
+		Config.BotToken                 = GetRawTicketStr  (Cfg, TEXT("BotToken"));
+		Config.GuildId                  = GetRawTicketStr  (Cfg, TEXT("GuildId"));
+		Config.TicketChannelId          = GetRawTicketStr  (Cfg, TEXT("TicketChannelId"));
+		Config.TicketLogChannelId       = GetRawTicketStr  (Cfg, TEXT("TicketLogChannelId"));
+		Config.bTicketWhitelistEnabled  = GetRawTicketBool (Cfg, TEXT("TicketWhitelistEnabled"),  true);
+		Config.bTicketHelpEnabled       = GetRawTicketBool (Cfg, TEXT("TicketHelpEnabled"),       true);
+		Config.bTicketReportEnabled     = GetRawTicketBool (Cfg, TEXT("TicketReportEnabled"),     true);
+		Config.bTicketBanAppealEnabled  = GetRawTicketBool (Cfg, TEXT("BanAppealEnabled"),        true);
+		Config.bTicketMuteAppealEnabled = GetRawTicketBool (Cfg, TEXT("MuteAppealEnabled"),       true);
+		Config.TicketNotifyRoleId       = GetRawTicketStr  (Cfg, TEXT("TicketNotifyRoleId"));
+		Config.TicketPanelChannelId     = GetRawTicketStr  (Cfg, TEXT("TicketPanelChannelId"));
+		Config.TicketCategoryId         = GetRawTicketStr  (Cfg, TEXT("TicketCategoryId"));
 		Config.CustomTicketReasons      = ParseRawIniArray(RawContent, TEXT("TicketReason"));
-		Config.InactiveTicketTimeoutHours = GetIniFloat(Cfg, TEXT("InactiveTicketTimeoutHours"), 0.0f);
-		Config.WhitelistCategoryId         = GetIniString(Cfg, TEXT("WhitelistCategoryId"));
-		Config.HelpCategoryId              = GetIniString(Cfg, TEXT("HelpCategoryId"));
-		Config.ReportCategoryId            = GetIniString(Cfg, TEXT("ReportCategoryId"));
-		Config.AppealCategoryId            = GetIniString(Cfg, TEXT("AppealCategoryId"));
-		Config.MuteAppealCategoryId        = GetIniString(Cfg, TEXT("MuteAppealCategoryId"));
-		Config.bTicketFeedbackEnabled      = GetIniBool  (Cfg, TEXT("TicketFeedbackEnabled"),      false);
+		Config.InactiveTicketTimeoutHours = GetRawTicketFloat(Cfg, TEXT("InactiveTicketTimeoutHours"), 0.0f);
+		Config.WhitelistCategoryId         = GetRawTicketStr  (Cfg, TEXT("WhitelistCategoryId"));
+		Config.HelpCategoryId              = GetRawTicketStr  (Cfg, TEXT("HelpCategoryId"));
+		Config.ReportCategoryId            = GetRawTicketStr  (Cfg, TEXT("ReportCategoryId"));
+		Config.AppealCategoryId            = GetRawTicketStr  (Cfg, TEXT("AppealCategoryId"));
+		Config.MuteAppealCategoryId        = GetRawTicketStr  (Cfg, TEXT("MuteAppealCategoryId"));
+		Config.bTicketFeedbackEnabled      = GetRawTicketBool (Cfg, TEXT("TicketFeedbackEnabled"),      false);
 		Config.TicketMacros                = ParseRawIniArray(RawContent, TEXT("TicketMacro"));
-		Config.TicketCooldownMinutes       = static_cast<int32>(GetIniFloat(Cfg, TEXT("TicketCooldownMinutes"), 0.0f));
-		Config.TicketReopenGracePeriodMinutes = static_cast<int32>(GetIniFloat(Cfg, TEXT("TicketReopenGracePeriodMinutes"), 0.0f));
-		Config.bAllowMultipleTicketTypes   = GetIniBool  (Cfg, TEXT("AllowMultipleTicketTypes"),   false);
-		Config.bAutoRefreshPanel           = GetIniBool  (Cfg, TEXT("AutoRefreshPanel"),           false);
-		Config.bDmOpenerOnStaffReply       = GetIniBool  (Cfg, TEXT("DmOpenerOnStaffReply"),       false);
-		Config.TicketSlaWarningMinutes     = static_cast<int32>(GetIniFloat(Cfg, TEXT("TicketSlaWarningMinutes"), 0.0f));
-		Config.TicketEscalationRoleId      = GetIniString(Cfg, TEXT("TicketEscalationRoleId"));
-		Config.TicketEscalationCategoryId  = GetIniString(Cfg, TEXT("TicketEscalationCategoryId"));
+		Config.TicketCooldownMinutes       = static_cast<int32>(GetRawTicketFloat(Cfg, TEXT("TicketCooldownMinutes"), 0.0f));
+		Config.TicketReopenGracePeriodMinutes = static_cast<int32>(GetRawTicketFloat(Cfg, TEXT("TicketReopenGracePeriodMinutes"), 0.0f));
+		Config.bAllowMultipleTicketTypes   = GetRawTicketBool (Cfg, TEXT("AllowMultipleTicketTypes"),   false);
+		Config.bAutoRefreshPanel           = GetRawTicketBool (Cfg, TEXT("AutoRefreshPanel"),           false);
+		Config.bDmOpenerOnStaffReply       = GetRawTicketBool (Cfg, TEXT("DmOpenerOnStaffReply"),       false);
+		Config.TicketSlaWarningMinutes     = static_cast<int32>(GetRawTicketFloat(Cfg, TEXT("TicketSlaWarningMinutes"), 0.0f));
+		Config.TicketEscalationRoleId      = GetRawTicketStr  (Cfg, TEXT("TicketEscalationRoleId"));
+		Config.TicketEscalationCategoryId  = GetRawTicketStr  (Cfg, TEXT("TicketEscalationCategoryId"));
 		Config.TicketTemplates             = ParseRawIniArray(RawContent, TEXT("TicketTemplate"));
 		Config.TicketAutoResponses         = ParseRawIniArray(RawContent, TEXT("TicketAutoResponse"));
-		Config.BanAppealCooldownDays       = static_cast<int32>(GetIniFloat(Cfg, TEXT("BanAppealCooldownDays"), 0.0f));
-		Config.MaxLifetimeAppeals          = static_cast<int32>(GetIniFloat(Cfg, TEXT("MaxLifetimeAppeals"), 0.0f));
+		Config.BanAppealCooldownDays       = static_cast<int32>(GetRawTicketFloat(Cfg, TEXT("BanAppealCooldownDays"), 0.0f));
+		Config.MaxLifetimeAppeals          = static_cast<int32>(GetRawTicketFloat(Cfg, TEXT("MaxLifetimeAppeals"), 0.0f));
 
 		UE_LOG(LogTicketSystem, Log,
 		       TEXT("TicketSystem: Loaded config from %s"), *PrimaryPath);
@@ -185,43 +221,41 @@ FTicketConfig FTicketConfig::Load()
 		{
 			FString BackupRaw;
 			FFileHelper::LoadFileToString(BackupRaw, *BackupPath);
+			const TMap<FString, FString> BackupCfg = ParseRawTicketSection(BackupRaw, TEXT("TicketSystem"));
 
-			FConfigFile BackupCfg;
-			BackupCfg.Read(BackupPath);
-
-			Config.BotToken                = GetIniString(BackupCfg, TEXT("BotToken"));
-			Config.GuildId                 = GetIniString(BackupCfg, TEXT("GuildId"));
-			Config.TicketChannelId         = GetIniString(BackupCfg, TEXT("TicketChannelId"));
-			Config.TicketLogChannelId      = GetIniString(BackupCfg, TEXT("TicketLogChannelId"));
-			Config.bTicketWhitelistEnabled = GetIniBool  (BackupCfg, TEXT("TicketWhitelistEnabled"), true);
-			Config.bTicketHelpEnabled      = GetIniBool  (BackupCfg, TEXT("TicketHelpEnabled"),      true);
-			Config.bTicketReportEnabled    = GetIniBool  (BackupCfg, TEXT("TicketReportEnabled"),    true);
-			Config.bTicketBanAppealEnabled = GetIniBool  (BackupCfg, TEXT("BanAppealEnabled"),       true);
-			Config.bTicketMuteAppealEnabled = GetIniBool (BackupCfg, TEXT("MuteAppealEnabled"),      true);
-			Config.TicketNotifyRoleId      = GetIniString(BackupCfg, TEXT("TicketNotifyRoleId"));
-			Config.TicketPanelChannelId    = GetIniString(BackupCfg, TEXT("TicketPanelChannelId"));
-			Config.TicketCategoryId        = GetIniString(BackupCfg, TEXT("TicketCategoryId"));
+			Config.BotToken                = GetRawTicketStr  (BackupCfg, TEXT("BotToken"));
+			Config.GuildId                 = GetRawTicketStr  (BackupCfg, TEXT("GuildId"));
+			Config.TicketChannelId         = GetRawTicketStr  (BackupCfg, TEXT("TicketChannelId"));
+			Config.TicketLogChannelId      = GetRawTicketStr  (BackupCfg, TEXT("TicketLogChannelId"));
+			Config.bTicketWhitelistEnabled = GetRawTicketBool (BackupCfg, TEXT("TicketWhitelistEnabled"), true);
+			Config.bTicketHelpEnabled      = GetRawTicketBool (BackupCfg, TEXT("TicketHelpEnabled"),      true);
+			Config.bTicketReportEnabled    = GetRawTicketBool (BackupCfg, TEXT("TicketReportEnabled"),    true);
+			Config.bTicketBanAppealEnabled = GetRawTicketBool (BackupCfg, TEXT("BanAppealEnabled"),       true);
+			Config.bTicketMuteAppealEnabled = GetRawTicketBool(BackupCfg, TEXT("MuteAppealEnabled"),      true);
+			Config.TicketNotifyRoleId      = GetRawTicketStr  (BackupCfg, TEXT("TicketNotifyRoleId"));
+			Config.TicketPanelChannelId    = GetRawTicketStr  (BackupCfg, TEXT("TicketPanelChannelId"));
+			Config.TicketCategoryId        = GetRawTicketStr  (BackupCfg, TEXT("TicketCategoryId"));
 			Config.CustomTicketReasons     = ParseRawIniArray(BackupRaw, TEXT("TicketReason"));
-			Config.InactiveTicketTimeoutHours = GetIniFloat(BackupCfg, TEXT("InactiveTicketTimeoutHours"), 0.0f);
-			Config.WhitelistCategoryId         = GetIniString(BackupCfg, TEXT("WhitelistCategoryId"));
-			Config.HelpCategoryId              = GetIniString(BackupCfg, TEXT("HelpCategoryId"));
-			Config.ReportCategoryId            = GetIniString(BackupCfg, TEXT("ReportCategoryId"));
-			Config.AppealCategoryId            = GetIniString(BackupCfg, TEXT("AppealCategoryId"));
-			Config.MuteAppealCategoryId        = GetIniString(BackupCfg, TEXT("MuteAppealCategoryId"));
-			Config.bTicketFeedbackEnabled      = GetIniBool  (BackupCfg, TEXT("TicketFeedbackEnabled"),      false);
+			Config.InactiveTicketTimeoutHours = GetRawTicketFloat(BackupCfg, TEXT("InactiveTicketTimeoutHours"), 0.0f);
+			Config.WhitelistCategoryId         = GetRawTicketStr  (BackupCfg, TEXT("WhitelistCategoryId"));
+			Config.HelpCategoryId              = GetRawTicketStr  (BackupCfg, TEXT("HelpCategoryId"));
+			Config.ReportCategoryId            = GetRawTicketStr  (BackupCfg, TEXT("ReportCategoryId"));
+			Config.AppealCategoryId            = GetRawTicketStr  (BackupCfg, TEXT("AppealCategoryId"));
+			Config.MuteAppealCategoryId        = GetRawTicketStr  (BackupCfg, TEXT("MuteAppealCategoryId"));
+			Config.bTicketFeedbackEnabled      = GetRawTicketBool (BackupCfg, TEXT("TicketFeedbackEnabled"),      false);
 			Config.TicketMacros                = ParseRawIniArray(BackupRaw, TEXT("TicketMacro"));
-			Config.TicketCooldownMinutes       = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("TicketCooldownMinutes"), 0.0f));
-			Config.TicketReopenGracePeriodMinutes = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("TicketReopenGracePeriodMinutes"), 0.0f));
-			Config.bAllowMultipleTicketTypes   = GetIniBool  (BackupCfg, TEXT("AllowMultipleTicketTypes"),   false);
-			Config.bAutoRefreshPanel           = GetIniBool  (BackupCfg, TEXT("AutoRefreshPanel"),           false);
-			Config.bDmOpenerOnStaffReply       = GetIniBool  (BackupCfg, TEXT("DmOpenerOnStaffReply"),       false);
-			Config.TicketSlaWarningMinutes     = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("TicketSlaWarningMinutes"), 0.0f));
-			Config.TicketEscalationRoleId      = GetIniString(BackupCfg, TEXT("TicketEscalationRoleId"));
-			Config.TicketEscalationCategoryId  = GetIniString(BackupCfg, TEXT("TicketEscalationCategoryId"));
+			Config.TicketCooldownMinutes       = static_cast<int32>(GetRawTicketFloat(BackupCfg, TEXT("TicketCooldownMinutes"), 0.0f));
+			Config.TicketReopenGracePeriodMinutes = static_cast<int32>(GetRawTicketFloat(BackupCfg, TEXT("TicketReopenGracePeriodMinutes"), 0.0f));
+			Config.bAllowMultipleTicketTypes   = GetRawTicketBool (BackupCfg, TEXT("AllowMultipleTicketTypes"),   false);
+			Config.bAutoRefreshPanel           = GetRawTicketBool (BackupCfg, TEXT("AutoRefreshPanel"),           false);
+			Config.bDmOpenerOnStaffReply       = GetRawTicketBool (BackupCfg, TEXT("DmOpenerOnStaffReply"),       false);
+			Config.TicketSlaWarningMinutes     = static_cast<int32>(GetRawTicketFloat(BackupCfg, TEXT("TicketSlaWarningMinutes"), 0.0f));
+			Config.TicketEscalationRoleId      = GetRawTicketStr  (BackupCfg, TEXT("TicketEscalationRoleId"));
+			Config.TicketEscalationCategoryId  = GetRawTicketStr  (BackupCfg, TEXT("TicketEscalationCategoryId"));
 			Config.TicketTemplates             = ParseRawIniArray(BackupRaw, TEXT("TicketTemplate"));
 			Config.TicketAutoResponses         = ParseRawIniArray(BackupRaw, TEXT("TicketAutoResponse"));
-			Config.BanAppealCooldownDays       = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("BanAppealCooldownDays"), 0.0f));
-			Config.MaxLifetimeAppeals          = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("MaxLifetimeAppeals"), 0.0f));
+			Config.BanAppealCooldownDays       = static_cast<int32>(GetRawTicketFloat(BackupCfg, TEXT("BanAppealCooldownDays"), 0.0f));
+			Config.MaxLifetimeAppeals          = static_cast<int32>(GetRawTicketFloat(BackupCfg, TEXT("MaxLifetimeAppeals"), 0.0f));
 
 			UE_LOG(LogTicketSystem, Log,
 			       TEXT("TicketSystem: Primary config not found at '%s' – restored from backup."),
