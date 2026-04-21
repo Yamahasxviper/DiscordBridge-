@@ -1013,123 +1013,133 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			Config.ChannelId = GetRawStringOrDefault(BackupValues, TEXT("ChannelId"), TEXT("")).TrimStartAndEnd();
 		}
 
-		// Restore all other user-customised settings from the backup so that
-		// message formats and status messages also survive a mod update that
-		// resets the primary config to its shipped defaults.
-		Config.ServerName           = GetRawStringOrDefault(BackupValues, TEXT("ServerName"),           Config.ServerName);
-		Config.GameToDiscordFormat  = GetRawStringOrFallback(BackupValues, TEXT("GameToDiscordFormat"),  Config.GameToDiscordFormat);
-		Config.DiscordToGameFormat  = GetRawStringOrFallback(BackupValues, TEXT("DiscordToGameFormat"),  Config.DiscordToGameFormat);
-		Config.bIgnoreBotMessages   = GetRawBoolOrDefault  (BackupValues, TEXT("IgnoreBotMessages"),
-		                              GetRawBoolOrDefault  (BackupValues, TEXT("bIgnoreBotMessages"),   Config.bIgnoreBotMessages));
-		Config.bServerStatusMessagesEnabled = GetRawBoolOrDefault(BackupValues, TEXT("ServerStatusMessagesEnabled"), Config.bServerStatusMessagesEnabled);
-		Config.StatusChannelId      = GetRawStringOrDefault(BackupValues, TEXT("StatusChannelId"),      Config.StatusChannelId);
-		Config.ServerOnlineMessage  = GetRawStringOrDefault(BackupValues, TEXT("ServerOnlineMessage"),  Config.ServerOnlineMessage);
-		Config.ServerOfflineMessage = GetRawStringOrDefault(BackupValues, TEXT("ServerOfflineMessage"), Config.ServerOfflineMessage);
-		Config.bShowPlayerCountInPresence       = GetRawBoolOrDefault  (BackupValues, TEXT("ShowPlayerCountInPresence"),
-		                                          GetRawBoolOrDefault  (BackupValues, TEXT("bShowPlayerCountInPresence"),       Config.bShowPlayerCountInPresence));
-		Config.PlayerCountPresenceFormat        = GetRawStringOrFallback(BackupValues, TEXT("PlayerCountPresenceFormat"),        Config.PlayerCountPresenceFormat);
-		Config.PlayerCountUpdateIntervalSeconds = GetRawFloatOrDefault (BackupValues, TEXT("PlayerCountUpdateIntervalSeconds"), Config.PlayerCountUpdateIntervalSeconds);
-		Config.PlayerCountActivityType          = GetRawIntOrDefault   (BackupValues, TEXT("PlayerCountActivityType"),          Config.PlayerCountActivityType);
-
-		// Whitelist settings are now in a separate config file
-		// (DefaultWhitelist.ini) loaded by FWhitelistConfig::Load().
-
-		// Player event notification settings
-		Config.bPlayerEventsEnabled    = GetRawBoolOrDefault  (BackupValues, TEXT("PlayerEventsEnabled"),    Config.bPlayerEventsEnabled);
-		Config.PlayerEventsChannelId   = GetRawStringOrDefault(BackupValues, TEXT("PlayerEventsChannelId"),   Config.PlayerEventsChannelId);
-		Config.PlayerJoinMessage       = GetRawStringOrDefault(BackupValues, TEXT("PlayerJoinMessage"),       Config.PlayerJoinMessage);
-		Config.PlayerJoinAdminChannelId  = GetRawStringOrDefault(BackupValues, TEXT("PlayerJoinAdminChannelId"),  Config.PlayerJoinAdminChannelId);
-		Config.PlayerJoinAdminMessage    = GetRawStringOrDefault(BackupValues, TEXT("PlayerJoinAdminMessage"),    Config.PlayerJoinAdminMessage);
-		Config.PlayerLeaveMessage      = GetRawStringOrDefault(BackupValues, TEXT("PlayerLeaveMessage"),      Config.PlayerLeaveMessage);
-		Config.PlayerTimeoutMessage    = GetRawStringOrDefault(BackupValues, TEXT("PlayerTimeoutMessage"),    Config.PlayerTimeoutMessage);
-		Config.bUseEmbedsForPlayerEvents = GetRawBoolOrDefault(BackupValues, TEXT("UseEmbedsForPlayerEvents"), Config.bUseEmbedsForPlayerEvents);
-
-		// Chat relay filter (array field – parse from raw backup content)
-		Config.ChatRelayBlocklist = ParseRawIniArray(BackupFileContent, TEXT("DiscordBridge"), TEXT("ChatRelayBlocklist"));
-
-		// Chat relay replacements (array field – parse from raw backup content)
+		const bool bHaveCredentialsAfterRestore =
+			!Config.BotToken.IsEmpty() && !Config.ChannelId.IsEmpty();
+		if (bHaveCredentialsAfterRestore)
 		{
-			TArray<FString> RawRepl = ParseRawIniArray(BackupFileContent, TEXT("DiscordBridge"), TEXT("ChatRelayBlocklistReplacements"));
-			for (const FString& Line : RawRepl)
+			// Restore all other user-customised settings from the backup so that
+			// message formats and status messages also survive a mod update that
+			// resets the primary config to its shipped defaults.
+			Config.ServerName           = GetRawStringOrDefault(BackupValues, TEXT("ServerName"),           Config.ServerName);
+			Config.GameToDiscordFormat  = GetRawStringOrFallback(BackupValues, TEXT("GameToDiscordFormat"),  Config.GameToDiscordFormat);
+			Config.DiscordToGameFormat  = GetRawStringOrFallback(BackupValues, TEXT("DiscordToGameFormat"),  Config.DiscordToGameFormat);
+			Config.bIgnoreBotMessages   = GetRawBoolOrDefault  (BackupValues, TEXT("IgnoreBotMessages"),
+			                              GetRawBoolOrDefault  (BackupValues, TEXT("bIgnoreBotMessages"),   Config.bIgnoreBotMessages));
+			Config.bServerStatusMessagesEnabled = GetRawBoolOrDefault(BackupValues, TEXT("ServerStatusMessagesEnabled"), Config.bServerStatusMessagesEnabled);
+			Config.StatusChannelId      = GetRawStringOrDefault(BackupValues, TEXT("StatusChannelId"),      Config.StatusChannelId);
+			Config.ServerOnlineMessage  = GetRawStringOrDefault(BackupValues, TEXT("ServerOnlineMessage"),  Config.ServerOnlineMessage);
+			Config.ServerOfflineMessage = GetRawStringOrDefault(BackupValues, TEXT("ServerOfflineMessage"), Config.ServerOfflineMessage);
+			Config.bShowPlayerCountInPresence       = GetRawBoolOrDefault  (BackupValues, TEXT("ShowPlayerCountInPresence"),
+			                                          GetRawBoolOrDefault  (BackupValues, TEXT("bShowPlayerCountInPresence"),       Config.bShowPlayerCountInPresence));
+			Config.PlayerCountPresenceFormat        = GetRawStringOrFallback(BackupValues, TEXT("PlayerCountPresenceFormat"),        Config.PlayerCountPresenceFormat);
+			Config.PlayerCountUpdateIntervalSeconds = GetRawFloatOrDefault (BackupValues, TEXT("PlayerCountUpdateIntervalSeconds"), Config.PlayerCountUpdateIntervalSeconds);
+			Config.PlayerCountActivityType          = GetRawIntOrDefault   (BackupValues, TEXT("PlayerCountActivityType"),          Config.PlayerCountActivityType);
+
+			// Whitelist settings are now in a separate config file
+			// (DefaultWhitelist.ini) loaded by FWhitelistConfig::Load().
+
+			// Player event notification settings
+			Config.bPlayerEventsEnabled    = GetRawBoolOrDefault  (BackupValues, TEXT("PlayerEventsEnabled"),    Config.bPlayerEventsEnabled);
+			Config.PlayerEventsChannelId   = GetRawStringOrDefault(BackupValues, TEXT("PlayerEventsChannelId"),   Config.PlayerEventsChannelId);
+			Config.PlayerJoinMessage       = GetRawStringOrDefault(BackupValues, TEXT("PlayerJoinMessage"),       Config.PlayerJoinMessage);
+			Config.PlayerJoinAdminChannelId  = GetRawStringOrDefault(BackupValues, TEXT("PlayerJoinAdminChannelId"),  Config.PlayerJoinAdminChannelId);
+			Config.PlayerJoinAdminMessage    = GetRawStringOrDefault(BackupValues, TEXT("PlayerJoinAdminMessage"),    Config.PlayerJoinAdminMessage);
+			Config.PlayerLeaveMessage      = GetRawStringOrDefault(BackupValues, TEXT("PlayerLeaveMessage"),      Config.PlayerLeaveMessage);
+			Config.PlayerTimeoutMessage    = GetRawStringOrDefault(BackupValues, TEXT("PlayerTimeoutMessage"),    Config.PlayerTimeoutMessage);
+			Config.bUseEmbedsForPlayerEvents = GetRawBoolOrDefault(BackupValues, TEXT("UseEmbedsForPlayerEvents"), Config.bUseEmbedsForPlayerEvents);
+
+			// Chat relay filter (array field – parse from raw backup content)
+			Config.ChatRelayBlocklist = ParseRawIniArray(BackupFileContent, TEXT("DiscordBridge"), TEXT("ChatRelayBlocklist"));
+
+			// Chat relay replacements (array field – parse from raw backup content)
 			{
-				FString Cleaned = Line.TrimStartAndEnd();
-				if (Cleaned.StartsWith(TEXT("("))) Cleaned = Cleaned.Mid(1);
-				if (Cleaned.EndsWith(TEXT(")")))   Cleaned = Cleaned.LeftChop(1);
-
-				FString PatStr, ReplStr;
-				auto ExtractQuoted = [&](const FString& Key, FString& Out) -> bool
+				TArray<FString> RawRepl = ParseRawIniArray(BackupFileContent, TEXT("DiscordBridge"), TEXT("ChatRelayBlocklistReplacements"));
+				for (const FString& Line : RawRepl)
 				{
-					const FString Search = Key + TEXT("=\"");
-					const int32   Idx    = Cleaned.Find(Search, ESearchCase::IgnoreCase);
-					if (Idx == INDEX_NONE) return false;
-					const int32 Start = Idx + Search.Len();
-					const int32 End   = Cleaned.Find(TEXT("\""), ESearchCase::IgnoreCase, ESearchDir::FromStart, Start);
-					if (End == INDEX_NONE) return false;
-					Out = Cleaned.Mid(Start, End - Start);
-					return true;
-				};
+					FString Cleaned = Line.TrimStartAndEnd();
+					if (Cleaned.StartsWith(TEXT("("))) Cleaned = Cleaned.Mid(1);
+					if (Cleaned.EndsWith(TEXT(")")))   Cleaned = Cleaned.LeftChop(1);
 
-				if (ExtractQuoted(TEXT("Pattern"),     PatStr) &&
-				    ExtractQuoted(TEXT("Replacement"), ReplStr))
-				{
-					FChatRelayReplacement R;
-					R.Pattern     = PatStr;
-					R.Replacement = ReplStr;
-					Config.ChatRelayBlocklistReplacements.Add(R);
+					FString PatStr, ReplStr;
+					auto ExtractQuoted = [&](const FString& Key, FString& Out) -> bool
+					{
+						const FString Search = Key + TEXT("=\"");
+						const int32   Idx    = Cleaned.Find(Search, ESearchCase::IgnoreCase);
+						if (Idx == INDEX_NONE) return false;
+						const int32 Start = Idx + Search.Len();
+						const int32 End   = Cleaned.Find(TEXT("\""), ESearchCase::IgnoreCase, ESearchDir::FromStart, Start);
+						if (End == INDEX_NONE) return false;
+						Out = Cleaned.Mid(Start, End - Start);
+						return true;
+					};
+
+					if (ExtractQuoted(TEXT("Pattern"),     PatStr) &&
+					    ExtractQuoted(TEXT("Replacement"), ReplStr))
+					{
+						FChatRelayReplacement R;
+						R.Pattern     = PatStr;
+						R.Replacement = ReplStr;
+						Config.ChatRelayBlocklistReplacements.Add(R);
+					}
 				}
 			}
+
+			// Bot commands
+			Config.PlayersCommandChannelId = GetRawStringOrDefault (BackupValues, TEXT("PlayersCommandChannelId"), Config.PlayersCommandChannelId);
+			Config.DiscordInviteUrl        = GetRawStringOrDefault (BackupValues, TEXT("DiscordInviteUrl"),        Config.DiscordInviteUrl);
+
+			// New fields
+			Config.PhaseEventsChannelId     = GetRawStringOrDefault (BackupValues, TEXT("PhaseEventsChannelId"),     Config.PhaseEventsChannelId);
+			Config.SchematicEventsChannelId = GetRawStringOrDefault (BackupValues, TEXT("SchematicEventsChannelId"), Config.SchematicEventsChannelId);
+			Config.BanEventsChannelId       = GetRawStringOrDefault (BackupValues, TEXT("BanEventsChannelId"),       Config.BanEventsChannelId);
+			Config.bEnableJoinReactionVoting = GetRawBoolOrDefault  (BackupValues, TEXT("EnableJoinReactionVoting"), Config.bEnableJoinReactionVoting);
+			Config.VoteKickThreshold        = GetRawIntOrDefault    (BackupValues, TEXT("VoteKickThreshold"),        Config.VoteKickThreshold);
+			Config.VoteWindowMinutes        = GetRawIntOrDefault    (BackupValues, TEXT("VoteWindowMinutes"),        Config.VoteWindowMinutes);
+			Config.AfkKickMinutes           = GetRawIntOrDefault    (BackupValues, TEXT("AfkKickMinutes"),           Config.AfkKickMinutes);
+			Config.AfkKickReason            = GetRawStringOrDefault (BackupValues, TEXT("AfkKickReason"),            Config.AfkKickReason);
+
+			// Scheduled announcements
+			Config.AnnouncementIntervalMinutes = GetRawIntOrDefault    (BackupValues, TEXT("AnnouncementIntervalMinutes"), Config.AnnouncementIntervalMinutes);
+			Config.AnnouncementMessage         = GetRawStringOrDefault (BackupValues, TEXT("AnnouncementMessage"),         Config.AnnouncementMessage);
+			Config.AnnouncementChannelId       = GetRawStringOrDefault (BackupValues, TEXT("AnnouncementChannelId"),       Config.AnnouncementChannelId);
+
+			// Embed mode flags
+			Config.bUseEmbedsForPhaseEvents     = GetRawBoolOrDefault(BackupValues, TEXT("UseEmbedsForPhaseEvents"),     Config.bUseEmbedsForPhaseEvents);
+			Config.bUseEmbedsForSchematicEvents = GetRawBoolOrDefault(BackupValues, TEXT("UseEmbedsForSchematicEvents"), Config.bUseEmbedsForSchematicEvents);
+
+			// Webhook fallback
+			Config.FallbackWebhookUrl = GetRawStringOrDefault(BackupValues, TEXT("FallbackWebhookUrl"), Config.FallbackWebhookUrl);
+
+			// Slash commands
+			Config.bEnableSlashCommands = GetRawBoolOrDefault(BackupValues, TEXT("EnableSlashCommands"), Config.bEnableSlashCommands);
+
+			// Mute notifications
+			Config.bNotifyMuteEvents  = GetRawBoolOrDefault  (BackupValues, TEXT("NotifyMuteEvents"),  Config.bNotifyMuteEvents);
+			Config.ModeratorChannelId = GetRawStringOrDefault(BackupValues, TEXT("ModeratorChannelId"), Config.ModeratorChannelId);
+
+			Config.ModerationLogChannelId = GetRawStringOrDefault(BackupValues, TEXT("ModerationLogChannelId"), Config.ModerationLogChannelId);
+
+			// Bot info / help channel
+			Config.BotInfoChannelId = GetRawStringOrDefault(BackupValues, TEXT("BotInfoChannelId"), Config.BotInfoChannelId);
+
+			// On-join DM welcome message
+			Config.WelcomeMessageDM = GetRawStringOrDefault(BackupValues, TEXT("WelcomeMessageDM"), Config.WelcomeMessageDM);
+
+			// On-join in-game hint message
+			Config.JoinHintMessage = GetRawStringOrDefault(BackupValues, TEXT("JoinHintMessage"), Config.JoinHintMessage);
+
+			// On-join broadcast message (all players)
+			Config.bInGameJoinBroadcastEnabled = GetRawBoolOrDefault(BackupValues, TEXT("InGameJoinBroadcastEnabled"), Config.bInGameJoinBroadcastEnabled);
+			Config.InGameJoinBroadcast = GetRawStringOrDefault(BackupValues, TEXT("InGameJoinBroadcast"), Config.InGameJoinBroadcast);
+
+			// DiscordRoleLabels array (restore from raw backup content)
+			Config.DiscordRoleLabels = ParseRawIniArray(BackupFileContent, TEXT("DiscordBridge"), TEXT("DiscordRoleLabels"));
 		}
-
-		// Bot commands
-		Config.PlayersCommandChannelId = GetRawStringOrDefault (BackupValues, TEXT("PlayersCommandChannelId"), Config.PlayersCommandChannelId);
-		Config.DiscordInviteUrl        = GetRawStringOrDefault (BackupValues, TEXT("DiscordInviteUrl"),        Config.DiscordInviteUrl);
-
-		// New fields
-		Config.PhaseEventsChannelId     = GetRawStringOrDefault (BackupValues, TEXT("PhaseEventsChannelId"),     Config.PhaseEventsChannelId);
-		Config.SchematicEventsChannelId = GetRawStringOrDefault (BackupValues, TEXT("SchematicEventsChannelId"), Config.SchematicEventsChannelId);
-		Config.BanEventsChannelId       = GetRawStringOrDefault (BackupValues, TEXT("BanEventsChannelId"),       Config.BanEventsChannelId);
-		Config.bEnableJoinReactionVoting = GetRawBoolOrDefault  (BackupValues, TEXT("EnableJoinReactionVoting"), Config.bEnableJoinReactionVoting);
-		Config.VoteKickThreshold        = GetRawIntOrDefault    (BackupValues, TEXT("VoteKickThreshold"),        Config.VoteKickThreshold);
-		Config.VoteWindowMinutes        = GetRawIntOrDefault    (BackupValues, TEXT("VoteWindowMinutes"),        Config.VoteWindowMinutes);
-		Config.AfkKickMinutes           = GetRawIntOrDefault    (BackupValues, TEXT("AfkKickMinutes"),           Config.AfkKickMinutes);
-		Config.AfkKickReason            = GetRawStringOrDefault (BackupValues, TEXT("AfkKickReason"),            Config.AfkKickReason);
-
-		// Scheduled announcements
-		Config.AnnouncementIntervalMinutes = GetRawIntOrDefault    (BackupValues, TEXT("AnnouncementIntervalMinutes"), Config.AnnouncementIntervalMinutes);
-		Config.AnnouncementMessage         = GetRawStringOrDefault (BackupValues, TEXT("AnnouncementMessage"),         Config.AnnouncementMessage);
-		Config.AnnouncementChannelId       = GetRawStringOrDefault (BackupValues, TEXT("AnnouncementChannelId"),       Config.AnnouncementChannelId);
-
-		// Embed mode flags
-		Config.bUseEmbedsForPhaseEvents     = GetRawBoolOrDefault(BackupValues, TEXT("UseEmbedsForPhaseEvents"),     Config.bUseEmbedsForPhaseEvents);
-		Config.bUseEmbedsForSchematicEvents = GetRawBoolOrDefault(BackupValues, TEXT("UseEmbedsForSchematicEvents"), Config.bUseEmbedsForSchematicEvents);
-
-		// Webhook fallback
-		Config.FallbackWebhookUrl = GetRawStringOrDefault(BackupValues, TEXT("FallbackWebhookUrl"), Config.FallbackWebhookUrl);
-
-		// Slash commands
-		Config.bEnableSlashCommands = GetRawBoolOrDefault(BackupValues, TEXT("EnableSlashCommands"), Config.bEnableSlashCommands);
-
-		// Mute notifications
-		Config.bNotifyMuteEvents  = GetRawBoolOrDefault  (BackupValues, TEXT("NotifyMuteEvents"),  Config.bNotifyMuteEvents);
-		Config.ModeratorChannelId = GetRawStringOrDefault(BackupValues, TEXT("ModeratorChannelId"), Config.ModeratorChannelId);
-
-		Config.ModerationLogChannelId = GetRawStringOrDefault(BackupValues, TEXT("ModerationLogChannelId"), Config.ModerationLogChannelId);
-
-		// Bot info / help channel
-		Config.BotInfoChannelId = GetRawStringOrDefault(BackupValues, TEXT("BotInfoChannelId"), Config.BotInfoChannelId);
-
-		// On-join DM welcome message
-		Config.WelcomeMessageDM = GetRawStringOrDefault(BackupValues, TEXT("WelcomeMessageDM"), Config.WelcomeMessageDM);
-
-		// On-join in-game hint message
-		Config.JoinHintMessage = GetRawStringOrDefault(BackupValues, TEXT("JoinHintMessage"), Config.JoinHintMessage);
-
-		// On-join broadcast message (all players)
-		Config.bInGameJoinBroadcastEnabled = GetRawBoolOrDefault(BackupValues, TEXT("InGameJoinBroadcastEnabled"), Config.bInGameJoinBroadcastEnabled);
-		Config.InGameJoinBroadcast = GetRawStringOrDefault(BackupValues, TEXT("InGameJoinBroadcast"), Config.InGameJoinBroadcast);
-
-		// DiscordRoleLabels array (restore from raw backup content)
-		Config.DiscordRoleLabels = ParseRawIniArray(BackupFileContent, TEXT("DiscordBridge"), TEXT("DiscordRoleLabels"));
+		else
+		{
+			UE_LOG(LogTemp, Log,
+			       TEXT("DiscordBridge: Backup restore skipped because BotToken/ChannelId are still incomplete."));
+		}
 
 		// ScheduledAnnouncements: NOT restored from backup — they remain in primary config only.
 
@@ -1139,7 +1149,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		// blank credentials (e.g. first server start before credentials are set).
 		const bool bRestoredToken   = !bHadToken   && !Config.BotToken.IsEmpty();
 		const bool bRestoredChannel = !bHadChannel && !Config.ChannelId.IsEmpty();
-		if (bRestoredToken || bRestoredChannel)
+		if (bHaveCredentialsAfterRestore && (bRestoredToken || bRestoredChannel))
 		{
 			UE_LOG(LogTemp, Log,
 			       TEXT("DiscordBridge: Primary config '%s' had no credentials – "
