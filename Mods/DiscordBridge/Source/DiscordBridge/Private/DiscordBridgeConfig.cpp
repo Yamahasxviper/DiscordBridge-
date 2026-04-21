@@ -1013,13 +1013,13 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			Config.ChannelId = GetRawStringOrDefault(BackupValues, TEXT("ChannelId"), TEXT("")).TrimStartAndEnd();
 		}
 
-		const bool bHaveCredentialsAfterRestore =
-			!Config.BotToken.IsEmpty() && !Config.ChannelId.IsEmpty();
-		if (bHaveCredentialsAfterRestore)
+		// Restore all other user-customised settings from the backup so that
+		// message formats and status messages also survive a mod update that
+		// resets the primary config to its shipped defaults.
+		// This is done unconditionally: even when credentials are still empty
+		// after checking the backup (e.g. first server start before credentials
+		// are set), restoring other settings is harmless.
 		{
-			// Restore all other user-customised settings from the backup so that
-			// message formats and status messages also survive a mod update that
-			// resets the primary config to its shipped defaults.
 			Config.ServerName           = GetRawStringOrDefault(BackupValues, TEXT("ServerName"),           Config.ServerName);
 			Config.GameToDiscordFormat  = GetRawStringOrFallback(BackupValues, TEXT("GameToDiscordFormat"),  Config.GameToDiscordFormat);
 			Config.DiscordToGameFormat  = GetRawStringOrFallback(BackupValues, TEXT("DiscordToGameFormat"),  Config.DiscordToGameFormat);
@@ -1135,21 +1135,17 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			// DiscordRoleLabels array (restore from raw backup content)
 			Config.DiscordRoleLabels = ParseRawIniArray(BackupFileContent, TEXT("DiscordBridge"), TEXT("DiscordRoleLabels"));
 		}
-		else
-		{
-			UE_LOG(LogTemp, Log,
-			       TEXT("DiscordBridge: Backup restore skipped because BotToken/ChannelId are still incomplete."));
-		}
 
 		// ScheduledAnnouncements: NOT restored from backup — they remain in primary config only.
 
-		// Only log the "restored from backup" message when credentials were
-		// actually recovered (i.e. previously blank in primary but now non-empty
-		// from the backup). Avoid a misleading message when the backup also has
-		// blank credentials (e.g. first server start before credentials are set).
+		// Only log the "restored from backup" message and write back to the
+		// primary config file when credentials were actually recovered
+		// (i.e. previously blank in primary but now non-empty from the backup).
+		// Avoid a misleading message when the backup also has blank credentials
+		// (e.g. first server start before credentials are set).
 		const bool bRestoredToken   = !bHadToken   && !Config.BotToken.IsEmpty();
 		const bool bRestoredChannel = !bHadChannel && !Config.ChannelId.IsEmpty();
-		if (bHaveCredentialsAfterRestore && (bRestoredToken || bRestoredChannel))
+		if (bRestoredToken || bRestoredChannel)
 		{
 			UE_LOG(LogTemp, Log,
 			       TEXT("DiscordBridge: Primary config '%s' had no credentials – "
