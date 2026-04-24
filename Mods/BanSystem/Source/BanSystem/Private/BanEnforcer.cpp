@@ -569,6 +569,7 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
                 }
             }
         }
+        const FString CachedIp = GetCachedIpForPlayer(PC);
         if (!CachedIp.IsEmpty())
         {
             const FString IpUid = UBanDatabase::MakeUid(TEXT("IP"), CachedIp);
