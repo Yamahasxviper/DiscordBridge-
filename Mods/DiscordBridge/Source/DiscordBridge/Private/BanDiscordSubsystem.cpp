@@ -311,6 +311,33 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Config = FBanBridgeConfig::Load();
 	PostLoginHandle = FGameModeEvents::GameModePostLoginEvent.AddUObject(
 		this, &UBanDiscordSubsystem::OnPostLoginModerationReminder);
+
+	// Mirror non-bot bans to the bot's moderation log channel.
+	// Bot-command bans (HandleBanCommand / ExecutePanelBan) already post themselves,
+	// so the lambda skips while a Discord interaction is being processed.
+	{
+		TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
+		BanAddedHandle = UBanDatabase::OnBanAdded.AddLambda(
+			[WeakThis](const FBanEntry& Entry)
+			{
+				UBanDiscordSubsystem* Self = WeakThis.Get();
+				if (!Self || !Self->CachedProvider) return;
+				// Skip when a bot interaction is in flight — the command handler
+				// already posts to the moderation log for that case.
+				if (!Self->PendingInteractionToken.IsEmpty()) return;
+				if (Self->Config.ModerationLogChannelId.IsEmpty()) return;
+
+				const FString DurationStr = Entry.bIsPermanent
+					? TEXT("Permanent")
+					: FString::Printf(TEXT("%lld min"), (Entry.ExpireDate - Entry.BanDate).GetTotalMinutes());
+				const FString Msg = FString::Printf(
+					TEXT("🔨 **%s** (`%s`) banned.\nReason: %s\nBy: %s | Duration: %s"),
+					*Entry.PlayerName, *Entry.Uid,
+					*Entry.Reason, *Entry.BannedBy, *DurationStr);
+				Self->PostModerationLog(Msg);
+			});
+	}
+
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: Initialized. Waiting for Discord provider via SetProvider()."));
 }
@@ -319,6 +346,11 @@ void UBanDiscordSubsystem::Deinitialize()
 {
 	FGameModeEvents::GameModePostLoginEvent.Remove(PostLoginHandle);
 	PostLoginHandle.Reset();
+	if (BanAddedHandle.IsValid())
+	{
+		UBanDatabase::OnBanAdded.Remove(BanAddedHandle);
+		BanAddedHandle.Reset();
+	}
 	SetProvider(nullptr);
 	Super::Deinitialize();
 }

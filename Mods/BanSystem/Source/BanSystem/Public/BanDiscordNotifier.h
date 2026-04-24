@@ -52,6 +52,15 @@ public:
     static void NotifyGeoIpBlocked(const FString& PlayerName, const FString& Uid,
                                     const FString& IpAddress, const FString& CountryCode);
 
+    /** Called when a player is muted via the in-game /mute command. */
+    static void NotifyPlayerMuted(const FString& Uid, const FString& PlayerName,
+                                  const FString& MutedBy, const FString& Reason,
+                                  bool bIsTimed, const FDateTime& ExpireDate);
+
+    /** Called when a player is unmuted via the in-game /unmute command. */
+    static void NotifyPlayerUnmuted(const FString& Uid, const FString& PlayerName,
+                                    const FString& UnmutedBy);
+
 private:
     /**
      * Posts JsonPayload to the configured DiscordWebhookUrl via HTTP POST.

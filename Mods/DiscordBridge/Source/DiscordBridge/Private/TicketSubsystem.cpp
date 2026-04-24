@@ -304,6 +304,7 @@ void UTicketSubsystem::Deinitialize()
 	TicketChannelToAssigneeName.Empty();
 	TicketChannelToLastActivity.Empty();
 	TicketChannelToOpenerName.Empty();
+	TicketChannelToWlIgn.Empty();
 	TicketChannelToOpenTime.Empty();
 	TicketChannelToType.Empty();
 	TicketChannelToPriority.Empty();
@@ -698,12 +699,12 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 			return;
 		}
 
+		// Prefer the IGN the player submitted in the modal over their Discord username.
 		FString OpenerName;
-		const FString* NamePtr = TicketChannelToOpenerName.Find(SourceChannelId);
-		if (NamePtr)
-		{
+		if (const FString* IgnPtr = TicketChannelToWlIgn.Find(SourceChannelId))
+			OpenerName = *IgnPtr;
+		else if (const FString* NamePtr = TicketChannelToOpenerName.Find(SourceChannelId))
 			OpenerName = *NamePtr;
-		}
 
 		FString ApproveResponse;
 		if (!OpenerName.IsEmpty() && FWhitelistManager::AddPlayer(OpenerName, TEXT(""), DiscordUsername))
@@ -732,6 +733,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		TicketChannelToAssigneeName.Remove(SourceChannelId);
 		TicketChannelToLastActivity.Remove(SourceChannelId);
 		TicketChannelToOpenerName.Remove(SourceChannelId);
+		TicketChannelToWlIgn.Remove(SourceChannelId);
 		FString RemovedTypeApprove;
 		TicketChannelToType.RemoveAndCopyValue(SourceChannelId, RemovedTypeApprove);
 		if (Config.bAllowMultipleTicketTypes && !RemovedOpenerApprove.IsEmpty() && !RemovedTypeApprove.IsEmpty())
@@ -991,6 +993,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		TicketChannelToAssigneeName.Remove(SourceChannelId);
 		TicketChannelToLastActivity.Remove(SourceChannelId);
 		TicketChannelToOpenerName.Remove(SourceChannelId);
+		TicketChannelToWlIgn.Remove(SourceChannelId);
 		FString RemovedType;
 		TicketChannelToType.RemoveAndCopyValue(SourceChannelId, RemovedType);
 		TicketChannelToOpenTime.Remove(SourceChannelId);
@@ -1247,10 +1250,26 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 				/*bEphemeral=*/true);
 			return;
 		}
-		ShowTicketReasonModal(InteractionId, InteractionToken,
+
+		FModalField WlIgnField;
+		WlIgnField.Label       = TEXT("In-Game Name");
+		WlIgnField.CustomId    = TEXT("wl_ign");
+		WlIgnField.Placeholder = TEXT("Your exact in-game name (case-sensitive)");
+		WlIgnField.bRequired   = true;
+		WlIgnField.MaxLength   = 80;
+
+		FModalField WlReasonField;
+		WlReasonField.Label       = TEXT("Why do you want to join? (optional)");
+		WlReasonField.CustomId    = TEXT("wl_reason");
+		WlReasonField.Placeholder = TEXT("Tell us a bit about yourself");
+		WlReasonField.bRequired   = false;
+		WlReasonField.bParagraph  = true;
+		WlReasonField.MaxLength   = 500;
+
+		Bridge->RespondWithMultiFieldModal(InteractionId, InteractionToken,
 			TEXT("ticket_modal:wl"),
 			TEXT("Whitelist Request"),
-			TEXT("Describe why you want to join (optional)"));
+			{ WlIgnField, WlReasonField });
 	}
 	else if (CustomId == TEXT("ticket_help"))
 	{
@@ -1673,12 +1692,28 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 				/*bEphemeral=*/true);
 			return;
 		}
+		const FString WlIgn       = ModalFields.FindRef(TEXT("wl_ign"));
+		const FString WlReasonRaw = ModalFields.FindRef(TEXT("wl_reason"));
+		const FString WlReason    = WlReasonRaw.IsEmpty() ? Reason : WlReasonRaw;
+
+		if (WlIgn.IsEmpty())
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
+				TEXT(":warning: Please provide your in-game name so we can whitelist you."),
+				/*bEphemeral=*/true);
+			return;
+		}
+
+		const FString WlDetails = WlReason.IsEmpty()
+			? FString::Printf(TEXT("In-Game Name: %s"), *WlIgn)
+			: FString::Printf(TEXT("In-Game Name: %s\nReason: %s"), *WlIgn, *WlReason);
+
 		Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
 			TEXT(":white_check_mark: Opening your whitelist request ticket…  "
 			     "A private channel will appear shortly."),
 			/*bEphemeral=*/true);
-		CreateTicketChannel(DiscordUserId, DiscordUsername, TEXT("whitelist"), Reason,
-		                    TEXT(""), TEXT(""));
+		CreateTicketChannel(DiscordUserId, DiscordUsername, TEXT("whitelist"), WlDetails,
+		                    TEXT(""), TEXT(""), WlIgn);
 	}
 	else if (ModalCustomId == TEXT("ticket_modal:help"))
 	{
@@ -2006,7 +2041,8 @@ void UTicketSubsystem::CreateTicketChannel(
 	const FString& TicketType,
 	const FString& ExtraInfo,
 	const FString& DisplayLabel,
-	const FString& DisplayDesc)
+	const FString& DisplayDesc,
+	const FString& WlIgn)
 {
 	IDiscordBridgeProvider* Bridge = GetBridge();
 	if (!Bridge)
@@ -2064,6 +2100,7 @@ void UTicketSubsystem::CreateTicketChannel(
 	const FString ExtraInfoCopy      = ExtraInfo;
 	const FString DisplayLabelCopy   = DisplayLabel;
 	const FString DisplayDescCopy    = DisplayDesc;
+	const FString WlIgnCopy          = WlIgn;
 
 	// Select per-type category
 	FString CategoryIdCopy;
@@ -2089,7 +2126,7 @@ void UTicketSubsystem::CreateTicketChannel(
 		Overwrites,
 		[WeakThis, NotifyRoleIdCopy, TicketChannelCopy,
 		 OpenerUserIdCopy, OpenerUsernameCopy, TicketTypeCopy,
-		 ExtraInfoCopy, DisplayLabelCopy, DisplayDescCopy, CategoryIdCopy]
+		 ExtraInfoCopy, DisplayLabelCopy, DisplayDescCopy, CategoryIdCopy, WlIgnCopy]
 		(const FString& NewChannelId)
 		{
 			UTicketSubsystem* Self = WeakThis.Get();
@@ -2119,6 +2156,8 @@ void UTicketSubsystem::CreateTicketChannel(
 			Self->TicketChannelToOpenTime.Add(NewChannelId, FDateTime::UtcNow());
 			Self->TicketChannelToType.Add(NewChannelId, TicketTypeCopy);
 			Self->TicketChannelStaffReplied.Add(NewChannelId, false);
+			if (!WlIgnCopy.IsEmpty())
+				Self->TicketChannelToWlIgn.Add(NewChannelId, WlIgnCopy);
 			if (Self->Config.bAllowMultipleTicketTypes)
 			{
 				Self->OpenerToTicketsByType.FindOrAdd(OpenerUserIdCopy).Add(TicketTypeCopy, NewChannelId);
@@ -2135,12 +2174,23 @@ void UTicketSubsystem::CreateTicketChannel(
 			FString WelcomeContent;
 			if (TicketTypeCopy == TEXT("whitelist"))
 			{
-				WelcomeContent = FString::Printf(
-					TEXT("%s:ticket: **Whitelist Request** from %s\n\n"
-					     "Please tell us your **in-game name** so we can add you.\n"
-					     "Feel free to share any additional information here.\n\n"
-					     ":information_source: An admin will review your request shortly."),
-					*MentionPrefix, *UserMention);
+				if (!WlIgnCopy.IsEmpty())
+				{
+					WelcomeContent = FString::Printf(
+						TEXT("%s:ticket: **Whitelist Request** from %s\n\n"
+						     "**In-Game Name:** %s\n\n"
+						     ":information_source: An admin will review your request shortly."),
+						*MentionPrefix, *UserMention, *WlIgnCopy);
+				}
+				else
+				{
+					WelcomeContent = FString::Printf(
+						TEXT("%s:ticket: **Whitelist Request** from %s\n\n"
+						     "Please tell us your **in-game name** so we can add you.\n"
+						     "Feel free to share any additional information here.\n\n"
+						     ":information_source: An admin will review your request shortly."),
+						*MentionPrefix, *UserMention);
+				}
 			}
 			else if (TicketTypeCopy == TEXT("help"))
 			{
@@ -3858,6 +3908,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		TicketChannelToAssigneeName.Remove(SourceChannelId);
 		TicketChannelToLastActivity.Remove(SourceChannelId);
 		TicketChannelToOpenerName.Remove(SourceChannelId);
+		TicketChannelToWlIgn.Remove(SourceChannelId);
 		FString MergeRemovedType;
 		TicketChannelToType.RemoveAndCopyValue(SourceChannelId, MergeRemovedType);
 		TicketChannelToOpenTime.Remove(SourceChannelId);
@@ -3934,6 +3985,9 @@ void UTicketSubsystem::SaveTicketState() const
 			Entry->SetStringField(TEXT("open_time"), OpenTime->ToIso8601());
 		const FString* OpenerName = TicketChannelToOpenerName.Find(Pair.Key);
 		if (OpenerName)   Entry->SetStringField(TEXT("opener_name"),   *OpenerName);
+		const FString* WlIgnSave = TicketChannelToWlIgn.Find(Pair.Key);
+		if (WlIgnSave && !WlIgnSave->IsEmpty())
+			Entry->SetStringField(TEXT("wl_ign"), *WlIgnSave);
 
 		// Persist tags.
 		const TArray<FString>* SaveTags = TicketChannelToTags.Find(Pair.Key);
@@ -4080,13 +4134,15 @@ void UTicketSubsystem::LoadTicketState()
 		}
 
 		// Restore new fields.
-		FString TicketType, Priority, OpenerName, OpenTimeStr;
+		FString TicketType, Priority, OpenerName, OpenTimeStr, WlIgnLoad;
 		if ((*EntryObj)->TryGetStringField(TEXT("ticket_type"), TicketType) && !TicketType.IsEmpty())
 			TicketChannelToType.Add(ChannelId, TicketType);
 		if ((*EntryObj)->TryGetStringField(TEXT("priority"), Priority) && !Priority.IsEmpty())
 			TicketChannelToPriority.Add(ChannelId, Priority);
 		if ((*EntryObj)->TryGetStringField(TEXT("opener_name"), OpenerName) && !OpenerName.IsEmpty())
 			TicketChannelToOpenerName.Add(ChannelId, OpenerName);
+		if ((*EntryObj)->TryGetStringField(TEXT("wl_ign"), WlIgnLoad) && !WlIgnLoad.IsEmpty())
+			TicketChannelToWlIgn.Add(ChannelId, WlIgnLoad);
 		if ((*EntryObj)->TryGetStringField(TEXT("open_time"), OpenTimeStr) && !OpenTimeStr.IsEmpty())
 		{
 			FDateTime OT;
@@ -4268,6 +4324,7 @@ void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
 	TicketChannelToLastActivity.Remove(ChannelId);
 	TicketChannelToOpenTime.Remove(ChannelId);
 	TicketChannelToOpenerName.Remove(ChannelId);
+	TicketChannelToWlIgn.Remove(ChannelId);
 	TicketChannelToPriority.Remove(ChannelId);
 	TicketChannelToTags.Remove(ChannelId);
 	TicketChannelToNotes.Remove(ChannelId);
@@ -4404,6 +4461,7 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 	TicketChannelToPriority.Remove(ChannelId);
 	TicketChannelToOpenTime.Remove(ChannelId);
 	TicketChannelToOpenerName.Remove(ChannelId);
+	TicketChannelToWlIgn.Remove(ChannelId);
 	ReopenedOnceChannels.Remove(ChannelId);
 
 	if (Config.bAllowMultipleTicketTypes && !RemovedOpener.IsEmpty() && !RemovedTypeInactive.IsEmpty())

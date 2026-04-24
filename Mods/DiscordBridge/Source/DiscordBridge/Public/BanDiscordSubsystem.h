@@ -494,6 +494,12 @@ private:
 	/** Handle for the UBanAppealRegistry::OnBanAppealSubmitted subscription. */
 	FDelegateHandle AppealSubmittedDelegateHandle;
 
+	/** Handle for UBanDatabase::OnBanAdded. Active for the lifetime of the subsystem
+	 *  so that bans issued via the REST API or in-game commands are mirrored to the
+	 *  bot's ModerationLogChannelId (the Discord-bot command handler already does its
+	 *  own posting, so the handler skips entries while a bot interaction is in flight). */
+	FDelegateHandle BanAddedHandle;
+
 	/** Handle for the AStaffChatCommand::OnInGameStaffChat subscription.
 	 *  Active when CachedProvider is set and StaffChatChannelId is non-empty. */
 	FDelegateHandle StaffChatDelegateHandle;
