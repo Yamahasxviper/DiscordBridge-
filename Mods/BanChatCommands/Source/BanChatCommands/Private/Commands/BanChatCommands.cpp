@@ -721,10 +721,14 @@ namespace BanChat
 
         // Prune stale entries for players who have disconnected so the map
         // doesn't grow for the entire server process lifetime.
-        const FTimespan CutOff = FTimespan::FromSeconds(CooldownSeconds);
+        // Use a generous 1-hour cutoff so we never prematurely evict entries
+        // that belong to a different command with a longer cooldown.
+        // The actual per-command expiry check below is what enforces the real
+        // cooldown; this loop is only a memory-management pass.
+        static const FTimespan PruneCutOff = FTimespan::FromHours(1);
         for (auto It = CommandCooldowns.CreateIterator(); It; ++It)
         {
-            if ((Now - It.Value()) > CutOff)
+            if ((Now - It.Value()) > PruneCutOff)
                 It.RemoveCurrent();
         }
 
@@ -1211,7 +1215,7 @@ EExecutionStatus ABanCheckChatCommand::ExecuteCommand_Implementation(
     if (DB->GetBanByUid(Uid, Entry) && Entry.IsExpired())
     {
         Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] Ban for %s was expired and has been removed."), *Uid),
+            FString::Printf(TEXT("[BanChatCommands] Ban for %s has expired (will be pruned on next server tick)."), *Uid),
             FLinearColor::Yellow);
     }
     else
@@ -1826,8 +1830,15 @@ EExecutionStatus AWarnChatCommand::ExecuteCommand_Implementation(
                 FString::Printf(TEXT("[BanChatCommands] '%s' reached the auto-ban threshold (%d warnings) — banning."),
                     *DisplayName, WarnCount),
                 FLinearColor::Red);
-            BanChat::DoBan(this, Sender, Uid, DisplayName, BanDurationMinutes,
+            const EExecutionStatus AutoBanResult = BanChat::DoBan(
+                this, Sender, Uid, DisplayName, BanDurationMinutes,
                 TEXT("Auto-banned: reached warning threshold"), TEXT("system"));
+            if (AutoBanResult != EExecutionStatus::COMPLETED)
+            {
+                UE_LOG(LogBanChatCommands, Warning,
+                    TEXT("BanChatCommands: auto-ban for '%s' (%s) failed after reaching warn threshold (%d)."),
+                    *DisplayName, *Uid, WarnCount);
+            }
 
             // Post a Discord review embed so staff can approve or override.
             {
@@ -2352,7 +2363,7 @@ EExecutionStatus AMuteChatCommand::ExecuteCommand_Implementation(
     }
 
     const FString DurStr = Minutes > 0
-        ? FString::Printf(TEXT(" for %d minute(s)"), Minutes)
+        ? FString::Printf(TEXT(" for %s"), *BanChat::FormatDuration(Minutes))
         : TEXT(" indefinitely");
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] Muted '%s'%s — %s"), *DisplayName, *DurStr, *Reason),
@@ -2679,9 +2690,17 @@ EExecutionStatus ATempUnmuteChatCommand::ExecuteCommand_Implementation(
     const FString Reason = TEXT("Timed mute");
     MuteReg->MutePlayer(Uid, DisplayName, Reason, Sender->GetSenderName(), Minutes);
 
+    // Notify Discord so the timed mute is visible to all staff — consistent
+    // with the /mute command which calls NotifyPlayerMuted for every mute.
+    {
+        const FDateTime Expiry = FDateTime::UtcNow() + FTimespan::FromMinutes(static_cast<double>(Minutes));
+        FBanDiscordNotifier::NotifyPlayerMuted(Uid, DisplayName, Sender->GetSenderName(),
+            Reason, /*bIsTimed=*/true, Expiry);
+    }
+
     Sender->SendChatMessage(
-        FString::Printf(TEXT("[BanChatCommands] Set timed mute for '%s' — expires in %d minute(s)."),
-            *DisplayName, Minutes),
+        FString::Printf(TEXT("[BanChatCommands] Set timed mute for '%s' — expires in %s."),
+            *DisplayName, *BanChat::FormatDuration(Minutes)),
         FLinearColor::Yellow);
 
     return EExecutionStatus::COMPLETED;
