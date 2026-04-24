@@ -3221,7 +3221,13 @@ EExecutionStatus AMuteReasonChatCommand::ExecuteCommand_Implementation(
     }
 
     const FString NewReason = BanChat::JoinArgs(Arguments, 1);
-    MuteReg->UpdateMuteReason(Uid, NewReason);
+    if (!MuteReg->UpdateMuteReason(Uid, NewReason))
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Could not update mute reason for '%s' — mute may have just expired."), *DisplayName),
+            FLinearColor::Yellow);
+        return EExecutionStatus::COMPLETED;
+    }
 
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] :white_check_mark: Mute reason for **%s** updated."), *DisplayName),
@@ -3541,24 +3547,24 @@ EExecutionStatus AScheduleBanChatCommand::ExecuteCommand_Implementation(
     // Optional ban duration (3rd argument).
     int32 BanDurationMinutes = 0; // 0 = permanent
     int32 ReasonStartIdx = 2;
-    if (Arguments.Num() > 2 && Arguments[2] != TEXT("perm") && Arguments[2] != TEXT("0"))
+    if (Arguments.Num() > 2)
     {
-        const int32 Parsed = BanChat::ParseDurationMinutes(Arguments[2]);
-        if (Parsed > 0)
-        {
-            BanDurationMinutes = Parsed;
-            ReasonStartIdx = 3;
-        }
-        else if (Arguments[2] == TEXT("perm") || Arguments[2] == TEXT("permanent"))
+        // Explicit "permanent" markers — check before ParseDurationMinutes so that
+        // "0" is not silently clamped to 1 minute by FMath::Max(1, Atoi("0")).
+        if (Arguments[2] == TEXT("perm") || Arguments[2] == TEXT("permanent") || Arguments[2] == TEXT("0"))
         {
             BanDurationMinutes = 0;
             ReasonStartIdx = 3;
         }
-    }
-    else if (Arguments.Num() > 2 && (Arguments[2] == TEXT("perm") || Arguments[2] == TEXT("permanent")))
-    {
-        BanDurationMinutes = 0;
-        ReasonStartIdx = 3;
+        else
+        {
+            const int32 Parsed = BanChat::ParseDurationMinutes(Arguments[2]);
+            if (Parsed > 0)
+            {
+                BanDurationMinutes = Parsed;
+                ReasonStartIdx = 3;
+            }
+        }
     }
 
     const FString Reason = Arguments.Num() > ReasonStartIdx

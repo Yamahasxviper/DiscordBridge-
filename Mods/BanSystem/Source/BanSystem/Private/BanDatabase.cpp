@@ -78,7 +78,12 @@ namespace BanDbJson
 
         FString BanDateStr;
         if (Obj->TryGetStringField(TEXT("banDate"), BanDateStr))
-            FDateTime::ParseIso8601(*BanDateStr, OutEntry.BanDate);
+        {
+            if (!FDateTime::ParseIso8601(*BanDateStr, OutEntry.BanDate))
+                UE_LOG(LogBanDatabase, Warning,
+                    TEXT("BanDatabase: record uid='%s' has malformed banDate '%s' — using epoch"),
+                    *OutEntry.Uid, *BanDateStr);
+        }
 
         bool bPerm = true;
         Obj->TryGetBoolField(TEXT("isPermanent"), bPerm);
