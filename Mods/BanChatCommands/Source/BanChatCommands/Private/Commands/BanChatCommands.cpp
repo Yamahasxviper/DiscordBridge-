@@ -1667,11 +1667,20 @@ EExecutionStatus AKickChatCommand::ExecuteCommand_Implementation(
         : TEXT("Kicked by server moderator");
     const FString KickedBy = Sender->GetSenderName();
 
-    UBanEnforcer::KickConnectedPlayer(GetWorld(), Uid, Reason);
+    const bool bKicked = UBanEnforcer::KickConnectedPlayer(GetWorld(), Uid, Reason);
 
-    Sender->SendChatMessage(
-        FString::Printf(TEXT("[BanChatCommands] Kicked '%s' — reason: %s"), *DisplayName, *Reason),
-        FLinearColor::Green);
+    if (bKicked)
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Kicked '%s' — reason: %s"), *DisplayName, *Reason),
+            FLinearColor::Green);
+    }
+    else
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] '%s' is not currently online — not kicked."), *DisplayName),
+            FLinearColor::Yellow);
+    }
 
     FBanDiscordNotifier::NotifyPlayerKicked(DisplayName, Reason, KickedBy, Uid);
 
@@ -2277,7 +2286,9 @@ AMuteChatCommand::AMuteChatCommand()
     MinNumberOfArguments = 1;
     bOnlyUsableByPlayer  = false;
     Usage = NSLOCTEXT("BanChatCommands", "MuteUsage",
-        "/mute <player|PUID> [minutes] [reason...]");
+        "/mute <player|PUID> [duration] [reason...]\n"
+        "  duration: minutes (e.g. 30) or shorthand (e.g. 30m, 1h, 2h30m, 1d, 7d, 1d12h)\n"
+        "  omit duration for indefinite mute");
 }
 
 EExecutionStatus AMuteChatCommand::ExecuteCommand_Implementation(
@@ -2293,18 +2304,23 @@ EExecutionStatus AMuteChatCommand::ExecuteCommand_Implementation(
 
     int32 Minutes     = 0;
     int32 ReasonStart = 1;
-    if (Arguments.Num() >= 2 && Arguments[1].IsNumeric())
+    if (Arguments.Num() >= 2)
     {
-        const int32 ParsedMinutes = FCString::Atoi(*Arguments[1]);
-        if (ParsedMinutes <= 0)
+        const int32 Parsed = BanChat::ParseDurationMinutes(Arguments[1]);
+        if (Parsed > 0)
         {
+            Minutes     = Parsed;
+            ReasonStart = 2;
+        }
+        else if (Arguments[1].IsNumeric())
+        {
+            // A bare integer that is <= 0 (e.g. "0") — reject explicitly.
             Sender->SendChatMessage(
-                TEXT("[BanChatCommands] Duration must be a positive number of minutes (e.g. 30)."),
+                TEXT("[BanChatCommands] Duration must be positive (e.g. 30, 30m, 1h, 1d)."),
                 FLinearColor::Red);
             return EExecutionStatus::BAD_ARGUMENTS;
         }
-        Minutes      = ParsedMinutes;
-        ReasonStart  = 2;
+        // else: arg2 is not a duration string — treat as start of reason
     }
 
     const FString Reason   = Arguments.Num() > ReasonStart
