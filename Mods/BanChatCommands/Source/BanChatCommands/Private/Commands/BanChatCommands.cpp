@@ -2626,14 +2626,14 @@ ATempUnmuteChatCommand::ATempUnmuteChatCommand()
     MinNumberOfArguments = 2;
     bOnlyUsableByPlayer  = false;
     Usage = NSLOCTEXT("BanChatCommands", "TempUnmuteUsage",
-        "/tempunmute <player|PUID> <minutes>");
+        "/tempunmute <player|PUID> <duration>  — duration: 30m, 1h, 1d, 1w, 2h30m, or plain minutes");
 }
 
 EExecutionStatus ATempUnmuteChatCommand::ExecuteCommand_Implementation(
     UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
 {
     FString AdminId;
-    if (!BanChat::IsAdminSender(Sender, AdminId))
+    if (!BanChat::IsModeratorSender(Sender, AdminId))
         return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
 
     FString Uid, DisplayName;
@@ -2881,8 +2881,18 @@ EExecutionStatus AStaffChatCommand::ExecuteCommand_Implementation(
         if (!PS) continue;
 
         const FUniqueNetIdRepl& PsUniqueId = PS->GetUniqueId();
-        if (!PsUniqueId.IsValid() || PsUniqueId.GetType() == FName(TEXT("NONE"))) continue;
-        const FString PSUid = UBanDatabase::MakeUid(TEXT("EOS"), PsUniqueId.ToString().ToLower());
+        FString PSUid;
+        if (PsUniqueId.IsValid() && PsUniqueId.GetType() != FName(TEXT("NONE")))
+        {
+            PSUid = UBanDatabase::MakeUid(TEXT("EOS"), PsUniqueId.ToString().ToLower());
+        }
+        else
+        {
+            const FString EosPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+            if (!EosPuid.IsEmpty())
+                PSUid = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
+        }
+        if (PSUid.IsEmpty()) continue;
 
         if (!Cfg) continue;
 
@@ -3061,7 +3071,8 @@ AExtendBanChatCommand::AExtendBanChatCommand()
     CommandName          = TEXT("extend");
     MinNumberOfArguments = 2;
     bOnlyUsableByPlayer  = false;
-    Usage = NSLOCTEXT("BanChatCommands", "ExtendBanUsage", "/extend <player|PUID> <minutes>");
+    Usage = NSLOCTEXT("BanChatCommands", "ExtendBanUsage",
+        "/extend <player|PUID> <duration>  — duration: 30m, 1h, 1d, 1w, 2h30m, or plain minutes");
 }
 
 EExecutionStatus AExtendBanChatCommand::ExecuteCommand_Implementation(
@@ -3296,8 +3307,18 @@ EExecutionStatus AFreezeChatCommand::ExecuteCommand_Implementation(
             APlayerController* PC = It->Get();
             if (!PC || !PC->PlayerState) continue;
             const FUniqueNetIdRepl& PcId = PC->PlayerState->GetUniqueId();
-            if (!PcId.IsValid() || PcId.GetType() == FName(TEXT("NONE"))) continue;
-            if (UBanDatabase::MakeUid(TEXT("EOS"), PcId.ToString().ToLower()) == Uid)
+            FString PcUid;
+            if (PcId.IsValid() && PcId.GetType() != FName(TEXT("NONE")))
+            {
+                PcUid = UBanDatabase::MakeUid(TEXT("EOS"), PcId.ToString().ToLower());
+            }
+            else
+            {
+                const FString EosPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+                if (!EosPuid.IsEmpty())
+                    PcUid = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
+            }
+            if (PcUid == Uid)
             {
                 PC->SetIgnoreMoveInput(false);
                 break;
@@ -3317,8 +3338,18 @@ EExecutionStatus AFreezeChatCommand::ExecuteCommand_Implementation(
             APlayerController* PC = It->Get();
             if (!PC || !PC->PlayerState) continue;
             const FUniqueNetIdRepl& PcId = PC->PlayerState->GetUniqueId();
-            if (!PcId.IsValid() || PcId.GetType() == FName(TEXT("NONE"))) continue;
-            if (UBanDatabase::MakeUid(TEXT("EOS"), PcId.ToString().ToLower()) == Uid)
+            FString PcUid;
+            if (PcId.IsValid() && PcId.GetType() != FName(TEXT("NONE")))
+            {
+                PcUid = UBanDatabase::MakeUid(TEXT("EOS"), PcId.ToString().ToLower());
+            }
+            else
+            {
+                const FString EosPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+                if (!EosPuid.IsEmpty())
+                    PcUid = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
+            }
+            if (PcUid == Uid)
             {
                 PC->SetIgnoreMoveInput(true);
                 break;

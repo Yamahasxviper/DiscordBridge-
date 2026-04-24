@@ -8,6 +8,7 @@
 #include "BanWebSocketPusher.h"
 #include "BanAuditLog.h"
 #include "BanDatabase.h"
+#include "BanEnforcer.h"
 #include "Engine/World.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/Crc.h"
@@ -53,20 +54,28 @@ void FBanChatCommandsModule::StartupModule()
         FTickerDelegate::CreateRaw(this, &FBanChatCommandsModule::OnMuteExpiryTick),
         30.0f);
 
-    // Bind game-mode logout event to clean up FrozenPlayerUids when a player
-    // disconnects.  Without this, the toggle fires in the wrong direction on
-    // reconnect because the UID is still in the set even though the freeze was
-    // never re-applied to the new PlayerController.
-    LogoutHandle = FGameModeEvents::GameModeLogoutEvent.AddLambda(
-        [](AGameModeBase* /*GameMode*/, AController* Exiting)
+    // Bind game-mode post-login event to re-apply any active freeze when a
+    // frozen player reconnects.  This means a freeze persists across disconnects
+    // until an admin explicitly runs /freeze again (the toggle then unfreezes).
+    PostLoginHandle = FGameModeEvents::GameModePostLoginEvent.AddLambda(
+        [](AGameModeBase* /*GameMode*/, APlayerController* NewPlayer)
         {
-            if (!Exiting) return;
-            const APlayerController* PC = Cast<APlayerController>(Exiting);
-            if (!PC || !PC->PlayerState) return;
-            const FUniqueNetIdRepl& UniqueId = PC->PlayerState->GetUniqueId();
-            if (!UniqueId.IsValid() || UniqueId.GetType() == FName(TEXT("NONE"))) return;
-            const FString Uid = UBanDatabase::MakeUid(TEXT("EOS"), UniqueId.ToString().ToLower());
-            AFreezeChatCommand::FrozenPlayerUids.Remove(Uid);
+            if (!NewPlayer || !NewPlayer->PlayerState) return;
+            const FUniqueNetIdRepl& UniqueId = NewPlayer->PlayerState->GetUniqueId();
+            FString Uid;
+            if (UniqueId.IsValid() && UniqueId.GetType() != FName(TEXT("NONE")))
+            {
+                Uid = UBanDatabase::MakeUid(TEXT("EOS"), UniqueId.ToString().ToLower());
+            }
+            else
+            {
+                const FString EosPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(NewPlayer);
+                if (!EosPuid.IsEmpty())
+                    Uid = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
+            }
+            if (Uid.IsEmpty()) return;
+            if (AFreezeChatCommand::FrozenPlayerUids.Contains(Uid))
+                NewPlayer->SetIgnoreMoveInput(true);
         });
 
     WorldInitHandle = FWorldDelegates::OnWorldInitializedActors.AddLambda(
@@ -425,8 +434,8 @@ void FBanChatCommandsModule::ShutdownModule()
     FTSTicker::GetCoreTicker().RemoveTicker(MuteExpiryHandle);
     MuteExpiryHandle.Reset();
 
-    FGameModeEvents::GameModeLogoutEvent.Remove(LogoutHandle);
-    LogoutHandle.Reset();
+    FGameModeEvents::GameModePostLoginEvent.Remove(PostLoginHandle);
+    PostLoginHandle.Reset();
 
     FWorldDelegates::OnWorldInitializedActors.Remove(WorldInitHandle);
     WorldInitHandle.Reset();
