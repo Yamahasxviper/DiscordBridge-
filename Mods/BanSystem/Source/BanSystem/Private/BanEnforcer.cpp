@@ -556,18 +556,19 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
     {
         // Check whether the player had a temporary ban that just expired and,
         // if configured, post a Discord notification so admins are aware.
+        // AlreadyNotifiedExpiredBanUids deduplicates notifications when both
+        // PerformBanCheckForPlayer and PerformBanCheckForUid run for the same login.
         {
             FBanEntry ExpiredEntry;
             if (DB->GetBanByUid(Uid, ExpiredEntry) && !ExpiredEntry.bIsPermanent && ExpiredEntry.IsExpired())
             {
-                FBanDiscordNotifier::NotifyBanExpired(ExpiredEntry);
+                if (!AlreadyNotifiedExpiredBanUids.Contains(Uid))
+                {
+                    AlreadyNotifiedExpiredBanUids.Add(Uid);
+                    FBanDiscordNotifier::NotifyBanExpired(ExpiredEntry);
+                }
             }
         }
-
-        // EOS identity is not banned — also check the player's IP address.
-        // This catches players who evade an existing /banname ban by reconnecting
-        // under a new EOS PUID while their IP ban record is still active.
-        const FString CachedIp = GetCachedIpForPlayer(PC);
         if (!CachedIp.IsEmpty())
         {
             const FString IpUid = UBanDatabase::MakeUid(TEXT("IP"), CachedIp);
@@ -861,11 +862,17 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
     if (!DB->IsCurrentlyBannedByAnyId(Uid, Entry))
     {
         // Notify Discord if a temporary ban just expired.
+        // AlreadyNotifiedExpiredBanUids deduplicates notifications when both
+        // PerformBanCheckForPlayer and PerformBanCheckForUid run for the same login.
         {
             FBanEntry ExpiredEntry;
             if (DB->GetBanByUid(Uid, ExpiredEntry) && !ExpiredEntry.bIsPermanent && ExpiredEntry.IsExpired())
             {
-                FBanDiscordNotifier::NotifyBanExpired(ExpiredEntry);
+                if (!AlreadyNotifiedExpiredBanUids.Contains(Uid))
+                {
+                    AlreadyNotifiedExpiredBanUids.Add(Uid);
+                    FBanDiscordNotifier::NotifyBanExpired(ExpiredEntry);
+                }
             }
         }
 

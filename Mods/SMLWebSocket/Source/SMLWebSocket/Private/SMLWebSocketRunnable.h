@@ -48,6 +48,8 @@ struct FSMLWebSocketReconnectConfig
 	int32   ProxyPort{3128};
 	FString ProxyUser;
 	FString ProxyPassword;
+	// SSL settings
+	bool bVerifySSLCertificate{false};
 };
 
 // ── State machine ─────────────────────────────────────────────────────────────

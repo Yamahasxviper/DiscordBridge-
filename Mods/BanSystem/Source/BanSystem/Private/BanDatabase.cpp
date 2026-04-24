@@ -403,21 +403,36 @@ bool UBanDatabase::RemoveBanById(int64 Id)
 
 int32 UBanDatabase::PruneExpiredBans()
 {
-    FScopeLock Lock(&DbMutex);
+    TArray<FBanEntry> Expired;
 
-    const FDateTime Now = FDateTime::UtcNow();
-    const int32 Before  = Bans.Num();
-
-    Bans.RemoveAll([&Now](const FBanEntry& E)
     {
-        return !E.bIsPermanent && E.ExpireDate < Now;
-    });
+        FScopeLock Lock(&DbMutex);
 
-    const int32 Pruned = Before - Bans.Num();
-    if (Pruned > 0)
-        SaveToFile();
+        const FDateTime Now = FDateTime::UtcNow();
 
-    return Pruned;
+        // Collect expired entries before removal so we can broadcast OnBanRemoved
+        // outside the lock, matching the behaviour of RemoveBanByUid/RemoveBanById.
+        for (const FBanEntry& E : Bans)
+        {
+            if (!E.bIsPermanent && E.ExpireDate < Now)
+                Expired.Add(E);
+        }
+
+        if (!Expired.IsEmpty())
+        {
+            Bans.RemoveAll([&Now](const FBanEntry& E)
+            {
+                return !E.bIsPermanent && E.ExpireDate < Now;
+            });
+            SaveToFile();
+        }
+    }
+
+    // Broadcast outside the lock to avoid re-entrancy with OnBanRemoved subscribers.
+    for (const FBanEntry& E : Expired)
+        OnBanRemoved.Broadcast(E.Uid, E.PlayerName);
+
+    return Expired.Num();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

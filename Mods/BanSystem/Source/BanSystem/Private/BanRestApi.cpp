@@ -781,6 +781,8 @@ void UBanRestApi::RegisterRoutes()
             if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
 
             const int32 Pruned = DB->PruneExpiredBans();
+            if (Pruned > 0)
+                UE_LOG(LogBanRestApi, Log, TEXT("BanRestApi: /bans/prune removed %d expired ban(s)."), Pruned);
 
             TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
             Obj->SetNumberField(TEXT("pruned"), Pruned);

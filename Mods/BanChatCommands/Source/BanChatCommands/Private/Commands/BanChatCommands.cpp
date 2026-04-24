@@ -1679,19 +1679,23 @@ EExecutionStatus AKickChatCommand::ExecuteCommand_Implementation(
     const UBanChatCommandsConfig* CmdCfg = UBanChatCommandsConfig::Get();
     if (CmdCfg && CmdCfg->bCreateWarnOnKick)
     {
-        if (UWorld* W = GetWorld())
+        UWorld* W = GetWorld();
+        UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
+        UPlayerWarningRegistry* WarnReg = GI ? GI->GetSubsystem<UPlayerWarningRegistry>() : nullptr;
+        if (WarnReg)
         {
-            if (UGameInstance* GI = W->GetGameInstance())
-            {
-                if (UPlayerWarningRegistry* WarnReg = GI->GetSubsystem<UPlayerWarningRegistry>())
-                {
-                    WarnReg->AddWarning(Uid, DisplayName,
-                        FString::Printf(TEXT("[Kick] %s"), *Reason), KickedBy);
-                    const int32 WarnCount = WarnReg->GetWarningCount(Uid);
-                    FBanDiscordNotifier::NotifyWarningIssued(Uid, DisplayName,
-                        FString::Printf(TEXT("[Kick] %s"), *Reason), KickedBy, WarnCount);
-                }
-            }
+            WarnReg->AddWarning(Uid, DisplayName,
+                FString::Printf(TEXT("[Kick] %s"), *Reason), KickedBy);
+            const int32 WarnCount = WarnReg->GetWarningCount(Uid);
+            FBanDiscordNotifier::NotifyWarningIssued(Uid, DisplayName,
+                FString::Printf(TEXT("[Kick] %s"), *Reason), KickedBy, WarnCount);
+        }
+        else
+        {
+            UE_LOG(LogBanChatCommands, Warning,
+                TEXT("BanChatCommands: bCreateWarnOnKick is true but PlayerWarningRegistry "
+                     "is unavailable — kick warning not recorded for '%s' (%s)."),
+                *DisplayName, *Uid);
         }
     }
 

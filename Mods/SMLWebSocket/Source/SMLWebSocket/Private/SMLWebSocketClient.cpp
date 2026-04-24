@@ -62,6 +62,7 @@ void USMLWebSocketClient::Connect(const FString& Url,
 	ReconnectCfg.ProxyPort                 = ProxyPort;
 	ReconnectCfg.ProxyUser                 = ProxyUser;
 	ReconnectCfg.ProxyPassword             = ProxyPassword;
+	ReconnectCfg.bVerifySSLCertificate     = bVerifySSLCertificate;
 
 	Runnable = MakeShared<FSMLWebSocketRunnable>(this, Url, Protocols, ExtraHeaders, ReconnectCfg,
 	                                             ConnectionGeneration);
