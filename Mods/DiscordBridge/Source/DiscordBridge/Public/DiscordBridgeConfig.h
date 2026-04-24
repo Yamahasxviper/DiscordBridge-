@@ -466,7 +466,7 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 * Only has an effect when BanChatCommands mod is installed.
 	 * Default: false.
 	 */
-	bool bNotifyMuteEvents{ false };
+	bool bNotifyMuteEvents{ true };
 
 	/**
 	 * Channel ID to post mute/unmute notifications to.

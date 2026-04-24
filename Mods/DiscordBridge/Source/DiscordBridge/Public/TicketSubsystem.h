@@ -182,7 +182,8 @@ private:
 	                         const FString& TicketType,
 	                         const FString& ExtraInfo,
 	                         const FString& DisplayLabel,
-	                         const FString& DisplayDesc);
+	                         const FString& DisplayDesc,
+	                         const FString& WlIgn = TEXT(""));
 
 	/**
 	 * Post the ticket panel (a message with clickable buttons) to the configured
@@ -303,6 +304,12 @@ private:
 
 	/** Maps ticket channel ID to the opener's Discord username (for Approve & Whitelist). */
 	TMap<FString, FString> TicketChannelToOpenerName;
+
+	/** Maps whitelist ticket channel ID to the in-game name the player provided in
+	 *  the ticket modal.  Used by the "Approve & Whitelist" button so the correct
+	 *  game name is passed to FWhitelistManager::AddPlayer rather than the Discord
+	 *  display name. */
+	TMap<FString, FString> TicketChannelToWlIgn;
 
 	/** Maps ticket channel ID to the ticket open time (for stats). */
 	TMap<FString, FDateTime> TicketChannelToOpenTime;

@@ -346,3 +346,34 @@ void FBanDiscordNotifier::NotifyGeoIpBlocked(const FString& PlayerName, const FS
         UBanWebSocketPusher::PushEvent(TEXT("geoip_block"), Obj);
     }
 }
+
+void FBanDiscordNotifier::NotifyPlayerMuted(const FString& Uid, const FString& PlayerName,
+                                             const FString& MutedBy, const FString& Reason,
+                                             bool bIsTimed, const FDateTime& ExpireDate)
+{
+    const FString DurationStr = bIsTimed
+        ? FString::Printf(TEXT("%lld min"), (ExpireDate - FDateTime::UtcNow()).GetTotalMinutes())
+        : TEXT("Indefinite");
+
+    const FString Fields =
+        Field(TEXT("Player"),   PlayerName)  + TEXT(",") +
+        Field(TEXT("UID"),      Uid)         + TEXT(",") +
+        Field(TEXT("Muted By"), MutedBy)     + TEXT(",") +
+        Field(TEXT("Duration"), DurationStr) + TEXT(",") +
+        Field(TEXT("Reason"),   Reason, false);
+
+    // Deep orange: 15105570
+    PostWebhook(BuildEmbed(15105570, TEXT("🔇 Player Muted"), Fields));
+}
+
+void FBanDiscordNotifier::NotifyPlayerUnmuted(const FString& Uid, const FString& PlayerName,
+                                               const FString& UnmutedBy)
+{
+    const FString Fields =
+        Field(TEXT("Player"),     PlayerName.IsEmpty() ? Uid : PlayerName) + TEXT(",") +
+        Field(TEXT("UID"),        Uid)       + TEXT(",") +
+        Field(TEXT("Unmuted By"), UnmutedBy, false);
+
+    // Green: 3066993
+    PostWebhook(BuildEmbed(3066993, TEXT("🔊 Player Unmuted"), Fields));
+}

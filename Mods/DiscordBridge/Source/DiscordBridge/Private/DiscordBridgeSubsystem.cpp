@@ -2424,6 +2424,38 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 
 	if (bDropMessage) return;
 
+	// Feature: suppress muted players' messages from the Discord relay.
+	// A player who is muted in-game should not have their chat forwarded to Discord.
+	{
+		const UWorld* WMute = GetWorld();
+		UGameInstance* GIMute = WMute ? WMute->GetGameInstance() : nullptr;
+		UMuteRegistry* MuteReg = GIMute ? GIMute->GetSubsystem<UMuteRegistry>() : nullptr;
+		if (MuteReg && WMute)
+		{
+			for (FConstPlayerControllerIterator It = WMute->GetPlayerControllerIterator(); It; ++It)
+			{
+				APlayerController* PC = It->Get();
+				if (!PC || !PC->PlayerState) continue;
+				if (!PC->PlayerState->GetPlayerName().Equals(PlayerName, ESearchCase::IgnoreCase)) continue;
+				const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+				if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
+				{
+					const FString Uid = UBanDatabase::MakeUid(
+						NetId.GetType().ToString().ToUpper(),
+						NetId.ToString().ToLower());
+					if (MuteReg->IsMuted(Uid))
+					{
+						UE_LOG(LogDiscordBridge, Verbose,
+						       TEXT("DiscordBridge: Suppressing Discord relay for muted player '%s'."),
+						       *PlayerName);
+						return;
+					}
+				}
+				break;
+			}
+		}
+	}
+
 	// Feature: auto-warn on repeated chat-filter hits.
 	// When ChatFilterAutoWarnThreshold > 0, track how many times this player has
 	// triggered the filter within ChatFilterAutoWarnWindowMinutes.  On threshold
@@ -2460,8 +2492,10 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 					// Reset so they can be warned again after another full window of hits.
 					Rec.HitTimestamps.Empty();
 
-					// Derive UID.
+					// Derive UID and capture the PlayerController so we can
+					// notify the player in-game after issuing the auto-warn.
 					FString Uid;
+					APlayerController* WarnTargetPC = nullptr;
 					if (W)
 					{
 						for (FConstPlayerControllerIterator It = W->GetPlayerControllerIterator(); It; ++It)
@@ -2476,6 +2510,7 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 								Uid = UBanDatabase::MakeUid(
 									NetId.GetType().ToString().ToUpper(),
 									NetId.ToString().ToLower());
+								WarnTargetPC = PC;
 								break;
 							}
 						}
@@ -2496,6 +2531,15 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 
 						WarnReg->AddWarning(WarnEntry);
 						FBanDiscordNotifier::NotifyWarningIssued(Uid, PlayerName, WarnReason, TEXT("auto"), WarnReg->GetWarningCount(Uid));
+
+						// Notify the player in-game so they are aware they have been warned.
+						if (WarnTargetPC)
+						{
+							WarnTargetPC->ClientMessage(FString::Printf(
+								TEXT("[Warning] You have been automatically warned for inappropriate language. "
+								     "(Warning #%d)"),
+								WarnReg->GetWarningCount(Uid)));
+						}
 					}
 				}
 			}

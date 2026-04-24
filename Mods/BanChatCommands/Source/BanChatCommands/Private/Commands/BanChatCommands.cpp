@@ -2322,6 +2322,15 @@ EExecutionStatus AMuteChatCommand::ExecuteCommand_Implementation(
 
     MuteReg->MutePlayer(Uid, DisplayName, Reason, MutedBy, Minutes);
 
+    // Notify via webhook so the action is visible even without the Discord bot.
+    {
+        const bool bIsTimed = Minutes > 0;
+        const FDateTime Expiry = bIsTimed
+            ? FDateTime::UtcNow() + FTimespan::FromMinutes(static_cast<double>(Minutes))
+            : FDateTime(0);
+        FBanDiscordNotifier::NotifyPlayerMuted(Uid, DisplayName, MutedBy, Reason, bIsTimed, Expiry);
+    }
+
     const FString DurStr = Minutes > 0
         ? FString::Printf(TEXT(" for %d minute(s)"), Minutes)
         : TEXT(" indefinitely");
@@ -2370,6 +2379,7 @@ EExecutionStatus AUnmuteChatCommand::ExecuteCommand_Implementation(
 
     if (MuteReg->UnmutePlayer(Uid))
     {
+        FBanDiscordNotifier::NotifyPlayerUnmuted(Uid, DisplayName, Sender->GetSenderName());
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Unmuted '%s'."), *DisplayName),
             FLinearColor::Green);
