@@ -485,6 +485,18 @@ private:
 	/** Loaded config (populated in Initialize()). */
 	FBanBridgeConfig Config;
 
+	/**
+	 * ServerName from FDiscordBridgeConfig, cached at Initialize() and on
+	 * config reload to avoid reading the config file from disk every panel refresh.
+	 */
+	FString CachedDiscordServerName;
+
+	/**
+	 * BanEventsChannelId from FDiscordBridgeConfig, cached at Initialize() and on
+	 * config reload so PostModerationLog() never hits the disk in the fallback path.
+	 */
+	FString CachedBanEventsChannelId;
+
 	/** Injected Discord provider — nullptr until SetProvider() is called. */
 	IDiscordBridgeProvider* CachedProvider = nullptr;
 

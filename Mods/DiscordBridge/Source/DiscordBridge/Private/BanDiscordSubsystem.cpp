@@ -309,6 +309,15 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Super::Initialize(Collection);
 	FBanBridgeConfig::RestoreDefaultConfigIfNeeded();
 	Config = FBanBridgeConfig::Load();
+
+	// Cache the FDiscordBridgeConfig fields we reference at runtime so we
+	// never hit the disk inside BuildPanelData() or PostModerationLog().
+	{
+		const FDiscordBridgeConfig DiscordCfg = FDiscordBridgeConfig::LoadOrCreate();
+		CachedDiscordServerName  = DiscordCfg.ServerName;
+		CachedBanEventsChannelId = DiscordCfg.BanEventsChannelId;
+	}
+
 	PostLoginHandle = FGameModeEvents::GameModePostLoginEvent.AddUObject(
 		this, &UBanDiscordSubsystem::OnPostLoginModerationReminder);
 
@@ -1280,6 +1289,8 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 	int32 ExtraRemoved = 0;
 	if (bHadRecord)
 		ExtraRemoved = BanDiscordHelpers::RemoveCounterpartBans(this, DB, Uid, BanRecord.LinkedUids);
+
+	FBanDiscordNotifier::NotifyBanRemoved(Uid, DisplayName, SenderName);
 
 	FString Msg = FString::Printf(
 		TEXT("✅ Ban removed for **%s** (`%s`).\nUnbanned by: %s"),
@@ -2615,6 +2626,14 @@ void UBanDiscordSubsystem::HandleReloadConfigCommand(const FString& ChannelId,
 
 	Config = FBanBridgeConfig::Load();
 
+	// Also refresh the cached FDiscordBridgeConfig fields so BuildPanelData()
+	// and PostModerationLog() see any changes to ServerName / BanEventsChannelId.
+	{
+		const FDiscordBridgeConfig DiscordCfg = FDiscordBridgeConfig::LoadOrCreate();
+		CachedDiscordServerName  = DiscordCfg.ServerName;
+		CachedBanEventsChannelId = DiscordCfg.BanEventsChannelId;
+	}
+
 	UE_LOG(LogBanDiscord, Log,
 		TEXT("BanDiscordSubsystem: Config reloaded by %s."), *SenderName);
 
@@ -3147,11 +3166,9 @@ if (!CachedProvider) return;
 FString TargetChannelId = Config.ModerationLogChannelId;
 if (TargetChannelId.IsEmpty() || TargetChannelId == TEXT("0"))
 {
-	// Fall back to DiscordBridgeConfig::BanEventsChannelId so that operators
-	// who only set BanEventsChannelId (and not ModerationLogChannelId) still
-	// see bot-sourced ban/kick/warn events in their designated events channel.
-	const FDiscordBridgeConfig DiscordCfg = FDiscordBridgeConfig::LoadOrCreate();
-	TargetChannelId = DiscordCfg.BanEventsChannelId;
+	// Fall back to FDiscordBridgeConfig::BanEventsChannelId (cached at
+	// Initialize() to avoid a disk read on every moderation log entry).
+	TargetChannelId = CachedBanEventsChannelId;
 }
 if (TargetChannelId.IsEmpty() || TargetChannelId == TEXT("0")) return;
 
@@ -4604,9 +4621,10 @@ TSharedPtr<FJsonObject> UBanDiscordSubsystem::BuildPanelData() const
 	if (UMuteRegistry* MuteReg = GI ? GI->GetSubsystem<UMuteRegistry>() : nullptr)
 		MutedCount = MuteReg->GetAllMutes().Num();
 
-	// Feature 7: Read ServerName from DiscordBridgeConfig for panel footer/title.
-	const FDiscordBridgeConfig DiscordCfg = FDiscordBridgeConfig::LoadOrCreate();
-	const FString ServerName = DiscordCfg.ServerName;
+	// Feature 7: Read ServerName from CachedDiscordServerName (populated in
+	// Initialize() and kept in sync by HandleReloadConfigCommand / ExecutePanelReloadConfig)
+	// to avoid reading the config file from disk on every panel refresh.
+	const FString& ServerName = CachedDiscordServerName;
 
 	// Build the embed object.
 	TSharedPtr<FJsonObject> Embed = MakeShared<FJsonObject>();
@@ -5517,6 +5535,7 @@ FString UBanDiscordSubsystem::ExecutePanelKick(const FString& PlayerArg,
 		SendInGameModerationNoticeToUid(Uid, FString::Printf(
 			TEXT("%s Kicked @%s. Reason: %s. By: %s."),
 			*StaffPrefix, *DisplayName, *KickReason, *SenderName));
+		PostToPlayerModerationThread(DisplayName, Uid, Msg);
 		return Msg;
 	}
 	return FString::Printf(
@@ -5569,6 +5588,7 @@ FString UBanDiscordSubsystem::ExecutePanelBan(const FString& PlayerArg,
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Permanently banned @%s. Reason: %s. By: %s."),
 		*StaffPrefix, *DisplayName, *Entry.Reason, *SenderName));
+	PostToPlayerModerationThread(DisplayName, Uid, Msg);
 	return Msg;
 }
 
@@ -5628,6 +5648,7 @@ FString UBanDiscordSubsystem::ExecutePanelTempBan(const FString& PlayerArg,
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Temporarily banned @%s for %d minute(s). Reason: %s. By: %s."),
 		*StaffPrefix, *DisplayName, DurationMinutes, *Entry.Reason, *SenderName));
+	PostToPlayerModerationThread(DisplayName, Uid, Msg);
 	return Msg;
 }
 
@@ -5658,9 +5679,11 @@ FString UBanDiscordSubsystem::ExecutePanelWarn(const FString& PlayerArg,
 		TEXT("%s Warned @%s. Reason: %s. Total warnings: %d. By: %s."),
 		*StaffPrefix, *DisplayName, *Reason, WarnCount, *SenderName));
 
-	return FString::Printf(
+	const FString WarnMsg = FString::Printf(
 		TEXT("⚠️ Warned **%s** (`%s`).\nReason: %s\nTotal warnings: **%d**\nWarned by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *Reason, WarnCount, *SenderName);
+	PostToPlayerModerationThread(DisplayName, Uid, WarnMsg);
+	return WarnMsg;
 }
 
 FString UBanDiscordSubsystem::ExecutePanelMute(const FString& PlayerArg,
@@ -5707,10 +5730,12 @@ FString UBanDiscordSubsystem::ExecutePanelMute(const FString& PlayerArg,
 		TEXT("%s Muted @%s for %s. Reason: %s. By: %s."),
 		*StaffPrefix, *DisplayName, *DurStr, *MuteReason, *SenderName));
 
-	return FString::Printf(
+	const FString MuteMsg = FString::Printf(
 		TEXT("🔇 Muted **%s** (`%s`) %s.\nReason: %s\nMuted by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *DurStr,
 		*MuteReason, *SenderName);
+	PostToPlayerModerationThread(DisplayName, Uid, MuteMsg);
+	return MuteMsg;
 }
 
 FString UBanDiscordSubsystem::ExecutePanelAnnounce(const FString& Message,
@@ -5869,6 +5894,16 @@ FString UBanDiscordSubsystem::ExecutePanelStaffList() const
 FString UBanDiscordSubsystem::ExecutePanelReloadConfig(const FString& SenderName)
 {
 	Config = FBanBridgeConfig::Load();
+
+	// Refresh the cached FDiscordBridgeConfig fields used by BuildPanelData()
+	// and PostModerationLog() so changes to ServerName / BanEventsChannelId
+	// take effect immediately without a server restart.
+	{
+		const FDiscordBridgeConfig DiscordCfg = FDiscordBridgeConfig::LoadOrCreate();
+		CachedDiscordServerName  = DiscordCfg.ServerName;
+		CachedBanEventsChannelId = DiscordCfg.BanEventsChannelId;
+	}
+
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: [Panel] Config reloaded by %s."), *SenderName);
 	return FString::Printf(TEXT("✅ BanBridge configuration reloaded by **%s**."), *SenderName);
@@ -5923,6 +5958,7 @@ FString UBanDiscordSubsystem::ExecutePanelUnban(const FString& PlayerArg,
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Unbanned @%s. By: %s."),
 		*StaffPrefix, *DisplayName, *SenderName));
+	PostToPlayerModerationThread(DisplayName, Uid, Msg);
 	return Msg;
 }
 
@@ -5953,9 +5989,11 @@ FString UBanDiscordSubsystem::ExecutePanelUnmute(const FString& PlayerArg,
 		TEXT("%s Unmuted @%s. By: %s."),
 		*StaffPrefix, *DisplayName, *SenderName));
 
-	return FString::Printf(
+	const FString UnmuteMsg = FString::Printf(
 		TEXT("✅ Unmuted **%s** (`%s`).\nUnmuted by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
+	PostToPlayerModerationThread(DisplayName, Uid, UnmuteMsg);
+	return UnmuteMsg;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
