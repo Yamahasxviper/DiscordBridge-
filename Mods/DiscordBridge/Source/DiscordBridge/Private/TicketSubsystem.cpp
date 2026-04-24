@@ -95,7 +95,6 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		// Check every 5 minutes; the real threshold is InactiveTicketTimeoutHours.
 		constexpr float CheckIntervalSeconds = 5.0f * 60.0f;
 
-		TWeakObjectPtr<UTicketSubsystem> WeakThis(this);
 		InactiveTicketCheckHandle = FTSTicker::GetCoreTicker().AddTicker(
 			FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
 			{

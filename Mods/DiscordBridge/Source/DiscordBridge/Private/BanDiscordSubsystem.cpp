@@ -2078,7 +2078,11 @@ void UBanDiscordSubsystem::HandleBanReasonCommand(const TArray<FString>& Args,
 
 	const FString OldReason = Entry.Reason;
 	Entry.Reason = BanDiscordHelpers::JoinArgs(Args, 1);
-	DB->AddBan(Entry);
+	if (!DB->AddBan(Entry))
+	{
+		Respond(ChannelId, TEXT("❌ Failed to update ban record. Check server logs."));
+		return;
+	}
 
 	const FString Msg = FString::Printf(
 		TEXT("✅ Ban reason updated for **%s** (`%s`).\nOld reason: %s\nNew reason: %s\nUpdated by: %s"),
@@ -3752,7 +3756,8 @@ if (Args.Num() > 2)
 {
 const int32 Parsed = UBanDiscordSubsystem::ParseDurationMinutes(Args[2]);
 if (Parsed > 0) { BanDurationMinutes = Parsed; ReasonIdx = 3; }
-else if (Args[2] == TEXT("perm") || Args[2] == TEXT("permanent")) { BanDurationMinutes = 0; ReasonIdx = 3; }
+// ParseDurationMinutes("0") returns 0 (not > 0) so check explicitly for "0" here.
+else if (Args[2] == TEXT("perm") || Args[2] == TEXT("permanent") || Args[2] == TEXT("0")) { BanDurationMinutes = 0; ReasonIdx = 3; }
 }
 
 FString Reason = TEXT("Scheduled ban");
