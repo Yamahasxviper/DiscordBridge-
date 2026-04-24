@@ -437,6 +437,11 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 								if (Sessions->FindByUid(Uid, Record) && !Record.DisplayName.IsEmpty())
 									PlayerName = Record.DisplayName;
 							}
+
+							// Write to audit log so timed-mute auto-expiries appear in history.
+							if (UBanAuditLog* AuditLog = LiveGI->GetSubsystem<UBanAuditLog>())
+								AuditLog->LogAction(TEXT("unmute"), Uid, PlayerName,
+								                    TEXT("system"), TEXT("system"), TEXT("Timed mute expired"));
 						}
 						const FString UnmuteMsg = FString::Printf(
 							TEXT("🔊 Unmuted **%s** (`%s`)."), *PlayerName, *Uid);
@@ -1216,6 +1221,16 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 	UE_LOG(LogBanDiscord, Log, TEXT("BanDiscordSubsystem: %s banned %s (%s). Reason: %s"),
 	       *SenderName, *DisplayName, *Uid, *Entry.Reason);
 
+	// Write to audit log so Discord-issued bans appear alongside in-game and REST bans.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+		{
+			const FString ActionType = bTemporary ? TEXT("tempban") : TEXT("ban");
+			AuditLog->LogAction(ActionType, Uid, DisplayName, SenderName, SenderName, Entry.Reason);
+		}
+	}
+
 	Respond(ChannelId, Msg);
 	const FString InGameBanNotice = bTemporary
 		? FString::Printf(
@@ -1302,6 +1317,13 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: %s unbanned %s (%s)."),
 	       *SenderName, *DisplayName, *Uid);
+
+	// Write to audit log so Discord-issued unbans appear alongside REST/in-game unbans.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+			AuditLog->LogAction(TEXT("unban"), Uid, DisplayName, SenderName, SenderName, TEXT(""));
+	}
 
 	Respond(ChannelId, Msg);
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
@@ -1616,6 +1638,14 @@ void UBanDiscordSubsystem::HandleKickCommand(const TArray<FString>& Args,
 	if (bKicked)
 	{
 		FBanDiscordNotifier::NotifyPlayerKicked(DisplayName, Reason, SenderName);
+
+		// Write to audit log so Discord-issued kicks appear alongside in-game kicks.
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+				AuditLog->LogAction(TEXT("kick"), Uid, DisplayName, SenderName, SenderName, Reason);
+		}
+
 		FString KickMsg = FString::Printf(
 			TEXT("✅ Kicked **%s** (`%s`).\nReason: %s\nKicked by: %s"),
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *Reason, *SenderName);
@@ -1650,7 +1680,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 	{
 		Respond(ChannelId,
 			bMute
-			? TEXT("Usage: `/mod mute <PUID|name> [minutes] [reason]`")
+			? TEXT("Usage: `/mod mute <PUID|name> [duration] [reason]`\nDuration: 30m, 2h, 1d, 1w or plain minutes")
 			: TEXT("Usage: `/mod unmute <PUID|name>`"));
 		return;
 	}
@@ -1680,6 +1710,14 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 					*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
 			return;
 		}
+
+		// Write to audit log so Discord-issued unmutes appear alongside in-game unmutes.
+		if (UGameInstance* GI2 = GetGameInstance())
+		{
+			if (UBanAuditLog* AuditLog = GI2->GetSubsystem<UBanAuditLog>())
+				AuditLog->LogAction(TEXT("unmute"), Uid, DisplayName, SenderName, SenderName, TEXT(""));
+		}
+
 		const FString UnmuteMsg = FString::Printf(
 			TEXT("✅ Unmuted **%s** (`%s`).\nUnmuted by: %s"),
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
@@ -1691,13 +1729,15 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 		return;
 	}
 
-	// Parse optional [minutes].
+	// Parse optional [duration].
+	// Accepts raw integers (minutes) as well as human-readable suffixes:
+	// 30m, 2h, 1d, 1w — matching the formats accepted by the admin panel.
 	int32 ReasonStart = 1;
 	int32 Minutes = 0;
 	if (Args.Num() > 1)
 	{
-		int32 Parsed = 0;
-		if (FDefaultValueHelper::ParseInt(Args[1], Parsed) && Parsed > 0)
+		const int32 Parsed = ParseDurationMinutes(Args[1]);
+		if (Parsed > 0)
 		{
 			Minutes = Parsed;
 			ReasonStart = 2;
@@ -1716,6 +1756,11 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 	const FString MuteMsg = FString::Printf(
 		TEXT("🔇 Muted **%s** (`%s`)%s.\nReason: %s\nMuted by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *DurStr, *Reason, *SenderName);
+
+	// Write to audit log so Discord-issued mutes appear alongside in-game mutes.
+	if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
+		AuditLog->LogAction(TEXT("mute"), Uid, DisplayName, SenderName, SenderName, Reason);
+
 	Respond(ChannelId, MuteMsg);
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Muted @%s%s. Reason: %s. By: %s."),
@@ -1762,6 +1807,13 @@ void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
 	const int32 WarnCount = WarnReg->GetWarningCount(Uid);
 
 	FBanDiscordNotifier::NotifyWarningIssued(Uid, DisplayName, Reason, SenderName, WarnCount);
+
+	// Write to audit log so Discord-issued warns appear alongside in-game and REST warns.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+			AuditLog->LogAction(TEXT("warn"), Uid, DisplayName, SenderName, SenderName, Reason);
+	}
 
 	const FString WarnMsg = FString::Printf(
 		TEXT("⚠️ Warned **%s** (`%s`).\nReason: %s\nTotal warnings: **%d**\nWarned by: %s"),
@@ -4154,6 +4206,8 @@ if (!InteractionObj->TryGetObjectField(TEXT("data"), CmdDataPtr) || !CmdDataPtr)
 UE_LOG(LogBanDiscord, Warning,
        TEXT("BanDiscordSubsystem: Slash command ignored — "
             "interaction payload has no 'data' field."));
+if (!ChannelId.IsEmpty())
+    Respond(ChannelId, TEXT("❌ Could not parse the command. Please try again."));
 return;
 }
 
@@ -5590,6 +5644,14 @@ FString UBanDiscordSubsystem::ExecutePanelBan(const FString& PlayerArg,
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: [Panel] %s permanently banned %s (%s). Reason: %s"),
 	       *SenderName, *DisplayName, *Uid, *Entry.Reason);
+
+	// Write to audit log so panel-issued bans appear alongside slash-command and REST bans.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+			AuditLog->LogAction(TEXT("ban"), Uid, DisplayName, SenderName, SenderName, Entry.Reason);
+	}
+
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Permanently banned @%s. Reason: %s. By: %s."),
 		*StaffPrefix, *DisplayName, *Entry.Reason, *SenderName));
@@ -5650,6 +5712,14 @@ FString UBanDiscordSubsystem::ExecutePanelTempBan(const FString& PlayerArg,
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: [Panel] %s temp-banned %s (%s) for %d min. Reason: %s"),
 	       *SenderName, *DisplayName, *Uid, DurationMinutes, *Entry.Reason);
+
+	// Write to audit log so panel-issued temp-bans appear alongside slash-command and REST bans.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+			AuditLog->LogAction(TEXT("tempban"), Uid, DisplayName, SenderName, SenderName, Entry.Reason);
+	}
+
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Temporarily banned @%s for %d minute(s). Reason: %s. By: %s."),
 		*StaffPrefix, *DisplayName, DurationMinutes, *Entry.Reason, *SenderName));
@@ -5680,6 +5750,11 @@ FString UBanDiscordSubsystem::ExecutePanelWarn(const FString& PlayerArg,
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: [Panel] %s warned %s (%s). Reason: %s"),
 	       *SenderName, *DisplayName, *Uid, *Reason);
+
+	// Write to audit log so panel-issued warns appear alongside slash-command and REST warns.
+	if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
+		AuditLog->LogAction(TEXT("warn"), Uid, DisplayName, SenderName, SenderName, Reason);
+
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Warned @%s. Reason: %s. Total warnings: %d. By: %s."),
 		*StaffPrefix, *DisplayName, *Reason, WarnCount, *SenderName));
@@ -5731,6 +5806,11 @@ FString UBanDiscordSubsystem::ExecutePanelMute(const FString& PlayerArg,
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: [Panel] %s muted %s (%s) for %s. Reason: %s"),
 	       *SenderName, *DisplayName, *Uid, *DurStr, *MuteReason);
+
+	// Write to audit log so panel-issued mutes appear alongside slash-command mutes.
+	if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
+		AuditLog->LogAction(TEXT("mute"), Uid, DisplayName, SenderName, SenderName, MuteReason);
+
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Muted @%s for %s. Reason: %s. By: %s."),
 		*StaffPrefix, *DisplayName, *DurStr, *MuteReason, *SenderName));
@@ -5960,6 +6040,14 @@ FString UBanDiscordSubsystem::ExecutePanelUnban(const FString& PlayerArg,
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: [Panel] %s unbanned %s (%s)."),
 	       *SenderName, *DisplayName, *Uid);
+
+	// Write to audit log so panel-issued unbans appear alongside slash-command and REST unbans.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+			AuditLog->LogAction(TEXT("unban"), Uid, DisplayName, SenderName, SenderName, TEXT(""));
+	}
+
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Unbanned @%s. By: %s."),
 		*StaffPrefix, *DisplayName, *SenderName));
@@ -5990,6 +6078,11 @@ FString UBanDiscordSubsystem::ExecutePanelUnmute(const FString& PlayerArg,
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: [Panel] %s unmuted %s (%s)."),
 	       *SenderName, *DisplayName, *Uid);
+
+	// Write to audit log so panel-issued unmutes appear alongside slash-command unmutes.
+	if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
+		AuditLog->LogAction(TEXT("unmute"), Uid, DisplayName, SenderName, SenderName, TEXT(""));
+
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Unmuted @%s. By: %s."),
 		*StaffPrefix, *DisplayName, *SenderName));

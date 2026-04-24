@@ -235,4 +235,12 @@ private:
      * itself without a game-instance reference).
      */
     FString CachedBanSystemModVersion;
+
+    /**
+     * UIDs for which NotifyBanExpired has already been fired this server session.
+     * Prevents duplicate Discord notifications when both PerformBanCheckForPlayer
+     * and PerformBanCheckForUid are triggered for the same player login event.
+     * Reset on Deinitialize() (i.e. server shutdown).
+     */
+    TSet<FString> AlreadyNotifiedExpiredBanUids;
 };

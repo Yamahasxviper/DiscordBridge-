@@ -617,13 +617,21 @@ bool FSMLWebSocketRunnable::InitSslContext()
 		return false;
 	}
 
-	// The Satisfactory dedicated server environment does not ship a standard OS CA
-	// bundle, so SSL_CTX_set_default_verify_paths() finds no root certificates and
-	// SSL_VERIFY_PEER subsequently rejects every server certificate with SSL_ERROR_SSL.
-	// We therefore disable peer verification: the connection is still TLS-encrypted
-	// (confidentiality and integrity are maintained), but the server's certificate
-	// chain is not validated against a CA bundle.
-	SSL_CTX_set_verify(SslCtx, SSL_VERIFY_NONE, nullptr);
+	// Certificate verification is controlled by FSMLWebSocketReconnectConfig::bVerifySSLCertificate.
+	// The default is SSL_VERIFY_NONE because the Satisfactory dedicated-server environment
+	// does not ship a standard OS CA bundle, so SSL_VERIFY_PEER rejects every certificate.
+	// When bVerifySSLCertificate is true the system CA bundle is loaded and peer verification
+	// is enabled — only set this if you have a CA bundle available on the server.
+	if (ReconnectCfg.bVerifySSLCertificate)
+	{
+		SSL_CTX_set_default_verify_paths(SslCtx);
+		SSL_CTX_set_verify(SslCtx, SSL_VERIFY_PEER, nullptr);
+		UE_LOG(LogSMLWebSocket, Log, TEXT("SMLWebSocket: SSL certificate verification enabled."));
+	}
+	else
+	{
+		SSL_CTX_set_verify(SslCtx, SSL_VERIFY_NONE, nullptr);
+	}
 
 	// Require at least TLS 1.2
 	SSL_CTX_set_min_proto_version(SslCtx, TLS1_2_VERSION);

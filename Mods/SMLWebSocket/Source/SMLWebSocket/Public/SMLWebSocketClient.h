@@ -283,6 +283,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket")
 	FString ProxyPassword;
 
+	/**
+	 * When true, the TLS certificate presented by the wss:// server is
+	 * validated against the system CA bundle (SSL_VERIFY_PEER).
+	 *
+	 * NOTE: The Satisfactory dedicated-server environment does not ship a
+	 * standard CA bundle, so this should remain false (the default) unless
+	 * you have manually configured the server with a CA certificate store.
+	 * Setting it to true with no CA bundle will cause every wss:// connection
+	 * to fail with an SSL certificate-verification error.
+	 *
+	 * When false (default) the connection is still TLS-encrypted — only
+	 * certificate-chain validation is skipped (SSL_VERIFY_NONE).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket")
+	bool bVerifySSLCertificate{false};
+
 	// ── Factory ───────────────────────────────────────────────────────────────
 
 	/**
