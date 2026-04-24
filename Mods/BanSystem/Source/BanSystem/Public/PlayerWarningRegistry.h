@@ -111,6 +111,17 @@ public:
      */
     int32 PruneExpiredWarnings();
 
+    // ── Delegates ─────────────────────────────────────────────────────────────
+
+    /**
+     * Fired on the game thread after every successful AddWarning() call.
+     * Allows external systems (e.g. BanDiscordSubsystem) to route warnings
+     * issued from in-game commands or the chat filter into per-player threads
+     * without polling or direct coupling.
+     */
+    DECLARE_MULTICAST_DELEGATE_OneParam(FOnWarningAdded, const FWarningEntry& /*Entry*/);
+    static FOnWarningAdded OnWarningAdded;
+
 private:
     void    LoadFromFile();
     bool    SaveToFile() const;

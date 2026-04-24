@@ -500,6 +500,51 @@ private:
 	 *  own posting, so the handler skips entries while a bot interaction is in flight). */
 	FDelegateHandle BanAddedHandle;
 
+	/**
+	 * Handle for UBanDatabase::OnBanRemoved.
+	 * Mirrors REST API / BanEnforcer expiry unbans to the moderation log channel
+	 * so that staff see all unban events, not just those triggered by Discord
+	 * slash commands.  The handler skips while a bot interaction is in flight
+	 * (the unban command handler already posts its own message in that case).
+	 */
+	FDelegateHandle BanRemovedHandle;
+
+	/**
+	 * Handle for UPlayerWarningRegistry::OnWarningAdded.
+	 * Routes in-game /warn (BanChatCommands) and chat-filter auto-warns
+	 * (DiscordBridgeSubsystem) into the per-player moderation thread without
+	 * direct coupling between those systems and BanDiscordSubsystem.
+	 * The handler is guarded by PendingInteractionToken so Discord slash /warn
+	 * (which already calls PostToPlayerModerationThread directly) does not
+	 * cause duplicate thread messages.
+	 */
+	FDelegateHandle WarnAddedHandle;
+
+	/**
+	 * Handle for UMuteRegistry::OnPlayerMuted (instance delegate).
+	 * Routes in-game /mute (BanChatCommands) to per-player moderation threads.
+	 * Guarded by PendingInteractionToken — Discord slash /mod mute already
+	 * calls PostToPlayerModerationThread directly.
+	 */
+	FDelegateHandle MutedEventHandle;
+
+	/**
+	 * Handle for UMuteRegistry::OnPlayerUnmuted (instance delegate).
+	 * Routes in-game /unmute (BanChatCommands) to per-player moderation threads.
+	 * Guarded by PendingInteractionToken — Discord slash /mod unmute already
+	 * calls PostToPlayerModerationThread directly.
+	 */
+	FDelegateHandle UnmutedEventHandle;
+
+	/**
+	 * Handle for FBanDiscordNotifier::OnPlayerKickedLogged.
+	 * Routes in-game /kick (BanChatCommands) to per-player moderation threads.
+	 * The delegate is only broadcast when a Uid is supplied to NotifyPlayerKicked(),
+	 * which Discord slash handlers intentionally omit — so no deduplication guard
+	 * is needed here; double-posting is structurally impossible.
+	 */
+	FDelegateHandle KickLoggedHandle;
+
 	/** Handle for the AStaffChatCommand::OnInGameStaffChat subscription.
 	 *  Active when CachedProvider is set and StaffChatChannelId is non-empty. */
 	FDelegateHandle StaffChatDelegateHandle;

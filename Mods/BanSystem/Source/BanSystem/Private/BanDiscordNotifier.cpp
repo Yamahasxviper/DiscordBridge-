@@ -11,6 +11,9 @@
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 
+// Static delegate definition.
+FBanDiscordNotifier::FOnPlayerKickedLogged FBanDiscordNotifier::OnPlayerKickedLogged;
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -171,7 +174,7 @@ void FBanDiscordNotifier::NotifyWarningIssued(const FString& Uid, const FString&
 }
 
 void FBanDiscordNotifier::NotifyPlayerKicked(const FString& PlayerName, const FString& Reason,
-                                             const FString& KickedBy)
+                                             const FString& KickedBy, const FString& Uid)
 {
     const FString Fields =
         Field(TEXT("Player"),    PlayerName) + TEXT(",") +
@@ -187,8 +190,17 @@ void FBanDiscordNotifier::NotifyPlayerKicked(const FString& PlayerName, const FS
         Obj->SetStringField(TEXT("playerName"), PlayerName);
         Obj->SetStringField(TEXT("reason"),     Reason);
         Obj->SetStringField(TEXT("kickedBy"),   KickedBy);
+        if (!Uid.IsEmpty())
+            Obj->SetStringField(TEXT("uid"), Uid);
         UBanWebSocketPusher::PushEvent(TEXT("kick"), Obj);
     }
+
+    // Allow BanDiscordSubsystem to route in-game kicks into per-player threads.
+    // Only fired when the caller supplies a UID (in-game /kick); Discord slash-kick
+    // handlers intentionally omit it, so those events are handled directly by
+    // HandleKickCommand → PostToPlayerModerationThread.
+    if (!Uid.IsEmpty())
+        OnPlayerKickedLogged.Broadcast(Uid, PlayerName, Reason, KickedBy);
 }
 
 void FBanDiscordNotifier::NotifyAppealSubmitted(const FBanAppealEntry& Appeal)
@@ -364,6 +376,19 @@ void FBanDiscordNotifier::NotifyPlayerMuted(const FString& Uid, const FString& P
 
     // Deep orange: 15105570
     PostWebhook(BuildEmbed(15105570, TEXT("🔇 Player Muted"), Fields));
+
+    // WebSocket push
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        Obj->SetStringField(TEXT("uid"),        Uid);
+        Obj->SetStringField(TEXT("playerName"), PlayerName);
+        Obj->SetStringField(TEXT("mutedBy"),    MutedBy);
+        Obj->SetStringField(TEXT("reason"),     Reason);
+        Obj->SetBoolField  (TEXT("isTimed"),    bIsTimed);
+        if (bIsTimed)
+            Obj->SetStringField(TEXT("expireDate"), ExpireDate.ToIso8601());
+        UBanWebSocketPusher::PushEvent(TEXT("mute"), Obj);
+    }
 }
 
 void FBanDiscordNotifier::NotifyPlayerUnmuted(const FString& Uid, const FString& PlayerName,
@@ -376,4 +401,13 @@ void FBanDiscordNotifier::NotifyPlayerUnmuted(const FString& Uid, const FString&
 
     // Green: 3066993
     PostWebhook(BuildEmbed(3066993, TEXT("🔊 Player Unmuted"), Fields));
+
+    // WebSocket push
+    {
+        TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+        Obj->SetStringField(TEXT("uid"),        Uid);
+        Obj->SetStringField(TEXT("playerName"), PlayerName);
+        Obj->SetStringField(TEXT("unmutedBy"),  UnmutedBy);
+        UBanWebSocketPusher::PushEvent(TEXT("unmute"), Obj);
+    }
 }
