@@ -453,7 +453,31 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 			{
 				UBanDiscordSubsystem* Self = WeakThis.Get();
 				if (!Self || !Self->CachedProvider) return;
-				if (Self->Config.StaffChatChannelId.IsEmpty()) return;
+
+				if (Self->Config.StaffChatChannelId.IsEmpty())
+				{
+					// Bot is running but the staff-chat Discord channel is not
+					// configured. Notify the sender in-game so they are not left
+					// silently without a Discord mirror.
+					UGameInstance* GI = Self->GetGameInstance();
+					UWorld* World = GI ? GI->GetWorld() : nullptr;
+					if (World)
+					{
+						for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+						{
+							APlayerController* PC = It->Get();
+							if (!PC || !PC->PlayerState) continue;
+							if (PC->PlayerState->GetPlayerName().Equals(SenderName, ESearchCase::IgnoreCase))
+							{
+								PC->ClientMessage(
+									TEXT("[StaffChat] Discord mirror is not configured. "
+									     "Set StaffChatChannelId in DefaultBanBridge.ini to enable."));
+								break;
+							}
+						}
+					}
+					return;
+				}
 
 				const FString Formatted = FString::Printf(
 					TEXT("[In-Game Staff] %s: %s"), *SenderName, *Message);
@@ -2972,10 +2996,19 @@ void UBanDiscordSubsystem::HandleStaffChatCommand(const TArray<FString>& Args,
 void UBanDiscordSubsystem::PostModerationLog(const FString& Message) const
 {
 if (!CachedProvider) return;
-if (Config.ModerationLogChannelId.IsEmpty()) return;
-if (Config.ModerationLogChannelId == TEXT("0")) return;
 
-CachedProvider->SendDiscordChannelMessage(Config.ModerationLogChannelId, Message);
+FString TargetChannelId = Config.ModerationLogChannelId;
+if (TargetChannelId.IsEmpty() || TargetChannelId == TEXT("0"))
+{
+	// Fall back to DiscordBridgeConfig::BanEventsChannelId so that operators
+	// who only set BanEventsChannelId (and not ModerationLogChannelId) still
+	// see bot-sourced ban/kick/warn events in their designated events channel.
+	const FDiscordBridgeConfig DiscordCfg = FDiscordBridgeConfig::LoadOrCreate();
+	TargetChannelId = DiscordCfg.BanEventsChannelId;
+}
+if (TargetChannelId.IsEmpty() || TargetChannelId == TEXT("0")) return;
+
+CachedProvider->SendDiscordChannelMessage(TargetChannelId, Message);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
