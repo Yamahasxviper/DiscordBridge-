@@ -950,33 +950,53 @@ bool UBanDiscordSubsystem::IsValidIPQuery(const FString& Query)
 int32 UBanDiscordSubsystem::ParseDurationMinutes(const FString& DurationStr)
 {
 	if (DurationStr.IsEmpty()) return 0;
-	const FString Lower = DurationStr.ToLower();
 
-	// "perm" / "permanent" → 0 (permanent)
+	// "perm" / "permanent" → 0 (used by callers as "permanent/indefinite")
+	const FString Lower = DurationStr.ToLower();
 	if (Lower == TEXT("perm") || Lower == TEXT("permanent")) return 0;
 
-	// Multiplier suffixes: m=minutes, h=hours, d=days, w=weeks.
-	auto ParseWithSuffix = [](const FString& S, TCHAR Suffix, int32 Multiplier) -> int32
+	// Plain integer — assume minutes.
+	if (DurationStr.IsNumeric())
 	{
-		if (!S.EndsWith(FString::Chr(Suffix))) return -1;
-		const FString NumPart = S.LeftChop(1);
 		int32 Val = 0;
-		if (!FDefaultValueHelper::ParseInt(NumPart, Val) || Val <= 0) return -1;
-		return Val * Multiplier;
-	};
+		if (FDefaultValueHelper::ParseInt(DurationStr, Val) && Val > 0)
+			return Val;
+		return 0;
+	}
 
-	int32 Result;
-	if ((Result = ParseWithSuffix(Lower, TEXT('w'), 10080)) > 0) return Result;
-	if ((Result = ParseWithSuffix(Lower, TEXT('d'), 1440))  > 0) return Result;
-	if ((Result = ParseWithSuffix(Lower, TEXT('h'), 60))    > 0) return Result;
-	if ((Result = ParseWithSuffix(Lower, TEXT('m'), 1))     > 0) return Result;
+	// Multi-token compound string: e.g. "2h30m", "1d12h", "1w2d".
+	// Each token is <digits><unit> where unit ∈ {w, d, h, m}.
+	int32 Total = 0;
+	bool bHadToken = false;
+	const TCHAR* p = *Lower;
 
-	// Plain number — assume minutes.
-	int32 Val = 0;
-	if (FDefaultValueHelper::ParseInt(DurationStr, Val) && Val > 0)
-		return Val;
+	while (*p)
+	{
+		if (!FChar::IsDigit(*p)) return 0;
 
-	return 0;
+		int32 Num = 0;
+		while (*p && FChar::IsDigit(*p))
+		{
+			Num = Num * 10 + (*p - TEXT('0'));
+			++p;
+		}
+
+		if (!*p) return 0; // digits without a trailing unit
+
+		const TCHAR Unit = *p;
+		++p;
+
+		if      (Unit == TEXT('w')) Total += Num * 10080;
+		else if (Unit == TEXT('d')) Total += Num * 1440;
+		else if (Unit == TEXT('h')) Total += Num * 60;
+		else if (Unit == TEXT('m')) Total += Num;
+		else return 0;
+
+		bHadToken = true;
+	}
+
+	if (!bHadToken || Total <= 0) return 0;
+	return Total;
 }
 
 bool UBanDiscordSubsystem::ResolveTarget(const FString& Arg,
@@ -1138,15 +1158,18 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 	}
 
 	// Parse duration for /ban temp.
+	// Accepts plain integers (minutes) and shorthand suffixes: 30m, 2h, 1d, 1w, 2h30m, etc.
 	int32 DurationMinutes = 0;
 	int32 ReasonStartIdx  = 1;
 	if (bTemporary)
 	{
-		if (!FDefaultValueHelper::ParseInt(Args[1], DurationMinutes) || DurationMinutes <= 0)
+		DurationMinutes = ParseDurationMinutes(Args[1]);
+		if (DurationMinutes <= 0)
 		{
 			Respond(ChannelId,
-				TEXT("❌ `<minutes>` must be a positive integer.\n"
-				     "Usage: `/ban temp <PUID|name> <minutes> [reason]`"));
+				TEXT("❌ `<duration>` must be a positive value "
+				     "(e.g. `60`, `30m`, `1h`, `2h30m`, `1d`, `1w`).\n"
+				     "Usage: `/ban temp <PUID|name> <duration> [reason]`"));
 			return;
 		}
 		ReasonStartIdx = 2;
@@ -2023,19 +2046,17 @@ void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
 
 	int32 Banned = 0;
 
-	// Ban EOS PUID.
-	{
-		FBanEntry Entry;
-		Entry.Uid        = Record.Uid;
-		UBanDatabase::ParseUid(Record.Uid, Entry.Platform, Entry.PlayerUID);
-		Entry.PlayerName = Record.DisplayName;
-		Entry.Reason     = Reason;
-		Entry.BannedBy   = SenderName;
-		Entry.BanDate    = FDateTime::UtcNow();
-		Entry.bIsPermanent = true;
-		Entry.ExpireDate   = FDateTime(0);
-		if (DB->AddBan(Entry)) ++Banned;
-	}
+	// Ban EOS PUID — declared outside the block so we can call GetKickMessage() below.
+	FBanEntry EosEntry;
+	EosEntry.Uid        = Record.Uid;
+	UBanDatabase::ParseUid(Record.Uid, EosEntry.Platform, EosEntry.PlayerUID);
+	EosEntry.PlayerName = Record.DisplayName;
+	EosEntry.Reason     = Reason;
+	EosEntry.BannedBy   = SenderName;
+	EosEntry.BanDate    = FDateTime::UtcNow();
+	EosEntry.bIsPermanent = true;
+	EosEntry.ExpireDate   = FDateTime(0);
+	if (DB->AddBan(EosEntry)) ++Banned;
 
 	// Also ban IP if recorded.
 	FString IpUid;
@@ -2061,9 +2082,9 @@ void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
 		}
 	}
 
-	// Kick if currently connected.
+	// Kick if currently connected — use the actual ban entry so the player sees the real reason.
 	if (UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr)
-		UBanEnforcer::KickConnectedPlayer(World, Record.Uid, FBanEntry().GetKickMessage());
+		UBanEnforcer::KickConnectedPlayer(World, Record.Uid, EosEntry.GetKickMessage());
 
 	const FString SafeName = BanDiscordHelpers::EscapeMarkdown(Record.DisplayName);
 	FString Msg = FString::Printf(

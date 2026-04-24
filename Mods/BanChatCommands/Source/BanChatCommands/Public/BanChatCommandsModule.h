@@ -50,8 +50,8 @@ public:
 
 private:
     FDelegateHandle WorldInitHandle;
-    /** Handle for the game-mode logout event — removes disconnected players from FrozenPlayerUids. */
-    FDelegateHandle LogoutHandle;
+    /** Handle for the game-mode post-login event — re-applies freeze for reconnecting players. */
+    FDelegateHandle PostLoginHandle;
 
     // ── Auto-reload ───────────────────────────────────────────────────────────
 
