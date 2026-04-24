@@ -1673,7 +1673,7 @@ EExecutionStatus AKickChatCommand::ExecuteCommand_Implementation(
         FString::Printf(TEXT("[BanChatCommands] Kicked '%s' — reason: %s"), *DisplayName, *Reason),
         FLinearColor::Green);
 
-    FBanDiscordNotifier::NotifyPlayerKicked(DisplayName, Reason, KickedBy);
+    FBanDiscordNotifier::NotifyPlayerKicked(DisplayName, Reason, KickedBy, Uid);
 
     // Optionally create a warning so kick reasons are preserved in history.
     const UBanChatCommandsConfig* CmdCfg = UBanChatCommandsConfig::Get();

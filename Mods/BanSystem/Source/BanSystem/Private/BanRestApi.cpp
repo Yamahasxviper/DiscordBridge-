@@ -1650,8 +1650,14 @@ void UBanRestApi::RegisterRoutes()
 
             const FBanAppealEntry NewEntry = AppealsReg->AddAppeal(Uid, Reason, ContactInfo);
 
-            // Notify Discord via webhook.
-            FBanDiscordNotifier::NotifyAppealSubmitted(NewEntry);
+            // AddAppeal() already broadcasts OnBanAppealSubmitted, which
+            // BanDiscordSubsystem subscribes to when the bot is running.
+            // Only fire the webhook directly when no bot listener is active,
+            // to prevent duplicate appeal notifications in the same Discord
+            // channel when both DiscordWebhookUrl and ModerationLogChannelId
+            // are configured.
+            if (!UBanAppealRegistry::OnBanAppealSubmitted.IsBound())
+                FBanDiscordNotifier::NotifyAppealSubmitted(NewEntry);
 
             // WebSocket push.
             {

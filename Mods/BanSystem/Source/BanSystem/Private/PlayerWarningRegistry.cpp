@@ -13,6 +13,9 @@
 
 DEFINE_LOG_CATEGORY(LogPlayerWarningRegistry);
 
+// Static delegate definition.
+UPlayerWarningRegistry::FOnWarningAdded UPlayerWarningRegistry::OnWarningAdded;
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  USubsystem lifecycle
 // ─────────────────────────────────────────────────────────────────────────────
@@ -49,42 +52,53 @@ void UPlayerWarningRegistry::AddWarning(const FString& Uid, const FString& Playe
 {
     if (Uid.IsEmpty()) return;
 
-    FScopeLock Lock(&Mutex);
-
-    // Determine the next Id (max existing + 1).
-    int64 NextId = 1;
-    for (const FWarningEntry& W : Warnings)
-        if (W.Id >= NextId) NextId = W.Id + 1;
-
     FWarningEntry Entry;
-    Entry.Id         = NextId;
-    Entry.Uid        = Uid;
-    Entry.PlayerName = PlayerName;
-    Entry.Reason     = Reason;
-    Entry.WarnedBy   = WarnedBy;
-    Entry.WarnDate   = FDateTime::UtcNow();
+    {
+        FScopeLock Lock(&Mutex);
 
-    Warnings.Add(Entry);
-    SaveToFile();
+        // Determine the next Id (max existing + 1).
+        int64 NextId = 1;
+        for (const FWarningEntry& W : Warnings)
+            if (W.Id >= NextId) NextId = W.Id + 1;
+
+        Entry.Id         = NextId;
+        Entry.Uid        = Uid;
+        Entry.PlayerName = PlayerName;
+        Entry.Reason     = Reason;
+        Entry.WarnedBy   = WarnedBy;
+        Entry.WarnDate   = FDateTime::UtcNow();
+
+        Warnings.Add(Entry);
+        SaveToFile();
+    }
+
+    // Broadcast outside the lock so listeners can safely call back into the registry.
+    OnWarningAdded.Broadcast(Entry);
 }
 
 void UPlayerWarningRegistry::AddWarning(const FWarningEntry& InEntry)
 {
     if (InEntry.Uid.IsEmpty()) return;
 
-    FScopeLock Lock(&Mutex);
+    FWarningEntry Entry;
+    {
+        FScopeLock Lock(&Mutex);
 
-    // Determine the next Id (max existing + 1).
-    int64 NextId = 1;
-    for (const FWarningEntry& W : Warnings)
-        if (W.Id >= NextId) NextId = W.Id + 1;
+        // Determine the next Id (max existing + 1).
+        int64 NextId = 1;
+        for (const FWarningEntry& W : Warnings)
+            if (W.Id >= NextId) NextId = W.Id + 1;
 
-    FWarningEntry Entry = InEntry;
-    Entry.Id       = NextId;
-    Entry.WarnDate = FDateTime::UtcNow();
+        Entry = InEntry;
+        Entry.Id       = NextId;
+        Entry.WarnDate = FDateTime::UtcNow();
 
-    Warnings.Add(Entry);
-    SaveToFile();
+        Warnings.Add(Entry);
+        SaveToFile();
+    }
+
+    // Broadcast outside the lock so listeners can safely call back into the registry.
+    OnWarningAdded.Broadcast(Entry);
 }
 
 TArray<FWarningEntry> UPlayerWarningRegistry::GetWarningsForUid(const FString& Uid) const
@@ -157,28 +171,33 @@ void UPlayerWarningRegistry::AddWarning(const FString& Uid, const FString& Playe
 {
     if (Uid.IsEmpty()) return;
 
-    FScopeLock Lock(&Mutex);
-
-    int64 NextId = 1;
-    for (const FWarningEntry& W : Warnings)
-        if (W.Id >= NextId) NextId = W.Id + 1;
-
     FWarningEntry Entry;
-    Entry.Id         = NextId;
-    Entry.Uid        = Uid;
-    Entry.PlayerName = PlayerName;
-    Entry.Reason     = Reason;
-    Entry.WarnedBy   = WarnedBy;
-    Entry.WarnDate   = FDateTime::UtcNow();
-    Entry.Points     = FMath::Max(1, Points);
-    if (ExpiryMinutes > 0)
     {
-        Entry.bHasExpiry  = true;
-        Entry.ExpireDate  = FDateTime::UtcNow() + FTimespan::FromMinutes(ExpiryMinutes);
+        FScopeLock Lock(&Mutex);
+
+        int64 NextId = 1;
+        for (const FWarningEntry& W : Warnings)
+            if (W.Id >= NextId) NextId = W.Id + 1;
+
+        Entry.Id         = NextId;
+        Entry.Uid        = Uid;
+        Entry.PlayerName = PlayerName;
+        Entry.Reason     = Reason;
+        Entry.WarnedBy   = WarnedBy;
+        Entry.WarnDate   = FDateTime::UtcNow();
+        Entry.Points     = FMath::Max(1, Points);
+        if (ExpiryMinutes > 0)
+        {
+            Entry.bHasExpiry  = true;
+            Entry.ExpireDate  = FDateTime::UtcNow() + FTimespan::FromMinutes(ExpiryMinutes);
+        }
+
+        Warnings.Add(Entry);
+        SaveToFile();
     }
 
-    Warnings.Add(Entry);
-    SaveToFile();
+    // Broadcast outside the lock so listeners can safely call back into the registry.
+    OnWarningAdded.Broadcast(Entry);
 }
 
 int32 UPlayerWarningRegistry::GetWarningPoints(const FString& Uid) const

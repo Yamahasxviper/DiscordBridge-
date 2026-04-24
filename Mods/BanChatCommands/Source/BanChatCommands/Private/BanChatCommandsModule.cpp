@@ -144,10 +144,12 @@ void FBanChatCommandsModule::StartupModule()
                 UMuteRegistry* MuteReg = GI->GetSubsystem<UMuteRegistry>();
                 if (MuteReg)
                 {
-                    if (MutedDelegateHandle.IsValid())
-                        MuteReg->OnPlayerMuted.Remove(MutedDelegateHandle);
-                    if (UnmutedDelegateHandle.IsValid())
-                        MuteReg->OnPlayerUnmuted.Remove(UnmutedDelegateHandle);
+                    // Remove any previous binding unconditionally: Remove() with an
+                    // invalid handle is a documented no-op, and always calling it
+                    // guarantees cleanup even in the edge case where a prior
+                    // UMuteRegistry instance was replaced between world loads.
+                    MuteReg->OnPlayerMuted.Remove(MutedDelegateHandle);
+                    MuteReg->OnPlayerUnmuted.Remove(UnmutedDelegateHandle);
 
                     MutedDelegateHandle = MuteReg->OnPlayerMuted.AddLambda(
                         [WeakGI](const FMuteEntry& Entry, bool bIsTimed)

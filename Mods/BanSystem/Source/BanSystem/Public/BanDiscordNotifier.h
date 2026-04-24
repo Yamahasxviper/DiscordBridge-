@@ -28,9 +28,17 @@ public:
                                     const FString& Reason, const FString& WarnedBy,
                                     int32 TotalWarnings);
 
-    /** Called when a player is kicked (without a ban). */
+    /**
+     * Called when a player is kicked (without a ban).
+     * @param Uid  Optional compound UID ("EOS:xxx").  When non-empty the
+     *             OnPlayerKickedLogged delegate is broadcast so that subsystems
+     *             such as BanDiscordSubsystem can route the event into a
+     *             per-player moderation thread.  Existing callers that omit
+     *             the Uid (e.g. Discord slash-kick handlers) are unaffected.
+     */
     static void NotifyPlayerKicked(const FString& PlayerName, const FString& Reason,
-                                   const FString& KickedBy);
+                                   const FString& KickedBy,
+                                   const FString& Uid = FString());
 
     /** Called when a temporary ban expires and the player is allowed to reconnect. */
     static void NotifyBanExpired(const FBanEntry& Entry);
@@ -60,6 +68,20 @@ public:
     /** Called when a player is unmuted via the in-game /unmute command. */
     static void NotifyPlayerUnmuted(const FString& Uid, const FString& PlayerName,
                                     const FString& UnmutedBy);
+
+    // ── Delegates ─────────────────────────────────────────────────────────────
+
+    /**
+     * Fired (on the game thread) by NotifyPlayerKicked() when a non-empty Uid
+     * is supplied.  Allows BanDiscordSubsystem to route in-game /kick events
+     * into per-player moderation threads without direct coupling.
+     * Discord slash-kick handlers intentionally omit the Uid, so this delegate
+     * is only fired for in-game commands — preventing duplicate thread posts.
+     */
+    DECLARE_MULTICAST_DELEGATE_FourParams(FOnPlayerKickedLogged,
+        const FString& /*Uid*/, const FString& /*PlayerName*/,
+        const FString& /*Reason*/, const FString& /*KickedBy*/);
+    static FOnPlayerKickedLogged OnPlayerKickedLogged;
 
 private:
     /**

@@ -338,6 +338,126 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 			});
 	}
 
+	// Mirror non-bot unbans (REST API / BanEnforcer expiry) to the moderation log.
+	// The lambda is guarded by PendingInteractionToken so Discord slash unban
+	// commands (which post their own message via Respond) don't double-post.
+	{
+		TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
+		BanRemovedHandle = UBanDatabase::OnBanRemoved.AddLambda(
+			[WeakThis](const FString& Uid, const FString& PlayerName)
+			{
+				UBanDiscordSubsystem* Self = WeakThis.Get();
+				if (!Self || !Self->CachedProvider) return;
+				if (!Self->PendingInteractionToken.IsEmpty()) return;
+				if (Self->Config.ModerationLogChannelId.IsEmpty()) return;
+
+				const FString DisplayName = PlayerName.IsEmpty() ? Uid : PlayerName;
+				const FString Msg = FString::Printf(
+					TEXT("✅ **%s** (`%s`) unbanned."), *DisplayName, *Uid);
+				Self->PostModerationLog(Msg);
+			});
+	}
+
+	// Route in-game /warn and chat-filter auto-warns to per-player mod threads.
+	// The delegate is a static member of UPlayerWarningRegistry so no subsystem
+	// pointer is needed for subscription.  The PendingInteractionToken guard
+	// prevents duplicate thread posts when a Discord slash /warn is in flight
+	// (that handler already calls PostToPlayerModerationThread directly).
+	{
+		TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
+		WarnAddedHandle = UPlayerWarningRegistry::OnWarningAdded.AddLambda(
+			[WeakThis](const FWarningEntry& Entry)
+			{
+				UBanDiscordSubsystem* Self = WeakThis.Get();
+				if (!Self || !Self->CachedProvider) return;
+				if (!Self->PendingInteractionToken.IsEmpty()) return;
+				if (Self->Config.ModerationLogChannelId.IsEmpty()) return;
+				if (Entry.Uid.IsEmpty()) return;
+
+				const FString WarnMsg = FString::Printf(
+					TEXT("⚠️ **%s** (`%s`) warned.\nReason: %s\nBy: %s"),
+					*Entry.PlayerName, *Entry.Uid, *Entry.Reason, *Entry.WarnedBy);
+				Self->PostToPlayerModerationThread(Entry.PlayerName, Entry.Uid, WarnMsg);
+			});
+	}
+
+	// Route in-game /mute and /unmute (BanChatCommands) to per-player mod threads.
+	// OnPlayerMuted / OnPlayerUnmuted are instance delegates on UMuteRegistry, so
+	// we get the subsystem pointer first.  If BanChatCommands is not installed the
+	// subsystem will be null and the subscription is simply skipped.
+	{
+		TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UMuteRegistry* MuteReg = GI->GetSubsystem<UMuteRegistry>())
+			{
+				MutedEventHandle = MuteReg->OnPlayerMuted.AddLambda(
+					[WeakThis](const FMuteEntry& Entry, bool bIsTimed)
+					{
+						UBanDiscordSubsystem* Self = WeakThis.Get();
+						if (!Self || !Self->CachedProvider) return;
+						if (!Self->PendingInteractionToken.IsEmpty()) return;
+						if (Self->Config.ModerationLogChannelId.IsEmpty()) return;
+
+						const FString DurStr = bIsTimed
+							? FString::Printf(TEXT(" for **%lld minute(s)**"),
+								  static_cast<int64>((Entry.ExpireDate - FDateTime::UtcNow()).GetTotalMinutes()))
+							: TEXT(" **indefinitely**");
+						const FString MuteMsg = FString::Printf(
+							TEXT("🔇 Muted **%s** (`%s`)%s.\nReason: %s\nBy: %s"),
+							*Entry.PlayerName, *Entry.Uid, *DurStr, *Entry.Reason, *Entry.MutedBy);
+						Self->PostToPlayerModerationThread(Entry.PlayerName, Entry.Uid, MuteMsg);
+					});
+
+				UnmutedEventHandle = MuteReg->OnPlayerUnmuted.AddLambda(
+					[WeakThis](const FString& Uid)
+					{
+						UBanDiscordSubsystem* Self = WeakThis.Get();
+						if (!Self || !Self->CachedProvider) return;
+						if (!Self->PendingInteractionToken.IsEmpty()) return;
+						if (Self->Config.ModerationLogChannelId.IsEmpty()) return;
+
+						// Attempt to resolve a display name for the thread lookup.
+						FString PlayerName = Uid;
+						if (UGameInstance* LiveGI = Self->GetGameInstance())
+						{
+							if (UPlayerSessionRegistry* Sessions =
+									LiveGI->GetSubsystem<UPlayerSessionRegistry>())
+							{
+								FPlayerSessionRecord Record;
+								if (Sessions->FindByUid(Uid, Record) && !Record.DisplayName.IsEmpty())
+									PlayerName = Record.DisplayName;
+							}
+						}
+						const FString UnmuteMsg = FString::Printf(
+							TEXT("🔊 Unmuted **%s** (`%s`)."), *PlayerName, *Uid);
+						Self->PostToPlayerModerationThread(PlayerName, Uid, UnmuteMsg);
+					});
+			}
+		}
+	}
+
+	// Route in-game /kick (BanChatCommands) to per-player mod threads.
+	// The OnPlayerKickedLogged delegate is only broadcast when NotifyPlayerKicked()
+	// receives a non-empty Uid; Discord slash-kick handlers omit the Uid so they
+	// never trigger this subscriber — no PendingInteractionToken guard needed.
+	{
+		TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
+		KickLoggedHandle = FBanDiscordNotifier::OnPlayerKickedLogged.AddLambda(
+			[WeakThis](const FString& Uid, const FString& PlayerName,
+			           const FString& Reason, const FString& KickedBy)
+			{
+				UBanDiscordSubsystem* Self = WeakThis.Get();
+				if (!Self || !Self->CachedProvider) return;
+				if (Self->Config.ModerationLogChannelId.IsEmpty()) return;
+
+				const FString KickMsg = FString::Printf(
+					TEXT("👢 Kicked **%s** (`%s`).\nReason: %s\nBy: %s"),
+					*PlayerName, *Uid, *Reason, *KickedBy);
+				Self->PostToPlayerModerationThread(PlayerName, Uid, KickMsg);
+			});
+	}
+
 	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: Initialized. Waiting for Discord provider via SetProvider()."));
 }
@@ -346,11 +466,38 @@ void UBanDiscordSubsystem::Deinitialize()
 {
 	FGameModeEvents::GameModePostLoginEvent.Remove(PostLoginHandle);
 	PostLoginHandle.Reset();
+
 	if (BanAddedHandle.IsValid())
 	{
 		UBanDatabase::OnBanAdded.Remove(BanAddedHandle);
 		BanAddedHandle.Reset();
 	}
+	if (BanRemovedHandle.IsValid())
+	{
+		UBanDatabase::OnBanRemoved.Remove(BanRemovedHandle);
+		BanRemovedHandle.Reset();
+	}
+	if (WarnAddedHandle.IsValid())
+	{
+		UPlayerWarningRegistry::OnWarningAdded.Remove(WarnAddedHandle);
+		WarnAddedHandle.Reset();
+	}
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UMuteRegistry* MuteReg = GI->GetSubsystem<UMuteRegistry>())
+		{
+			MuteReg->OnPlayerMuted.Remove(MutedEventHandle);
+			MuteReg->OnPlayerUnmuted.Remove(UnmutedEventHandle);
+		}
+	}
+	MutedEventHandle.Reset();
+	UnmutedEventHandle.Reset();
+	if (KickLoggedHandle.IsValid())
+	{
+		FBanDiscordNotifier::OnPlayerKickedLogged.Remove(KickLoggedHandle);
+		KickLoggedHandle.Reset();
+	}
+
 	SetProvider(nullptr);
 	Super::Deinitialize();
 }
