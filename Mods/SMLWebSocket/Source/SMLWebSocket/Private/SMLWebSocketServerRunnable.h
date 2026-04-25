@@ -34,7 +34,7 @@ public:
                                          const FString& InApiToken = FString());
     virtual ~FSMLWebSocketServerRunnable() override;
 
-    // ── FRunnable ──────────────────────────────────────────────────────────
+    // ── FRunnable ─────────────────────────────────────────────────────────────
     virtual bool Init() override;
     virtual uint32 Run() override;
     virtual void Stop() override;

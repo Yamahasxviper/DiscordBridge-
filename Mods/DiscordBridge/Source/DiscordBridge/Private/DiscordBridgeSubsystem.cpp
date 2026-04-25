@@ -5187,7 +5187,7 @@ void UDiscordBridgeSubsystem::HandleBotInfoCommand(const FString& ResponseChanne
 {
 if (Config.BotToken.IsEmpty() || ResponseChannelId.IsEmpty()) return;
 
-// ── Embed 1: General / chat commands ─────────────────────────────────────
+// ── Embed 1: General / chat commands ─────────────────────────────────────────
 {
 TSharedPtr<FJsonObject> Embed = MakeShared<FJsonObject>();
 Embed->SetStringField(TEXT("title"), TEXT("📖 DiscordBridge — Features & Commands"));
@@ -5247,7 +5247,7 @@ TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(Embed) });
 SendMessageBodyToChannel(ResponseChannelId, Body);
 }
 
-// ── Embed 2: Admin / Moderator commands (only when BanSystem is active) ───
+// ── Embed 2: Admin / Moderator commands (only when BanSystem is active) ──────
 {
 TSharedPtr<FJsonObject> Embed = MakeShared<FJsonObject>();
 Embed->SetStringField(TEXT("title"), TEXT("🛡️ Moderation Commands (BanSystem)"));
@@ -5457,7 +5457,7 @@ const FString Url = FString::Printf(
 TEXT("https://discord.com/api/v10/applications/%s/guilds/%s/commands"),
 *BotUserId, *GuildId);
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 // Build a command option JSON value.  Type: 3=STRING, 4=INTEGER, 5=BOOLEAN.
 // When bAutocomplete is true the option enables Discord's type-ahead suggestions.
@@ -5511,14 +5511,14 @@ auto StrOAC = [&](const FString& N, const FString& D) { return MakeOpt(N, D, 3, 
 
 TArray<TSharedPtr<FJsonValue>> Commands;
 
-// ── Standalone public commands ─────────────────────────────────────────────
+// ── Standalone public commands ───────────────────────────────────────────────
 Commands.Add(MakeCmd(TEXT("players"), TEXT("Show the list of online players.")));
 Commands.Add(MakeCmd(TEXT("stats"),   TEXT("Show server statistics.")));
 Commands.Add(MakeCmd(TEXT("server"),  TEXT("Show server info embed.")));
 Commands.Add(MakeCmd(TEXT("online"),  TEXT("Show online players as a rich embed.")));
 Commands.Add(MakeCmd(TEXT("help"),    TEXT("Show the bot command reference.")));
 
-// ── /ban – ban management (admin) ─────────────────────────────────────────
+// ── /ban – ban management (admin) ────────────────────────────────────────────
 Commands.Add(MakeCmd(TEXT("ban"), TEXT("Ban management commands."),
 {
 	MakeSub(TEXT("add"),        TEXT("Permanently ban a player."),
@@ -5556,7 +5556,7 @@ Commands.Add(MakeCmd(TEXT("ban"), TEXT("Ban management commands."),
 		{ Str(TEXT("players"), TEXT("Space-separated UIDs")), Str(TEXT("reason"), TEXT("Reason for all targets")) }),
 }));
 
-// ── /warn – warning management (admin) ────────────────────────────────────
+// ── /warn – warning management (admin) ───────────────────────────────────────
 Commands.Add(MakeCmd(TEXT("warn"), TEXT("Warning management commands."),
 {
 	MakeSub(TEXT("add"),      TEXT("Issue a formal warning."),
@@ -5569,7 +5569,7 @@ Commands.Add(MakeCmd(TEXT("warn"), TEXT("Warning management commands."),
 		{ Int(TEXT("warning_id"), TEXT("Warning integer ID")) }),
 }));
 
-// ── /mod – moderator commands (mod or admin) ──────────────────────────────
+// ── /mod – moderator commands (mod or admin) ─────────────────────────────────
 Commands.Add(MakeCmd(TEXT("mod"), TEXT("Moderation commands (moderator or admin)."),
 {
 	MakeSub(TEXT("kick"),       TEXT("Kick a connected player."),
@@ -5600,7 +5600,7 @@ Commands.Add(MakeCmd(TEXT("mod"), TEXT("Moderation commands (moderator or admin)
 		{ StrAC(TEXT("player"),   TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 }));
 
-// ── /player – player information commands (admin) ─────────────────────────
+// ── /player – player information commands (admin) ────────────────────────────
 Commands.Add(MakeCmd(TEXT("player"), TEXT("Player information and note commands."),
 {
 	MakeSub(TEXT("history"),    TEXT("Show known session records for a player."),
@@ -5619,7 +5619,7 @@ Commands.Add(MakeCmd(TEXT("player"), TEXT("Player information and note commands.
 		{ StrAC(TEXT("player"),  TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 }));
 
-// ── /appeal – ban appeal management (admin) ───────────────────────────────
+// ── /appeal – ban appeal management (admin) ──────────────────────────────────
 Commands.Add(MakeCmd(TEXT("appeal"), TEXT("Ban appeal management commands."),
 {
 	MakeSub(TEXT("list"),    TEXT("List pending ban appeals.")),
@@ -5631,7 +5631,7 @@ Commands.Add(MakeCmd(TEXT("appeal"), TEXT("Ban appeal management commands."),
 		{ Int(TEXT("id"), TEXT("Appeal integer ID")) }),
 }));
 
-// ── /admin – admin utility commands ──────────────────────────────────────
+// ── /admin – admin utility commands ──────────────────────────────────────────
 Commands.Add(MakeCmd(TEXT("admin"), TEXT("Admin utility commands."),
 {
 	MakeSub(TEXT("say"),          TEXT("Broadcast an admin message in-game."),
@@ -5645,7 +5645,7 @@ Commands.Add(MakeCmd(TEXT("admin"), TEXT("Admin utility commands."),
 		{ StrO(TEXT("reason"),    TEXT("Reason for clearing chat")) }),
 }));
 
-// ── /whitelist – whitelist management (role-restricted) ──────────────────
+// ── /whitelist – whitelist management (role-restricted) ──────────────────────
 Commands.Add(MakeCmd(TEXT("whitelist"), TEXT("Whitelist management commands."),
 {
 	MakeSub(TEXT("on"),     TEXT("Enable the server whitelist.")),
@@ -5667,7 +5667,7 @@ Commands.Add(MakeCmd(TEXT("whitelist"), TEXT("Whitelist management commands."),
 		{ StrAC(TEXT("query"),      TEXT("Partial name to search for")) }),
 }));
 
-// ── /ticket – ticket management (support role) ───────────────────────────
+// ── /ticket – ticket management (support role) ───────────────────────────────
 Commands.Add(MakeCmd(TEXT("ticket"), TEXT("Support ticket management commands."),
 {
 	MakeSub(TEXT("panel"),    TEXT("Post the ticket selection panel to the configured channel.")),
@@ -6062,7 +6062,7 @@ CmdName = CmdName.ToLower();
 const TArray<TSharedPtr<FJsonValue>>* TopOptions = nullptr;
 (*CmdDataPtr)->TryGetArrayField(TEXT("options"), TopOptions);
 
-// ── Standalone public commands ─────────────────────────────────────────────
+// ── Standalone public commands ───────────────────────────────────────────────
 // These are handled inline and respond directly to the interaction.
 
 if (CmdName == TEXT("players"))
@@ -6154,7 +6154,7 @@ RespondToInteraction(InteractionId, InteractionToken, 4, Reply, false);
 return;
 }
 
-// ── /whitelist – handled within DiscordBridgeSubsystem ────────────────────
+// ── /whitelist – handled within DiscordBridgeSubsystem ───────────────────────
 if (CmdName == TEXT("whitelist"))
 {
 // Acknowledge the interaction immediately.
@@ -6233,7 +6233,7 @@ HandleWhitelistCommand(SubCmd, AuthorName, Config.ChannelId, AuthorId);
 return;
 }
 
-// ── /player stats – handled here since HandlePlayerStatsCommand lives here ─
+// ── /player stats – handled here since HandlePlayerStatsCommand lives here ───
 if (CmdName == TEXT("player") && TopOptions && !TopOptions->IsEmpty())
 {
 const TSharedPtr<FJsonObject>* SubCheck = nullptr;
@@ -6252,7 +6252,7 @@ return;
 }
 }
 
-// ── /ticket – delegated to TicketSubsystem via the interaction delegate ────
+// ── /ticket – delegated to TicketSubsystem via the interaction delegate ──────
 if (CmdName == TEXT("ticket"))
 {
 if (!OnDiscordInteractionReceived.IsBound())
@@ -6271,7 +6271,7 @@ OnDiscordInteractionReceived.Broadcast(DataObj);
 return;
 }
 
-// ── Ban / mod / warn / player / appeal / admin ─────────────────────────────
+// ── Ban / mod / warn / player / appeal / admin ───────────────────────────────
 // These are delegated to UBanDiscordSubsystem via the interaction delegate.
 // Acknowledge first so Discord does not show "interaction failed"; the real
 // response is posted to the channel by the existing command handler.

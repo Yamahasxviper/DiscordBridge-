@@ -25,7 +25,7 @@ class BANSYSTEM_API UBanAppealRegistry : public UGameInstanceSubsystem
     GENERATED_BODY()
 
 public:
-    // ── USubsystem ────────────────────────────────────────────────────────
+    // ── USubsystem ───────────────────────────────────────────────────────────
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
@@ -67,7 +67,7 @@ public:
                       const FString& ReviewedByName,
                       const FString& ReviewNote);
 
-    // ── Delegates ─────────────────────────────────────────────────────────────
+    // ── Delegates ────────────────────────────────────────────────────────────
 
     /**
      * Fired after every AddAppeal() call.

@@ -34,7 +34,7 @@
 class BANCHATCOMMANDS_API FBanChatCommandsModule : public IModuleInterface
 {
 public:
-    virtual void StartupModule()  override;
+    virtual void StartupModule() override;
     virtual void ShutdownModule() override;
 
     /** Writes the current admin list to Saved/BanChatCommands/BanChatCommands.ini.
@@ -53,7 +53,7 @@ private:
     /** Handle for the game-mode post-login event — re-applies freeze for reconnecting players. */
     FDelegateHandle PostLoginHandle;
 
-    // ── Auto-reload ───────────────────────────────────────────────────────────
+    // ── Auto-reload ──────────────────────────────────────────────────────────
 
     /** How often (seconds) to poll for config-file changes. */
     static constexpr float ConfigPollIntervalSeconds = 60.0f;

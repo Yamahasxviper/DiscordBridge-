@@ -47,7 +47,7 @@ public:
     virtual ~USMLWebSocketServer() override;
     virtual void BeginDestroy() override;
 
-    // ── Delegates ─────────────────────────────────────────────────────────
+    // ── Delegates ─────────────────────────────────────────────────────────────
 
     /** Fired when a new WebSocket client connects. ClientId is a unique string for this session. */
     UPROPERTY(BlueprintAssignable, Category="SML|WebSocket|Server")
@@ -65,12 +65,12 @@ public:
     UPROPERTY(BlueprintAssignable, Category="SML|WebSocket|Server")
     FSMLWebSocketServerOnErrorDelegate OnError;
 
-    // ── Factory ───────────────────────────────────────────────────────────
+    // ── Factory ───────────────────────────────────────────────────────────────
 
     UFUNCTION(BlueprintCallable, Category="SML|WebSocket|Server", meta=(WorldContext="WorldContextObject"))
     static USMLWebSocketServer* CreateWebSocketServer(UObject* WorldContextObject);
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     /**
      * Start listening for WebSocket connections on the given port.
@@ -81,17 +81,17 @@ public:
     UFUNCTION(BlueprintCallable, Category="SML|WebSocket|Server")
     bool Listen(int32 Port);
 
-	/**
-	 * Optional API token for server-side authentication.
-	 * When non-empty, incoming WebSocket clients must include the HTTP header:
-	 *   Authorization: Bearer <token>
-	 * in their HTTP Upgrade request to be accepted. Clients that do not present
-	 * the correct token receive an HTTP 401 response and the connection is closed.
-	 * Leave empty (default) to accept all connections without authentication.
-	 * Set this before calling Listen().
-	 */
-	UPROPERTY(BlueprintReadWrite, Category="SML|WebSocket|Server")
-	FString ApiToken;
+    /**
+     * Optional API token for server-side authentication.
+     * When non-empty, incoming WebSocket clients must include the HTTP header:
+     *   Authorization: Bearer <token>
+     * in their HTTP Upgrade request to be accepted. Clients that do not present
+     * the correct token receive an HTTP 401 response and the connection is closed.
+     * Leave empty (default) to accept all connections without authentication.
+     * Set this before calling Listen().
+     */
+    UPROPERTY(BlueprintReadWrite, Category="SML|WebSocket|Server")
+    FString ApiToken;
 
     /** Stop accepting new connections and close all active connections. */
     UFUNCTION(BlueprintCallable, Category="SML|WebSocket|Server")
@@ -101,7 +101,7 @@ public:
     UFUNCTION(BlueprintPure, Category="SML|WebSocket|Server")
     bool IsListening() const;
 
-    // ── Messaging ─────────────────────────────────────────────────────────
+    // ── Messaging ─────────────────────────────────────────────────────────────
 
     /** Send a text message to all currently-connected clients. */
     UFUNCTION(BlueprintCallable, Category="SML|WebSocket|Server")

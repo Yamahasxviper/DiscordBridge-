@@ -59,7 +59,7 @@ void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
                 Enforcer->OnPostLogin(GameMode, NewPlayer);
         });
 
-    // ──────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
     // PreLogin hook — capture the EOS PUID from the client Options string.
     //
     // Root cause of the "gave up waiting for EOS PUID" / "/whoami UNCOMPLETED"
@@ -72,7 +72,7 @@ void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
     // (same string logged as "Login request: ?ClientIdentity=...").  We hook it
     // here with SUBSCRIBE_UOBJECT_METHOD_AFTER to extract and cache the decoded
     // EOS PUID, keyed by UNetConnection, before PostLogin fires.
-    // ──────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
     PreLoginHookHandle = SUBSCRIBE_UOBJECT_METHOD_AFTER(UFGGameModeDSComponent, PreLogin,
         ([WeakThis](const bool& bLoginAllowed,
                     UFGGameModeDSComponent* /*Self*/,
@@ -1072,7 +1072,7 @@ FString UBanEnforcer::ExtractEosPuidFromConnectionUrl(APlayerController* PC)
         }
     }
 
-    // ── Fallback path: Conn->URL option (works if CSS ever sets it) ───────────
+    // ── Fallback path: Conn->URL option (works if CSS ever sets it) ──────────
     // Kept as a belt-and-suspenders fallback; historically always returned null
     // on CSS DS 1.1.0 because Conn->URL holds the server bind address, not the
     // client join URL.  May become relevant for future CSS versions.

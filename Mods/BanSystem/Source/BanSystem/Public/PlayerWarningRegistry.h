@@ -25,7 +25,7 @@ class BANSYSTEM_API UPlayerWarningRegistry : public UGameInstanceSubsystem
     GENERATED_BODY()
 
 public:
-    // ── USubsystem ────────────────────────────────────────────────────────
+    // ── USubsystem ───────────────────────────────────────────────────────────
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
@@ -111,7 +111,7 @@ public:
      */
     int32 PruneExpiredWarnings();
 
-    // ── Delegates ─────────────────────────────────────────────────────────────
+    // ── Delegates ────────────────────────────────────────────────────────────
 
     /**
      * Fired on the game thread after every successful AddWarning() call.
