@@ -2433,6 +2433,8 @@ EExecutionStatus AUnmuteChatCommand::ExecuteCommand_Implementation(
     if (MuteReg->UnmutePlayer(Uid))
     {
         FBanDiscordNotifier::NotifyPlayerUnmuted(Uid, DisplayName, Sender->GetSenderName());
+        if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
+            AuditLog->LogAction(TEXT("unmute"), Uid, DisplayName, AdminUid, Sender->GetSenderName(), TEXT(""));
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Unmuted '%s'."), *DisplayName),
             FLinearColor::Green);
@@ -2704,6 +2706,11 @@ EExecutionStatus ATempUnmuteChatCommand::ExecuteCommand_Implementation(
 
     MuteReg->UnmutePlayer(Uid);
     FBanDiscordNotifier::NotifyPlayerUnmuted(Uid, DisplayName, Sender->GetSenderName());
+
+    UWorld* W = GetWorld();
+    if (UGameInstance* GI2 = W ? W->GetGameInstance() : nullptr)
+        if (UBanAuditLog* AuditLog = GI2->GetSubsystem<UBanAuditLog>())
+            AuditLog->LogAction(TEXT("unmute"), Uid, DisplayName, AdminId, Sender->GetSenderName(), TEXT("Timed mute lifted early"));
 
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] Timed mute lifted early for '%s'."), *DisplayName),
@@ -3292,7 +3299,7 @@ EExecutionStatus AMuteReasonChatCommand::ExecuteCommand_Implementation(
     }
 
     Sender->SendChatMessage(
-        FString::Printf(TEXT("[BanChatCommands] :white_check_mark: Mute reason for **%s** updated."), *DisplayName),
+        FString::Printf(TEXT("[BanChatCommands] Updated mute reason for '%s'."), *DisplayName),
         FLinearColor::Green);
 
     return EExecutionStatus::COMPLETED;

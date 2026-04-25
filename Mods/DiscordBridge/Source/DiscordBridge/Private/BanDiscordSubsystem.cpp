@@ -437,11 +437,6 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 								if (Sessions->FindByUid(Uid, Record) && !Record.DisplayName.IsEmpty())
 									PlayerName = Record.DisplayName;
 							}
-
-							// Write to audit log so timed-mute auto-expiries appear in history.
-							if (UBanAuditLog* AuditLog = LiveGI->GetSubsystem<UBanAuditLog>())
-								AuditLog->LogAction(TEXT("unmute"), Uid, PlayerName,
-								                    TEXT("system"), TEXT("system"), TEXT("Timed mute expired"));
 						}
 						const FString UnmuteMsg = FString::Printf(
 							TEXT("🔊 Unmuted **%s** (`%s`)."), *PlayerName, *Uid);
@@ -3099,6 +3094,9 @@ void UBanDiscordSubsystem::HandleTempUnmuteCommand(const TArray<FString>& Args,
 
 	MuteReg->UnmutePlayer(Uid);
 
+	if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
+		AuditLog->LogAction(TEXT("unmute"), Uid, DisplayName, SenderName, SenderName, TEXT("Timed mute lifted early"));
+
 	const FString UnmuteMsg = FString::Printf(
 		TEXT("🔊 Timed mute lifted from **%s** (`%s`) early.\nUnmuted by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
@@ -3106,7 +3104,7 @@ void UBanDiscordSubsystem::HandleTempUnmuteCommand(const TArray<FString>& Args,
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Timed mute lifted for @%s. By: %s."),
 		*StaffPrefix, *DisplayName, *SenderName));
-	PostModerationLog(UnmuteMsg);
+	PostToPlayerModerationThread(DisplayName, Uid, UnmuteMsg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

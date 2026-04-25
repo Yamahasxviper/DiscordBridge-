@@ -459,7 +459,13 @@ bool FBanChatCommandsModule::OnMuteExpiryTick(float /*DeltaTime*/)
         UGameInstance* GI = WCtx.OwningGameInstance;
         if (!GI) continue;
         UMuteRegistry* MuteReg = GI->GetSubsystem<UMuteRegistry>();
-        if (MuteReg) MuteReg->TickExpiry();
+        if (!MuteReg) continue;
+        TArray<FString> Expired = MuteReg->TickExpiry();
+        if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+        {
+            for (const FString& ExpiredUid : Expired)
+                AuditLog->LogAction(TEXT("unmute"), ExpiredUid, TEXT(""), TEXT("system"), TEXT("system"), TEXT("Timed mute expired"));
+        }
     }
     return true; // keep ticking
 }
