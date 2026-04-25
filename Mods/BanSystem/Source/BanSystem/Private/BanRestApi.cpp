@@ -604,6 +604,11 @@ void UBanRestApi::RegisterRoutes()
             if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
 
             const int64 Id = FCString::Atoi64(*IdStr);
+            if (Id <= 0)
+            {
+                Done(BanJson::Error(TEXT("Invalid ban ID"), EHttpServerResponseCodes::BadRequest));
+                return true;
+            }
 
             // Use the overload that atomically captures the deleted entry's data
             // inside the database lock, eliminating the TOCTOU window that existed
@@ -1829,6 +1834,11 @@ void UBanRestApi::RegisterRoutes()
                 return true;
             }
             const int64 Id = FCString::Atoi64(*IdStr);
+            if (Id <= 0)
+            {
+                Done(BanJson::Error(TEXT("Invalid appeal ID"), EHttpServerResponseCodes::BadRequest));
+                return true;
+            }
 
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
@@ -1999,6 +2009,11 @@ void UBanRestApi::RegisterRoutes()
                 return true;
             }
             const int64 Id = FCString::Atoi64(*IdStr);
+            if (Id <= 0)
+            {
+                Done(BanJson::Error(TEXT("Invalid appeal ID"), EHttpServerResponseCodes::BadRequest));
+                return true;
+            }
 
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
@@ -2300,6 +2315,11 @@ void UBanRestApi::RegisterRoutes()
                 return true;
             }
             const int64 Id = FCString::Atoi64(*IdStr);
+            if (Id <= 0)
+            {
+                Done(BanJson::Error(TEXT("Invalid appeal ID"), EHttpServerResponseCodes::BadRequest));
+                return true;
+            }
 
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
@@ -2489,6 +2509,11 @@ void UBanRestApi::RegisterRoutes()
                 return true;
             }
             const int64 Id = FCString::Atoi64(*IdStr);
+            if (Id <= 0)
+            {
+                Done(BanJson::Error(TEXT("Invalid scheduled ban ID"), EHttpServerResponseCodes::BadRequest));
+                return true;
+            }
 
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
