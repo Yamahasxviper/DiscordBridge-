@@ -213,6 +213,8 @@ void UMuteRegistry::LoadFromFile()
     }
 
     const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+    int32 LoadedCount = 0;
+    int32 ExpiredSkipped = 0;
     if (Root->TryGetArrayField(TEXT("mutes"), Arr) && Arr)
     {
         for (const TSharedPtr<FJsonValue>& Val : *Arr)
@@ -234,9 +236,28 @@ void UMuteRegistry::LoadFromFile()
             if ((*ObjPtr)->TryGetStringField(TEXT("expireDate"), DateStr))
                 FDateTime::ParseIso8601(*DateStr, Entry.ExpireDate);
 
-            if (!Entry.Uid.IsEmpty() && !Entry.IsExpired())
+            if (Entry.Uid.IsEmpty()) continue;
+
+            if (Entry.IsExpired())
+            {
+                ++ExpiredSkipped;
+            }
+            else
+            {
                 Mutes.Add(Entry);
+                ++LoadedCount;
+            }
         }
+    }
+
+    // Compact the file when expired entries were skipped so they do not
+    // accumulate on disk indefinitely across server restarts.
+    if (ExpiredSkipped > 0)
+    {
+        UE_LOG(LogMuteRegistry, Log,
+            TEXT("MuteRegistry: discarding %d expired mute(s) from disk during load."),
+            ExpiredSkipped);
+        SaveToFile();
     }
 }
 

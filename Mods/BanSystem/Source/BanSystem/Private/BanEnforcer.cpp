@@ -271,12 +271,31 @@ void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
             }
         }
     }
+
+    // Subscribe to ban-removal events so AlreadyNotifiedExpiredBanUids does not
+    // grow unboundedly.  When a ban record is deleted (manually, via REST API, or
+    // by expiry pruning) the corresponding UID is evicted from the dedup set so
+    // that a future re-ban + expiry cycle will still trigger a notification.
+    TWeakObjectPtr<UBanEnforcer> WeakThisBR(this);
+    BanRemovedHandle = UBanDatabase::OnBanRemoved.AddLambda(
+        [WeakThisBR](const FString& Uid, const FString& /*PlayerName*/)
+        {
+            if (UBanEnforcer* Enforcer = WeakThisBR.Get())
+                Enforcer->AlreadyNotifiedExpiredBanUids.Remove(Uid);
+        });
 }
 
 void UBanEnforcer::Deinitialize()
 {
     FGameModeEvents::GameModePostLoginEvent.Remove(PostLoginHandle);
     PostLoginHandle.Reset();
+
+    // Unsubscribe from ban-removal notifications.
+    if (BanRemovedHandle.IsValid())
+    {
+        UBanDatabase::OnBanRemoved.Remove(BanRemovedHandle);
+        BanRemovedHandle.Reset();
+    }
 
     // Remove the PreLogin / NotifyPlayerLogout SML hooks.
     UNSUBSCRIBE_UOBJECT_METHOD(UFGGameModeDSComponent, PreLogin, PreLoginHookHandle);

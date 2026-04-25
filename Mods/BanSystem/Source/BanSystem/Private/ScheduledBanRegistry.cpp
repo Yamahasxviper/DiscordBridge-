@@ -181,7 +181,8 @@ void UScheduledBanRegistry::ApplyScheduledBan(const FScheduledBanEntry& Entry)
 
 void UScheduledBanRegistry::LoadFromFile()
 {
-    // Caller should hold Mutex or call from Initialize before other threads run.
+    // Always hold the mutex regardless of calling context (Initialize or reload).
+    FScopeLock Lock(&Mutex);
     Pending.Empty();
 
     FString RawJson;

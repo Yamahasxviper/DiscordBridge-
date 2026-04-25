@@ -598,23 +598,11 @@ void UBanRestApi::RegisterRoutes()
 
             const int64 Id = FCString::Atoi64(*IdStr);
 
-            // Look up before deletion so we have the UID/name for notifications.
-            FString DeletedUid;
-            FString DeletedPlayerName;
-            {
-                TArray<FBanEntry> AllBans = DB->GetAllBans();
-                for (const FBanEntry& E : AllBans)
-                {
-                    if (E.Id == Id)
-                    {
-                        DeletedUid        = E.Uid;
-                        DeletedPlayerName = E.PlayerName;
-                        break;
-                    }
-                }
-            }
-
-            if (!DB->RemoveBanById(Id))
+            // Use the overload that atomically captures the deleted entry's data
+            // inside the database lock, eliminating the TOCTOU window that existed
+            // when GetAllBans() + RemoveBanById() were called as two separate steps.
+            FBanEntry DeletedEntry;
+            if (!DB->RemoveBanById(Id, DeletedEntry))
             {
                 Done(BanJson::Error(
                     FString::Printf(TEXT("No ban found with id %lld"), Id),
@@ -622,9 +610,9 @@ void UBanRestApi::RegisterRoutes()
                 return true;
             }
 
-            FBanDiscordNotifier::NotifyBanRemoved(DeletedUid, DeletedPlayerName, TEXT("api"));
+            FBanDiscordNotifier::NotifyBanRemoved(DeletedEntry.Uid, DeletedEntry.PlayerName, TEXT("api"));
             if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-                AuditLog->LogAction(TEXT("unban"), DeletedUid, DeletedPlayerName, TEXT("api"), TEXT("api"),
+                AuditLog->LogAction(TEXT("unban"), DeletedEntry.Uid, DeletedEntry.PlayerName, TEXT("api"), TEXT("api"),
                     FString::Printf(TEXT("id=%lld"), Id));
 
             Done(BanJson::Ok(FString::Printf(TEXT("Ban id=%lld removed"), Id)));
@@ -1124,7 +1112,15 @@ void UBanRestApi::RegisterRoutes()
             if (!GI) { OnComplete(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
 
             const FString* IdParam = Request.PathParams.Find(TEXT("id"));
-            const int64 Id = IdParam ? FCString::Atoi64(**IdParam) : 0;
+            // Validate before Atoi64: the string must be numeric and short enough
+            // to fit in int64 (max 19 decimal digits) to avoid undefined behaviour
+            // from overflow in FCString::Atoi64.
+            if (!IdParam || !IdParam->IsNumeric() || IdParam->Len() > 19)
+            {
+                OnComplete(BanJson::Error(TEXT("Invalid warning ID"), EHttpServerResponseCodes::BadRequest));
+                return true;
+            }
+            const int64 Id = FCString::Atoi64(**IdParam);
             if (Id <= 0)
             {
                 OnComplete(BanJson::Error(TEXT("Invalid warning ID"), EHttpServerResponseCodes::BadRequest));

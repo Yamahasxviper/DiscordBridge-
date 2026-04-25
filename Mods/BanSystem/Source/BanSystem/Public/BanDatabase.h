@@ -55,6 +55,17 @@ public:
     bool RemoveBanById(int64 Id);
 
     /**
+     * Atomically look up and remove a ban by its integer row ID.
+     * If a matching record is found it is removed, OutEntry is filled with the
+     * deleted data, and the method returns true.  OutEntry is untouched on
+     * failure.  Use this overload when the caller needs the deleted entry's
+     * details (e.g. UID, player name) for notifications — it eliminates the
+     * TOCTOU window that exists when GetAllBans() + RemoveBanById() are called
+     * separately.
+     */
+    bool RemoveBanById(int64 Id, FBanEntry& OutEntry);
+
+    /**
      * Delete all expired temporary bans.
      * Returns the number of bans removed.
      */

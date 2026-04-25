@@ -207,19 +207,25 @@ void UBanDatabase::Deinitialize()
 
 void UBanDatabase::ReloadIfChanged()
 {
-    // Read the cached mtime under the lock to avoid a data race with SaveToFile().
-    FDateTime CachedModTime;
-    {
-        FScopeLock Lock(&DbMutex);
-        CachedModTime = LastKnownFileModTime;
-    }
-
     const FDateTime NewModTime = IFileManager::Get().GetTimeStamp(*DbPath);
 
     // GetTimeStamp returns FDateTime(0) when the file does not exist.
-    // In that case there is nothing to reload, so bail out early.
-    if (NewModTime == FDateTime(0) || NewModTime == CachedModTime)
+    if (NewModTime == FDateTime(0))
         return;
+
+    {
+        FScopeLock Lock(&DbMutex);
+        if (NewModTime == LastKnownFileModTime)
+            return;
+
+        // Record the new mtime BEFORE releasing the lock and calling LoadFromFile().
+        // If another external edit arrives concurrently during the load it will
+        // produce a timestamp strictly greater than NewModTime, so the next
+        // ReloadIfChanged() call will detect and load it.  Storing the mtime
+        // after loading would create a window where that concurrent edit is
+        // permanently missed.
+        LastKnownFileModTime = NewModTime;
+    }
 
     UE_LOG(LogBanDatabase, Log,
         TEXT("BanDatabase: bans.json changed on disk, reloading (%s)"), *DbPath);
@@ -228,16 +234,12 @@ void UBanDatabase::ReloadIfChanged()
 
     // Prune any bans that expired while the file was externally edited and
     // immediately write the cleaned list back so the file stays consistent.
+    // PruneExpiredBans() calls SaveToFile() when bans are removed, which in
+    // turn updates LastKnownFileModTime to the post-prune file mtime.
     const int32 Pruned = PruneExpiredBans();
 
-    // Record the definitive mtime after all writes are done.
-    {
-        FScopeLock Lock(&DbMutex);
-        LastKnownFileModTime = IFileManager::Get().GetTimeStamp(*DbPath);
-        UE_LOG(LogBanDatabase, Log,
-            TEXT("BanDatabase: reload complete (%d ban(s), pruned %d expired)"),
-            Bans.Num(), Pruned);
-    }
+    UE_LOG(LogBanDatabase, Log,
+        TEXT("BanDatabase: reload complete (pruned %d expired)"), Pruned);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -263,6 +265,16 @@ void UBanDatabase::LoadFromFile()
     {
         UE_LOG(LogBanDatabase, Warning,
             TEXT("BanDatabase: failed to parse %s — starting with empty ban list"), *DbPath);
+        // Rename the corrupt file so it is not silently re-discarded on every
+        // server restart.  A fresh empty database will be written on the next
+        // SaveToFile() call (e.g. when the first ban is added or at Initialize).
+        const FString CorruptPath = DbPath + TEXT(".corrupt.bak");
+        if (IFileManager::Get().Move(*CorruptPath, *DbPath))
+        {
+            UE_LOG(LogBanDatabase, Warning,
+                TEXT("BanDatabase: corrupt file moved to %s — a fresh database will be created on next write."),
+                *CorruptPath);
+        }
         return;
     }
 
@@ -387,17 +399,22 @@ bool UBanDatabase::RemoveBanByUid(const FString& Uid)
 
 bool UBanDatabase::RemoveBanById(int64 Id)
 {
-    FString RemovedUid;
-    FString RemovedPlayerName;
-    bool bRemoved;
+    FBanEntry Ignored;
+    return RemoveBanById(Id, Ignored);
+}
+
+bool UBanDatabase::RemoveBanById(int64 Id, FBanEntry& OutEntry)
+{
+    bool bRemoved = false;
 
     {
         FScopeLock Lock(&DbMutex);
 
-        // Capture identity before removal so the delegate can carry it.
+        // Capture the full entry before removal so callers have the data they
+        // need for notifications without a separate GetAllBans() round-trip.
         for (const FBanEntry& E : Bans)
         {
-            if (E.Id == Id) { RemovedUid = E.Uid; RemovedPlayerName = E.PlayerName; break; }
+            if (E.Id == Id) { OutEntry = E; break; }
         }
 
         const int32 Removed = Bans.RemoveAll([Id](const FBanEntry& E){ return E.Id == Id; });
@@ -406,7 +423,7 @@ bool UBanDatabase::RemoveBanById(int64 Id)
     }
 
     if (bRemoved)
-        OnBanRemoved.Broadcast(RemovedUid, RemovedPlayerName);
+        OnBanRemoved.Broadcast(OutEntry.Uid, OutEntry.PlayerName);
 
     return bRemoved;
 }
