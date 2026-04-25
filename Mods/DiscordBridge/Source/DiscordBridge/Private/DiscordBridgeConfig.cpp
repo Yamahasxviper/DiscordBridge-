@@ -682,7 +682,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 					}
 				}
 
-				if (!ConfigFile.GetString(ConfigSection, TEXT("PlayersCommandPrefix"), TmpVal))
+				if (!ConfigFile.GetString(ConfigSection, TEXT("PlayersCommandChannelId"), TmpVal))
 				{
 					AppendContent2 +=
 						TEXT("\n")

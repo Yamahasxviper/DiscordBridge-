@@ -3923,8 +3923,22 @@ void UBanDiscordSubsystem::HandlePollCommand(const TArray<FString>& Args,
 		*FieldsJson,
 		*FDateTime::UtcNow().ToIso8601());
 
-	// Send via the provider's body helper (bypasses text escaping).
-	Respond(ChannelId, EmbedJson);
+	// Send as a proper JSON body so Discord renders the embed.
+	// Respond() wraps its argument in {"content":"..."} which would display the
+	// embed JSON as literal text instead of rendering it.
+	TSharedPtr<FJsonObject> BodyObj;
+	TSharedRef<TJsonReader<>> BodyReader = TJsonReaderFactory<>::Create(EmbedJson);
+	if (FJsonSerializer::Deserialize(BodyReader, BodyObj) && BodyObj.IsValid())
+	{
+		CachedProvider->SendMessageBodyToChannel(ChannelId, BodyObj);
+		if (!PendingInteractionToken.IsEmpty())
+			CachedProvider->FollowUpInteraction(PendingInteractionToken,
+				TEXT("✅ Poll posted."), /*bEphemeral=*/true);
+	}
+	else
+	{
+		Respond(ChannelId, TEXT(":x: Failed to build poll embed."));
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4249,7 +4263,22 @@ void UBanDiscordSubsystem::HandleReputationCommand(const TArray<FString>& Args,
 	*Fields,
 	*FDateTime::UtcNow().ToIso8601());
 
-	Respond(ChannelId, EmbedJson);
+	// Send as a proper JSON body so Discord renders the embed.
+	// Respond() wraps its argument in {"content":"..."} which would display the
+	// embed JSON as literal text instead of rendering it.
+	TSharedPtr<FJsonObject> BodyObj;
+	TSharedRef<TJsonReader<>> BodyReader = TJsonReaderFactory<>::Create(EmbedJson);
+	if (FJsonSerializer::Deserialize(BodyReader, BodyObj) && BodyObj.IsValid())
+	{
+		CachedProvider->SendMessageBodyToChannel(ChannelId, BodyObj);
+		if (!PendingInteractionToken.IsEmpty())
+			CachedProvider->FollowUpInteraction(PendingInteractionToken,
+				TEXT("✅ Reputation shown."), /*bEphemeral=*/true);
+	}
+	else
+	{
+		Respond(ChannelId, TEXT(":x: Failed to build reputation embed."));
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

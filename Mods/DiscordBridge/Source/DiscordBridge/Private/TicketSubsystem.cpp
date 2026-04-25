@@ -3112,12 +3112,16 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 
 		const FString SenderName = ExtractSenderDisplayName();
 		TicketChannelToAssignee.Add(SourceChannelId, AssigneeId);
-		TicketChannelToAssigneeName.Add(SourceChannelId, SenderName);
+		// Store the assignee as a mention — we don't have their display name here.
+		// Using SenderName (the assigner) was wrong: it caused the ticket list to
+		// show the assigning mod instead of the person actually handling the ticket.
+		TicketChannelToAssigneeName.Add(SourceChannelId, TEXT("<@") + AssigneeId + TEXT(">"));
 		SaveTicketState();
 
 		Bridge->SendDiscordChannelMessage(SourceChannelId,
 			FString::Printf(
-				TEXT(":pencil: This ticket has been claimed by **%s**."),
+				TEXT(":pencil: Ticket assigned to <@%s> by **%s**."),
+				*AssigneeId,
 				*SenderName));
 		return;
 	}
