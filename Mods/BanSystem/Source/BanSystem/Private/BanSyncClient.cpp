@@ -211,7 +211,10 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
             if (bPermanentMatch && bReasonMatch && bCategoryMatch)
                 return; // Identical — nothing to update.
             // Fields changed — remove the stale record and fall through to re-add.
+            // Guard against re-broadcasting the removal back to peers (B3 fix).
+            bProcessingPeerBan = true;
             DB->RemoveBanByUid(Uid);
+            bProcessingPeerBan = false;
         }
 
         FBanEntry Ban;
@@ -256,7 +259,12 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
 
         if (Uid.IsEmpty()) return;
 
-        if (DB->RemoveBanByUid(Uid))
+        // Guard against re-broadcasting this peer-sourced unban back to peers.
+        bProcessingPeerBan = true;
+        const bool bRemoved = DB->RemoveBanByUid(Uid);
+        bProcessingPeerBan = false;
+
+        if (bRemoved)
         {
             if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
                 AuditLog->LogAction(TEXT("unban"), Uid, PlayerName,

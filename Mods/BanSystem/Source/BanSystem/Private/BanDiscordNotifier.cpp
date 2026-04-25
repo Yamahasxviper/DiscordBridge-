@@ -11,6 +11,8 @@
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogBanDiscordNotifier, Log, All);
+
 // Static delegate definition.
 FBanDiscordNotifier::FOnPlayerKickedLogged FBanDiscordNotifier::OnPlayerKickedLogged;
 
@@ -88,6 +90,16 @@ void FBanDiscordNotifier::PostWebhook(const FString& JsonPayload)
     Request->SetVerb(TEXT("POST"));
     Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
     Request->SetContentAsString(JsonPayload);
+    Request->OnProcessRequestComplete().BindLambda(
+        [](FHttpRequestPtr /*Req*/, FHttpResponsePtr Response, bool bConnectedSuccessfully)
+        {
+            if (!bConnectedSuccessfully || !Response || Response->GetResponseCode() / 100 != 2)
+            {
+                UE_LOG(LogBanDiscordNotifier, Warning,
+                    TEXT("BanDiscordNotifier: Discord webhook delivery failed (HTTP %d)"),
+                    Response ? Response->GetResponseCode() : 0);
+            }
+        });
     Request->ProcessRequest();
 }
 

@@ -358,7 +358,6 @@ void UBanRestApi::RegisterRoutes()
         EHttpServerRequestVerbs::VERB_GET,
         [](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
-            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
             Obj->SetStringField(TEXT("status"),    TEXT("ok"));
             Obj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
@@ -414,7 +413,7 @@ void UBanRestApi::RegisterRoutes()
             if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
 
             const FString* NameQuery = Req.QueryParams.Find(TEXT("name"));
-            const FString Query = NameQuery ? NameQuery->ToLower() : TEXT("");
+            const FString Query = NameQuery ? *NameQuery : TEXT("");
 
             TArray<FBanEntry> All = DB->GetAllBans();
             TArray<TSharedPtr<FJsonValue>> Arr;
@@ -901,7 +900,7 @@ void UBanRestApi::RegisterRoutes()
             if (!Reg) { Done(BanJson::Error(TEXT("PlayerSessionRegistry unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
 
             const FString* NameQuery = Req.QueryParams.Find(TEXT("name"));
-            const FString Query = NameQuery ? NameQuery->ToLower() : TEXT("");
+            const FString Query = NameQuery ? *NameQuery : TEXT("");
 
             TArray<FPlayerSessionRecord> All = Reg->GetAllRecords();
             TArray<TSharedPtr<FJsonValue>> Arr;
