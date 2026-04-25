@@ -966,7 +966,8 @@ int32 UBanDiscordSubsystem::ParseDurationMinutes(const FString& DurationStr)
 
 	// Multi-token compound string: e.g. "2h30m", "1d12h", "1w2d".
 	// Each token is <digits><unit> where unit ∈ {w, d, h, m}.
-	int32 Total = 0;
+	// Use int64 for intermediate accumulation to avoid overflow for large values.
+	int64 Total = 0;
 	bool bHadToken = false;
 	const TCHAR* p = *Lower;
 
@@ -974,7 +975,7 @@ int32 UBanDiscordSubsystem::ParseDurationMinutes(const FString& DurationStr)
 	{
 		if (!FChar::IsDigit(*p)) return 0;
 
-		int32 Num = 0;
+		int64 Num = 0;
 		while (*p && FChar::IsDigit(*p))
 		{
 			Num = Num * 10 + (*p - TEXT('0'));
@@ -996,7 +997,8 @@ int32 UBanDiscordSubsystem::ParseDurationMinutes(const FString& DurationStr)
 	}
 
 	if (!bHadToken || Total <= 0) return 0;
-	return Total;
+	// Cap at INT32_MAX to avoid truncation when converting back to int32.
+	return static_cast<int32>(FMath::Min(Total, static_cast<int64>(INT32_MAX)));
 }
 
 bool UBanDiscordSubsystem::ResolveTarget(const FString& Arg,
@@ -1664,7 +1666,7 @@ void UBanDiscordSubsystem::HandleKickCommand(const TArray<FString>& Args,
 		FBanDiscordNotifier::NotifyPlayerKicked(DisplayName, Reason, SenderName);
 
 		// Write to audit log so Discord-issued kicks appear alongside in-game kicks.
-		if (UGameInstance* GI = GetGameInstance())
+		if (GI)
 		{
 			if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
 				AuditLog->LogAction(TEXT("kick"), Uid, DisplayName, SenderName, SenderName, Reason);
@@ -1736,9 +1738,9 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 		}
 
 		// Write to audit log so Discord-issued unmutes appear alongside in-game unmutes.
-		if (UGameInstance* GI2 = GetGameInstance())
+		if (GI)
 		{
-			if (UBanAuditLog* AuditLog = GI2->GetSubsystem<UBanAuditLog>())
+			if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
 				AuditLog->LogAction(TEXT("unmute"), Uid, DisplayName, SenderName, SenderName, TEXT(""));
 		}
 
@@ -1834,7 +1836,7 @@ void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
 	FBanDiscordNotifier::NotifyWarningIssued(Uid, DisplayName, Reason, SenderName, WarnCount);
 
 	// Write to audit log so Discord-issued warns appear alongside in-game and REST warns.
-	if (UGameInstance* GI = GetGameInstance())
+	if (GI)
 	{
 		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
 			AuditLog->LogAction(TEXT("warn"), Uid, DisplayName, SenderName, SenderName, Reason);
@@ -3305,18 +3307,18 @@ void UBanDiscordSubsystem::HandleStaffChatCommand(const TArray<FString>& Args,
 
 void UBanDiscordSubsystem::PostModerationLog(const FString& Message) const
 {
-if (!CachedProvider) return;
+	if (!CachedProvider) return;
 
-FString TargetChannelId = Config.ModerationLogChannelId;
-if (TargetChannelId.IsEmpty() || TargetChannelId == TEXT("0"))
-{
-	// Fall back to FDiscordBridgeConfig::BanEventsChannelId (cached at
-	// Initialize() to avoid a disk read on every moderation log entry).
-	TargetChannelId = CachedBanEventsChannelId;
-}
-if (TargetChannelId.IsEmpty() || TargetChannelId == TEXT("0")) return;
+	FString TargetChannelId = Config.ModerationLogChannelId;
+	if (TargetChannelId.IsEmpty() || TargetChannelId == TEXT("0"))
+	{
+		// Fall back to FDiscordBridgeConfig::BanEventsChannelId (cached at
+		// Initialize() to avoid a disk read on every moderation log entry).
+		TargetChannelId = CachedBanEventsChannelId;
+	}
+	if (TargetChannelId.IsEmpty() || TargetChannelId == TEXT("0")) return;
 
-CachedProvider->SendDiscordChannelMessage(TargetChannelId, Message);
+	CachedProvider->SendDiscordChannelMessage(TargetChannelId, Message);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3624,66 +3626,64 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 void UBanDiscordSubsystem::HandlePlaytimeCommand(const TArray<FString>& Args,
                                                   const FString& ChannelId)
 {
-if (!CachedProvider) return;
+	if (!CachedProvider) return;
 
-if (Args.IsEmpty())
-{
-Respond(ChannelId,
-TEXT("Usage: `/player playtime <player|PUID>`"));
-return;
-}
+	if (Args.IsEmpty())
+	{
+		Respond(ChannelId, TEXT("Usage: `/player playtime <player|PUID>`"));
+		return;
+	}
 
-FString Uid, DisplayName, ErrorMsg;
-if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
-{
-Respond(ChannelId,
-FString::Printf(TEXT(":x: %s"), *ErrorMsg));
-return;
-}
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
+	{
+		Respond(ChannelId, FString::Printf(TEXT(":x: %s"), *ErrorMsg));
+		return;
+	}
 
-UGameInstance* GI = GetGameInstance();
-UPlayerSessionRegistry* Registry = GI ? GI->GetSubsystem<UPlayerSessionRegistry>() : nullptr;
-if (!Registry)
-{
-Respond(ChannelId,
-TEXT(":x: PlayerSessionRegistry is not available (BanSystem may not be installed)."));
-return;
-}
+	UGameInstance* GI = GetGameInstance();
+	UPlayerSessionRegistry* Registry = GI ? GI->GetSubsystem<UPlayerSessionRegistry>() : nullptr;
+	if (!Registry)
+	{
+		Respond(ChannelId,
+			TEXT(":x: PlayerSessionRegistry is not available (BanSystem may not be installed)."));
+		return;
+	}
 
-FPlayerSessionRecord Record;
-const bool bFound = Registry->FindByUid(Uid, Record);
+	FPlayerSessionRecord Record;
+	const bool bFound = Registry->FindByUid(Uid, Record);
 
-FString Reply;
-if (!bFound || Record.LastSeen.IsEmpty())
-{
-Reply = FString::Printf(TEXT(":hourglass: No session record found for **%s** (`%s`)."),
-*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid);
-}
-else
-{
-// Check if the player is currently online (present in the world).
-bool bOnline = false;
-if (UWorld* World = GI->GetWorld())
-{
-for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-{
-APlayerController* PC = It->Get();
-if (PC && PC->PlayerState && PC->PlayerState->GetPlayerName() == DisplayName)
-{
-bOnline = true;
-break;
-}
-}
-}
+	FString Reply;
+	if (!bFound || Record.LastSeen.IsEmpty())
+	{
+		Reply = FString::Printf(TEXT(":hourglass: No session record found for **%s** (`%s`)."),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid);
+	}
+	else
+	{
+		// Check if the player is currently online by UID (more reliable than display name).
+		bool bOnline = false;
+		if (UWorld* World = GI->GetWorld())
+		{
+			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			{
+				APlayerController* PC = It->Get();
+				if (PC && BanDiscordHelpers::GetControllerUid(PC).Equals(Uid, ESearchCase::IgnoreCase))
+				{
+					bOnline = true;
+					break;
+				}
+			}
+		}
 
-Reply = FString::Printf(
-TEXT(":clock3: **%s** (`%s`)\n• **Last Seen:** %s UTC\n• **Status:** %s"),
-*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid,
-*Record.LastSeen,
-bOnline ? TEXT("🟢 Online") : TEXT("🔴 Offline"));
-}
+		Reply = FString::Printf(
+			TEXT(":clock3: **%s** (`%s`)\n• **Last Seen:** %s UTC\n• **Status:** %s"),
+			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid,
+			*Record.LastSeen,
+			bOnline ? TEXT("🟢 Online") : TEXT("🔴 Offline"));
+	}
 
-Respond(ChannelId, Reply);
+	Respond(ChannelId, Reply);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3694,42 +3694,40 @@ void UBanDiscordSubsystem::HandleSayCommand(const TArray<FString>& Args,
                                              const FString& ChannelId,
                                              const FString& SenderName)
 {
-if (!CachedProvider) return;
+	if (!CachedProvider) return;
 
-if (Args.IsEmpty())
-{
-Respond(ChannelId,
-TEXT("Usage: `!say <message...>` — broadcasts as [ADMIN] in-game"));
-return;
-}
+	if (Args.IsEmpty())
+	{
+		Respond(ChannelId, TEXT("Usage: `!say <message...>` — broadcasts as [ADMIN] in-game"));
+		return;
+	}
 
-UGameInstance* GI = GetGameInstance();
-UWorld* World = GI ? GI->GetWorld() : nullptr;
-if (!World)
-{
-Respond(ChannelId,
-TEXT(":x: No active game world found."));
-return;
-}
+	UGameInstance* GI = GetGameInstance();
+	UWorld* World = GI ? GI->GetWorld() : nullptr;
+	if (!World)
+	{
+		Respond(ChannelId, TEXT(":x: No active game world found."));
+		return;
+	}
 
-const FString Message  = BanDiscordHelpers::JoinArgs(Args, 0);
-const FString Formatted = FString::Printf(TEXT("[ADMIN] %s: %s"), *SenderName, *Message);
+	const FString Message   = BanDiscordHelpers::JoinArgs(Args, 0);
+	const FString Formatted = FString::Printf(TEXT("[ADMIN] %s: %s"), *SenderName, *Message);
 
-int32 Delivered = 0;
-for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-{
-if (APlayerController* PC = It->Get())
-{
-PC->ClientMessage(Formatted);
-++Delivered;
-}
-}
+	int32 Delivered = 0;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (APlayerController* PC = It->Get())
+		{
+			PC->ClientMessage(Formatted);
+			++Delivered;
+		}
+	}
 
-Respond(ChannelId,
-FString::Printf(TEXT("📢 Admin broadcast delivered to **%d** player(s): *%s*"),
-Delivered, *BanDiscordHelpers::EscapeMarkdown(Message)));
+	Respond(ChannelId,
+		FString::Printf(TEXT("📢 Admin broadcast delivered to **%d** player(s): *%s*"),
+			Delivered, *BanDiscordHelpers::EscapeMarkdown(Message)));
 
-PostModerationLog(FString::Printf(TEXT("%s broadcast [ADMIN]: %s"), *SenderName, *Message));
+	PostModerationLog(FString::Printf(TEXT("%s broadcast [ADMIN]: %s"), *SenderName, *Message));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3739,61 +3737,60 @@ PostModerationLog(FString::Printf(TEXT("%s broadcast [ADMIN]: %s"), *SenderName,
 void UBanDiscordSubsystem::HandlePollCommand(const TArray<FString>& Args,
                                               const FString& ChannelId)
 {
-if (!CachedProvider) return;
+	if (!CachedProvider) return;
 
-// Build full text by joining args then splitting on "|".
-const FString FullText = BanDiscordHelpers::JoinArgs(Args, 0);
-TArray<FString> Parts;
-FullText.ParseIntoArray(Parts, TEXT("|"), true);
-for (FString& P : Parts) P.TrimStartAndEndInline();
+	// Build full text by joining args then splitting on "|".
+	const FString FullText = BanDiscordHelpers::JoinArgs(Args, 0);
+	TArray<FString> Parts;
+	FullText.ParseIntoArray(Parts, TEXT("|"), true);
+	for (FString& P : Parts) P.TrimStartAndEndInline();
 
-if (Parts.Num() < 3)
-{
-Respond(ChannelId,
-TEXT("Usage: `!poll <question> | <optionA> | <optionB> [| <optionC> ...]`\n"
- "Example: `!poll Restart tonight? | Yes | No | Maybe`"));
-return;
-}
+	if (Parts.Num() < 3)
+	{
+		Respond(ChannelId,
+			TEXT("Usage: `!poll <question> | <optionA> | <optionB> [| <optionC> ...]`\n"
+			     "Example: `!poll Restart tonight? | Yes | No | Maybe`"));
+		return;
+	}
 
-const FString Question = Parts[0];
-const TArray<FString> Options(Parts.GetData() + 1, Parts.Num() - 1);
+	const FString Question = Parts[0];
+	const TArray<FString> Options(Parts.GetData() + 1, Parts.Num() - 1);
 
-if (Options.Num() < 2 || Options.Num() > 10)
-{
-Respond(ChannelId,
-TEXT(":x: A poll requires between 2 and 10 options."));
-return;
-}
+	if (Options.Num() < 2 || Options.Num() > 10)
+	{
+		Respond(ChannelId, TEXT(":x: A poll requires between 2 and 10 options."));
+		return;
+	}
 
-// Number emoji labels for options.
-static const TCHAR* NumEmoji[] = {
-TEXT("1️⃣"), TEXT("2️⃣"), TEXT("3️⃣"), TEXT("4️⃣"), TEXT("5️⃣"),
-TEXT("6️⃣"), TEXT("7️⃣"), TEXT("8️⃣"), TEXT("9️⃣"), TEXT("🔟")
-};
+	// Number emoji labels for options.
+	static const TCHAR* NumEmoji[] = {
+		TEXT("1️⃣"), TEXT("2️⃣"), TEXT("3️⃣"), TEXT("4️⃣"), TEXT("5️⃣"),
+		TEXT("6️⃣"), TEXT("7️⃣"), TEXT("8️⃣"), TEXT("9️⃣"), TEXT("🔟")
+	};
 
-FString FieldsJson;
-for (int32 i = 0; i < Options.Num(); ++i)
-{
-if (i > 0) FieldsJson += TEXT(",");
-const FString Label = FString::Printf(TEXT("%s %s"), NumEmoji[i],
-*BanDiscordHelpers::Truncate(Options[i], 1024));
-FieldsJson += FString::Printf(
-TEXT("{\"name\":\"%s\",\"value\":\"React with %s to vote\",\"inline\":false}"),
-*Label.Replace(TEXT("\""), TEXT("\\\"")),
-NumEmoji[i]);
-}
+	FString FieldsJson;
+	for (int32 i = 0; i < Options.Num(); ++i)
+	{
+		if (i > 0) FieldsJson += TEXT(",");
+		const FString Label = FString::Printf(TEXT("%s %s"), NumEmoji[i],
+			*BanDiscordHelpers::Truncate(Options[i], 1024));
+		FieldsJson += FString::Printf(
+			TEXT("{\"name\":\"%s\",\"value\":\"React with %s to vote\",\"inline\":false}"),
+			*Label.Replace(TEXT("\""), TEXT("\\\"")),
+			NumEmoji[i]);
+	}
 
-// Assemble embed payload.
-const FString EmbedJson = FString::Printf(
-TEXT("{\"embeds\":[{\"title\":\"📊 %s\",\"color\":5793266,\"fields\":[%s],"
- "\"footer\":{\"text\":\"React to vote! Results visible on the reactions.\"},"
- "\"timestamp\":\"%s\"}]}"),
-*Question.Replace(TEXT("\""), TEXT("\\\"")),
-*FieldsJson,
-*FDateTime::UtcNow().ToIso8601());
+	// Assemble embed payload.
+	const FString EmbedJson = FString::Printf(
+		TEXT("{\"embeds\":[{\"title\":\"📊 %s\",\"color\":5793266,\"fields\":[%s],"
+		     "\"footer\":{\"text\":\"React to vote! Results visible on the reactions.\"},"
+		     "\"timestamp\":\"%s\"}]}"),
+		*Question.Replace(TEXT("\""), TEXT("\\\"")),
+		*FieldsJson,
+		*FDateTime::UtcNow().ToIso8601());
 
-// Send via the provider's body helper (bypasses text escaping).
-Respond(ChannelId, EmbedJson);
+	// Send via the provider's body helper (bypasses text escaping).
+	Respond(ChannelId, EmbedJson);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3804,46 +3801,46 @@ void UBanDiscordSubsystem::PostToPlayerModerationThread(const FString& PlayerNam
                                                          const FString& Uid,
                                                          const FString& Message)
 {
-if (!CachedProvider) return;
-if (Config.ModerationLogChannelId.IsEmpty()) return;
-if (Config.ModerationLogChannelId == TEXT("0")) return;
+	if (!CachedProvider) return;
+	if (Config.ModerationLogChannelId.IsEmpty()) return;
+	if (Config.ModerationLogChannelId == TEXT("0")) return;
 
-// Fast path: a thread for this player was already created in a prior call.
-if (const FString* CachedId = PlayerThreadIdCache.Find(Uid))
-{
-CachedProvider->SendDiscordChannelMessage(*CachedId, Message);
-return;
-}
+	// Fast path: a thread for this player was already created in a prior call.
+	if (const FString* CachedId = PlayerThreadIdCache.Find(Uid))
+	{
+		CachedProvider->SendDiscordChannelMessage(*CachedId, Message);
+		return;
+	}
 
-// Build the thread name: "PlayerName [EOS:xxx]" truncated to 100 chars.
-const FString ThreadName = BanDiscordHelpers::Truncate(
-FString::Printf(TEXT("%s [%s]"), *PlayerName, *Uid), 100);
+	// Build the thread name: "PlayerName [EOS:xxx]" truncated to 100 chars.
+	const FString ThreadName = BanDiscordHelpers::Truncate(
+		FString::Printf(TEXT("%s [%s]"), *PlayerName, *Uid), 100);
 
-// Post a prefixed fallback to the main mod-log channel immediately so the
-// message is never lost, even if thread creation fails or is slow.
-const FString Prefixed = FString::Printf(
-TEXT("**[%s]** %s"), *BanDiscordHelpers::EscapeMarkdown(ThreadName), *Message);
-CachedProvider->SendDiscordChannelMessage(Config.ModerationLogChannelId, Prefixed);
+	// Post a prefixed fallback to the main mod-log channel immediately so the
+	// message is never lost, even if thread creation fails or is slow.
+	const FString Prefixed = FString::Printf(
+		TEXT("**[%s]** %s"), *BanDiscordHelpers::EscapeMarkdown(ThreadName), *Message);
+	CachedProvider->SendDiscordChannelMessage(Config.ModerationLogChannelId, Prefixed);
 
-// Asynchronously create a Discord thread for this player so that future
-// moderation events are grouped per-player rather than posted inline.
-const FString ChanId = Config.ModerationLogChannelId;
-const FString UidKey = Uid;
-TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
+	// Asynchronously create a Discord thread for this player so that future
+	// moderation events are grouped per-player rather than posted inline.
+	const FString ChanId = Config.ModerationLogChannelId;
+	const FString UidKey = Uid;
+	TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
 
-CachedProvider->CreateDiscordThread(ChanId, ThreadName,
-[WeakThis, UidKey](const FString& ThreadId)
-{
-UBanDiscordSubsystem* Self = WeakThis.Get();
-if (Self && !ThreadId.IsEmpty())
-{
-// Cache the thread so subsequent events go straight into it.
-Self->PlayerThreadIdCache.Add(UidKey, ThreadId);
-UE_LOG(LogBanDiscord, Log,
-       TEXT("BanDiscordSubsystem: Created mod-log thread %s for player uid=%s."),
-       *ThreadId, *UidKey);
-}
-});
+	CachedProvider->CreateDiscordThread(ChanId, ThreadName,
+		[WeakThis, UidKey](const FString& ThreadId)
+		{
+			UBanDiscordSubsystem* Self = WeakThis.Get();
+			if (Self && !ThreadId.IsEmpty())
+			{
+				// Cache the thread so subsequent events go straight into it.
+				Self->PlayerThreadIdCache.Add(UidKey, ThreadId);
+				UE_LOG(LogBanDiscord, Log,
+				       TEXT("BanDiscordSubsystem: Created mod-log thread %s for player uid=%s."),
+				       *ThreadId, *UidKey);
+			}
+		});
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3854,70 +3851,73 @@ void UBanDiscordSubsystem::HandleScheduleBanCommand(const TArray<FString>& Args,
                                                      const FString& ChannelId,
                                                      const FString& SenderName)
 {
-if (!CachedProvider) return;
+	if (!CachedProvider) return;
 
-if (Args.Num() < 2)
-{
-Respond(ChannelId,
-TEXT("Usage: `!scheduleban <player|PUID> <delay> [banDuration] [reason...]`\n"
-     "Example: `!scheduleban BadPlayer 2h 1d Griefing`"));
-return;
-}
+	if (Args.Num() < 2)
+	{
+		Respond(ChannelId,
+			TEXT("Usage: `!scheduleban <player|PUID> <delay> [banDuration] [reason...]`\n"
+			     "Example: `!scheduleban BadPlayer 2h 1d Griefing`"));
+		return;
+	}
 
-UGameInstance* GI = GetGameInstance();
-UScheduledBanRegistry* SchReg = GI ? GI->GetSubsystem<UScheduledBanRegistry>() : nullptr;
-if (!SchReg)
-{
-Respond(ChannelId,
-TEXT(":x: ScheduledBanRegistry unavailable."));
-return;
-}
+	UGameInstance* GI = GetGameInstance();
+	UScheduledBanRegistry* SchReg = GI ? GI->GetSubsystem<UScheduledBanRegistry>() : nullptr;
+	if (!SchReg)
+	{
+		Respond(ChannelId, TEXT(":x: ScheduledBanRegistry unavailable."));
+		return;
+	}
 
-FString Uid, DisplayName, ErrorMsg;
-if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
-{
-Uid         = UBanDatabase::MakeUid(TEXT("EOS"), Args[0].ToLower());
-DisplayName = Args[0];
-}
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
+	{
+		Uid         = UBanDatabase::MakeUid(TEXT("EOS"), Args[0].ToLower());
+		DisplayName = Args[0];
+	}
 
-// Parse delay.
-const int32 DelayMinutes = UBanDiscordSubsystem::ParseDurationMinutes(Args[1]);
-if (DelayMinutes <= 0)
-{
-Respond(ChannelId,
-FString::Printf(TEXT(":x: Invalid delay `%s`. Use format like `30m`, `2h`, `1d`."), *Args[1]));
-return;
-}
+	// Parse delay.
+	const int32 DelayMinutes = UBanDiscordSubsystem::ParseDurationMinutes(Args[1]);
+	if (DelayMinutes <= 0)
+	{
+		Respond(ChannelId,
+			FString::Printf(TEXT(":x: Invalid delay `%s`. Use format like `30m`, `2h`, `1d`."), *Args[1]));
+		return;
+	}
 
-// Optional ban duration.
-int32 BanDurationMinutes = 0;
-int32 ReasonIdx = 2;
-if (Args.Num() > 2)
-{
-const int32 Parsed = UBanDiscordSubsystem::ParseDurationMinutes(Args[2]);
-if (Parsed > 0) { BanDurationMinutes = Parsed; ReasonIdx = 3; }
-// ParseDurationMinutes("0") returns 0 (not > 0) so check explicitly for "0" here.
-else if (Args[2] == TEXT("perm") || Args[2] == TEXT("permanent") || Args[2] == TEXT("0")) { BanDurationMinutes = 0; ReasonIdx = 3; }
-}
+	// Optional ban duration.
+	int32 BanDurationMinutes = 0;
+	int32 ReasonIdx = 2;
+	if (Args.Num() > 2)
+	{
+		const int32 Parsed = UBanDiscordSubsystem::ParseDurationMinutes(Args[2]);
+		if (Parsed > 0)
+		{
+			BanDurationMinutes = Parsed;
+			ReasonIdx = 3;
+		}
+		// ParseDurationMinutes("perm") returns 0 — treat as permanent.
+		else if (Args[2] == TEXT("perm") || Args[2] == TEXT("permanent") || Args[2] == TEXT("0"))
+		{
+			BanDurationMinutes = 0;
+			ReasonIdx = 3;
+		}
+	}
 
-FString Reason = TEXT("Scheduled ban");
-if (ReasonIdx < Args.Num())
-{
-Reason.Empty();
-for (int32 i = ReasonIdx; i < Args.Num(); ++i)
-{
-if (i > ReasonIdx) Reason += TEXT(" ");
-Reason += Args[i];
-}
-}
+	FString Reason = TEXT("Scheduled ban");
+	if (ReasonIdx < Args.Num())
+		Reason = BanDiscordHelpers::JoinArgs(Args, ReasonIdx);
 
-const FDateTime EffectiveAt = FDateTime::UtcNow() + FTimespan::FromMinutes(DelayMinutes);
-FScheduledBanEntry Entry = SchReg->AddScheduled(Uid, DisplayName, Reason, SenderName, EffectiveAt, BanDurationMinutes);
+	const FDateTime EffectiveAt = FDateTime::UtcNow() + FTimespan::FromMinutes(DelayMinutes);
+	FScheduledBanEntry Entry = SchReg->AddScheduled(Uid, DisplayName, Reason, SenderName, EffectiveAt, BanDurationMinutes);
 
-const FString DurStr = BanDurationMinutes == 0 ? TEXT("permanent") : FString::Printf(TEXT("%d min"), BanDurationMinutes);
-Respond(ChannelId,
-FString::Printf(TEXT(":calendar: Scheduled ban **#%lld** for `%s` in **%d min** (effective %s). Duration: %s. Reason: %s"),
-Entry.Id, *DisplayName, DelayMinutes, *EffectiveAt.ToString(TEXT("%Y-%m-%d %H:%M:%S")), *DurStr, *Reason));
+	const FString DurStr = BanDurationMinutes == 0
+		? TEXT("permanent")
+		: FString::Printf(TEXT("%d min"), BanDurationMinutes);
+	Respond(ChannelId,
+		FString::Printf(TEXT(":calendar: Scheduled ban **#%lld** for `%s` in **%d min** (effective %s). Duration: %s. Reason: %s"),
+			Entry.Id, *DisplayName, DelayMinutes,
+			*EffectiveAt.ToString(TEXT("%Y-%m-%d %H:%M:%S")), *DurStr, *Reason));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3928,100 +3928,100 @@ void UBanDiscordSubsystem::HandleQBanCommand(const TArray<FString>& Args,
                                               const FString& ChannelId,
                                               const FString& SenderName)
 {
-if (!CachedProvider) return;
+	if (!CachedProvider) return;
 
-const UBanSystemConfig* SysCfg = UBanSystemConfig::Get();
-if (!SysCfg || SysCfg->BanTemplates.IsEmpty())
-{
-Respond(ChannelId,
-TEXT(":x: No ban templates configured (`BanTemplates=` in DefaultBanSystem.ini)."));
-return;
-}
+	const UBanSystemConfig* SysCfg = UBanSystemConfig::Get();
+	if (!SysCfg || SysCfg->BanTemplates.IsEmpty())
+	{
+		Respond(ChannelId,
+		TEXT(":x: No ban templates configured (`BanTemplates=` in DefaultBanSystem.ini)."));
+		return;
+	}
 
-// Parse pipe-delimited template strings into FBanTemplate structs.
-const TArray<FBanTemplate> Templates = FBanTemplate::ParseTemplates(SysCfg->BanTemplates);
+	// Parse pipe-delimited template strings into FBanTemplate structs.
+	const TArray<FBanTemplate> Templates = FBanTemplate::ParseTemplates(SysCfg->BanTemplates);
 
-if (Args.IsEmpty())
-{
-FString List = TEXT("**Available ban templates:**\n");
-for (const FBanTemplate& T : Templates)
-{
-const FString DurStr = T.DurationMinutes == 0 ? TEXT("permanent") : FString::Printf(TEXT("%dmin"), T.DurationMinutes);
-List += FString::Printf(TEXT("`%s` — %s — %s\n"), *T.Slug, *DurStr, *T.Reason);
-}
-Respond(ChannelId, List);
-return;
-}
+	if (Args.IsEmpty())
+	{
+		FString List = TEXT("**Available ban templates:**\n");
+		for (const FBanTemplate& T : Templates)
+		{
+			const FString DurStr = T.DurationMinutes == 0 ? TEXT("permanent") : FString::Printf(TEXT("%dmin"), T.DurationMinutes);
+			List += FString::Printf(TEXT("`%s` — %s — %s\n"), *T.Slug, *DurStr, *T.Reason);
+		}
+		Respond(ChannelId, List);
+		return;
+	}
 
-if (Args.Num() < 2)
-{
-Respond(ChannelId,
-TEXT("Usage: `!qban <templateSlug> <player|PUID>`"));
-return;
-}
+	if (Args.Num() < 2)
+	{
+		Respond(ChannelId,
+		TEXT("Usage: `!qban <templateSlug> <player|PUID>`"));
+		return;
+	}
 
-const FString Slug = Args[0].ToLower();
-const FBanTemplate* Template = nullptr;
-for (const FBanTemplate& T : Templates)
-{
-if (T.Slug.ToLower() == Slug) { Template = &T; break; }
-}
-if (!Template)
-{
-Respond(ChannelId,
-FString::Printf(TEXT(":x: Unknown template `%s`. Use `!qban` to list templates."), *Slug));
-return;
-}
+	const FString Slug = Args[0].ToLower();
+	const FBanTemplate* Template = nullptr;
+	for (const FBanTemplate& T : Templates)
+	{
+		if (T.Slug.ToLower() == Slug) { Template = &T; break; }
+	}
+	if (!Template)
+	{
+		Respond(ChannelId,
+		FString::Printf(TEXT(":x: Unknown template `%s`. Use `!qban` to list templates."), *Slug));
+		return;
+	}
 
-FString Uid, DisplayName, ErrorMsg;
-if (!ResolveTarget(Args[1], Uid, DisplayName, ErrorMsg))
-{
-Uid         = UBanDatabase::MakeUid(TEXT("EOS"), Args[1].ToLower());
-DisplayName = Args[1];
-}
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(Args[1], Uid, DisplayName, ErrorMsg))
+	{
+		Uid         = UBanDatabase::MakeUid(TEXT("EOS"), Args[1].ToLower());
+		DisplayName = Args[1];
+	}
 
-UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
-if (!DB)
-{
-Respond(ChannelId, TEXT(":x: Database unavailable."));
-return;
-}
+	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
+	if (!DB)
+	{
+		Respond(ChannelId, TEXT(":x: Database unavailable."));
+		return;
+	}
 
-FBanEntry Ban;
-Ban.Uid        = Uid;
-UBanDatabase::ParseUid(Uid, Ban.Platform, Ban.PlayerUID);
-Ban.PlayerName      = DisplayName;
-Ban.Reason          = Template->Reason;
-Ban.BannedBy        = SenderName;
-const FDateTime TemplateBanNow = FDateTime::UtcNow();
-Ban.BanDate         = TemplateBanNow;
-Ban.Category        = Template->Category;
-Ban.bIsPermanent    = (Template->DurationMinutes <= 0);
-Ban.ExpireDate      = Ban.bIsPermanent
-? FDateTime(0)
-: TemplateBanNow + FTimespan::FromMinutes(Template->DurationMinutes);
+	FBanEntry Ban;
+	Ban.Uid        = Uid;
+	UBanDatabase::ParseUid(Uid, Ban.Platform, Ban.PlayerUID);
+	Ban.PlayerName      = DisplayName;
+	Ban.Reason          = Template->Reason;
+	Ban.BannedBy        = SenderName;
+	const FDateTime TemplateBanNow = FDateTime::UtcNow();
+	Ban.BanDate         = TemplateBanNow;
+	Ban.Category        = Template->Category;
+	Ban.bIsPermanent    = (Template->DurationMinutes <= 0);
+	Ban.ExpireDate      = Ban.bIsPermanent
+	? FDateTime(0)
+	: TemplateBanNow + FTimespan::FromMinutes(Template->DurationMinutes);
 
-if (!DB->AddBan(Ban))
-{
-Respond(ChannelId, TEXT(":x: Failed to apply ban."));
-return;
-}
+	if (!DB->AddBan(Ban))
+	{
+		Respond(ChannelId, TEXT(":x: Failed to apply ban."));
+		return;
+	}
 
-UGameInstance* GI = GetGameInstance();
-if (UWorld* W = GI ? GI->GetWorld() : nullptr)
-UBanEnforcer::KickConnectedPlayer(W, Uid, Ban.GetKickMessage());
+	UGameInstance* GI = GetGameInstance();
+	if (UWorld* W = GI ? GI->GetWorld() : nullptr)
+	UBanEnforcer::KickConnectedPlayer(W, Uid, Ban.GetKickMessage());
 
-// Also ban counterpart identifiers (IP↔EOS).
-BanDiscordHelpers::AddCounterpartBans(this, DB, Uid, DisplayName,
+	// Also ban counterpart identifiers (IP↔EOS).
+	BanDiscordHelpers::AddCounterpartBans(this, DB, Uid, DisplayName,
 	Template->Reason, SenderName, Ban.bIsPermanent, Ban.ExpireDate);
 
-FBanDiscordNotifier::NotifyBanCreated(Ban);
+	FBanDiscordNotifier::NotifyBanCreated(Ban);
 
-const FString DurStr = Ban.bIsPermanent ? TEXT("permanent") : FString::Printf(TEXT("%dmin"), Template->DurationMinutes);
-FString QBanMsg = FString::Printf(TEXT(":hammer: [%s] Banned **%s** (%s). Reason: %s. Duration: %s."),
-*Slug, *DisplayName, *Uid, *Template->Reason, *DurStr);
-QBanMsg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
-Respond(ChannelId, QBanMsg);
+	const FString DurStr = Ban.bIsPermanent ? TEXT("permanent") : FString::Printf(TEXT("%dmin"), Template->DurationMinutes);
+	FString QBanMsg = FString::Printf(TEXT(":hammer: [%s] Banned **%s** (%s). Reason: %s. Duration: %s."),
+	*Slug, *DisplayName, *Uid, *Template->Reason, *DurStr);
+	QBanMsg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
+	Respond(ChannelId, QBanMsg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4031,91 +4031,91 @@ Respond(ChannelId, QBanMsg);
 void UBanDiscordSubsystem::HandleReputationCommand(const TArray<FString>& Args,
                                                     const FString& ChannelId)
 {
-if (!CachedProvider) return;
+	if (!CachedProvider) return;
 
-if (Args.IsEmpty())
-{
-Respond(ChannelId,
-TEXT("Usage: `!reputation <player|PUID>`"));
-return;
-}
+	if (Args.IsEmpty())
+	{
+		Respond(ChannelId,
+		TEXT("Usage: `!reputation <player|PUID>`"));
+		return;
+	}
 
-FString Uid, DisplayName, ErrorMsg;
-if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
-{
-Uid         = UBanDatabase::MakeUid(TEXT("EOS"), Args[0].ToLower());
-DisplayName = Args[0];
-}
+	FString Uid, DisplayName, ErrorMsg;
+	if (!ResolveTarget(Args[0], Uid, DisplayName, ErrorMsg))
+	{
+		Uid         = UBanDatabase::MakeUid(TEXT("EOS"), Args[0].ToLower());
+		DisplayName = Args[0];
+	}
 
-UGameInstance* GI = GetGameInstance();
-UBanDatabase*           DB        = GI ? GI->GetSubsystem<UBanDatabase>() : nullptr;
-UPlayerWarningRegistry* WarnReg   = GI ? GI->GetSubsystem<UPlayerWarningRegistry>() : nullptr;
-UPlayerSessionRegistry* SessionReg= GI ? GI->GetSubsystem<UPlayerSessionRegistry>() : nullptr;
-UBanAuditLog*           AuditLog  = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr;
+	UGameInstance* GI = GetGameInstance();
+	UBanDatabase*           DB        = GI ? GI->GetSubsystem<UBanDatabase>() : nullptr;
+	UPlayerWarningRegistry* WarnReg   = GI ? GI->GetSubsystem<UPlayerWarningRegistry>() : nullptr;
+	UPlayerSessionRegistry* SessionReg= GI ? GI->GetSubsystem<UPlayerSessionRegistry>() : nullptr;
+	UBanAuditLog*           AuditLog  = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr;
 
-const int32 WarnCount  = WarnReg  ? WarnReg->GetWarningCount(Uid)  : 0;
-const int32 WarnPoints = WarnReg  ? WarnReg->GetWarningPoints(Uid) : 0;
+	const int32 WarnCount  = WarnReg  ? WarnReg->GetWarningCount(Uid)  : 0;
+	const int32 WarnPoints = WarnReg  ? WarnReg->GetWarningPoints(Uid) : 0;
 
-int32 TotalBans = 0;
-bool  bCurrentlyBanned = false;
-if (DB)
-{
-for (const FBanEntry& B : DB->GetAllBans())
-{
-if (B.Uid.Equals(Uid, ESearchCase::IgnoreCase))
-{
-++TotalBans;
-if (!B.IsExpired()) bCurrentlyBanned = true;
-}
-}
-}
+	int32 TotalBans = 0;
+	bool  bCurrentlyBanned = false;
+	if (DB)
+	{
+		for (const FBanEntry& B : DB->GetAllBans())
+		{
+			if (B.Uid.Equals(Uid, ESearchCase::IgnoreCase))
+			{
+				++TotalBans;
+				if (!B.IsExpired()) bCurrentlyBanned = true;
+			}
+		}
+	}
 
-int32 KickCount = 0;
-if (AuditLog)
-{
-for (const FAuditEntry& E : AuditLog->GetEntriesForTarget(Uid))
-{
-if (E.Action == TEXT("kick")) ++KickCount;
-}
-}
+	int32 KickCount = 0;
+	if (AuditLog)
+	{
+		for (const FAuditEntry& E : AuditLog->GetEntriesForTarget(Uid))
+		{
+			if (E.Action == TEXT("kick")) ++KickCount;
+		}
+	}
 
-FString LastSeen = TEXT("unknown");
-if (SessionReg)
-{
-FPlayerSessionRecord Rec;
-if (SessionReg->FindByUid(Uid, Rec))
-{
-LastSeen    = Rec.LastSeen;
-if (!Rec.DisplayName.IsEmpty()) DisplayName = Rec.DisplayName;
-}
-}
+	FString LastSeen = TEXT("unknown");
+	if (SessionReg)
+	{
+		FPlayerSessionRecord Rec;
+		if (SessionReg->FindByUid(Uid, Rec))
+		{
+			LastSeen    = Rec.LastSeen;
+			if (!Rec.DisplayName.IsEmpty()) DisplayName = Rec.DisplayName;
+		}
+	}
 
-const int32 Score = FMath::Max(0,
-100 - (WarnPoints * 5) - (TotalBans * 15) - (KickCount * 3));
+	const int32 Score = FMath::Max(0,
+	100 - (WarnPoints * 5) - (TotalBans * 15) - (KickCount * 3));
 
-const int32 Color = Score >= 70 ? 3066993 : (Score >= 40 ? 16776960 : 15158332);
+	const int32 Color = Score >= 70 ? 3066993 : (Score >= 40 ? 16776960 : 15158332);
 
-const FString Fields = FString::Printf(
-TEXT("{\"name\":\"Score\",\"value\":\"%d/100\",\"inline\":true},"
+	const FString Fields = FString::Printf(
+	TEXT("{\"name\":\"Score\",\"value\":\"%d/100\",\"inline\":true},"
      "{\"name\":\"Currently Banned\",\"value\":\"%s\",\"inline\":true},"
      "{\"name\":\"Warnings\",\"value\":\"%d (pts: %d)\",\"inline\":true},"
      "{\"name\":\"Total Bans\",\"value\":\"%d\",\"inline\":true},"
      "{\"name\":\"Kicks\",\"value\":\"%d\",\"inline\":true},"
      "{\"name\":\"Last Seen\",\"value\":\"%s\",\"inline\":false}"),
-Score,
-bCurrentlyBanned ? TEXT("YES") : TEXT("No"),
-WarnCount, WarnPoints, TotalBans, KickCount,
-*BanDiscordHelpers::EscapeMarkdown(LastSeen));
+	Score,
+	bCurrentlyBanned ? TEXT("YES") : TEXT("No"),
+	WarnCount, WarnPoints, TotalBans, KickCount,
+	*BanDiscordHelpers::EscapeMarkdown(LastSeen));
 
-const FString EmbedJson = FString::Printf(
-TEXT("{\"embeds\":[{\"title\":\"🔍 Reputation: %s\",\"description\":\"`%s`\",\"color\":%d,\"fields\":[%s],\"timestamp\":\"%s\"}]}"),
-*BanDiscordHelpers::EscapeMarkdown(DisplayName),
-*BanDiscordHelpers::EscapeMarkdown(Uid),
-Color,
-*Fields,
-*FDateTime::UtcNow().ToIso8601());
+	const FString EmbedJson = FString::Printf(
+	TEXT("{\"embeds\":[{\"title\":\"🔍 Reputation: %s\",\"description\":\"`%s`\",\"color\":%d,\"fields\":[%s],\"timestamp\":\"%s\"}]}"),
+	*BanDiscordHelpers::EscapeMarkdown(DisplayName),
+	*BanDiscordHelpers::EscapeMarkdown(Uid),
+	Color,
+	*Fields,
+	*FDateTime::UtcNow().ToIso8601());
 
-Respond(ChannelId, EmbedJson);
+	Respond(ChannelId, EmbedJson);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4126,88 +4126,88 @@ void UBanDiscordSubsystem::HandleBulkBanCommand(const TArray<FString>& Args,
                                                  const FString& ChannelId,
                                                  const FString& SenderName)
 {
-if (!CachedProvider) return;
+	if (!CachedProvider) return;
 
-if (Args.IsEmpty())
-{
-Respond(ChannelId,
-TEXT("Usage: `!bulkban <PUID1> <PUID2> ... -- <reason>`"));
-return;
-}
+	if (Args.IsEmpty())
+	{
+		Respond(ChannelId,
+		TEXT("Usage: `!bulkban <PUID1> <PUID2> ... -- <reason>`"));
+		return;
+	}
 
-UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
-if (!DB)
-{
-Respond(ChannelId, TEXT(":x: Database unavailable."));
-return;
-}
+	UBanDatabase* DB = BanDiscordHelpers::GetDB(this);
+	if (!DB)
+	{
+		Respond(ChannelId, TEXT(":x: Database unavailable."));
+		return;
+	}
 
-// Split on "--".
-TArray<FString> Uids;
-FString Reason = TEXT("Bulk ban");
-int32 SepIdx = -1;
-for (int32 i = 0; i < Args.Num(); ++i)
-{
-if (Args[i] == TEXT("--")) { SepIdx = i; break; }
-}
+	// Split on "--".
+	TArray<FString> Uids;
+	FString Reason = TEXT("Bulk ban");
+	int32 SepIdx = -1;
+	for (int32 i = 0; i < Args.Num(); ++i)
+	{
+		if (Args[i] == TEXT("--")) { SepIdx = i; break; }
+	}
 
-if (SepIdx > 0 && SepIdx < Args.Num() - 1)
-{
-for (int32 i = 0; i < SepIdx; ++i)
-Uids.Add(Args[i]);
+	if (SepIdx > 0 && SepIdx < Args.Num() - 1)
+	{
+		for (int32 i = 0; i < SepIdx; ++i)
+			Uids.Add(Args[i]);
 
-Reason.Empty();
-for (int32 i = SepIdx + 1; i < Args.Num(); ++i)
-{
-if (i > SepIdx + 1) Reason += TEXT(" ");
-Reason += Args[i];
-}
-}
-else
-{
-Uids = Args;
-}
+		Reason.Empty();
+		for (int32 i = SepIdx + 1; i < Args.Num(); ++i)
+		{
+			if (i > SepIdx + 1) Reason += TEXT(" ");
+			Reason += Args[i];
+		}
+	}
+	else
+	{
+		Uids = Args;
+	}
 
-if (Uids.IsEmpty())
-{
-Respond(ChannelId,
-TEXT(":x: No UIDs provided."));
-return;
-}
+	if (Uids.IsEmpty())
+	{
+		Respond(ChannelId, TEXT(":x: No UIDs provided."));
+		return;
+	}
 
-UGameInstance* GI = GetGameInstance();
-int32 BannedCount = 0;
+	UGameInstance* GI = GetGameInstance();
+	int32 BannedCount = 0;
 
-for (const FString& RawUid : Uids)
-{
-const FString Uid = UBanDatabase::MakeUid(TEXT("EOS"), RawUid.ToLower());
+	for (const FString& RawUid : Uids)
+	{
+		const FString Uid = UBanDatabase::MakeUid(TEXT("EOS"), RawUid.ToLower());
 
-FBanEntry Ban;
-Ban.Uid        = Uid;
-UBanDatabase::ParseUid(Uid, Ban.Platform, Ban.PlayerUID);
-Ban.PlayerName      = RawUid;
-Ban.Reason          = Reason;
-Ban.BannedBy        = SenderName;
-Ban.BanDate         = FDateTime::UtcNow();
-Ban.bIsPermanent    = true;
-Ban.ExpireDate      = FDateTime(0);
+		FBanEntry Ban;
+		Ban.Uid        = Uid;
+		UBanDatabase::ParseUid(Uid, Ban.Platform, Ban.PlayerUID);
+		Ban.PlayerName      = RawUid;
+		Ban.Reason          = Reason;
+		Ban.BannedBy        = SenderName;
+		Ban.BanDate         = FDateTime::UtcNow();
+		Ban.bIsPermanent    = true;
+		Ban.ExpireDate      = FDateTime(0);
 
-if (DB->AddBan(Ban))
-{
-if (UWorld* W = GI ? GI->GetWorld() : nullptr)
-UBanEnforcer::KickConnectedPlayer(W, Uid, Ban.GetKickMessage());
-FBanDiscordNotifier::NotifyBanCreated(Ban);
-// Also ban counterpart identifiers (IP↔EOS).
-BanDiscordHelpers::AddCounterpartBans(this, DB, Uid, RawUid,
-	Reason, SenderName, true, FDateTime(0));
-++BannedCount;
-}
-}
+		if (DB->AddBan(Ban))
+		{
+			if (UWorld* W = GI ? GI->GetWorld() : nullptr)
+				UBanEnforcer::KickConnectedPlayer(W, Uid, Ban.GetKickMessage());
+			FBanDiscordNotifier::NotifyBanCreated(Ban);
+			// Also ban counterpart identifiers (IP↔EOS).
+			BanDiscordHelpers::AddCounterpartBans(this, DB, Uid, RawUid,
+				Reason, SenderName, true, FDateTime(0));
+			++BannedCount;
+		}
+	}
 
-Respond(ChannelId,
-FString::Printf(TEXT(":hammer: Bulk ban complete: **%d/%d** players banned. Reason: %s"),
-BannedCount, Uids.Num(), *Reason));
-PostModerationLog(FString::Printf(TEXT("%s bulk-banned %d player(s). Reason: %s"), *SenderName, BannedCount, *Reason));
+	Respond(ChannelId,
+		FString::Printf(TEXT(":hammer: Bulk ban complete: **%d/%d** players banned. Reason: %s"),
+			BannedCount, Uids.Num(), *Reason));
+	PostModerationLog(FString::Printf(TEXT("%s bulk-banned %d player(s). Reason: %s"),
+		*SenderName, BannedCount, *Reason));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4216,526 +4216,526 @@ PostModerationLog(FString::Printf(TEXT("%s bulk-banned %d player(s). Reason: %s"
 
 void UBanDiscordSubsystem::OnDiscordInteraction(const TSharedPtr<FJsonObject>& InteractionObj)
 {
-if (!InteractionObj.IsValid() || !CachedProvider)
-{
-UE_LOG(LogBanDiscord, Warning,
+	if (!InteractionObj.IsValid() || !CachedProvider)
+	{
+		UE_LOG(LogBanDiscord, Warning,
        TEXT("BanDiscordSubsystem: OnDiscordInteraction skipped — "
             "InteractionObj is %s, CachedProvider is %s."),
        InteractionObj.IsValid() ? TEXT("valid") : TEXT("null"),
        CachedProvider ? TEXT("set") : TEXT("null"));
-return;
-}
+		return;
+	}
 
-// Only handle APPLICATION_COMMAND interactions (type 2).
-int32 InteractionType = 0;
-InteractionObj->TryGetNumberField(TEXT("type"), InteractionType);
+	// Only handle APPLICATION_COMMAND interactions (type 2).
+	int32 InteractionType = 0;
+	InteractionObj->TryGetNumberField(TEXT("type"), InteractionType);
 
-// Type 3 = MESSAGE_COMPONENT (button / select-menu clicks).
-if (InteractionType == 3)
-{
-HandlePanelButtonInteraction(InteractionObj);
-return;
-}
+	// Type 3 = MESSAGE_COMPONENT (button / select-menu clicks).
+	if (InteractionType == 3)
+	{
+		HandlePanelButtonInteraction(InteractionObj);
+		return;
+	}
 
-// Type 5 = MODAL_SUBMIT.
-if (InteractionType == 5)
-{
-HandlePanelModalSubmit(InteractionObj);
-return;
-}
+	// Type 5 = MODAL_SUBMIT.
+	if (InteractionType == 5)
+	{
+		HandlePanelModalSubmit(InteractionObj);
+		return;
+	}
 
-// Only continue processing for APPLICATION_COMMAND (type 2) interactions.
-if (InteractionType != 2) return;
+	// Only continue processing for APPLICATION_COMMAND (type 2) interactions.
+	if (InteractionType != 2) return;
 
-// Extract the interaction token and set up a guard that clears
-// PendingInteractionToken when OnDiscordInteraction returns, ensuring
-// the member field is never stale between calls.
-{
-FString ExtractedToken;
-InteractionObj->TryGetStringField(TEXT("token"), ExtractedToken);
-PendingInteractionToken = ExtractedToken;
-}
+	// Extract the interaction token and set up a guard that clears
+	// PendingInteractionToken when OnDiscordInteraction returns, ensuring
+	// the member field is never stale between calls.
+	{
+		FString ExtractedToken;
+		InteractionObj->TryGetStringField(TEXT("token"), ExtractedToken);
+		PendingInteractionToken = ExtractedToken;
+	}
 
-// Extract the interaction ID — passed explicitly to handlers that respond
-// directly (e.g. HandlePanelCommand sends an embed via RespondToInteractionWithBody).
-FString InteractionId;
-InteractionObj->TryGetStringField(TEXT("id"), InteractionId);
+	// Extract the interaction ID — passed explicitly to handlers that respond
+	// directly (e.g. HandlePanelCommand sends an embed via RespondToInteractionWithBody).
+	FString InteractionId;
+	InteractionObj->TryGetStringField(TEXT("id"), InteractionId);
 
-// RAII guard: clears PendingInteractionToken on any return path.
-struct FInteractionTokenGuard
-{
+	// RAII guard: clears PendingInteractionToken on any return path.
+	struct FInteractionTokenGuard
+	{
     FString& TokenRef;
     explicit FInteractionTokenGuard(FString& T) : TokenRef(T) {}
     ~FInteractionTokenGuard() { TokenRef = FString(); }
-} TokenGuard(PendingInteractionToken);
+	} TokenGuard(PendingInteractionToken);
 
-// Extract channel_id early so error messages can be posted.
-FString ChannelId;
-InteractionObj->TryGetStringField(TEXT("channel_id"), ChannelId);
+	// Extract channel_id early so error messages can be posted.
+	FString ChannelId;
+	InteractionObj->TryGetStringField(TEXT("channel_id"), ChannelId);
 
-// Commands are disabled when neither role is configured.
-if (Config.AdminRoleId.IsEmpty() && Config.ModeratorRoleId.IsEmpty())
-{
-UE_LOG(LogBanDiscord, Warning,
+	// Commands are disabled when neither role is configured.
+	if (Config.AdminRoleId.IsEmpty() && Config.ModeratorRoleId.IsEmpty())
+	{
+		UE_LOG(LogBanDiscord, Warning,
        TEXT("BanDiscordSubsystem: Slash command ignored — "
             "neither AdminRoleId nor ModeratorRoleId is set in DefaultBanBridge.ini."));
-if (!ChannelId.IsEmpty())
-{
-Respond(ChannelId,
+		if (!ChannelId.IsEmpty())
+		{
+			Respond(ChannelId,
     TEXT("❌ Ban commands are disabled — `AdminRoleId` is not configured.\n"
          "Set `AdminRoleId` in `DefaultBanBridge.ini` and restart the server."));
-}
-return;
-}
+		}
+		return;
+	}
 
-// Extract command data.
-const TSharedPtr<FJsonObject>* CmdDataPtr = nullptr;
-if (!InteractionObj->TryGetObjectField(TEXT("data"), CmdDataPtr) || !CmdDataPtr)
-{
-UE_LOG(LogBanDiscord, Warning,
+	// Extract command data.
+	const TSharedPtr<FJsonObject>* CmdDataPtr = nullptr;
+	if (!InteractionObj->TryGetObjectField(TEXT("data"), CmdDataPtr) || !CmdDataPtr)
+	{
+		UE_LOG(LogBanDiscord, Warning,
        TEXT("BanDiscordSubsystem: Slash command ignored — "
             "interaction payload has no 'data' field."));
-if (!ChannelId.IsEmpty())
+		if (!ChannelId.IsEmpty())
     Respond(ChannelId, TEXT("❌ Could not parse the command. Please try again."));
-return;
-}
+		return;
+	}
 
-FString CmdGroupName;
-(*CmdDataPtr)->TryGetStringField(TEXT("name"), CmdGroupName);
-CmdGroupName = CmdGroupName.ToLower();
+	FString CmdGroupName;
+	(*CmdDataPtr)->TryGetStringField(TEXT("name"), CmdGroupName);
+	CmdGroupName = CmdGroupName.ToLower();
 
-// Only handle groups that belong to BanDiscordSubsystem.
-static const TArray<FString> HandledGroups = {
-TEXT("ban"), TEXT("warn"), TEXT("mod"),
-TEXT("player"), TEXT("appeal"), TEXT("admin"),
-};
-if (!HandledGroups.Contains(CmdGroupName)) return;
+	// Only handle groups that belong to BanDiscordSubsystem.
+	static const TArray<FString> HandledGroups = {
+		TEXT("ban"), TEXT("warn"), TEXT("mod"),
+		TEXT("player"), TEXT("appeal"), TEXT("admin"),
+	};
+	if (!HandledGroups.Contains(CmdGroupName)) return;
 
-// Extract the subcommand and its option list.
-const TArray<TSharedPtr<FJsonValue>>* TopOpts = nullptr;
-(*CmdDataPtr)->TryGetArrayField(TEXT("options"), TopOpts);
-if (!TopOpts || TopOpts->IsEmpty())
-{
-UE_LOG(LogBanDiscord, Warning,
+	// Extract the subcommand and its option list.
+	const TArray<TSharedPtr<FJsonValue>>* TopOpts = nullptr;
+	(*CmdDataPtr)->TryGetArrayField(TEXT("options"), TopOpts);
+	if (!TopOpts || TopOpts->IsEmpty())
+	{
+		UE_LOG(LogBanDiscord, Warning,
        TEXT("BanDiscordSubsystem: /%s interaction has no subcommand options."),
        *CmdGroupName);
-if (!ChannelId.IsEmpty())
-Respond(ChannelId,
+		if (!ChannelId.IsEmpty())
+		Respond(ChannelId,
     TEXT("❌ Could not parse the subcommand. Please try the command again."));
-return;
-}
+		return;
+	}
 
-const TSharedPtr<FJsonObject>* SubCmdPtr = nullptr;
-if (!(*TopOpts)[0]->TryGetObject(SubCmdPtr) || !SubCmdPtr)
-{
-UE_LOG(LogBanDiscord, Warning,
+	const TSharedPtr<FJsonObject>* SubCmdPtr = nullptr;
+	if (!(*TopOpts)[0]->TryGetObject(SubCmdPtr) || !SubCmdPtr)
+	{
+		UE_LOG(LogBanDiscord, Warning,
        TEXT("BanDiscordSubsystem: /%s interaction subcommand object is malformed."),
        *CmdGroupName);
-if (!ChannelId.IsEmpty())
-Respond(ChannelId,
+		if (!ChannelId.IsEmpty())
+		Respond(ChannelId,
     TEXT("❌ Could not parse the subcommand. Please try the command again."));
-return;
-}
+		return;
+	}
 
-FString SubCmdName;
-(*SubCmdPtr)->TryGetStringField(TEXT("name"), SubCmdName);
-SubCmdName = SubCmdName.ToLower();
+	FString SubCmdName;
+	(*SubCmdPtr)->TryGetStringField(TEXT("name"), SubCmdName);
+	SubCmdName = SubCmdName.ToLower();
 
-const TArray<TSharedPtr<FJsonValue>>* SubOpts = nullptr;
-(*SubCmdPtr)->TryGetArrayField(TEXT("options"), SubOpts);
+	const TArray<TSharedPtr<FJsonValue>>* SubOpts = nullptr;
+	(*SubCmdPtr)->TryGetArrayField(TEXT("options"), SubOpts);
 
-// Extract sender identity, channel, and roles.
-FString SenderName, AuthorId;
-TArray<FString> MemberRoles;
+	// Extract sender identity, channel, and roles.
+	FString SenderName, AuthorId;
+	TArray<FString> MemberRoles;
 
-const TSharedPtr<FJsonObject>* MemberPtr = nullptr;
-if (InteractionObj->TryGetObjectField(TEXT("member"), MemberPtr) && MemberPtr)
-{
-(*MemberPtr)->TryGetStringField(TEXT("nick"), SenderName);
-const TSharedPtr<FJsonObject>* UserPtr = nullptr;
-if ((*MemberPtr)->TryGetObjectField(TEXT("user"), UserPtr) && UserPtr)
-{
-(*UserPtr)->TryGetStringField(TEXT("id"), AuthorId);
-if (SenderName.IsEmpty())
-(*UserPtr)->TryGetStringField(TEXT("global_name"), SenderName);
-if (SenderName.IsEmpty())
-(*UserPtr)->TryGetStringField(TEXT("username"), SenderName);
-}
-const TArray<TSharedPtr<FJsonValue>>* RolesArr = nullptr;
-if ((*MemberPtr)->TryGetArrayField(TEXT("roles"), RolesArr) && RolesArr)
-{
-for (const TSharedPtr<FJsonValue>& RV : *RolesArr)
-{
-FString RId;
-if (RV->TryGetString(RId)) MemberRoles.Add(RId);
-}
-}
-}
-if (SenderName.IsEmpty()) SenderName = TEXT("Discord Admin");
-if (ChannelId.IsEmpty())
-{
-UE_LOG(LogBanDiscord, Warning,
+	const TSharedPtr<FJsonObject>* MemberPtr = nullptr;
+	if (InteractionObj->TryGetObjectField(TEXT("member"), MemberPtr) && MemberPtr)
+	{
+		(*MemberPtr)->TryGetStringField(TEXT("nick"), SenderName);
+		const TSharedPtr<FJsonObject>* UserPtr = nullptr;
+		if ((*MemberPtr)->TryGetObjectField(TEXT("user"), UserPtr) && UserPtr)
+		{
+			(*UserPtr)->TryGetStringField(TEXT("id"), AuthorId);
+			if (SenderName.IsEmpty())
+			(*UserPtr)->TryGetStringField(TEXT("global_name"), SenderName);
+			if (SenderName.IsEmpty())
+			(*UserPtr)->TryGetStringField(TEXT("username"), SenderName);
+		}
+		const TArray<TSharedPtr<FJsonValue>>* RolesArr = nullptr;
+		if ((*MemberPtr)->TryGetArrayField(TEXT("roles"), RolesArr) && RolesArr)
+		{
+			for (const TSharedPtr<FJsonValue>& RV : *RolesArr)
+			{
+				FString RId;
+				if (RV->TryGetString(RId)) MemberRoles.Add(RId);
+			}
+		}
+	}
+	if (SenderName.IsEmpty()) SenderName = TEXT("Discord Admin");
+	if (ChannelId.IsEmpty())
+	{
+		UE_LOG(LogBanDiscord, Warning,
        TEXT("BanDiscordSubsystem: /%s %s — channel_id is empty, cannot respond."),
        *CmdGroupName, *SubCmdName);
-return;
-}
+		return;
+	}
 
-// Helper: extract a named option value as a string (handles STRING and INTEGER types).
-auto GetOpt = [&](const FString& Name) -> FString
-{
-if (!SubOpts) return FString();
-for (const TSharedPtr<FJsonValue>& Opt : *SubOpts)
-{
-const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
-if (!Opt->TryGetObject(ObjPtr) || !ObjPtr) continue;
-FString OptName;
-if (!(*ObjPtr)->TryGetStringField(TEXT("name"), OptName) ||
+	// Helper: extract a named option value as a string (handles STRING and INTEGER types).
+	auto GetOpt = [&](const FString& Name) -> FString
+	{
+		if (!SubOpts) return FString();
+		for (const TSharedPtr<FJsonValue>& Opt : *SubOpts)
+		{
+			const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+			if (!Opt->TryGetObject(ObjPtr) || !ObjPtr) continue;
+			FString OptName;
+			if (!(*ObjPtr)->TryGetStringField(TEXT("name"), OptName) ||
     !OptName.Equals(Name, ESearchCase::IgnoreCase)) continue;
-FString StrVal;
-if ((*ObjPtr)->TryGetStringField(TEXT("value"), StrVal)) return StrVal;
-double NumVal = 0.0;
-if ((*ObjPtr)->TryGetNumberField(TEXT("value"), NumVal))
-return FString::Printf(TEXT("%lld"), static_cast<int64>(NumVal));
-return FString();
-}
-return FString();
-};
+			FString StrVal;
+			if ((*ObjPtr)->TryGetStringField(TEXT("value"), StrVal)) return StrVal;
+			double NumVal = 0.0;
+			if ((*ObjPtr)->TryGetNumberField(TEXT("value"), NumVal))
+			return FString::Printf(TEXT("%lld"), static_cast<int64>(NumVal));
+			return FString();
+		}
+		return FString();
+	};
 
-// Determine required permission level.
-// /mod subcommands are accessible to moderators; all others require admin.
-static const TArray<FString> ModOnlyCmds = {
-TEXT("kick"), TEXT("modban"), TEXT("mute"), TEXT("unmute"),
-TEXT("tempmute"), TEXT("tempunmute"), TEXT("mutecheck"), TEXT("mutelist"),
-TEXT("mutereason"), TEXT("announce"), TEXT("stafflist"), TEXT("staffchat"),
-};
-const bool bNeedsAdminOnly = (CmdGroupName != TEXT("mod")) || !ModOnlyCmds.Contains(SubCmdName);
-const bool bAuthorised     = bNeedsAdminOnly
-? IsAdminMember(MemberRoles)
-: IsModeratorMember(MemberRoles);
+	// Determine required permission level.
+	// /mod subcommands are accessible to moderators; all others require admin.
+	static const TArray<FString> ModOnlyCmds = {
+		TEXT("kick"), TEXT("modban"), TEXT("mute"), TEXT("unmute"),
+		TEXT("tempmute"), TEXT("tempunmute"), TEXT("mutecheck"), TEXT("mutelist"),
+		TEXT("mutereason"), TEXT("announce"), TEXT("stafflist"), TEXT("staffchat"),
+	};
+	const bool bNeedsAdminOnly = (CmdGroupName != TEXT("mod")) || !ModOnlyCmds.Contains(SubCmdName);
+	const bool bAuthorised     = bNeedsAdminOnly
+	? IsAdminMember(MemberRoles)
+	: IsModeratorMember(MemberRoles);
 
-if (!bAuthorised)
-{
-Respond(ChannelId,
-bNeedsAdminOnly
-? TEXT("❌ Admin role required for that command.")
-: TEXT("❌ Moderator role required for that command."));
-return;
-}
+	if (!bAuthorised)
+	{
+		Respond(ChannelId,
+		bNeedsAdminOnly
+		? TEXT("❌ Admin role required for that command.")
+		: TEXT("❌ Moderator role required for that command."));
+		return;
+	}
 
-// Resolve the role-aware in-game broadcast prefix once, reused by all handlers.
-const FString StaffPrefix = ResolveStaffPrefix(MemberRoles);
+	// Resolve the role-aware in-game broadcast prefix once, reused by all handlers.
+	const FString StaffPrefix = ResolveStaffPrefix(MemberRoles);
 
-// ── Route to the appropriate command handler ──────────────────────────────
-TArray<FString> Args;
-bool bHandled = true;
+	// ── Route to the appropriate command handler ──────────────────────────────
+	TArray<FString> Args;
+	bool bHandled = true;
 
-if (CmdGroupName == TEXT("ban"))
-{
-if (SubCmdName == TEXT("add"))
-{
-Args.Add(GetOpt(TEXT("player")));
-const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
-HandleBanCommand(Args, ChannelId, SenderName, false, StaffPrefix);
-}
-else if (SubCmdName == TEXT("temp"))
-{
-// Convert duration string (e.g. "2h") to minutes.
-const FString Player = GetOpt(TEXT("player"));
-const FString DurStr = GetOpt(TEXT("duration"));
-const int32 Minutes  = ParseDurationMinutes(DurStr);
-const FString Reason = GetOpt(TEXT("reason"));
-Args.Add(Player);
-Args.Add(FString::FromInt(FMath::Max(1, Minutes)));
-if (!Reason.IsEmpty()) Args.Add(Reason);
-HandleBanCommand(Args, ChannelId, SenderName, true, StaffPrefix);
-}
-else if (SubCmdName == TEXT("remove"))
-{
-Args.Add(GetOpt(TEXT("uid")));
-HandleUnbanCommand(Args, ChannelId, SenderName, StaffPrefix);
-}
-else if (SubCmdName == TEXT("removename"))
-{
-Args.Add(GetOpt(TEXT("name")));
-HandleUnbanNameCommand(Args, ChannelId, SenderName);
-}
-else if (SubCmdName == TEXT("byname"))
-{
-Args.Add(GetOpt(TEXT("name")));
-const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
-HandleBanNameCommand(Args, ChannelId, SenderName);
-}
-else if (SubCmdName == TEXT("check"))
-{
-Args.Add(GetOpt(TEXT("player")));
-HandleBanCheckCommand(Args, ChannelId);
-}
-else if (SubCmdName == TEXT("reason"))
-{
-Args.Add(GetOpt(TEXT("player")));
-Args.Add(GetOpt(TEXT("new_reason")));
-HandleBanReasonCommand(Args, ChannelId, SenderName);
-}
-else if (SubCmdName == TEXT("list"))
-{
-const FString P = GetOpt(TEXT("page")); if (!P.IsEmpty()) Args.Add(P);
-HandleBanListCommand(Args, ChannelId);
-}
-else if (SubCmdName == TEXT("extend"))
-{
-Args.Add(GetOpt(TEXT("player")));
-Args.Add(GetOpt(TEXT("duration")));
-HandleExtendBanCommand(Args, ChannelId, SenderName);
-}
-else if (SubCmdName == TEXT("duration"))
-{
-Args.Add(GetOpt(TEXT("player")));
-HandleDurationCommand(Args, ChannelId);
-}
-else if (SubCmdName == TEXT("link"))
-{
-Args.Add(GetOpt(TEXT("uid1")));
-Args.Add(GetOpt(TEXT("uid2")));
-HandleLinkBansCommand(Args, ChannelId, SenderName, true);
-}
-else if (SubCmdName == TEXT("unlink"))
-{
-Args.Add(GetOpt(TEXT("uid1")));
-Args.Add(GetOpt(TEXT("uid2")));
-HandleLinkBansCommand(Args, ChannelId, SenderName, false);
-}
-else if (SubCmdName == TEXT("schedule"))
-{
-Args.Add(GetOpt(TEXT("player")));
-Args.Add(GetOpt(TEXT("delay")));
-const FString BD = GetOpt(TEXT("ban_duration")); if (!BD.IsEmpty()) Args.Add(BD);
-const FString R  = GetOpt(TEXT("reason"));       if (!R.IsEmpty())  Args.Add(R);
-HandleScheduleBanCommand(Args, ChannelId, SenderName);
-}
-else if (SubCmdName == TEXT("quick"))
-{
-Args.Add(GetOpt(TEXT("template")));
-Args.Add(GetOpt(TEXT("player")));
-HandleQBanCommand(Args, ChannelId, SenderName);
-}
-else if (SubCmdName == TEXT("bulk"))
-{
-// Split the space-separated player list into individual UID args.
-const FString PlayersStr = GetOpt(TEXT("players"));
-const FString Reason     = GetOpt(TEXT("reason"));
-TArray<FString> PlayerTokens;
-PlayersStr.ParseIntoArrayWS(PlayerTokens);
-Args.Append(PlayerTokens);
-Args.Add(TEXT("--"));
-if (!Reason.IsEmpty()) Args.Add(Reason);
-HandleBulkBanCommand(Args, ChannelId, SenderName);
-}
-else { bHandled = false; }
-}
-else if (CmdGroupName == TEXT("warn"))
-{
-if (SubCmdName == TEXT("add"))
-{
-Args.Add(GetOpt(TEXT("player")));
-Args.Add(GetOpt(TEXT("reason")));
-HandleWarnCommand(Args, ChannelId, SenderName, StaffPrefix);
-}
-else if (SubCmdName == TEXT("list"))
-{
-Args.Add(GetOpt(TEXT("player")));
-HandleWarningsCommand(Args, ChannelId);
-}
-else if (SubCmdName == TEXT("clearall"))
-{
-Args.Add(GetOpt(TEXT("player")));
-HandleClearWarnsCommand(Args, ChannelId, SenderName);
-}
-else if (SubCmdName == TEXT("clearone"))
-{
-Args.Add(GetOpt(TEXT("warning_id")));
-HandleClearWarnByIdCommand(Args, ChannelId, SenderName);
-}
-else { bHandled = false; }
-}
-else if (CmdGroupName == TEXT("mod"))
-{
-if (SubCmdName == TEXT("kick"))
-{
-Args.Add(GetOpt(TEXT("player")));
-const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
-HandleKickCommand(Args, ChannelId, SenderName, StaffPrefix);
-}
-else if (SubCmdName == TEXT("modban"))
-{
-Args.Add(GetOpt(TEXT("player")));
-const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
-HandleModBanCommand(Args, ChannelId, SenderName);
-}
-else if (SubCmdName == TEXT("mute"))
-{
-Args.Add(GetOpt(TEXT("player")));
-const FString Mins = GetOpt(TEXT("minutes")); if (!Mins.IsEmpty()) Args.Add(Mins);
-const FString R    = GetOpt(TEXT("reason"));  if (!R.IsEmpty())    Args.Add(R);
-HandleMuteCommand(Args, ChannelId, SenderName, true, StaffPrefix);
-}
-else if (SubCmdName == TEXT("unmute"))
-{
-Args.Add(GetOpt(TEXT("player")));
-HandleMuteCommand(Args, ChannelId, SenderName, false, StaffPrefix);
-}
-else if (SubCmdName == TEXT("tempmute"))
-{
-Args.Add(GetOpt(TEXT("player")));
-Args.Add(GetOpt(TEXT("minutes")));
-HandleTempMuteCommand(Args, ChannelId, SenderName, StaffPrefix);
-}
-else if (SubCmdName == TEXT("tempunmute"))
-{
-Args.Add(GetOpt(TEXT("player")));
-HandleTempUnmuteCommand(Args, ChannelId, SenderName, StaffPrefix);
-}
-else if (SubCmdName == TEXT("mutecheck"))
-{
-Args.Add(GetOpt(TEXT("player")));
-HandleMuteCheckCommand(Args, ChannelId);
-}
-else if (SubCmdName == TEXT("mutelist"))
-{
-HandleMuteListCommand(ChannelId);
-}
-else if (SubCmdName == TEXT("mutereason"))
-{
-Args.Add(GetOpt(TEXT("player")));
-Args.Add(GetOpt(TEXT("new_reason")));
-HandleMuteReasonCommand(Args, ChannelId, SenderName, StaffPrefix);
-}
-else if (SubCmdName == TEXT("announce"))
-{
-Args.Add(GetOpt(TEXT("message")));
-HandleAnnounceCommand(Args, ChannelId, SenderName);
-}
-else if (SubCmdName == TEXT("stafflist"))
-{
-HandleStaffListCommand(ChannelId);
-}
-else if (SubCmdName == TEXT("staffchat"))
-{
-Args.Add(GetOpt(TEXT("message")));
-HandleStaffChatCommand(Args, ChannelId, SenderName);
-}
-else if (SubCmdName == TEXT("freeze"))
-{
-Args.Add(GetOpt(TEXT("player")));
-HandleFreezeCommand(Args, ChannelId, SenderName);
-}
-else { bHandled = false; }
-}
-else if (CmdGroupName == TEXT("player"))
-{
-// Note: /player stats is handled by DiscordBridgeSubsystem (not BanDiscordSubsystem).
-if (SubCmdName == TEXT("history"))
-{
-Args.Add(GetOpt(TEXT("query")));
-HandlePlayerHistoryCommand(Args, ChannelId);
-}
-else if (SubCmdName == TEXT("note"))
-{
-Args.Add(GetOpt(TEXT("player")));
-Args.Add(GetOpt(TEXT("text"))); // JoinArgs(Args, 1) in handler reassembles the text
-HandleNoteCommand(Args, ChannelId, SenderName);
-}
-else if (SubCmdName == TEXT("notes"))
-{
-Args.Add(GetOpt(TEXT("player")));
-HandleNotesCommand(Args, ChannelId);
-}
-else if (SubCmdName == TEXT("reason"))
-{
-Args.Add(GetOpt(TEXT("uid")));
-HandleReasonCommand(Args, ChannelId);
-}
-else if (SubCmdName == TEXT("playtime"))
-{
-Args.Add(GetOpt(TEXT("player")));
-HandlePlaytimeCommand(Args, ChannelId);
-}
-else if (SubCmdName == TEXT("reputation"))
-{
-Args.Add(GetOpt(TEXT("player")));
-HandleReputationCommand(Args, ChannelId);
-}
-// "stats" is intentionally absent — handled in DiscordBridgeSubsystem.
-else { bHandled = false; }
-}
-else if (CmdGroupName == TEXT("appeal"))
-{
-if (SubCmdName == TEXT("list"))
-{
-HandleAppealsCommand(ChannelId);
-}
-else if (SubCmdName == TEXT("dismiss"))
-{
-Args.Add(GetOpt(TEXT("id")));
-HandleDismissAppealCommand(Args, ChannelId, SenderName);
-}
-else if (SubCmdName == TEXT("approve"))
-{
-Args.Add(GetOpt(TEXT("id")));
-HandleAppealApproveCommand(Args, ChannelId, SenderName);
-}
-else if (SubCmdName == TEXT("deny"))
-{
-Args.Add(GetOpt(TEXT("id")));
-HandleAppealDenyCommand(Args, ChannelId, SenderName);
-}
-else { bHandled = false; }
-}
-else if (CmdGroupName == TEXT("admin"))
-{
-if (SubCmdName == TEXT("say"))
-{
-Args.Add(GetOpt(TEXT("message")));
-HandleSayCommand(Args, ChannelId, SenderName);
-}
-else if (SubCmdName == TEXT("poll"))
-{
-// Reconstruct the pipe-delimited string that HandlePollCommand expects
-// (JoinArgs(Args, 0) then split on "|").
-const FString Question = GetOpt(TEXT("question"));
-const FString Options  = GetOpt(TEXT("options")); // "Yes|No|Maybe"
-TArray<FString> OptTokens;
-Options.ParseIntoArray(OptTokens, TEXT("|"), true);
-FString PollText = Question;
-for (const FString& O : OptTokens)
-PollText += TEXT(" | ") + O.TrimStartAndEnd();
-Args.Add(PollText);
-HandlePollCommand(Args, ChannelId);
-}
-else if (SubCmdName == TEXT("reloadconfig"))
-{
-HandleReloadConfigCommand(ChannelId, SenderName);
-}
-else if (SubCmdName == TEXT("panel"))
-{
-HandlePanelCommand(ChannelId, InteractionId, PendingInteractionToken, MemberRoles, SenderName, AuthorId);
-}
-else if (SubCmdName == TEXT("clearchat"))
-{
-const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
-HandleClearChatCommand(Args, ChannelId, SenderName);
-}
-else { bHandled = false; }
-}
-else { bHandled = false; }
+	if (CmdGroupName == TEXT("ban"))
+	{
+		if (SubCmdName == TEXT("add"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
+			HandleBanCommand(Args, ChannelId, SenderName, false, StaffPrefix);
+		}
+		else if (SubCmdName == TEXT("temp"))
+		{
+			// Convert duration string (e.g. "2h") to minutes.
+			const FString Player = GetOpt(TEXT("player"));
+			const FString DurStr = GetOpt(TEXT("duration"));
+			const int32 Minutes  = ParseDurationMinutes(DurStr);
+			const FString Reason = GetOpt(TEXT("reason"));
+			Args.Add(Player);
+			Args.Add(FString::FromInt(FMath::Max(1, Minutes)));
+			if (!Reason.IsEmpty()) Args.Add(Reason);
+			HandleBanCommand(Args, ChannelId, SenderName, true, StaffPrefix);
+		}
+		else if (SubCmdName == TEXT("remove"))
+		{
+			Args.Add(GetOpt(TEXT("uid")));
+			HandleUnbanCommand(Args, ChannelId, SenderName, StaffPrefix);
+		}
+		else if (SubCmdName == TEXT("removename"))
+		{
+			Args.Add(GetOpt(TEXT("name")));
+			HandleUnbanNameCommand(Args, ChannelId, SenderName);
+		}
+		else if (SubCmdName == TEXT("byname"))
+		{
+			Args.Add(GetOpt(TEXT("name")));
+			const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
+			HandleBanNameCommand(Args, ChannelId, SenderName);
+		}
+		else if (SubCmdName == TEXT("check"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			HandleBanCheckCommand(Args, ChannelId);
+		}
+		else if (SubCmdName == TEXT("reason"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			Args.Add(GetOpt(TEXT("new_reason")));
+			HandleBanReasonCommand(Args, ChannelId, SenderName);
+		}
+		else if (SubCmdName == TEXT("list"))
+		{
+			const FString P = GetOpt(TEXT("page")); if (!P.IsEmpty()) Args.Add(P);
+			HandleBanListCommand(Args, ChannelId);
+		}
+		else if (SubCmdName == TEXT("extend"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			Args.Add(GetOpt(TEXT("duration")));
+			HandleExtendBanCommand(Args, ChannelId, SenderName);
+		}
+		else if (SubCmdName == TEXT("duration"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			HandleDurationCommand(Args, ChannelId);
+		}
+		else if (SubCmdName == TEXT("link"))
+		{
+			Args.Add(GetOpt(TEXT("uid1")));
+			Args.Add(GetOpt(TEXT("uid2")));
+			HandleLinkBansCommand(Args, ChannelId, SenderName, true);
+		}
+		else if (SubCmdName == TEXT("unlink"))
+		{
+			Args.Add(GetOpt(TEXT("uid1")));
+			Args.Add(GetOpt(TEXT("uid2")));
+			HandleLinkBansCommand(Args, ChannelId, SenderName, false);
+		}
+		else if (SubCmdName == TEXT("schedule"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			Args.Add(GetOpt(TEXT("delay")));
+			const FString BD = GetOpt(TEXT("ban_duration")); if (!BD.IsEmpty()) Args.Add(BD);
+			const FString R  = GetOpt(TEXT("reason"));       if (!R.IsEmpty())  Args.Add(R);
+			HandleScheduleBanCommand(Args, ChannelId, SenderName);
+		}
+		else if (SubCmdName == TEXT("quick"))
+		{
+			Args.Add(GetOpt(TEXT("template")));
+			Args.Add(GetOpt(TEXT("player")));
+			HandleQBanCommand(Args, ChannelId, SenderName);
+		}
+		else if (SubCmdName == TEXT("bulk"))
+		{
+			// Split the space-separated player list into individual UID args.
+			const FString PlayersStr = GetOpt(TEXT("players"));
+			const FString Reason     = GetOpt(TEXT("reason"));
+			TArray<FString> PlayerTokens;
+			PlayersStr.ParseIntoArrayWS(PlayerTokens);
+			Args.Append(PlayerTokens);
+			Args.Add(TEXT("--"));
+			if (!Reason.IsEmpty()) Args.Add(Reason);
+			HandleBulkBanCommand(Args, ChannelId, SenderName);
+		}
+		else { bHandled = false; }
+	}
+	else if (CmdGroupName == TEXT("warn"))
+	{
+		if (SubCmdName == TEXT("add"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			Args.Add(GetOpt(TEXT("reason")));
+			HandleWarnCommand(Args, ChannelId, SenderName, StaffPrefix);
+		}
+		else if (SubCmdName == TEXT("list"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			HandleWarningsCommand(Args, ChannelId);
+		}
+		else if (SubCmdName == TEXT("clearall"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			HandleClearWarnsCommand(Args, ChannelId, SenderName);
+		}
+		else if (SubCmdName == TEXT("clearone"))
+		{
+			Args.Add(GetOpt(TEXT("warning_id")));
+			HandleClearWarnByIdCommand(Args, ChannelId, SenderName);
+		}
+		else { bHandled = false; }
+	}
+	else if (CmdGroupName == TEXT("mod"))
+	{
+		if (SubCmdName == TEXT("kick"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
+			HandleKickCommand(Args, ChannelId, SenderName, StaffPrefix);
+		}
+		else if (SubCmdName == TEXT("modban"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
+			HandleModBanCommand(Args, ChannelId, SenderName);
+		}
+		else if (SubCmdName == TEXT("mute"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			const FString Mins = GetOpt(TEXT("minutes")); if (!Mins.IsEmpty()) Args.Add(Mins);
+			const FString R    = GetOpt(TEXT("reason"));  if (!R.IsEmpty())    Args.Add(R);
+			HandleMuteCommand(Args, ChannelId, SenderName, true, StaffPrefix);
+		}
+		else if (SubCmdName == TEXT("unmute"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			HandleMuteCommand(Args, ChannelId, SenderName, false, StaffPrefix);
+		}
+		else if (SubCmdName == TEXT("tempmute"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			Args.Add(GetOpt(TEXT("minutes")));
+			HandleTempMuteCommand(Args, ChannelId, SenderName, StaffPrefix);
+		}
+		else if (SubCmdName == TEXT("tempunmute"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			HandleTempUnmuteCommand(Args, ChannelId, SenderName, StaffPrefix);
+		}
+		else if (SubCmdName == TEXT("mutecheck"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			HandleMuteCheckCommand(Args, ChannelId);
+		}
+		else if (SubCmdName == TEXT("mutelist"))
+		{
+			HandleMuteListCommand(ChannelId);
+		}
+		else if (SubCmdName == TEXT("mutereason"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			Args.Add(GetOpt(TEXT("new_reason")));
+			HandleMuteReasonCommand(Args, ChannelId, SenderName, StaffPrefix);
+		}
+		else if (SubCmdName == TEXT("announce"))
+		{
+			Args.Add(GetOpt(TEXT("message")));
+			HandleAnnounceCommand(Args, ChannelId, SenderName);
+		}
+		else if (SubCmdName == TEXT("stafflist"))
+		{
+			HandleStaffListCommand(ChannelId);
+		}
+		else if (SubCmdName == TEXT("staffchat"))
+		{
+			Args.Add(GetOpt(TEXT("message")));
+			HandleStaffChatCommand(Args, ChannelId, SenderName);
+		}
+		else if (SubCmdName == TEXT("freeze"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			HandleFreezeCommand(Args, ChannelId, SenderName);
+		}
+		else { bHandled = false; }
+	}
+	else if (CmdGroupName == TEXT("player"))
+	{
+		// Note: /player stats is handled by DiscordBridgeSubsystem (not BanDiscordSubsystem).
+		if (SubCmdName == TEXT("history"))
+		{
+			Args.Add(GetOpt(TEXT("query")));
+			HandlePlayerHistoryCommand(Args, ChannelId);
+		}
+		else if (SubCmdName == TEXT("note"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			Args.Add(GetOpt(TEXT("text"))); // JoinArgs(Args, 1) in handler reassembles the text
+			HandleNoteCommand(Args, ChannelId, SenderName);
+		}
+		else if (SubCmdName == TEXT("notes"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			HandleNotesCommand(Args, ChannelId);
+		}
+		else if (SubCmdName == TEXT("reason"))
+		{
+			Args.Add(GetOpt(TEXT("uid")));
+			HandleReasonCommand(Args, ChannelId);
+		}
+		else if (SubCmdName == TEXT("playtime"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			HandlePlaytimeCommand(Args, ChannelId);
+		}
+		else if (SubCmdName == TEXT("reputation"))
+		{
+			Args.Add(GetOpt(TEXT("player")));
+			HandleReputationCommand(Args, ChannelId);
+		}
+		// "stats" is intentionally absent — handled in DiscordBridgeSubsystem.
+		else { bHandled = false; }
+	}
+	else if (CmdGroupName == TEXT("appeal"))
+	{
+		if (SubCmdName == TEXT("list"))
+		{
+			HandleAppealsCommand(ChannelId);
+		}
+		else if (SubCmdName == TEXT("dismiss"))
+		{
+			Args.Add(GetOpt(TEXT("id")));
+			HandleDismissAppealCommand(Args, ChannelId, SenderName);
+		}
+		else if (SubCmdName == TEXT("approve"))
+		{
+			Args.Add(GetOpt(TEXT("id")));
+			HandleAppealApproveCommand(Args, ChannelId, SenderName);
+		}
+		else if (SubCmdName == TEXT("deny"))
+		{
+			Args.Add(GetOpt(TEXT("id")));
+			HandleAppealDenyCommand(Args, ChannelId, SenderName);
+		}
+		else { bHandled = false; }
+	}
+	else if (CmdGroupName == TEXT("admin"))
+	{
+		if (SubCmdName == TEXT("say"))
+		{
+			Args.Add(GetOpt(TEXT("message")));
+			HandleSayCommand(Args, ChannelId, SenderName);
+		}
+		else if (SubCmdName == TEXT("poll"))
+		{
+			// Reconstruct the pipe-delimited string that HandlePollCommand expects
+			// (JoinArgs(Args, 0) then split on "|").
+			const FString Question = GetOpt(TEXT("question"));
+			const FString Options  = GetOpt(TEXT("options")); // "Yes|No|Maybe"
+			TArray<FString> OptTokens;
+			Options.ParseIntoArray(OptTokens, TEXT("|"), true);
+			FString PollText = Question;
+			for (const FString& O : OptTokens)
+			PollText += TEXT(" | ") + O.TrimStartAndEnd();
+			Args.Add(PollText);
+			HandlePollCommand(Args, ChannelId);
+		}
+		else if (SubCmdName == TEXT("reloadconfig"))
+		{
+			HandleReloadConfigCommand(ChannelId, SenderName);
+		}
+		else if (SubCmdName == TEXT("panel"))
+		{
+			HandlePanelCommand(ChannelId, InteractionId, PendingInteractionToken, MemberRoles, SenderName, AuthorId);
+		}
+		else if (SubCmdName == TEXT("clearchat"))
+		{
+			const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
+			HandleClearChatCommand(Args, ChannelId, SenderName);
+		}
+		else { bHandled = false; }
+	}
+	else { bHandled = false; }
 
-if (!bHandled)
-{
-UE_LOG(LogBanDiscord, Warning,
+	if (!bHandled)
+	{
+		UE_LOG(LogBanDiscord, Warning,
        TEXT("BanDiscordSubsystem: Unrecognised slash command /%s %s — no handler matched."),
        *CmdGroupName, *SubCmdName);
-Respond(ChannelId,
+		Respond(ChannelId,
     FString::Printf(TEXT("❌ Unknown subcommand `/%s %s`."), *CmdGroupName, *SubCmdName));
-}
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
