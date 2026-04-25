@@ -578,7 +578,7 @@ bool FSMLWebSocketRunnable::ConnectThroughProxy()
 		return false;
 	}
 
-	// Read the proxy response line — look for "HTTP/1.x 200 Connection established".
+	// Read the proxy response — accumulate until the header block ends (\r\n\r\n).
 	FString ResponseLine;
 	uint8 Buf[1];
 	static constexpr int32 MaxLineBytes = 4096;
@@ -589,7 +589,16 @@ bool FSMLWebSocketRunnable::ConnectThroughProxy()
 		if (ResponseLine.EndsWith(TEXT("\r\n\r\n"))) break;
 	}
 
-	if (!ResponseLine.Contains(TEXT("200")))
+	// Validate only the HTTP status line (first line) to avoid false-positive
+	// matches when header values happen to contain "200" (e.g. Content-Length: 2000).
+	// The status line is "HTTP/x.y 200 <reason>"; split off at the first \r\n.
+	int32 FirstLineEnd = INDEX_NONE;
+	ResponseLine.FindChar(TEXT('\r'), FirstLineEnd);
+	const FString StatusLine = (FirstLineEnd != INDEX_NONE)
+		? ResponseLine.Left(FirstLineEnd)
+		: ResponseLine;
+
+	if (!StatusLine.Contains(TEXT(" 200 ")) && !StatusLine.EndsWith(TEXT(" 200")))
 	{
 		UE_LOG(LogSMLWebSocket, Error,
 		       TEXT("SMLWebSocket: Proxy CONNECT failed: %s"), *ResponseLine.Left(200));
@@ -1312,20 +1321,15 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 	case WsOpcode::Text:
 	case WsOpcode::Binary:
 	{
-		// Null-terminate the payload for the UTF-8 → TCHAR conversion
-		auto ToFString = [](const TArray<uint8>& Bytes) -> FString
-		{
-			TArray<uint8> Nulled = Bytes;
-			Nulled.Add(0);
-			return FString(UTF8_TO_TCHAR(reinterpret_cast<const ANSICHAR*>(Nulled.GetData())));
-		};
-
 		if (bFin && FragmentBuffer.IsEmpty())
 		{
 			// Unfragmented message
 			if (Opcode == WsOpcode::Text)
 			{
-				NotifyMessage(ToFString(Payload));
+				// Null-terminate the payload in-place to avoid an extra heap
+				// allocation.  Payload is a local temporary so mutation is safe.
+				Payload.Add(0);
+				NotifyMessage(FString(UTF8_TO_TCHAR(reinterpret_cast<const ANSICHAR*>(Payload.GetData()))));
 			}
 			else
 			{
@@ -1382,9 +1386,10 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 			}
 			else
 			{
-				TArray<uint8> Nulled = FragmentBuffer;
-				Nulled.Add(0);
-				const FString Msg = FString(UTF8_TO_TCHAR(reinterpret_cast<const ANSICHAR*>(Nulled.GetData())));
+				// Null-terminate the assembled fragment in-place to avoid an
+				// extra heap allocation; the buffer is immediately emptied below.
+				FragmentBuffer.Add(0);
+				const FString Msg = FString(UTF8_TO_TCHAR(reinterpret_cast<const ANSICHAR*>(FragmentBuffer.GetData())));
 				NotifyMessage(Msg);
 			}
 			FragmentBuffer.Empty();

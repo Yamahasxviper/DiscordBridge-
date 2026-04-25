@@ -166,6 +166,13 @@ private:
     FDelegateHandle PostLoginHandle;
 
     /**
+     * Subscription to UBanDatabase::OnBanRemoved so that UIDs are evicted from
+     * AlreadyNotifiedExpiredBanUids when the underlying ban record is deleted.
+     * Without this the set would grow for the entire server session lifetime.
+     */
+    FDelegateHandle BanRemovedHandle;
+
+    /**
      * Handle for the UFGGameModeDSComponent::PreLogin after-hook installed in
      * Initialize().  Removed in Deinitialize() to prevent stale handlers if the
      * subsystem is ever torn down and re-created.
