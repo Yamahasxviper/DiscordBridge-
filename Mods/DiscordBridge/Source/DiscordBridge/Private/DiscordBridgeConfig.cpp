@@ -688,8 +688,6 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						TEXT("\n")
 						TEXT("# -- BOT COMMANDS (added by mod update) --------------------------------\n")
 						TEXT("# Channel for /players responses. Leave empty to use ChannelId.\n")
-						TEXT("#\n")
-						TEXT("# Channel for /players responses. Leave empty to use ChannelId.\n")
 						TEXT("PlayersCommandChannelId=\n")
 						TEXT("#\n")
 						TEXT("# Discord invite link shown to players who type /discord in-game.\n")
@@ -1461,11 +1459,13 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		// DiscordRoleLabels array backup lines
 		FString BackupRoleLabelLines;
 		BackupRoleLabelLines += FString(TEXT("\n"))
-			+ TEXT("; -- Discord Role Labels (for %Role% placeholder) --------------------------\n")
+			+ TEXT("; -- On-Join Messages ----------------------------------------------------------\n")
 			+ TEXT("WelcomeMessageDM=") + Config.WelcomeMessageDM + TEXT("\n")
 			+ TEXT("JoinHintMessage=") + Config.JoinHintMessage + TEXT("\n")
 			+ TEXT("InGameJoinBroadcastEnabled=") + (Config.bInGameJoinBroadcastEnabled ? TEXT("True") : TEXT("False")) + TEXT("\n")
-			+ TEXT("InGameJoinBroadcast=") + Config.InGameJoinBroadcast + TEXT("\n");
+			+ TEXT("InGameJoinBroadcast=") + Config.InGameJoinBroadcast + TEXT("\n")
+			+ TEXT("\n")
+			+ TEXT("; -- Discord Role Labels (for %Role% placeholder) --------------------------\n");
 		for (const FString& Entry : Config.DiscordRoleLabels)
 		{
 			BackupRoleLabelLines += TEXT("+DiscordRoleLabels=") + Entry + TEXT("\n");

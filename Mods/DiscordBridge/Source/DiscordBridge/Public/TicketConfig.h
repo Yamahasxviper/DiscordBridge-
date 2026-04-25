@@ -31,7 +31,7 @@ struct DISCORDBRIDGE_API FTicketConfig
 	 *
 	 * Required Gateway intents (Discord Developer Portal → Bot → Privileged):
 	 *   Server Members Intent  (needed for role info in MESSAGE_CREATE)
-	 *   Message Content Intent (needed to read the !ticket-panel command)
+	 *   Message Content Intent (needed to read the /ticket panel slash command)
 	 */
 	FString BotToken;
 
@@ -78,7 +78,7 @@ struct DISCORDBRIDGE_API FTicketConfig
 	/**
 	 * Discord role ID to @mention in every ticket notification and to grant
 	 * view/write access inside every new ticket channel.
-	 * Also used to authorise the "!ticket-panel" management command.
+	 * Also used to authorise the "/ticket panel" management command.
 	 */
 	FString TicketNotifyRoleId;
 
@@ -86,7 +86,7 @@ struct DISCORDBRIDGE_API FTicketConfig
 
 	/**
 	 * Discord channel ID where the bot posts the ticket selection panel.
-	 * Run "!ticket-panel" (holding TicketNotifyRoleId) to post the panel.
+	 * Run "/ticket panel" (holding TicketNotifyRoleId) to post the panel.
 	 * Leave empty to skip the panel feature.
 	 */
 	FString TicketPanelChannelId;
@@ -191,7 +191,7 @@ struct DISCORDBRIDGE_API FTicketConfig
 
 	// ── Ticket escalation ─────────────────────────────────────────────────────
 
-	/** Discord role ID to @mention when a ticket is escalated via !ticket-escalate. */
+	/** Discord role ID to @mention when a ticket is escalated via /ticket escalate. */
 	FString TicketEscalationRoleId;
 
 	/** Discord category ID to move escalated ticket channels to.  Leave empty to skip. */

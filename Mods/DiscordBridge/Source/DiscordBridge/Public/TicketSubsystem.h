@@ -278,13 +278,13 @@ private:
 	/**
 	 * Maps each active ticket channel ID to the Discord user ID of the staff
 	 * member who has claimed ("assigned") the ticket.
-	 * Populated by the !ticket-assign command.
+	 * Populated by the /ticket assign command.
 	 */
 	TMap<FString, FString> TicketChannelToAssignee;
 
 	/**
 	 * Maps each active ticket channel ID to the display name of the assigned
-	 * staff member (for display in !ticket-list without a separate API call).
+	 * staff member (for display in /ticket list without a separate API call).
 	 */
 	TMap<FString, FString> TicketChannelToAssigneeName;
 

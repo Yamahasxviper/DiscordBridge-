@@ -466,7 +466,7 @@ struct DISCORDBRIDGE_API FDiscordBridgeConfig
 	 * (ModeratorChannelId, falling back to ChannelId) whenever a player is
 	 * muted or unmuted via /mute or /unmute.
 	 * Only has an effect when BanChatCommands mod is installed.
-	 * Default: false.
+	 * Default: true.
 	 */
 	bool bNotifyMuteEvents{ true };
 
