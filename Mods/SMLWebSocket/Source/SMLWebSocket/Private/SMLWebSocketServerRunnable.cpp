@@ -266,6 +266,7 @@ bool FSMLWebSocketServerRunnable::PerformHandshake(FClientState& Client)
     HeaderBuf.Reserve(1024);
     uint8 Ch = 0;
     int32 Recv = 0;
+    bool bFoundHeaderEnd = false;
 
     for (int32 i = 0; i < 8192; ++i)
     {
@@ -276,7 +277,19 @@ bool FSMLWebSocketServerRunnable::PerformHandshake(FClientState& Client)
         if (N >= 4 &&
             HeaderBuf[N-4] == '\r' && HeaderBuf[N-3] == '\n' &&
             HeaderBuf[N-2] == '\r' && HeaderBuf[N-1] == '\n')
+        {
+            bFoundHeaderEnd = true;
             break;
+        }
+    }
+
+    // If the loop exhausted the budget without finding the header terminator,
+    // the request is incomplete or malformed — reject it.
+    if (!bFoundHeaderEnd)
+    {
+        UE_LOG(LogWSServer, Warning,
+            TEXT("WSServer: Rejected client — HTTP header terminator not found within 8192 bytes."));
+        return false;
     }
 
     FString Headers = FUTF8ToTCHAR(reinterpret_cast<const ANSICHAR*>(HeaderBuf.GetData()), HeaderBuf.Num()).Get();
@@ -317,7 +330,24 @@ bool FSMLWebSocketServerRunnable::PerformHandshake(FClientState& Client)
         }
 
         const FString Expected = FString(TEXT("Bearer ")) + ApiToken;
-        if (AuthValue != Expected)
+
+        // Use a constant-time byte comparison to avoid timing side-channel
+        // attacks that could allow an attacker to brute-force the token one
+        // byte at a time by measuring response latency.
+        const FTCHARToUTF8 AuthUtf8(*AuthValue);
+        const FTCHARToUTF8 ExpectedUtf8(*Expected);
+        const int32 AuthLen     = AuthUtf8.Length();
+        const int32 ExpectedLen = ExpectedUtf8.Length();
+
+        // XOR-fold all bytes from both strings — result is 0 only when every
+        // byte matches.  Running the full loop regardless of length ensures the
+        // comparison takes the same time whether or not the lengths differ.
+        uint8 Diff = static_cast<uint8>(AuthLen ^ ExpectedLen);
+        const int32 CmpLen = FMath::Min(AuthLen, ExpectedLen);
+        for (int32 i = 0; i < CmpLen; ++i)
+            Diff |= static_cast<uint8>(AuthUtf8.Get()[i]) ^ static_cast<uint8>(ExpectedUtf8.Get()[i]);
+
+        if (Diff != 0)
         {
             const FString Response401 =
                 TEXT("HTTP/1.1 401 Unauthorized\r\n")

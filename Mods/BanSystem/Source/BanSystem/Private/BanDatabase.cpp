@@ -207,15 +207,19 @@ void UBanDatabase::Deinitialize()
 
 void UBanDatabase::ReloadIfChanged()
 {
-    const FDateTime NewModTime = IFileManager::Get().GetTimeStamp(*DbPath);
-
-    // GetTimeStamp returns FDateTime(0) when the file does not exist.
-    if (NewModTime == FDateTime(0))
-        return;
-
+    // Read the file mtime and compare it against the cached value inside a
+    // single lock scope.  Reading outside the lock and then acquiring it would
+    // create a TOCTOU window: a concurrent SaveToFile() could update
+    // LastKnownFileModTime to T2 between our GetTimeStamp() call (which saw T1)
+    // and our lock acquisition, causing us to store the stale T1 and then loop
+    // on every subsequent call (T2 != T1 forever).
+    FDateTime NewModTime;
     {
         FScopeLock Lock(&DbMutex);
-        if (NewModTime == LastKnownFileModTime)
+        NewModTime = IFileManager::Get().GetTimeStamp(*DbPath);
+
+        // GetTimeStamp returns FDateTime(0) when the file does not exist.
+        if (NewModTime == FDateTime(0) || NewModTime == LastKnownFileModTime)
             return;
 
         // Record the new mtime BEFORE releasing the lock and calling LoadFromFile().
