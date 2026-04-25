@@ -86,9 +86,11 @@ static void RemoveExpiredEntries(TArray<FString>& OutExpiredNames);
 
 private:
 static FString GetFilePath();
+static void    Save_Locked(); // caller must already hold Mutex
 
 static bool                     bEnabled;
 static TArray<FWhitelistEntry>  Entries;
 static TArray<FWhitelistAuditEntry> AuditLog;
 static int32                    MaxSlots;
+static FCriticalSection         Mutex;
 };

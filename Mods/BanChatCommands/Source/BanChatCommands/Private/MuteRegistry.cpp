@@ -9,6 +9,7 @@
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
 #include "HAL/PlatformFileManager.h"
+#include "HAL/FileManager.h"
 
 DEFINE_LOG_CATEGORY(LogMuteRegistry);
 
@@ -291,11 +292,18 @@ bool UMuteRegistry::SaveToFile() const
         return false;
     }
 
-    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath,
+    const FString TmpPath = FilePath + TEXT(".tmp");
+    if (!FFileHelper::SaveStringToFile(JsonStr, *TmpPath,
         FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
         UE_LOG(LogMuteRegistry, Error,
-            TEXT("MuteRegistry: failed to write %s"), *FilePath);
+            TEXT("MuteRegistry: failed to write temp file %s"), *TmpPath);
+        return false;
+    }
+    if (!IFileManager::Get().Move(*FilePath, *TmpPath, /*bReplace=*/true))
+    {
+        UE_LOG(LogMuteRegistry, Error,
+            TEXT("MuteRegistry: failed to replace %s with temp file"), *FilePath);
         return false;
     }
 

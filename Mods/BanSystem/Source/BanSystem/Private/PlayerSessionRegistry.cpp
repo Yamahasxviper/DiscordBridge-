@@ -11,6 +11,7 @@
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
 #include "HAL/PlatformFileManager.h"
+#include "HAL/FileManager.h"
 
 DEFINE_LOG_CATEGORY(LogPlayerSessionRegistry);
 
@@ -249,11 +250,18 @@ bool UPlayerSessionRegistry::SaveToFile() const
         return false;
     }
 
-    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath,
+    const FString TmpPath = FilePath + TEXT(".tmp");
+    if (!FFileHelper::SaveStringToFile(JsonStr, *TmpPath,
         FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
         UE_LOG(LogPlayerSessionRegistry, Error,
-            TEXT("PlayerSessionRegistry: failed to write %s"), *FilePath);
+            TEXT("PlayerSessionRegistry: failed to write temp file %s"), *TmpPath);
+        return false;
+    }
+    if (!IFileManager::Get().Move(*FilePath, *TmpPath, /*bReplace=*/true))
+    {
+        UE_LOG(LogPlayerSessionRegistry, Error,
+            TEXT("PlayerSessionRegistry: failed to replace %s with temp file"), *FilePath);
         return false;
     }
     return true;

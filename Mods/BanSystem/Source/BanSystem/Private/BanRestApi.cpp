@@ -149,10 +149,8 @@ namespace BanJson
     /**
      * Returns true when the request passes the API key check.
      * If RestApiKey is empty, always returns true (auth disabled).
-     * If RestApiKey is non-empty, the request must supply EITHER:
-     *   • header X-Api-Key with the matching value (case-sensitive), OR
-     *   • query parameter ?key=<value> (for browser-based dashboard access where
-     *     adding custom request headers is impractical on the initial page load).
+     * If RestApiKey is non-empty, the request must supply header X-Api-Key
+     * with the matching value (case-sensitive).
      */
     static bool CheckApiKey(const FHttpServerRequest& Req)
     {
@@ -163,12 +161,6 @@ namespace BanJson
         const TArray<FString>* KeyHeaderValues = Req.Headers.Find(TEXT("X-Api-Key"));
         if (KeyHeaderValues && !KeyHeaderValues->IsEmpty() &&
             (*KeyHeaderValues)[0].Equals(Cfg->RestApiKey, ESearchCase::CaseSensitive))
-            return true;
-
-        // Query-parameter fallback — allows navigating directly to the dashboard
-        // page in a browser with ?key=<apikey> without extra tooling.
-        const FString* QueryKey = Req.QueryParams.Find(TEXT("key"));
-        if (QueryKey && QueryKey->Equals(Cfg->RestApiKey, ESearchCase::CaseSensitive))
             return true;
 
         return false;
@@ -356,8 +348,9 @@ void UBanRestApi::RegisterRoutes()
     Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/health")),
         EHttpServerRequestVerbs::VERB_GET,
-        [](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
+        [](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
             Obj->SetStringField(TEXT("status"),    TEXT("ok"));
             Obj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());

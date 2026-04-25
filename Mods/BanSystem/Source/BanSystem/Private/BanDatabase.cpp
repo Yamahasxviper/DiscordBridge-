@@ -190,7 +190,7 @@ void UBanDatabase::Initialize(FSubsystemCollectionBase& Collection)
     // Capture the mtime so we can detect external edits in ReloadIfChanged().
     LastKnownFileModTime = IFileManager::Get().GetTimeStamp(*DbPath);
 
-    const int32 Pruned = PruneExpiredBans();
+    const int32 Pruned = PruneExpiredBans(/*bSilent=*/true);
     UE_LOG(LogBanDatabase, Log,
         TEXT("BanDatabase: loaded %s (%d ban(s), pruned %d expired)"),
         *DbPath, Bans.Num(), Pruned);
@@ -326,11 +326,18 @@ bool UBanDatabase::SaveToFile() const
         return false;
     }
 
-    if (!FFileHelper::SaveStringToFile(JsonStr, *DbPath,
+    if (!FFileHelper::SaveStringToFile(JsonStr, *(DbPath + TEXT(".tmp")),
         FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
         UE_LOG(LogBanDatabase, Error,
-            TEXT("BanDatabase: failed to write %s"), *DbPath);
+            TEXT("BanDatabase: failed to write temp file %s.tmp"), *DbPath);
+        return false;
+    }
+
+    if (!IFileManager::Get().Move(*DbPath, *(DbPath + TEXT(".tmp")), /*bReplace=*/true))
+    {
+        UE_LOG(LogBanDatabase, Error,
+            TEXT("BanDatabase: failed to rename temp file to %s"), *DbPath);
         return false;
     }
 
@@ -353,8 +360,8 @@ bool UBanDatabase::AddBan(const FBanEntry& Entry)
     {
         FScopeLock Lock(&DbMutex);
 
-        // Upsert: remove any existing record with the same UID first.
-        Bans.RemoveAll([&Entry](const FBanEntry& E){ return E.Uid == Entry.Uid; });
+        // Upsert: remove any existing record with the same UID first (case-insensitive).
+        Bans.RemoveAll([&Entry](const FBanEntry& E){ return E.Uid.Equals(Entry.Uid, ESearchCase::IgnoreCase); });
 
         NewEntry = Entry;
         if (NewEntry.Id <= 0)
@@ -383,10 +390,10 @@ bool UBanDatabase::RemoveBanByUid(const FString& Uid)
         // Capture player name before removal for the delegate.
         for (const FBanEntry& E : Bans)
         {
-            if (E.Uid == Uid) { RemovedPlayerName = E.PlayerName; break; }
+            if (E.Uid.Equals(Uid, ESearchCase::IgnoreCase)) { RemovedPlayerName = E.PlayerName; break; }
         }
 
-        const int32 Removed = Bans.RemoveAll([&Uid](const FBanEntry& E){ return E.Uid == Uid; });
+        const int32 Removed = Bans.RemoveAll([&Uid](const FBanEntry& E){ return E.Uid.Equals(Uid, ESearchCase::IgnoreCase); });
         bRemoved = (Removed > 0);
         if (bRemoved) SaveToFile();
     }
@@ -428,7 +435,7 @@ bool UBanDatabase::RemoveBanById(int64 Id, FBanEntry& OutEntry)
     return bRemoved;
 }
 
-int32 UBanDatabase::PruneExpiredBans()
+int32 UBanDatabase::PruneExpiredBans(bool bSilent)
 {
     TArray<FBanEntry> Expired;
 
@@ -456,8 +463,12 @@ int32 UBanDatabase::PruneExpiredBans()
     }
 
     // Broadcast outside the lock to avoid re-entrancy with OnBanRemoved subscribers.
-    for (const FBanEntry& E : Expired)
-        OnBanRemoved.Broadcast(E.Uid, E.PlayerName);
+    // Skipped in silent mode (e.g. startup pruning) to avoid notification floods.
+    if (!bSilent)
+    {
+        for (const FBanEntry& E : Expired)
+            OnBanRemoved.Broadcast(E.Uid, E.PlayerName);
+    }
 
     return Expired.Num();
 }
@@ -472,7 +483,7 @@ bool UBanDatabase::IsCurrentlyBanned(const FString& Uid, FBanEntry& OutEntry) co
 
     for (const FBanEntry& E : Bans)
     {
-        if (E.Uid != Uid) continue;
+        if (!E.Uid.Equals(Uid, ESearchCase::IgnoreCase)) continue;
 
         // Permanent bans are always active.
         if (E.bIsPermanent)
@@ -521,7 +532,7 @@ bool UBanDatabase::GetBanByUid_Locked(const FString& Uid, FBanEntry& OutEntry) c
 {
     for (const FBanEntry& E : Bans)
     {
-        if (E.Uid == Uid)
+        if (E.Uid.Equals(Uid, ESearchCase::IgnoreCase))
         {
             OutEntry = E;
             return true;

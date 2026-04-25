@@ -26,10 +26,10 @@ bool UBanChatCommandsConfig::IsAdminUid(const FString& Uid) const
 
 bool UBanChatCommandsConfig::IsModeratorUid(const FString& Uid) const
 {
+    if (Uid.IsEmpty()) return false;
+
     // Admins are always moderators.
     if (IsAdminUid(Uid)) return true;
-
-    if (Uid.IsEmpty()) return false;
 
     FString Platform, RawId;
     UBanDatabase::ParseUid(Uid, Platform, RawId);
