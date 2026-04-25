@@ -652,6 +652,7 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 			{
 				UBanDiscordSubsystem* Self = WeakThis.Get();
 				if (!Self || !Self->CachedProvider) return;
+				if (!MsgObj.IsValid()) return;
 				if (Self->Config.StaffChatChannelId.IsEmpty()) return;
 
 				// Only process messages from the configured staff-chat channel.

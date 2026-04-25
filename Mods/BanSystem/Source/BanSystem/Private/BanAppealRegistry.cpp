@@ -146,9 +146,9 @@ FString UBanAppealRegistry::GetRegistryPath() const
     if (Cfg && !Cfg->DatabasePath.IsEmpty())
         BaseDir = FPaths::GetPath(Cfg->DatabasePath);
     else
-        BaseDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("BanSystem"));
+        BaseDir = FPaths::ProjectSavedDir() / TEXT("BanSystem");
 
-    return FPaths::Combine(BaseDir, TEXT("appeals.json"));
+    return BaseDir / TEXT("appeals.json");
 }
 
 void UBanAppealRegistry::LoadFromFile()

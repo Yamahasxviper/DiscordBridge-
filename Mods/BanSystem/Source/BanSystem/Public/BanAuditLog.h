@@ -70,6 +70,7 @@ private:
     FString GetRegistryPath() const;
 
     TArray<FAuditEntry>  Entries;
+    int64                NextId = 1;
     mutable FCriticalSection Mutex;
     FString FilePath;
 
