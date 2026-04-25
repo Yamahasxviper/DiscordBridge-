@@ -2172,6 +2172,21 @@ AReasonChatCommand::AReasonChatCommand()
 EExecutionStatus AReasonChatCommand::ExecuteCommand_Implementation(
     UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
 {
+    // Restrict to admins/moderators — ban details (reason, banner, date) must not
+    // be visible to regular players.
+    FString CallerId;
+    const UBanChatCommandsConfig* ReasonCfg = UBanChatCommandsConfig::Get();
+    if (!BanChat::IsAdminSender(Sender, CallerId, false))
+    {
+        if (!ReasonCfg || !ReasonCfg->IsModeratorUid(CallerId))
+        {
+            if (Sender) Sender->SendChatMessage(
+                TEXT("[BanChatCommands] You do not have permission to use this command."),
+                FLinearColor::Red);
+            return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
+        }
+    }
+
     FString Uid;
     if (!BanChat::ParseAndNormaliseUidArg(Sender, Arguments[0], Uid))
         return EExecutionStatus::BAD_ARGUMENTS;
@@ -3987,6 +4002,16 @@ EExecutionStatus ABulkBanChatCommand::ExecuteCommand_Implementation(
 
     for (const FString& RawUid : Uids)
     {
+        // Validate: only accept 32-char hex EOS PUIDs in /bulkban to prevent
+        // garbage entries from typos or malformed input.
+        if (!BanChat::IsValidEOSPUID(RawUid))
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] Skipping '%s' — not a valid 32-char hex EOS PUID."), *RawUid),
+                FLinearColor::Yellow);
+            continue;
+        }
+
         const FString Uid = UBanDatabase::MakeUid(TEXT("EOS"), RawUid.ToLower());
 
         FBanEntry Ban;
