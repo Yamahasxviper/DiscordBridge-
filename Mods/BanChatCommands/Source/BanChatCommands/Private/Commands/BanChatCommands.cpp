@@ -2650,16 +2650,16 @@ EExecutionStatus ADurationChatCommand::ExecuteCommand_Implementation(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  ATempUnmuteChatCommand  — /tempunmute  (apply a timed mute)
+//  ATempUnmuteChatCommand  — /tempunmute  (lift a timed mute early)
 // ─────────────────────────────────────────────────────────────────────────────
 
 ATempUnmuteChatCommand::ATempUnmuteChatCommand()
 {
     CommandName          = TEXT("tempunmute");
-    MinNumberOfArguments = 2;
+    MinNumberOfArguments = 1;
     bOnlyUsableByPlayer  = false;
     Usage = NSLOCTEXT("BanChatCommands", "TempUnmuteUsage",
-        "/tempunmute <player|PUID> <duration>  — duration: 30m, 1h, 1d, 1w, 2h30m, or plain minutes");
+        "/tempunmute <player|PUID>  — lift a timed mute before its scheduled expiry");
 }
 
 EExecutionStatus ATempUnmuteChatCommand::ExecuteCommand_Implementation(
@@ -2673,30 +2673,6 @@ EExecutionStatus ATempUnmuteChatCommand::ExecuteCommand_Implementation(
     if (!BanChat::ResolveTarget(this, Sender, Arguments[0], Uid, DisplayName))
         return EExecutionStatus::BAD_ARGUMENTS;
 
-    int32 Minutes = BanChat::ParseDurationMinutes(Arguments[1]);
-    if (Minutes <= 0)
-    {
-        Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] Invalid duration '%s'. Use minutes (e.g. 30) or shorthand (e.g. 1h)."),
-                *Arguments[1]),
-            FLinearColor::Red);
-        return EExecutionStatus::BAD_ARGUMENTS;
-    }
-
-    {
-        const UBanChatCommandsConfig* TempMuteCfg = UBanChatCommandsConfig::Get();
-        if (TempMuteCfg && TempMuteCfg->MaxModMuteDurationMinutes > 0
-            && Sender->IsPlayerSender()
-            && !TempMuteCfg->IsAdminUid(AdminId)
-            && Minutes > TempMuteCfg->MaxModMuteDurationMinutes)
-        {
-            Minutes = TempMuteCfg->MaxModMuteDurationMinutes;
-            Sender->SendChatMessage(
-                FString::Printf(TEXT("[BanChatCommands] :warning: Duration capped to %d minutes (moderator limit)."), Minutes),
-                FLinearColor::Yellow);
-        }
-    }
-
     UWorld* World = GetWorld();
     if (!World) return EExecutionStatus::UNCOMPLETED;
     UGameInstance* GI = World->GetGameInstance();
@@ -2709,21 +2685,29 @@ EExecutionStatus ATempUnmuteChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::UNCOMPLETED;
     }
 
-    const FString Reason = TEXT("Timed mute");
-    MuteReg->MutePlayer(Uid, DisplayName, Reason, Sender->GetSenderName(), Minutes);
-
-    // Notify Discord so the timed mute is visible to all staff — consistent
-    // with the /mute command which calls NotifyPlayerMuted for every mute.
+    FMuteEntry Entry;
+    if (!MuteReg->GetMuteEntry(Uid, Entry))
     {
-        const FDateTime Expiry = FDateTime::UtcNow() + FTimespan::FromMinutes(static_cast<double>(Minutes));
-        FBanDiscordNotifier::NotifyPlayerMuted(Uid, DisplayName, Sender->GetSenderName(),
-            Reason, /*bIsTimed=*/true, Expiry);
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] '%s' is not currently muted."), *DisplayName),
+            FLinearColor::Yellow);
+        return EExecutionStatus::COMPLETED;
     }
 
+    if (Entry.bIsIndefinite)
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] '%s' has an indefinite mute. Use /unmute instead."), *DisplayName),
+            FLinearColor::Yellow);
+        return EExecutionStatus::COMPLETED;
+    }
+
+    MuteReg->UnmutePlayer(Uid);
+    FBanDiscordNotifier::NotifyPlayerUnmuted(Uid, DisplayName, Sender->GetSenderName());
+
     Sender->SendChatMessage(
-        FString::Printf(TEXT("[BanChatCommands] Set timed mute for '%s' — %s."),
-            *DisplayName, *BanChat::FormatDuration(Minutes)),
-        FLinearColor::Yellow);
+        FString::Printf(TEXT("[BanChatCommands] Timed mute lifted early for '%s'."), *DisplayName),
+        FLinearColor::Green);
 
     return EExecutionStatus::COMPLETED;
 }
