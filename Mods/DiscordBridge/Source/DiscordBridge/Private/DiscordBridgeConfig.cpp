@@ -43,7 +43,7 @@ namespace
 		{
 			RawBytes.RemoveAt(0, 3, /*bAllowShrinking=*/false);
 			FFileHelper::SaveArrayToFile(RawBytes, *FilePath);
-			UE_LOG(LogTemp, Log,
+			UE_LOG(LogDiscordBridge, Log,
 			       TEXT("DiscordBridge: Stripped UTF-8 BOM from '%s'."), *FilePath);
 		}
 	}
@@ -356,7 +356,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				{
 					Config.DiscordToGameFormat = OldSenderFmt + TEXT(": %Message%");
 				}
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: 'DiscordSenderFormat' is deprecated. "
 				            "Use 'DiscordToGameFormat' to control the full in-game line. "
 				            "Effective format is now: \"%s\""), *Config.DiscordToGameFormat);
@@ -552,7 +552,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		Config.ChannelId = Config.ChannelId.TrimStartAndEnd();
 
 		bLoadedFromMod = true;
-		UE_LOG(LogTemp, Log, TEXT("DiscordBridge: Loaded config from %s"), *ModFilePath);
+		UE_LOG(LogDiscordBridge, Log, TEXT("DiscordBridge: Loaded config from %s"), *ModFilePath);
 
 		// When BotToken is empty the file may not have been configured yet.
 		// Only rewrite with the annotated template when the file has no '#'
@@ -570,7 +570,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			StripBOM(ModFileRaw);
 			if (!ModFileRaw.Contains(TEXT("#")))
 			{
-				UE_LOG(LogTemp, Log,
+				UE_LOG(LogDiscordBridge, Log,
 				       TEXT("DiscordBridge: Config at '%s' has no BotToken and no comment "
 				            "lines (Alpakit-stripped or comment-free) – rewriting with "
 				            "annotated template so operators can see setting descriptions."),
@@ -579,7 +579,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 			}
 			else
 			{
-				UE_LOG(LogTemp, Log,
+				UE_LOG(LogDiscordBridge, Log,
 				       TEXT("DiscordBridge: Config at '%s' has no BotToken – "
 				            "Discord bridge will not start until BotToken is configured."),
 				       *ModFilePath);
@@ -723,7 +723,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 
 				if (!AppendContent2.IsEmpty())
 				{
-					UE_LOG(LogTemp, Log,
+					UE_LOG(LogDiscordBridge, Log,
 					       TEXT("DiscordBridge: Config at '%s' is missing individual settings "
 					            "(older version detected). Appending missing entries."),
 					       *ModFilePath);
@@ -735,14 +735,14 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 					if (FFileHelper::SaveStringToFile(ExistingContent2 + AppendContent2, *ModFilePath,
 					    FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 					{
-						UE_LOG(LogTemp, Log,
+						UE_LOG(LogDiscordBridge, Log,
 						       TEXT("DiscordBridge: Updated '%s' with missing settings. "
 						            "Review and configure them, then restart the server."),
 						       *ModFilePath);
 					}
 					else
 					{
-						UE_LOG(LogTemp, Warning,
+						UE_LOG(LogDiscordBridge, Warning,
 						       TEXT("DiscordBridge: Could not update '%s' with missing settings."),
 						       *ModFilePath);
 					}
@@ -757,7 +757,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		{
 			// Primary config missing – create it with defaults so the operator has
 			// a ready-made file to fill in.
-			UE_LOG(LogTemp, Log,
+			UE_LOG(LogDiscordBridge, Log,
 			       TEXT("DiscordBridge: Config file not found at '%s'. "
 			            "Creating it with defaults."), *ModFilePath);
 		}
@@ -964,14 +964,14 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		if (FFileHelper::SaveStringToFile(DefaultContent, *ModFilePath,
 			FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 		{
-			UE_LOG(LogTemp, Log,
+			UE_LOG(LogDiscordBridge, Log,
 			       TEXT("DiscordBridge: Wrote default config to '%s'. "
 			            "Set BotToken and ChannelId in that file, then restart "
 			            "the server to enable the Discord bridge."), *ModFilePath);
 		}
 		else
 		{
-			UE_LOG(LogTemp, Warning,
+			UE_LOG(LogDiscordBridge, Warning,
 			       TEXT("DiscordBridge: Could not write default config to '%s'."),
 			       *ModFilePath);
 		}
@@ -1141,7 +1141,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		const bool bRestoredChannel = !bHadChannel && !Config.ChannelId.IsEmpty();
 		if (bRestoredToken || bRestoredChannel)
 		{
-			UE_LOG(LogTemp, Log,
+			UE_LOG(LogDiscordBridge, Log,
 			       TEXT("DiscordBridge: Primary config '%s' had no credentials – "
 			            "restored from backup at '%s'. "
 			            "Writing all settings back to the primary config so they persist there."),
@@ -1343,13 +1343,13 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 				if (FFileHelper::SaveStringToFile(PrimaryContent, *ModFilePath,
 				    FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 				{
-					UE_LOG(LogTemp, Log,
+					UE_LOG(LogDiscordBridge, Log,
 					       TEXT("DiscordBridge: Updated primary config at '%s' with all restored settings."),
 					       *ModFilePath);
 				}
 				else
 				{
-					UE_LOG(LogTemp, Warning,
+					UE_LOG(LogDiscordBridge, Warning,
 					       TEXT("DiscordBridge: Could not write restored settings back to '%s'. "
 					            "The bridge will still function using the backup."),
 					       *ModFilePath);
@@ -1480,19 +1480,19 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 		{
 			if (Config.BotToken.IsEmpty())
 			{
-				UE_LOG(LogTemp, Log,
+				UE_LOG(LogDiscordBridge, Log,
 				       TEXT("DiscordBridge: Wrote backup config at '%s' (credentials not yet configured)."),
 				       *BackupFilePath);
 			}
 			else
 			{
-				UE_LOG(LogTemp, Log,
+				UE_LOG(LogDiscordBridge, Log,
 				       TEXT("DiscordBridge: Updated backup config at '%s'."), *BackupFilePath);
 			}
 		}
 		else
 		{
-			UE_LOG(LogTemp, Warning,
+			UE_LOG(LogDiscordBridge, Warning,
 			       TEXT("DiscordBridge: Could not write backup config to '%s'."),
 			       *BackupFilePath);
 		}

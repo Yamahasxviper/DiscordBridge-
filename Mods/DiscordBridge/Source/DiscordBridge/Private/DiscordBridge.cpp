@@ -2,6 +2,7 @@
 
 #include "DiscordBridge.h"
 #include "DiscordBridgeChatCommands.h"
+#include "DiscordBridgeConfig.h"
 #include "Modules/ModuleManager.h"
 #include "Engine/World.h"
 #include "Command/ChatCommandLibrary.h"
@@ -24,7 +25,7 @@ void FDiscordBridgeModule::StartupModule()
 			AChatCommandSubsystem* CmdSys = AChatCommandSubsystem::Get(World);
 			if (!CmdSys)
 			{
-				UE_LOG(LogTemp, Warning,
+				UE_LOG(LogDiscordBridge, Warning,
 					TEXT("DiscordBridge: AChatCommandSubsystem not available — /verify, /discord, /ingamewhitelist, /commands not registered."));
 				return;
 			}
@@ -34,7 +35,7 @@ void FDiscordBridgeModule::StartupModule()
 			CmdSys->RegisterCommand(TEXT("DiscordBridge"), AInGameWhitelistChatCommand::StaticClass());
 			CmdSys->RegisterCommand(TEXT("DiscordBridge"), ADiscordCommandsListChatCommand::StaticClass());
 
-			UE_LOG(LogTemp, Log,
+			UE_LOG(LogDiscordBridge, Log,
 				TEXT("DiscordBridge: Registered in-game slash commands: /verify, /discord, /ingamewhitelist, /commands."));
 		});
 }

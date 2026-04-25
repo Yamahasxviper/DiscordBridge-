@@ -37,7 +37,7 @@
 #include "PlayerWarningRegistry.h"
 #include "PlayerSessionRegistry.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogDiscordBridge, Log, All);
+DEFINE_LOG_CATEGORY(LogDiscordBridge);
 
 // Discord Gateway endpoint (v10, JSON encoding)
 static const FString DiscordGatewayUrl = TEXT("wss://gateway.discord.gg/?v=10&encoding=json");
@@ -2285,12 +2285,17 @@ void UDiscordBridgeSubsystem::UpdatePlayerCountPresence()
 	}
 
 	// Count connected players using the game state's player array.
+	// PlayerArray may contain null entries for pending/disconnecting players,
+	// so count only valid (non-null) APlayerState pointers.
 	int32 PlayerCount = 0;
 	if (UWorld* World = GetWorld())
 	{
 		if (AGameStateBase* GS = World->GetGameState<AGameStateBase>())
 		{
-			PlayerCount = GS->PlayerArray.Num();
+			for (APlayerState* PS : GS->PlayerArray)
+			{
+				if (PS) ++PlayerCount;
+			}
 		}
 	}
 
@@ -2531,8 +2536,9 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 			if (WarnReg)
 			{
 				const FDateTime Now       = FDateTime::UtcNow();
-				const FTimespan Window    = FTimespan::FromMinutes(BanCfg->ChatFilterAutoWarnWindowMinutes > 0
-					? BanCfg->ChatFilterAutoWarnWindowMinutes : 10);
+				const int32 EffectiveWindowMinutes = BanCfg->ChatFilterAutoWarnWindowMinutes > 0
+					? BanCfg->ChatFilterAutoWarnWindowMinutes : 10;
+				const FTimespan Window    = FTimespan::FromMinutes(EffectiveWindowMinutes);
 
 				// Update the hit-count tracker.
 				FFilterHitRecord& Rec = ChatFilterHits.FindOrAdd(PlayerName);
@@ -2578,7 +2584,7 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 					{
 						const FString WarnReason = FString::Printf(
 							TEXT("Auto-warn: triggered chat filter %d times within %d minutes"),
-							HitCount, BanCfg->ChatFilterAutoWarnWindowMinutes);
+							HitCount, EffectiveWindowMinutes);
 
 						FWarningEntry WarnEntry;
 						WarnEntry.Uid        = Uid;
@@ -4897,7 +4903,17 @@ NotifyMuteEvent(Entry.PlayerName, Entry.Uid, true, Entry.Reason);
 UnmutedEventHandle = MuteReg->OnPlayerUnmuted.AddLambda(
 [this](const FString& Uid)
 {
-NotifyMuteEvent(TEXT(""), Uid, false, TEXT(""));
+FString PlayerName;
+if (UGameInstance* GI = GetGameInstance())
+{
+if (UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>())
+{
+FPlayerSessionRecord Record;
+if (Registry->FindByUid(Uid, Record) && !Record.DisplayName.IsEmpty())
+PlayerName = Record.DisplayName;
+}
+}
+NotifyMuteEvent(PlayerName, Uid, false, TEXT(""));
 });
 bBoundMuteEvents = true;
 UE_LOG(LogDiscordBridge, Log, TEXT("DiscordBridge: Bound to UMuteRegistry mute-event delegates."));
@@ -5401,15 +5417,17 @@ return;
 
 FString PlayerList;
 int32 Idx = 1;
+int32 NonNullCount = 0;
 for (APlayerState* PS : GS->PlayerArray)
 {
 if (!PS) continue;
 PlayerList += FString::Printf(TEXT("%d. **%s**\n"), Idx++, *PS->GetPlayerName());
+++NonNullCount;
 }
 
 TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
 EmbedObj->SetStringField(TEXT("title"),
-FString::Printf(TEXT("👥 Online Players (%d)"), GS->PlayerArray.Num()));
+FString::Printf(TEXT("👥 Online Players (%d)"), NonNullCount));
 EmbedObj->SetNumberField(TEXT("color"), 3066993); // green
 EmbedObj->SetStringField(TEXT("description"), PlayerList);
 EmbedObj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
@@ -5437,12 +5455,12 @@ if (Target.IsEmpty()) return;
 
 const FString Emoji  = bIsMuted ? TEXT("🔇") : TEXT("🔊");
 const FString Action = bIsMuted ? TEXT("Muted") : TEXT("Unmuted");
-const FString Colour = bIsMuted ? TEXT("15158332") : TEXT("3066993"); // red / green
+const int32 Colour = bIsMuted ? 15158332 : 3066993; // red / green
 
 TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
 EmbedObj->SetStringField(TEXT("title"),
 FString::Printf(TEXT("%s Player %s: %s"), *Emoji, *Action, *PlayerName));
-EmbedObj->SetNumberField(TEXT("color"), FCString::Atoi(*Colour));
+EmbedObj->SetNumberField(TEXT("color"), Colour);
 if (bIsMuted && !Reason.IsEmpty())
 EmbedObj->SetStringField(TEXT("description"),
 FString::Printf(TEXT("**Reason:** %s"), *Reason));
@@ -5592,7 +5610,7 @@ Commands.Add(MakeCmd(TEXT("mod"), TEXT("Moderation commands (moderator or admin)
 	MakeSub(TEXT("unmute"),     TEXT("Lift a mute from a player."),
 		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("tempmute"),   TEXT("Apply a timed mute."),
-		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")), Str(TEXT("duration"), TEXT("Duration: 30m, 2h, 1d, 1w or plain minutes")), Str(TEXT("reason"), TEXT("Reason for the mute (optional)")) }),
+		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")), Str(TEXT("duration"), TEXT("Duration: 30m, 2h, 1d, 1w or plain minutes")), StrO(TEXT("reason"), TEXT("Reason for the mute")) }),
 	MakeSub(TEXT("tempunmute"), TEXT("Lift a timed mute."),
 		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("mutecheck"),  TEXT("Check mute status and expiry."),
@@ -5716,6 +5734,7 @@ Commands.Add(MakeCmd(TEXT("ticket"), TEXT("Support ticket management commands.")
 }));
 
 // Serialize the commands array and send to Discord.
+const int32 NumCommands = Commands.Num();
 FString BodyStr;
 {
 	TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&BodyStr);
@@ -5730,14 +5749,14 @@ Request->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bot %s"), *Confi
 Request->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
 Request->SetContentAsString(BodyStr);
 Request->OnProcessRequestComplete().BindLambda(
-	[](FHttpRequestPtr, FHttpResponsePtr Resp, bool bSuccess)
+	[NumCommands](FHttpRequestPtr, FHttpResponsePtr Resp, bool bSuccess)
 	{
 		if (bSuccess && Resp.IsValid() &&
 			(Resp->GetResponseCode() == 200 || Resp->GetResponseCode() == 201))
 		{
 			UE_LOG(LogDiscordBridge, Log,
 				TEXT("DiscordBridge: Slash commands registered successfully (%d commands)."),
-				13); // 5 standalone + 8 groups
+				NumCommands);
 		}
 		else
 		{
@@ -6238,7 +6257,7 @@ if (!Query.IsEmpty()) SubCmd += TEXT(" ") + Query;
 }
 // "on", "off", "status" carry no extra arguments.
 
-HandleWhitelistCommand(SubCmd, AuthorName, Config.ChannelId, AuthorId);
+HandleWhitelistCommand(SubCmd, AuthorName, InteractionChannelId, AuthorId);
 return;
 }
 

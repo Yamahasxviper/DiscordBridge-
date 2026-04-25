@@ -628,7 +628,7 @@ public:
  *
  * Mutes a player — their chat messages will not be relayed to Discord and
  * other players will not see them until the mute expires or is lifted with
- * /unmute.  Mutes are in-memory only and do not persist across server restarts.
+ * /unmute.  Mutes are persisted to disk (mutes.json) and survive server restarts.
  *
  * Requires admin.
  *

@@ -1753,7 +1753,7 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 			: FString::Printf(TEXT("In-Game Name: %s\nReason: %s"), *WlIgn, *WlReason);
 
 		Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
-			TEXT(":white_check_mark: Opening your whitelist request ticket…  "
+			TEXT(":white_check_mark: Opening your whitelist request ticket… "
 			     "A private channel will appear shortly."),
 			/*bEphemeral=*/true);
 		CreateTicketChannel(DiscordUserId, DiscordUsername, TEXT("whitelist"), WlDetails,
@@ -1769,7 +1769,7 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 			return;
 		}
 		Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
-			TEXT(":white_check_mark: Opening your help ticket…  "
+			TEXT(":white_check_mark: Opening your help ticket… "
 			     "A private channel will appear shortly."),
 			/*bEphemeral=*/true);
 		CreateTicketChannel(DiscordUserId, DiscordUsername, TEXT("help"), Reason,
@@ -1785,7 +1785,7 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 			return;
 		}
 		Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
-			TEXT(":white_check_mark: Opening your report ticket…  "
+			TEXT(":white_check_mark: Opening your report ticket… "
 			     "A private channel will appear shortly."),
 			/*bEphemeral=*/true);
 		CreateTicketChannel(DiscordUserId, DiscordUsername, TEXT("report"), Reason,
@@ -1898,13 +1898,20 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 		if (!AppealEosUid.IsEmpty())
 		{
 			FString NormalizedEos = AppealEosUid.TrimStartAndEnd();
-			if (!NormalizedEos.StartsWith(TEXT("EOS:"), ESearchCase::IgnoreCase))
+			if (NormalizedEos.StartsWith(TEXT("EOS:"), ESearchCase::IgnoreCase))
+			{
+				// Already has the prefix — keep the prefix but lowercase the PUID portion.
+				NormalizedEos = TEXT("EOS:") + NormalizedEos.Mid(4).ToLower();
+			}
+			else
+			{
 				NormalizedEos = UBanDatabase::MakeUid(TEXT("EOS"), NormalizedEos.ToLower());
+			}
 			OpenerToEosUid.Add(DiscordUserId, NormalizedEos);
 		}
 
 		Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
-			TEXT(":white_check_mark: Opening your ban appeal ticket…  "
+			TEXT(":white_check_mark: Opening your ban appeal ticket… "
 			     "A private channel will appear shortly."),
 			/*bEphemeral=*/true);
 		CreateTicketChannel(DiscordUserId, DiscordUsername, TEXT("banappeal"), AppealDetails,
@@ -1934,7 +1941,7 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 			MuteAppealReason.IsEmpty() ? TEXT("Not provided") : *MuteAppealReason);
 
 		Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
-			TEXT(":white_check_mark: Opening your mute appeal ticket…  "
+			TEXT(":white_check_mark: Opening your mute appeal ticket… "
 			     "A private channel will appear shortly."),
 			/*bEphemeral=*/true);
 		CreateTicketChannel(DiscordUserId, DiscordUsername, TEXT("muteappeal"), MuteAppealDetails,
@@ -2073,7 +2080,7 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 
 		Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
 			FString::Printf(
-				TEXT(":white_check_mark: Opening your **%s** ticket…  "
+				TEXT(":white_check_mark: Opening your **%s** ticket… "
 				     "A private channel will appear shortly."),
 				*Label),
 			/*bEphemeral=*/true);
@@ -2290,6 +2297,7 @@ void UTicketSubsystem::CreateTicketChannel(
 					{
 						FString BanEosUid;
 						if (WelcomeEosUid && !WelcomeEosUid->IsEmpty())
+						{
 						if (UBanDatabase* BanDb = GI->GetSubsystem<UBanDatabase>())
 						{
 							FBanEntry BanRecord;
@@ -2334,6 +2342,7 @@ void UTicketSubsystem::CreateTicketChannel(
 									*BanRecord.BanDate.ToString(TEXT("%Y-%m-%d %H:%M")),
 									*DurationStr);
 							}
+						}
 						}
 
 						// Feature 2: show warning history for the EOS UID.
@@ -2550,7 +2559,7 @@ void UTicketSubsystem::CreateTicketChannel(
 				if (TicketTypeCopy == TEXT("banappeal"))
 				{
 					// Count prior denied appeals for severity rating.
-					FString SeverityBadge = TEXT("🟡 First Appeal");
+					FString SeverityBadge;
 					if (UGameInstance* GI = Self->GetGameInstance())
 					{
 						if (UBanAppealRegistry* AppealReg = GI->GetSubsystem<UBanAppealRegistry>())
@@ -3309,7 +3318,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 			return;
 		}
 		TicketChannelToAssignee.Add(SourceChannelId, TargetId);
-		TicketChannelToAssigneeName.Add(SourceChannelId, MentionPart);
+		TicketChannelToAssigneeName.Add(SourceChannelId, TEXT("<@") + TargetId + TEXT(">"));
 		SaveTicketState();
 		Bridge->SendDiscordChannelMessage(SourceChannelId,
 			FString::Printf(TEXT(":arrows_counterclockwise: Ticket transferred to <@%s>."), *TargetId));
@@ -3481,7 +3490,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 			RatingStr = FString::Printf(TEXT("%.1f/5 (%d rating%s)"),
 				RatingSum / TotalRatings,
 				static_cast<int32>(TotalRatings),
-				TotalRatings == 1 ? TEXT("") : TEXT("s"));
+				TotalRatings == 1.0 ? TEXT("") : TEXT("s"));
 
 		const FString Msg = FString::Printf(
 			TEXT(":bar_chart: **Ticket Statistics**\n")
@@ -3544,7 +3553,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 			RptRatingStr = FString::Printf(TEXT("%.1f/5 (%d rating%s)"),
 				RptRatingSum / RptTotalRatings,
 				static_cast<int32>(RptTotalRatings),
-				RptTotalRatings == 1 ? TEXT("") : TEXT("s"));
+				RptTotalRatings == 1.0 ? TEXT("") : TEXT("s"));
 
 		const FString PeriodDisplay = PeriodArg.Equals(TEXT("week"), ESearchCase::IgnoreCase)
 			? TEXT("week") : TEXT("month");
@@ -4480,12 +4489,15 @@ void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
 								FString AuthorName;
 								const TSharedPtr<FJsonObject>* AuthorPtr = nullptr;
 								if ((*MsgObjPtr)->TryGetObjectField(TEXT("author"), AuthorPtr) && AuthorPtr)
-									(*AuthorPtr)->TryGetStringField(TEXT("username"), AuthorName);
+								{
+									if (!(*AuthorPtr)->TryGetStringField(TEXT("global_name"), AuthorName) || AuthorName.IsEmpty())
+										(*AuthorPtr)->TryGetStringField(TEXT("username"), AuthorName);
+								}
 
 								FString MsgContent;
 								(*MsgObjPtr)->TryGetStringField(TEXT("content"), MsgContent);
 
-								if (!MsgContent.IsEmpty())
+								if (!AuthorName.IsEmpty() && !MsgContent.IsEmpty())
 									TranscriptText += FString::Printf(TEXT("[%s]: %s\n"), *AuthorName, *MsgContent);
 							}
 						}
@@ -4498,6 +4510,9 @@ void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
 					TranscriptText += FString::Printf(
 						TEXT("\n**Appeal Review Note:** %s"), *ReviewNoteCopy);
 				}
+
+				if (TranscriptText.Len() > 1900)
+					TranscriptText = TranscriptText.Left(1900) + TEXT("\n*(transcript truncated)*");
 
 				B->SendDiscordChannelMessage(LogChannelId, TranscriptText);
 				B->DeleteDiscordChannel(ClosedChannelId);
