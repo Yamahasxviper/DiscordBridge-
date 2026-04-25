@@ -34,12 +34,11 @@ bool USMLWebSocketServer::Listen(int32 Port)
     if (bListening) return true;
 
     ServerRunnable = MakeShared<FSMLWebSocketServerRunnable>(this, Port, ApiToken);
-    if (!ServerRunnable->Init())
-    {
-        ServerRunnable.Reset();
-        return false;
-    }
 
+    // Do NOT call Init() manually here. FRunnableThread::Create() calls Init() on
+    // the new thread. Calling it a second time from the game thread would create and
+    // bind the listen socket twice — leaking the first socket and potentially failing
+    // to bind the port on the second attempt.
     ServerThread = FRunnableThread::Create(
         ServerRunnable.Get(),
         TEXT("SMLWebSocketServer"),

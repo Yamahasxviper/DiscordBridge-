@@ -268,7 +268,7 @@ bool FSMLWebSocketServerRunnable::PerformHandshake(FClientState& Client)
     int32 Recv = 0;
     bool bFoundHeaderEnd = false;
 
-    for (int32 i = 0; i < 8192; ++i)
+    for (int32 i = 0; i < 8192 && !bStopping.load(); ++i)
     {
         if (!Client.Socket->Recv(&Ch, 1, Recv) || Recv == 0) return false;
         HeaderBuf.Add(Ch);
@@ -456,6 +456,9 @@ bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClient
             }
             else // Text or Continuation — deliver as UTF-8 string
             {
+                // Null-terminate the payload bytes before converting to FString;
+                // UTF8_TO_TCHAR scans until '\0' and the frame payload has none.
+                Payload.Add(0);
                 const FString Text = FString(UTF8_TO_TCHAR(reinterpret_cast<const ANSICHAR*>(Payload.GetData())));
 
                 TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
