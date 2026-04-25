@@ -67,13 +67,8 @@ void UBanAuditLog::LogAction(const FString& Action,
 {
     FScopeLock Lock(&Mutex);
 
-    // Determine the next Id (max existing + 1).
-    int64 NextId = 1;
-    for (const FAuditEntry& E : Entries)
-        if (E.Id >= NextId) NextId = E.Id + 1;
-
     FAuditEntry Entry;
-    Entry.Id         = NextId;
+    Entry.Id         = NextId++;
     Entry.Action     = Action;
     Entry.TargetUid  = TargetUid;
     Entry.TargetName = TargetName;
@@ -179,6 +174,11 @@ void UBanAuditLog::LoadFromFile()
     // Trim on load in case the file was edited externally and exceeds the cap.
     if (Entries.Num() > MaxEntries)
         Entries.RemoveAt(0, Entries.Num() - MaxEntries);
+
+    // Restore the O(1) counter from loaded data so LogAction never reuses an Id.
+    NextId = 1;
+    for (const FAuditEntry& E : Entries)
+        if (E.Id >= NextId) NextId = E.Id + 1;
 }
 
 bool UBanAuditLog::SaveToFile() const

@@ -51,13 +51,8 @@ void UPlayerNoteRegistry::AddNote(const FString& Uid, const FString& PlayerName,
 
     FScopeLock Lock(&Mutex);
 
-    // Determine next Id (max existing + 1).
-    int64 NextId = 1;
-    for (const FPlayerNoteEntry& N : Notes)
-        if (N.Id >= NextId) NextId = N.Id + 1;
-
     FPlayerNoteEntry Entry;
-    Entry.Id         = NextId;
+    Entry.Id         = NextId++;
     Entry.Uid        = Uid;
     Entry.PlayerName = PlayerName;
     Entry.Note       = Note;
@@ -105,7 +100,7 @@ bool UPlayerNoteRegistry::DeleteNote(int64 Id)
 
 FString UPlayerNoteRegistry::GetRegistryPath() const
 {
-    return FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("BanChatCommands"), TEXT("notes.json"));
+    return FPaths::ProjectSavedDir() / TEXT("BanChatCommands") / TEXT("notes.json");
 }
 
 void UPlayerNoteRegistry::LoadFromFile()
@@ -152,6 +147,11 @@ void UPlayerNoteRegistry::LoadFromFile()
                 Notes.Add(Entry);
         }
     }
+
+    // Restore the O(1) counter from loaded data so AddNote never reuses an Id.
+    NextId = 1;
+    for (const FPlayerNoteEntry& N : Notes)
+        if (N.Id >= NextId) NextId = N.Id + 1;
 }
 
 bool UPlayerNoteRegistry::SaveToFile() const
