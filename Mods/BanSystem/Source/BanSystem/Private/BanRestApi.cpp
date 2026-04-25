@@ -564,7 +564,9 @@ void UBanRestApi::RegisterRoutes()
 
             FBanDiscordNotifier::NotifyBanCreated(Saved);
             if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-                AuditLog->LogAction(TEXT("ban"), Saved.Uid, Saved.PlayerName, Saved.BannedBy, Saved.BannedBy, Saved.Reason);
+                // REST API bans have no separate admin UID (BannedBy is a display name).
+                // Pass an empty adminUid so the audit log does not record the name twice.
+                AuditLog->LogAction(TEXT("ban"), Saved.Uid, Saved.PlayerName, TEXT(""), Saved.BannedBy, Saved.Reason);
 
             auto Resp = BanJson::Json(BanJson::ObjectToString(BanJson::EntryToJson(Saved)));
             Resp->Code = EHttpServerResponseCodes::Created;
@@ -1455,6 +1457,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }

@@ -338,7 +338,7 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 				const FString DurationStr = Entry.bIsPermanent
 					? TEXT("Permanent")
-					: FString::Printf(TEXT("%lld min"), (Entry.ExpireDate - Entry.BanDate).GetTotalMinutes());
+					: FString::Printf(TEXT("%lld min"), static_cast<int64>((Entry.ExpireDate - Entry.BanDate).GetTotalMinutes()));
 				const FString Msg = FString::Printf(
 					TEXT("🔨 **%s** (`%s`) banned.\nReason: %s\nBy: %s | Duration: %s"),
 					*Entry.PlayerName, *Entry.Uid,

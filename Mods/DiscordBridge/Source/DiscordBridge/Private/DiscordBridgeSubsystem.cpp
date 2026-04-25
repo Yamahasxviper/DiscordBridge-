@@ -543,6 +543,16 @@ void UDiscordBridgeSubsystem::OnWebSocketClosed(int32 StatusCode, const FString&
 		// Calling Close() sets bUserInitiatedClose on the background thread,
 		// which causes the reconnect loop to exit without retrying.
 		WebSocketClient->Close(1000, FString::Printf(TEXT("Terminal Discord close code %d"), StatusCode));
+
+		// Cancel any deferred Resume/Identify ticker so it does not fire
+		// after the connection has been permanently abandoned.
+		FTSTicker::GetCoreTicker().RemoveTicker(PendingReidentifyHandle);
+		PendingReidentifyHandle.Reset();
+
+		// Stop the player-count presence ticker — it serves no purpose when
+		// we are not going to reconnect, and bGatewayReady is already false.
+		FTSTicker::GetCoreTicker().RemoveTicker(PlayerCountTickerHandle);
+		PlayerCountTickerHandle.Reset();
 	}
 
 	// Cancel heartbeat; it will be restarted on the next successful connection.
@@ -608,6 +618,14 @@ void UDiscordBridgeSubsystem::HandleGatewayPayload(const FString& RawJson)
 		UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: Gateway payload missing 'op' field: %s"), *RawJson);
 		return;
 	}
+	// Guard against out-of-range or non-finite doubles before casting.
+	// Discord opcodes are 0–11; anything outside [0, 31] is unknown/malformed.
+	if (OpCodeD < 0.0 || OpCodeD > 31.0 || !FMath::IsFinite(OpCodeD))
+	{
+		UE_LOG(LogDiscordBridge, Warning,
+			TEXT("DiscordBridge: Gateway payload has out-of-range opcode (%.0f), ignoring"), OpCodeD);
+		return;
+	}
 	const int32 OpCode = static_cast<int32>(OpCodeD);
 
 	switch (OpCode)
@@ -619,7 +637,11 @@ void UDiscordBridgeSubsystem::HandleGatewayPayload(const FString& RawJson)
 		double Seq = -1.0;
 		if (Root->TryGetNumberField(TEXT("s"), Seq))
 		{
-			LastSequenceNumber = static_cast<int32>(Seq);
+			// Guard against out-of-range doubles before casting to int32.
+			// Discord sequence numbers are non-negative integers well within
+			// INT32_MAX; anything outside [0, INT32_MAX] is malformed.
+			if (Seq >= 0.0 && Seq <= static_cast<double>(MAX_int32) && FMath::IsFinite(Seq))
+				LastSequenceNumber = static_cast<int32>(Seq);
 		}
 
 		FString EventType;
@@ -804,6 +826,18 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 			{
 				const bool  bApprove       = CustomId.StartsWith(TEXT("wl_approve:"));
 				const FString TargetDiscordId = bApprove ? CustomId.Mid(11) : CustomId.Mid(8);
+
+				// Guard against malformed button custom_ids (e.g. "wl_approve:" with no ID).
+				if (TargetDiscordId.IsEmpty())
+				{
+					FString InteractionId, InteractionToken;
+					DataObj->TryGetStringField(TEXT("id"),    InteractionId);
+					DataObj->TryGetStringField(TEXT("token"), InteractionToken);
+					RespondToInteraction(InteractionId, InteractionToken, 4,
+						TEXT(":warning: Malformed button interaction — missing target Discord ID."),
+						/*bEphemeral=*/true);
+					return;
+				}
 
 				FString InteractionId, InteractionToken;
 				DataObj->TryGetStringField(TEXT("id"),    InteractionId);

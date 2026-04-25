@@ -176,7 +176,13 @@ void UMuteRegistry::TickExpiry()
 
         if (Mutes.Num() < Before)
         {
-            SaveToFile();
+            if (!SaveToFile())
+            {
+                UE_LOG(LogMuteRegistry, Error,
+                    TEXT("MuteRegistry: failed to save mutes.json after expiry — "
+                         "expired entries removed from memory but not persisted. "
+                         "They may reappear after a server restart."));
+            }
             UE_LOG(LogMuteRegistry, Log,
                 TEXT("MuteRegistry: expired %d timed mute(s)."), Expired.Num());
         }
