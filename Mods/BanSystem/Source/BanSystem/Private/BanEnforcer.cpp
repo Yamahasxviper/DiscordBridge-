@@ -220,7 +220,7 @@ void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
         }
     }
 
-    // server health-check response includes BanSystem status information.
+    // The server health-check response includes BanSystem status information.
     // This lets the CSS server browser / health-check clients surface ban-system
     // health alongside standard game metrics (completely additive, zero risk).
     //

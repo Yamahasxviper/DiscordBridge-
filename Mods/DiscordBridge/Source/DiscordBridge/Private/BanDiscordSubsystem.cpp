@@ -360,9 +360,11 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				if (Self->Config.ModerationLogChannelId.IsEmpty()) return;
 
 				const FString DurationStr = Entry.bIsPermanent
-					? TEXT("Permanent")
-					: FString::Printf(TEXT("%lld min"), FMath::Max((int64)0,
-					    static_cast<int64>((Entry.ExpireDate - Entry.BanDate).GetTotalMinutes())));
+					? TEXT("permanent")
+					: BanDiscordHelpers::FormatDuration(static_cast<int32>(FMath::Min(
+					    FMath::Max((int64)0,
+					        static_cast<int64>((Entry.ExpireDate - Entry.BanDate).GetTotalMinutes())),
+					    static_cast<int64>(INT32_MAX))));
 				const FString Msg = FString::Printf(
 					TEXT("🔨 **%s** (`%s`) banned.\nReason: %s\nBy: %s | Duration: %s"),
 					*Entry.PlayerName, *Entry.Uid,

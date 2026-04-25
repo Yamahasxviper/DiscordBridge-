@@ -3692,7 +3692,7 @@ EExecutionStatus AScheduleBanChatCommand::ExecuteCommand_Implementation(
 
     const FString DurationStr = (BanDurationMinutes == 0)
         ? TEXT("permanent")
-        : FString::Printf(TEXT("%d minutes"), BanDurationMinutes);
+        : BanChat::FormatDuration(BanDurationMinutes).Mid(4);
 
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] Scheduled ban #%lld for %s in %d minutes (%s). Duration: %s. Reason: %s"),
@@ -3744,7 +3744,7 @@ EExecutionStatus AQBanChatCommand::ExecuteCommand_Implementation(
             Sender->SendChatMessage(
                 FString::Printf(TEXT("  %s  |  %s  |  %s"),
                     *T.Slug,
-                    T.DurationMinutes == 0 ? TEXT("permanent") : *FString::Printf(TEXT("%dmin"), T.DurationMinutes),
+                    T.DurationMinutes == 0 ? TEXT("permanent") : *BanChat::FormatDuration(T.DurationMinutes).Mid(4),
                     *T.Reason),
                 FLinearColor::White);
         }
