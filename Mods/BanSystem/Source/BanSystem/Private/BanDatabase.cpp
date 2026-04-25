@@ -623,8 +623,18 @@ bool UBanDatabase::LinkBans(const FString& UidA, const FString& UidB)
         return SaveToFile();
     }
 
-    UE_LOG(LogBanDatabase, Warning,
-        TEXT("BanDatabase: LinkBans — no ban found for '%s' or '%s'"), *UidA, *UidB);
+    if (bFoundA && bFoundB)
+    {
+        // Both ban records exist but were already cross-linked — no-op, not an error.
+        UE_LOG(LogBanDatabase, Verbose,
+            TEXT("BanDatabase: LinkBans — '%s' and '%s' are already linked; no change"),
+            *UidA, *UidB);
+    }
+    else
+    {
+        UE_LOG(LogBanDatabase, Warning,
+            TEXT("BanDatabase: LinkBans — no ban found for '%s' or '%s'"), *UidA, *UidB);
+    }
     return false;
 }
 

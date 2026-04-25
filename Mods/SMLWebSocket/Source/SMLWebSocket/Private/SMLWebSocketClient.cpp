@@ -89,6 +89,9 @@ void USMLWebSocketClient::SendText(const FString& Message)
 		PendingSendQueue.Add(Message);
 		if (MaxQueuedMessages > 0 && PendingSendQueue.Num() > MaxQueuedMessages)
 		{
+			UE_LOG(LogSMLWebSocket, VeryVerbose,
+				TEXT("SMLWebSocketClient: outbound text queue full (%d) — oldest message dropped"),
+				MaxQueuedMessages);
 			PendingSendQueue.RemoveAt(0);
 		}
 	}
@@ -109,6 +112,9 @@ void USMLWebSocketClient::SendBinary(const TArray<uint8>& Data)
 		PendingSendBinaryQueue.Add(Data);
 		if (MaxQueuedMessages > 0 && PendingSendBinaryQueue.Num() > MaxQueuedMessages)
 		{
+			UE_LOG(LogSMLWebSocket, VeryVerbose,
+				TEXT("SMLWebSocketClient: outbound binary queue full (%d) — oldest message dropped"),
+				MaxQueuedMessages);
 			PendingSendBinaryQueue.RemoveAt(0);
 		}
 	}

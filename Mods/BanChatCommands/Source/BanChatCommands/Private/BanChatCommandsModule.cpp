@@ -96,51 +96,55 @@ void FBanChatCommandsModule::StartupModule()
                 return;
             }
 
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ABanChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ATempBanChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AUnbanChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AUnbanNameChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ABanCheckChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ABanListChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ALinkBansChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AUnlinkBansChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), APlayerHistoryChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AWhoAmIChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ABanNameChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AReloadConfigChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AKickChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AModBanChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AWarnChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AWarningsChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AClearWarnsChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AAnnounceChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AStaffListChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AReasonChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AHistoryChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AMuteChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AUnmuteChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ANoteChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ANotesChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ADurationChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ATempUnmuteChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AMuteCheckChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ABanReasonChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AStaffChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AMuteListChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AClearWarnByIdChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AExtendBanChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AAppealChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AMuteReasonChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AFreezeChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AClearChatChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AReportChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AScheduleBanChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AQBanChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), AReputationChatCommand::StaticClass());
-            CmdSys->RegisterCommand(TEXT("BanChatCommands"), ABulkBanChatCommand::StaticClass());
+            int32 RegisteredCommandCount = 0;
+            auto Reg = [&](UClass* Cls) { CmdSys->RegisterCommand(TEXT("BanChatCommands"), Cls); ++RegisteredCommandCount; };
+
+            Reg(ABanChatCommand::StaticClass());
+            Reg(ATempBanChatCommand::StaticClass());
+            Reg(AUnbanChatCommand::StaticClass());
+            Reg(AUnbanNameChatCommand::StaticClass());
+            Reg(ABanCheckChatCommand::StaticClass());
+            Reg(ABanListChatCommand::StaticClass());
+            Reg(ALinkBansChatCommand::StaticClass());
+            Reg(AUnlinkBansChatCommand::StaticClass());
+            Reg(APlayerHistoryChatCommand::StaticClass());
+            Reg(AWhoAmIChatCommand::StaticClass());
+            Reg(ABanNameChatCommand::StaticClass());
+            Reg(AReloadConfigChatCommand::StaticClass());
+            Reg(AKickChatCommand::StaticClass());
+            Reg(AModBanChatCommand::StaticClass());
+            Reg(AWarnChatCommand::StaticClass());
+            Reg(AWarningsChatCommand::StaticClass());
+            Reg(AClearWarnsChatCommand::StaticClass());
+            Reg(AAnnounceChatCommand::StaticClass());
+            Reg(AStaffListChatCommand::StaticClass());
+            Reg(AReasonChatCommand::StaticClass());
+            Reg(AHistoryChatCommand::StaticClass());
+            Reg(AMuteChatCommand::StaticClass());
+            Reg(AUnmuteChatCommand::StaticClass());
+            Reg(ANoteChatCommand::StaticClass());
+            Reg(ANotesChatCommand::StaticClass());
+            Reg(ADurationChatCommand::StaticClass());
+            Reg(ATempUnmuteChatCommand::StaticClass());
+            Reg(AMuteCheckChatCommand::StaticClass());
+            Reg(ABanReasonChatCommand::StaticClass());
+            Reg(AStaffChatCommand::StaticClass());
+            Reg(AMuteListChatCommand::StaticClass());
+            Reg(AClearWarnByIdChatCommand::StaticClass());
+            Reg(AExtendBanChatCommand::StaticClass());
+            Reg(AAppealChatCommand::StaticClass());
+            Reg(AMuteReasonChatCommand::StaticClass());
+            Reg(AFreezeChatCommand::StaticClass());
+            Reg(AClearChatChatCommand::StaticClass());
+            Reg(AReportChatCommand::StaticClass());
+            Reg(AScheduleBanChatCommand::StaticClass());
+            Reg(AQBanChatCommand::StaticClass());
+            Reg(AReputationChatCommand::StaticClass());
+            Reg(ABulkBanChatCommand::StaticClass());
 
             UE_LOG(LogBanChatCommands, Log,
-                TEXT("BanChatCommands: Registered 42 commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns, announce, stafflist, reason, history, mute, unmute, note, notes, duration, tempunmute, mutecheck, banreason, staffchat, mutelist, clearwarn, extend, appeal, mutereason, freeze, clearchat, report, scheduleban, qban, reputation, bulkban)."));
+                TEXT("BanChatCommands: Registered %d commands (ban, tempban, unban, unbanname, bancheck, banlist, linkbans, unlinkbans, playerhistory, whoami, banname, reloadconfig, kick, modban, warn, warnings, clearwarns, announce, stafflist, reason, history, mute, unmute, note, notes, duration, tempunmute, mutecheck, banreason, staffchat, mutelist, clearwarn, extend, appeal, mutereason, freeze, clearchat, report, scheduleban, qban, reputation, bulkban)."),
+                RegisteredCommandCount);
 
             // Bind MuteRegistry delegates to push WebSocket events and write audit log.
             // Remove any previous binding first: on servers that reload a world while the

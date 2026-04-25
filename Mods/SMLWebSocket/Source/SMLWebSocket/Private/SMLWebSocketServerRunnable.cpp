@@ -52,7 +52,11 @@ bool FSMLWebSocketServerRunnable::Init()
     }
 
     ListenSocket->SetReuseAddr(true);
-    ListenSocket->SetNonBlocking(false);
+    if (!ListenSocket->SetNonBlocking(false))
+    {
+        UE_LOG(LogWSServer, Warning,
+            TEXT("WSServer: SetNonBlocking(false) failed — socket blocking mode may be undefined"));
+    }
 
     TSharedRef<FInternetAddr> Addr = SocketSub->CreateInternetAddr();
     Addr->SetAnyAddress();

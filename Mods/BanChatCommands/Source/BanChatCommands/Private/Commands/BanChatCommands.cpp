@@ -501,11 +501,14 @@ namespace BanChat
 
     /**
      * Shared ban logic used by both /ban and /tempban.
+     * AdminUid is the compound UID of the issuing admin (e.g. "EOS:xxx"), used for
+     * rate-limiting so two admins with the same display name don't share a bucket.
+     * BannedBy is the human-readable name stored in the ban record.
      */
     static EExecutionStatus DoBan(UObject* Ctx, UCommandSender* Sender,
                                   const FString& Uid, const FString& DisplayName,
                                   int32 DurationMinutes, const FString& Reason,
-                                  const FString& BannedBy)
+                                  const FString& BannedBy, const FString& AdminUid)
     {
         UBanDatabase* DB = GetDB(Ctx);
         if (!DB)
@@ -514,14 +517,14 @@ namespace BanChat
             return EExecutionStatus::UNCOMPLETED;
         }
 
-        // Admin rate-limit check.
-        // Derive the admin UID from the BannedBy name by checking the current session.
-        // As a proxy we use the sender's display name as the rate-limit key.
+        // Admin rate-limit check, keyed by UID so that display-name changes
+        // and same-name admins each get their own independent bucket.
         {
-            // Use BannedBy as the rate-limit key; if empty fall back to sender name.
-            const FString RateLimitKey = BannedBy.IsEmpty()
-                ? (Sender ? Sender->GetSenderName() : TEXT("unknown"))
-                : BannedBy;
+            // Console senders have no UID; fall back to display name (console is
+            // never blocked by IsBanRateLimited, but provide a stable key anyway).
+            const FString RateLimitKey = AdminUid.IsEmpty()
+                ? (BannedBy.IsEmpty() ? TEXT("console") : BannedBy)
+                : AdminUid;
             if (IsBanRateLimited(Sender, RateLimitKey))
                 return EExecutionStatus::UNCOMPLETED;
         }
@@ -935,7 +938,7 @@ EExecutionStatus ABanChatCommand::ExecuteCommand_Implementation(
         : TEXT("Banned by server administrator");
 
     const FString BannedBy = Sender->GetSenderName();
-    return BanChat::DoBan(this, Sender, Uid, DisplayName, 0, Reason, BannedBy);
+    return BanChat::DoBan(this, Sender, Uid, DisplayName, 0, Reason, BannedBy, AdminId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -979,7 +982,7 @@ EExecutionStatus ATempBanChatCommand::ExecuteCommand_Implementation(
         : TEXT("Temporarily banned by server administrator");
     const FString BannedBy = Sender->GetSenderName();
 
-    return BanChat::DoBan(this, Sender, Uid, DisplayName, DurationMinutes, Reason, BannedBy);
+    return BanChat::DoBan(this, Sender, Uid, DisplayName, DurationMinutes, Reason, BannedBy, AdminId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1201,7 +1204,7 @@ EExecutionStatus ABanCheckChatCommand::ExecuteCommand_Implementation(
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] Please wait %d second(s) before using /bancheck again."), CoolSecs),
                 FLinearColor::Yellow);
-            return EExecutionStatus::COMPLETED;
+            return EExecutionStatus::UNCOMPLETED;
         }
     }
 
@@ -1913,7 +1916,7 @@ EExecutionStatus AWarningsChatCommand::ExecuteCommand_Implementation(
             Sender->SendChatMessage(
                 FString::Printf(TEXT("[BanChatCommands] Please wait %d second(s) before using /warnings again."), CoolSecs),
                 FLinearColor::Yellow);
-            return EExecutionStatus::COMPLETED;
+            return EExecutionStatus::UNCOMPLETED;
         }
     }
 
@@ -3473,7 +3476,26 @@ EExecutionStatus AClearChatChatCommand::ExecuteCommand_Implementation(
         {
             auto Esc = [](const FString& S) -> FString
             {
-                return S.Replace(TEXT("\\"), TEXT("\\\\")).Replace(TEXT("\""), TEXT("\\\"")).Replace(TEXT("\n"), TEXT("\\n"));
+                FString Out;
+                Out.Reserve(S.Len() + 8);
+                for (TCHAR C : S)
+                {
+                    switch (C)
+                    {
+                    case TEXT('"'):  Out += TEXT("\\\""); break;
+                    case TEXT('\\'): Out += TEXT("\\\\"); break;
+                    case TEXT('\n'): Out += TEXT("\\n");  break;
+                    case TEXT('\r'): Out += TEXT("\\r");  break;
+                    case TEXT('\t'): Out += TEXT("\\t");  break;
+                    default:
+                        if (C < 0x20)
+                            Out += FString::Printf(TEXT("\\u%04x"), static_cast<uint32>(C));
+                        else
+                            Out += C;
+                        break;
+                    }
+                }
+                return Out;
             };
             const FString JsonPayload = FString::Printf(
                 TEXT("{\"embeds\":[{\"title\":\"Chat Cleared\",\"color\":3447003,\"fields\":["
@@ -3541,7 +3563,7 @@ EExecutionStatus AReportChatCommand::ExecuteCommand_Implementation(
         Sender->SendChatMessage(
             TEXT("[BanChatCommands] Please wait 30 seconds before submitting another report."),
             FLinearColor::Yellow);
-        return EExecutionStatus::COMPLETED;
+        return EExecutionStatus::UNCOMPLETED;
     }
 
     const FString TargetName = Arguments[0];
@@ -3561,7 +3583,26 @@ EExecutionStatus AReportChatCommand::ExecuteCommand_Implementation(
     {
         auto Esc = [](const FString& S) -> FString
         {
-            return S.Replace(TEXT("\\"), TEXT("\\\\")).Replace(TEXT("\""), TEXT("\\\"")).Replace(TEXT("\n"), TEXT("\\n"));
+            FString Out;
+            Out.Reserve(S.Len() + 8);
+            for (TCHAR C : S)
+            {
+                switch (C)
+                {
+                case TEXT('"'):  Out += TEXT("\\\""); break;
+                case TEXT('\\'): Out += TEXT("\\\\"); break;
+                case TEXT('\n'): Out += TEXT("\\n");  break;
+                case TEXT('\r'): Out += TEXT("\\r");  break;
+                case TEXT('\t'): Out += TEXT("\\t");  break;
+                default:
+                    if (C < 0x20)
+                        Out += FString::Printf(TEXT("\\u%04x"), static_cast<uint32>(C));
+                    else
+                        Out += C;
+                    break;
+                }
+            }
+            return Out;
         };
 
         const FString JsonPayload = FString::Printf(

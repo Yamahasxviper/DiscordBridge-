@@ -802,6 +802,16 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 				UE_LOG(LogDiscordBridge, Log,
 				       TEXT("DiscordBridge: Guild ID set from GUILD_CREATE: %s"), *GuildId);
 			}
+			{
+				// The bot has been added to a second guild.  All moderation commands,
+				// role lookups, and channel operations target the first guild only.
+				// Log a prominent warning so the server operator can investigate.
+				UE_LOG(LogDiscordBridge, Warning,
+				       TEXT("DiscordBridge: Ignoring GUILD_CREATE for guild %s — bot is already ")
+				       TEXT("operating in guild %s. Remove the bot from the extra guild to avoid ")
+				       TEXT("unexpected behaviour."),
+				       *IncomingGuildId, *GuildId);
+			}
 		}
 		DataObj->TryGetStringField(TEXT("owner_id"), GuildOwnerId);
 	}
@@ -834,7 +844,10 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 			if (CustomId.StartsWith(TEXT("wl_approve:")) || CustomId.StartsWith(TEXT("wl_deny:")))
 			{
 				const bool  bApprove       = CustomId.StartsWith(TEXT("wl_approve:"));
-				const FString TargetDiscordId = bApprove ? CustomId.Mid(11) : CustomId.Mid(8);
+				// Use Len() so the offset stays correct if the prefix string is ever renamed.
+				const FString TargetDiscordId = bApprove
+					? CustomId.Mid(FString(TEXT("wl_approve:")).Len())
+					: CustomId.Mid(FString(TEXT("wl_deny:")).Len());
 
 				// Guard against malformed button custom_ids (e.g. "wl_approve:" with no ID).
 				if (TargetDiscordId.IsEmpty())
