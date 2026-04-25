@@ -255,7 +255,9 @@ namespace BanChat
         if (!World)
         {
             Sender->SendChatMessage(
-                FString::Printf(TEXT("[BanChatCommands] '%s' is not a valid EOS PUID."), *Arg),
+                FString::Printf(TEXT("[BanChatCommands] World context unavailable — "
+                    "cannot look up player by name. Provide an explicit EOS PUID (e.g. EOS:%s) "
+                    "or re-run the command once the world has initialised."), *Arg),
                 FLinearColor::Red);
             return false;
         }

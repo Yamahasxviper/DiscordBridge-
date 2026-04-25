@@ -63,6 +63,7 @@ void UPlayerWarningRegistry::AddWarning(const FString& Uid, const FString& Playe
         Entry.Reason     = Reason;
         Entry.WarnedBy   = WarnedBy;
         Entry.WarnDate   = FDateTime::UtcNow();
+        Entry.Points     = 1;
 
         Warnings.Add(Entry);
         SaveToFile();
@@ -229,7 +230,8 @@ int32 UPlayerWarningRegistry::PruneExpiredWarnings()
     return Removed;
 }
 
-bool UPlayerWarningRegistry::DeleteWarningById(int64 Id){
+bool UPlayerWarningRegistry::DeleteWarningById(int64 Id)
+{
     FScopeLock Lock(&Mutex);
 
     const int32 Before = Warnings.Num();

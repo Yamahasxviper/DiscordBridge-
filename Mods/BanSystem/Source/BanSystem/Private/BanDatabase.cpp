@@ -508,8 +508,9 @@ bool UBanDatabase::IsCurrentlyBanned(const FString& Uid, FBanEntry& OutEntry) co
             OutEntry = E;
             return true;
         }
-        // Expired — not currently banned.
-        return false;
+        // Expired — keep scanning in case a different record for this UID is still active
+        // (e.g. if bans.json was externally edited to contain two entries for the same UID).
+        continue;
     }
     return false;
 }

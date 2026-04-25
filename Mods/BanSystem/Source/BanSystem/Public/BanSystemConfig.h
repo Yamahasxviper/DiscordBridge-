@@ -92,9 +92,9 @@ public:
     int32 MaxBackups = 5;
 
     /**
-     * Optional API key for authenticating mutating REST API requests (POST, DELETE, PATCH).
-     * When non-empty, all mutating endpoints require the header: X-Api-Key: <value>
-     * Read-only endpoints (GET) are never gated.
+     * Optional API key for authenticating REST API requests.
+     * When non-empty, all endpoints except GET /health require the header:
+     *   X-Api-Key: <value>
      * Leave empty to disable API key authentication (default; only safe on a firewalled server).
      */
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
@@ -342,6 +342,10 @@ public:
      * Maximum number of ban/tempban actions an admin can issue within
      * AdminBanRateLimitMinutes before subsequent bans are rejected.
      * Default: 0 = disabled.
+     *
+     * NOTE: This setting is unused by BanChatCommands. The in-game /ban rate limiter
+     * reads UBanChatCommandsConfig::AdminBanRateLimitCount instead.
+     * This value is only consulted by BanRestApi and BanDiscordSubsystem panel actions.
      */
     UPROPERTY(Config, BlueprintReadOnly, Category = "BanSystem")
     int32 AdminBanRateLimitCount = 0;
