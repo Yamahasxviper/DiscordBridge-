@@ -17,7 +17,7 @@ A server-only Alpakit C++ mod that provides a persistent, EOS-based ban system f
 | Login-time enforcement | ✅ PostLogin hook + 20 s identity polling |
 | IP ban enforcement | ✅ PreLogin hook caches remote IP; checked at every login |
 | UID linking | ✅ Link multiple EOS UIDs (or EOS + IP) for the same player |
-| REST management API | ✅ 42 endpoints on configurable port (default 3000) |
+| REST management API | ✅ 41 endpoints on configurable port (default 3000) |
 | Player session registry | ✅ Audit log of all known UIDs, names, and IP addresses |
 | Warning system | ✅ Configurable auto-ban escalation tiers |
 | Scheduled bans | ✅ Deferred ban enforcement at a future timestamp |
@@ -37,7 +37,7 @@ A server-only Alpakit C++ mod that provides a persistent, EOS-based ban system f
 
 ## In-Game Commands (via BanChatCommands mod)
 
-Install the optional **BanChatCommands** mod to get the full set of 43 in-game chat commands. Admin access is controlled by player platform ID in `BanChatCommands.ini`.
+Install the optional **BanChatCommands** mod to get the full set of 42 in-game chat commands. Admin access is controlled by player platform ID in `BanChatCommands.ini`.
 
 | Command | Role | Description |
 |---------|------|-------------|
@@ -56,32 +56,31 @@ Install the optional **BanChatCommands** mod to get the full set of 43 in-game c
 | `/warnings <player\|UID>` | Admin | List all warnings for a player |
 | `/clearwarns <player\|UID>` | Admin | Remove all warnings for a player |
 | `/clearwarn <player\|UID> <id>` | Admin | Remove a specific warning by ID |
-| `/reason <UID>` | Admin | Show the ban reason for a UID |
+| `/reason <UID>` | All | Show the ban reason for a UID |
 | `/banreason <UID> <new reason>` | Admin | Edit the ban reason for a UID |
 | `/announce <message...>` | Admin | Server-wide broadcast (also posts to Discord) |
-| `/stafflist` | Admin | Show currently-online admins and moderators |
+| `/stafflist` | Moderator | Show currently-online admins and moderators |
 | `/note <player\|UID> <text>` | Admin | Add an admin note to a player |
 | `/notes <player\|UID>` | Admin | List all admin notes for a player |
 | `/duration <UID>` | Admin | Show remaining tempban duration |
 | `/extend <UID> <minutes>` | Admin | Extend a temporary ban duration |
-| `/appeal <UID>` | Admin | Manage ban appeals |
+| `/appeal <reason...>` | All | Submit your own ban appeal |
 | `/scheduleban <player\|UID> <timestamp> [reason]` | Admin | Schedule a future ban |
 | `/qban <template> <player\|UID>` | Admin | Apply a quick-ban template |
 | `/reputation <player\|UID>` | Admin | Show player reputation score |
 | `/bulkban <UID1> <UID2> ... [reason]` | Admin | Ban multiple players at once |
-| `/staffchat <message...>` | Admin | Staff-only message |
+| `/staffchat <message...>` | Moderator | Staff-only message |
 | `/kick <player\|UID> [reason...]` | Moderator | Disconnect without banning |
 | `/modban <player\|UID> [reason...]` | Moderator | 30-minute temporary ban |
-| `/mute <player\|UID> [minutes] [reason...]` | Moderator | Silence in-game chat |
-| `/unmute <player\|UID>` | Moderator | Remove a chat mute |
-| `/tempmute <player\|UID> <minutes> [reason...]` | Moderator | Timed mute |
+| `/mute <player\|UID> [duration] [reason...]` | Admin | Silence in-game chat (duration: minutes or 30m/1h/1d) |
+| `/unmute <player\|UID>` | Admin | Remove a chat mute |
 | `/tempunmute <player\|UID>` | Moderator | Remove a timed mute |
 | `/mutecheck <player\|UID>` | Moderator | Check mute status |
 | `/mutelist` | Moderator | List all active mutes |
-| `/mutereason <player\|UID> <reason>` | Moderator | Edit mute reason |
-| `/freeze <player\|UID>` | Moderator | Immobilise a player (toggle) |
-| `/clearchat` | Moderator | Flush chat history |
-| `/report <player\|UID> <reason>` | Moderator | Submit a player report |
+| `/mutereason <player\|UID> <reason>` | Admin | Edit mute reason |
+| `/freeze <player\|UID>` | Admin | Immobilise a player (toggle) |
+| `/clearchat` | Admin | Flush chat history |
+| `/report <player> [reason...]` | All | Submit a player report to staff |
 | `/history` | All | Show your own session and warning history |
 | `/whoami` | All | Show your own compound UID *(no admin required)* |
 
@@ -103,7 +102,8 @@ The mod starts a local HTTP server (default port **3000**) with a comprehensive 
 | `GET` | `/bans/export-csv` | Export bans as CSV |
 | `POST` | `/bans` | Create a ban |
 | `POST` | `/bans/ip` | Create an IP ban |
-| `POST` | `/bans/bulk` | Bulk ban operations |
+| `POST` | `/bans/bulk` | Bulk create bans |
+| `DELETE` | `/bans/bulk` | Bulk delete bans |
 | `PATCH` | `/bans/:uid` | Update an existing ban (reason, duration, make permanent) |
 | `DELETE` | `/bans/:uid` | Remove by compound UID |
 | `DELETE` | `/bans/id/:id` | Remove by row ID |
@@ -127,13 +127,14 @@ The mod starts a local HTTP server (default port **3000**) with a comprehensive 
 | `POST` | `/appeals` | Submit a ban appeal |
 | `GET` | `/appeals` | List appeals |
 | `GET` | `/appeals/:id` | Get a single appeal |
+| `PATCH` | `/appeals/:id` | Update an appeal (status, notes) |
 | `DELETE` | `/appeals/:id` | Dismiss an appeal |
 | `GET` | `/appeals/portal` | Self-service appeals HTML form |
 | `GET` | `/dashboard` | Unified admin dashboard SPA |
 | `GET` | `/scheduled` | List scheduled bans |
 | `POST` | `/scheduled` | Schedule a future ban |
 | `DELETE` | `/scheduled/:id` | Delete a scheduled ban |
-| `POST` | `/notes` | Add admin notes |
+| `GET` | `/notes` | Get admin note count (requires BanChatCommands) |
 
 Set `RestApiPort=0` in `DefaultBanSystem.ini` to disable the REST API entirely.
 Set `RestApiKey` to require an `X-Api-Key` header on all mutating requests.

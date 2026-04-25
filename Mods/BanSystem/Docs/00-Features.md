@@ -36,7 +36,7 @@ All bans are stored in a single JSON file (`bans.json`) that survives server res
 
 ## REST management API
 
-A local HTTP server (default port 3000) provides 42 REST endpoints for
+A local HTTP server (default port 3000) provides 41 REST endpoints for
 comprehensive ban, warning, session, appeal, and audit management.
 Includes Prometheus metrics export, CSV exports, a self-service appeals portal,
 and a unified admin dashboard.
@@ -67,12 +67,12 @@ In addition to EOS PUID bans, BanSystem supports **IP address bans**. IP UIDs us
 
 ## In-game chat commands (BanChatCommands mod)
 
-The optional **BanChatCommands** mod provides 43 in-game chat commands
+The optional **BanChatCommands** mod provides 42 in-game chat commands
 including `/ban`, `/tempban`, `/unban`, `/bancheck`, `/banlist`, `/linkbans`,
 `/unlinkbans`, `/playerhistory`, `/banname`, `/reloadconfig`, `/kick`, `/modban`,
 `/warn`, `/warnings`, `/clearwarns`, `/clearwarn`, `/announce`, `/stafflist`,
-`/reason`, `/banreason`, `/history`, `/mute`, `/unmute`, `/tempmute`,
-`/tempunmute`, `/mutecheck`, `/mutelist`, `/mutereason`, `/note`, `/notes`,
+`/reason`, `/banreason`, `/history`, `/mute`, `/unmute`, `/tempunmute`,
+`/mutecheck`, `/mutelist`, `/mutereason`, `/note`, `/notes`,
 `/duration`, `/extend`, `/appeal`, `/staffchat`, `/freeze`, `/clearchat`,
 `/report`, `/scheduleban`, `/qban`, `/reputation`, `/bulkban`, and `/whoami`
 directly from the Satisfactory in-game chat.

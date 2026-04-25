@@ -151,7 +151,7 @@ Each suggested item also carries:
 |--------|---------|--------|------------|
 | ✅ | `/ban`, `/tempban`, `/unban`, `/bancheck`, `/banlist` | — | — |
 | ✅ | `/warn`, `/warnings`, `/clearwarn`, `/clearallwarns` | — | — |
-| ✅ | `/kick`, `/mute`, `/unmute`, `/tempmute` | — | — |
+| ✅ | `/kick`, `/mute`, `/unmute` (timed via `/mute [duration]`) | — | — |
 | ✅ | `/note`, `/notes`, `/staffchat`, `/mutelist`, `/mutecheck` | — | — |
 | ✅ | `/playerhistory`, `/linkbans`, `/unlinkbans`, `/whoami` | — | — |
 | ✅ | `/qban <slug>` quick-ban from templates | — | — |
@@ -160,7 +160,7 @@ Each suggested item also carries:
 | 🔵 **Next** | **`/admin audit [page]`** — list recent moderation actions with admin name, action type, and target | 🔴 High | M |
 | ⚪ **Later** | **`/session <player>`** — show current session stats: time connected, build count | 🟡 Med | S |
 | ⚪ **Later** | **`/history export <player>`** — output full history (bans, warns, notes, sessions) as one formatted block | ⚪ Low | S |
-| ⚪ **Later** | **`/freeze <player>`** — prevent a player from moving without kicking them (investigation hold) | 🟡 Med | L |
+| ✅ | `/freeze <player>` — prevent a player from moving without kicking them (investigation hold) | 🟡 Med | S |
 | 🔵 **Next** | **Silent quarantine mode** — `/quarantine <player>` hides that player's chat from everyone else and blocks interactions without kicking; lifts with `/unquarantine` | 🔴 High | L |
 | 🔵 **Next** | **`/caseexport <player>`** — bundle all evidence for a player (chat log excerpts, warns, notes, ban history, session timestamps) into one formatted Discord message for staff review | 🔴 High | M |
 
@@ -168,7 +168,7 @@ Each suggested item also carries:
 | Status | Feature | Impact | Complexity |
 |--------|---------|--------|------------|
 | ✅ | Admin tier (`AdminEosPUIDs`) — full access | — | — |
-| ✅ | Moderator tier (`ModeratorEosPUIDs`) — kick + modban + limited mute | — | — |
+| ✅ | Moderator tier (`ModeratorEosPUIDs`) — kick + modban + tempunmute + stafflist/mutecheck/mutelist/staffchat | — | — |
 | ✅ | `MaxModMuteDurationMinutes` cap | — | — |
 | 🔵 **Next** | **Helper permission tier** — `HelperEosPUIDs` with read-only commands only (`/bancheck`, `/warnings`, `/mutecheck`) | 🔴 High | M |
 

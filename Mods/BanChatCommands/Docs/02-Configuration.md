@@ -47,7 +47,7 @@ Add one `+AdminEosPUIDs=` line per admin. The value is the player's **EOS Produc
 
 ## Moderator list
 
-Moderators can run `/kick`, `/modban`, `/mute`, and `/unmute` but **cannot** run full admin commands. Admins automatically qualify as moderators.
+Moderators can run `/kick`, `/modban`, `/tempunmute`, `/stafflist`, `/mutecheck`, `/mutelist`, and `/staffchat` but **cannot** run full admin commands like `/ban`, `/mute`, or `/warn`. Admins automatically qualify as moderators.
 
 ```ini
 +ModeratorEosPUIDs=aabbccdd11223344aabbccdd11223344
