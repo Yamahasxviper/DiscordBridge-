@@ -736,14 +736,20 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 					if (!PS) continue;
 
 					FString PUIDStr;
-					if (const FUniqueNetIdRepl& Id = PS->GetUniqueId(); Id.IsValid())
+					if (const FUniqueNetIdRepl& Id = PS->GetUniqueId();
+					    Id.IsValid() && Id.GetType() != FName(TEXT("NONE")))
 					{
 						PUIDStr = Id.ToString();
 						FString Platform, RawId;
 						UBanDatabase::ParseUid(PUIDStr, Platform, RawId);
 						if (Platform == TEXT("EOS")) PUIDStr = RawId;
 					}
+					else
+					{
+						PUIDStr = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+					}
 
+					if (PUIDStr.IsEmpty()) continue;
 					const FString CompoundUid = TEXT("EOS:") + PUIDStr.ToLower();
 					if (BccCfg && BccCfg->IsModeratorUid(CompoundUid))
 						PC->ClientMessage(Formatted);
@@ -2079,6 +2085,15 @@ void UBanDiscordSubsystem::HandleUnbanNameCommand(const TArray<FString>& Args,
 		*SenderName);
 	UE_LOG(LogBanDiscord, Log, TEXT("BanDiscordSubsystem: %s unbanname %s (%s)."),
 		*SenderName, *Record.DisplayName, *Record.Uid);
+
+	// Write to audit log so Discord-issued removename unbans appear alongside other unbans.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+			AuditLog->LogAction(TEXT("unban"), Record.Uid, Record.DisplayName,
+				SenderName, SenderName, TEXT(""));
+	}
+
 	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
 }
@@ -2206,6 +2221,15 @@ void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
 
 	UE_LOG(LogBanDiscord, Log, TEXT("BanDiscordSubsystem: %s banname %s (%s). Reason: %s"),
 		*SenderName, *Record.DisplayName, *Record.Uid, *Reason);
+
+	// Write to audit log so Discord-issued byname bans appear alongside other bans.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+			AuditLog->LogAction(TEXT("ban"), Record.Uid, Record.DisplayName,
+				SenderName, SenderName, Reason);
+	}
+
 	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
 }
@@ -2257,6 +2281,14 @@ void UBanDiscordSubsystem::HandleBanReasonCommand(const TArray<FString>& Args,
 	{
 		Respond(ChannelId, TEXT("❌ Failed to update ban record. Check server logs."));
 		return;
+	}
+
+	// Write to audit log so Discord-issued reason updates appear alongside other changes.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+			AuditLog->LogAction(TEXT("banreason"), Uid, DisplayName,
+				SenderName, SenderName, Entry.Reason);
 	}
 
 	const FString Msg = FString::Printf(
@@ -2390,8 +2422,19 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 		return;
 	}
 
-	Entry.ExpireDate = Entry.ExpireDate + FTimespan::FromMinutes(Minutes);
+	const FDateTime ExtendBase = FMath::Max(Entry.ExpireDate, FDateTime::UtcNow());
+	Entry.ExpireDate = ExtendBase + FTimespan::FromMinutes(Minutes);
 	DB->AddBan(Entry);
+
+	// Write to audit log so Discord-issued extend operations appear alongside in-game extends.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+			AuditLog->LogAction(TEXT("extend"), Uid, DisplayName, SenderName, SenderName,
+				FString::Printf(TEXT("Extended by %s -> new expiry %s UTC"),
+					*BanDiscordHelpers::FormatDuration(Minutes),
+					*Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S"))));
+	}
 
 	const FString Msg = FString::Printf(
 		TEXT("✅ Extended ban for **%s** (`%s`) by **%s**.\nNew expiry: %s UTC\nBy: %s"),
@@ -2575,6 +2618,16 @@ void UBanDiscordSubsystem::HandleClearWarnsCommand(const TArray<FString>& Args,
 	}
 
 	const int32 Removed = WarnReg->ClearWarningsForUid(Uid);
+
+	// Write to audit log so Discord-issued warning clears appear alongside in-game ones.
+	if (GI)
+	{
+		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+			AuditLog->LogAction(TEXT("clearwarns"), Uid, DisplayName,
+				SenderName, SenderName,
+				FString::Printf(TEXT("Cleared %d warning(s)"), Removed));
+	}
+
 	const FString Msg = FString::Printf(
 		TEXT("✅ Cleared **%d** warning(s) for **%s** (`%s`).\nBy: %s"),
 		Removed,
@@ -2627,6 +2680,16 @@ void UBanDiscordSubsystem::HandleClearWarnByIdCommand(const TArray<FString>& Arg
 		Respond(ChannelId,
 			FString::Printf(TEXT("⚠️ No warning found with ID `%lld`."), WarnId));
 		return;
+	}
+
+	// Write to audit log so Discord-issued warning deletions appear alongside in-game ones.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+			AuditLog->LogAction(TEXT("deletewarn_id"),
+				FString::Printf(TEXT("warning#%lld"), WarnId), TEXT(""),
+				SenderName, SenderName,
+				FString::Printf(TEXT("Deleted warning id %lld"), WarnId));
 	}
 
 	const FString Msg = FString::Printf(
@@ -2902,6 +2965,15 @@ void UBanDiscordSubsystem::HandleModBanCommand(const TArray<FString>& Args,
 	UE_LOG(LogBanDiscord, Log,
 		TEXT("BanDiscordSubsystem: %s modban %s (%s) for %d min. Reason: %s"),
 		*SenderName, *DisplayName, *Uid, DurationMinutes, *Reason);
+
+	// Write to audit log so Discord-issued mod bans appear alongside other bans.
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+			AuditLog->LogAction(TEXT("tempban"), Uid, DisplayName,
+				SenderName, SenderName, Reason);
+	}
+
 	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
 }
@@ -3197,6 +3269,11 @@ void UBanDiscordSubsystem::HandleMuteReasonCommand(const TArray<FString>& Args,
 		return;
 	}
 
+	// Write to audit log so Discord-issued mute reason updates appear alongside in-game changes.
+	if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
+		AuditLog->LogAction(TEXT("mutereason"), Uid, DisplayName,
+			SenderName, SenderName, NewReason);
+
 	const FString Msg = FString::Printf(
 		TEXT("✏️ Mute reason updated for **%s** (`%s`).\nNew reason: %s\nUpdated by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *NewReason, *SenderName);
@@ -3244,7 +3321,8 @@ void UBanDiscordSubsystem::HandleStaffListCommand(const FString& ChannelId)
 		if (!PS) continue;
 
 		FString PUIDStr;
-		if (const FUniqueNetIdRepl& Id = PS->GetUniqueId(); Id.IsValid())
+		if (const FUniqueNetIdRepl& Id = PS->GetUniqueId();
+		    Id.IsValid() && Id.GetType() != FName(TEXT("NONE")))
 		{
 			PUIDStr = Id.ToString();
 			// Strip the "EOS:" prefix for the config check.
@@ -3253,7 +3331,12 @@ void UBanDiscordSubsystem::HandleStaffListCommand(const FString& ChannelId)
 			if (Platform == TEXT("EOS"))
 				PUIDStr = RawId;
 		}
+		else
+		{
+			PUIDStr = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+		}
 
+		if (PUIDStr.IsEmpty()) continue;
 		const FString CompoundUid = TEXT("EOS:") + PUIDStr.ToLower();
 		const FString PlayerName  = PS->GetPlayerName();
 
@@ -3326,14 +3409,20 @@ void UBanDiscordSubsystem::HandleStaffChatCommand(const TArray<FString>& Args,
 		if (!PS) continue;
 
 		FString PUIDStr;
-		if (const FUniqueNetIdRepl& Id = PS->GetUniqueId(); Id.IsValid())
+		if (const FUniqueNetIdRepl& Id = PS->GetUniqueId();
+		    Id.IsValid() && Id.GetType() != FName(TEXT("NONE")))
 		{
 			PUIDStr = Id.ToString();
 			FString Platform, RawId;
 			UBanDatabase::ParseUid(PUIDStr, Platform, RawId);
 			if (Platform == TEXT("EOS")) PUIDStr = RawId;
 		}
+		else
+		{
+			PUIDStr = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+		}
 
+		if (PUIDStr.IsEmpty()) continue;
 		const FString CompoundUid = TEXT("EOS:") + PUIDStr.ToLower();
 		if (BccCfg->IsModeratorUid(CompoundUid))
 		{
