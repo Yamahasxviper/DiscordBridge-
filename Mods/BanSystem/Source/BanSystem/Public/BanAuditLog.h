@@ -70,12 +70,9 @@ private:
     FString GetRegistryPath() const;
 
     TArray<FAuditEntry>  Entries;
+    int64                NextId = 1;
     mutable FCriticalSection Mutex;
     FString FilePath;
-
-    /** Auto-incremented ID for the next entry; initialised from the loaded
-     *  entries in LoadFromFile() to avoid an O(N) scan on every LogAction(). */
-    int64 NextAuditId = 1;
 
     /**
      * BanSystem mod version string cached at Initialize() time via SML's

@@ -935,6 +935,7 @@ private:
     FString GetRegistryPath() const;
 
     TArray<FPlayerNoteEntry> Notes;
+    int64                    NextId = 1;
     mutable FCriticalSection Mutex;
     FString FilePath;
 };
