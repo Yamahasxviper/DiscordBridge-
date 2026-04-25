@@ -120,6 +120,29 @@ namespace BanDiscordHelpers
 	}
 
 	/**
+	 * Format a duration in minutes as a compact human-readable string.
+	 * Examples: 30 → "30m", 90 → "1h 30m", 1500 → "1d 1h".
+	 * Returns "permanently" for 0 or negative values.
+	 */
+	static FString FormatDuration(int32 TotalMinutes)
+	{
+		if (TotalMinutes <= 0)
+			return TEXT("permanently");
+
+		const int32 Weeks = TotalMinutes / (60 * 24 * 7);
+		const int32 Days  = (TotalMinutes % (60 * 24 * 7)) / (60 * 24);
+		const int32 Hours = (TotalMinutes % (60 * 24)) / 60;
+		const int32 Mins  = TotalMinutes % 60;
+
+		FString R;
+		if (Weeks > 0) { R += FString::Printf(TEXT("%dw"), Weeks); }
+		if (Days  > 0) { if (!R.IsEmpty()) R += TEXT(" "); R += FString::Printf(TEXT("%dd"), Days);  }
+		if (Hours > 0) { if (!R.IsEmpty()) R += TEXT(" "); R += FString::Printf(TEXT("%dh"), Hours); }
+		if (Mins  > 0) { if (!R.IsEmpty()) R += TEXT(" "); R += FString::Printf(TEXT("%dm"), Mins);  }
+		return R;
+	}
+
+	/**
 	 * Look up the player's session record and return a string with EOS PUID
 	 * and IP address suitable for appending to a ban confirmation message.
 	 * Returns an empty string when no session record is found.
@@ -409,8 +432,9 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 						if (Self->Config.ModerationLogChannelId.IsEmpty()) return;
 
 						const FString DurStr = bIsTimed
-							? FString::Printf(TEXT(" for **%lld minute(s)**"),
-								  FMath::Max((int64)0, static_cast<int64>((Entry.ExpireDate - FDateTime::UtcNow()).GetTotalMinutes())))
+							? FString::Printf(TEXT(" for **%s**"),
+								  *BanDiscordHelpers::FormatDuration(
+								      static_cast<int32>((Entry.ExpireDate - Entry.MuteDate).GetTotalMinutes())))
 							: TEXT(" **indefinitely**");
 						const FString MuteMsg = FString::Printf(
 							TEXT("🔇 Muted **%s** (`%s`)%s.\nReason: %s\nBy: %s"),
@@ -878,8 +902,9 @@ void UBanDiscordSubsystem::OnPostLoginModerationReminder(AGameModeBase* GameMode
 				const int32 RemainingMins = FMath::Max(
 					0, static_cast<int32>((MuteEntry.ExpireDate - FDateTime::UtcNow()).GetTotalMinutes()));
 				MuteStatus = FString::Printf(
-					TEXT("for %d minute(s) more (until %s UTC)"),
-					RemainingMins, *MuteEntry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")));
+					TEXT("for %s more (until %s UTC)"),
+					*BanDiscordHelpers::FormatDuration(RemainingMins),
+					*MuteEntry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")));
 			}
 
 			Controller->ClientMessage(FString::Printf(
@@ -1141,7 +1166,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 	if (Args.Num() < MinArgs)
 	{
 		const FString Usage = bTemporary
-			? TEXT("Usage: `/ban temp <PUID|name> <minutes> [reason]`")
+			? TEXT("Usage: `/ban temp <PUID|name> <duration> [reason]`\nDuration: `30m`, `2h`, `1d`, `1w` or plain minutes")
 			: TEXT("Usage: `/ban add <PUID|name> [reason]`");
 		Respond(ChannelId, Usage);
 		return;
@@ -1219,9 +1244,9 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 	if (bTemporary)
 	{
 		Msg = FString::Printf(
-			TEXT("✅ **%s** (`%s`) has been temporarily banned for **%d minute(s)**.\n"
+			TEXT("✅ **%s** (`%s`) has been temporarily banned for **%s**.\n"
 			     "Expires: %s\nReason: %s\nBanned by: %s"),
-			*SafeName, *Uid, DurationMinutes,
+			*SafeName, *Uid, *BanDiscordHelpers::FormatDuration(DurationMinutes),
 			*BanDiscordHelpers::FormatExpiry(Entry),
 			*Entry.Reason, *SenderName);
 	}
@@ -1256,8 +1281,8 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 	Respond(ChannelId, Msg);
 	const FString InGameBanNotice = bTemporary
 		? FString::Printf(
-			TEXT("%s Temporarily banned @%s for %d minute(s). Reason: %s. By: %s."),
-			*StaffPrefix, *DisplayName, DurationMinutes, *Entry.Reason, *SenderName)
+			TEXT("%s Temporarily banned @%s for %s. Reason: %s. By: %s."),
+			*StaffPrefix, *DisplayName, *BanDiscordHelpers::FormatDuration(DurationMinutes), *Entry.Reason, *SenderName)
 		: FString::Printf(
 			TEXT("%s Permanently banned @%s. Reason: %s. By: %s."),
 			*StaffPrefix, *DisplayName, *Entry.Reason, *SenderName);
@@ -1287,7 +1312,7 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!unban <PUID>`\nPUID can be a 32-char hex string or `EOS:<puid>`."));
+			TEXT("Usage: `/ban remove <PUID>`\nPUID can be a 32-char hex string or `EOS:<puid>`."));
 		return;
 	}
 
@@ -1772,7 +1797,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 	MuteReg->MutePlayer(Uid, DisplayName, Reason, SenderName, Minutes);
 
 	const FString DurStr = (Minutes > 0)
-		? FString::Printf(TEXT(" for **%d minute(s)**"), Minutes)
+		? FString::Printf(TEXT(" for **%s**"), *BanDiscordHelpers::FormatDuration(Minutes))
 		: TEXT(" **indefinitely**");
 
 	const FString MuteMsg = FString::Printf(
@@ -1972,7 +1997,7 @@ void UBanDiscordSubsystem::HandleUnbanNameCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!unbanname <name_substring>`"));
+			TEXT("Usage: `/ban removename <name_substring>`"));
 		return;
 	}
 
@@ -2005,7 +2030,7 @@ void UBanDiscordSubsystem::HandleUnbanNameCommand(const TArray<FString>& Args,
 		if (Matches.Num() > Show)
 			List += FString::Printf(TEXT(", +%d more"), Matches.Num() - Show);
 		Respond(ChannelId,
-			FString::Printf(TEXT("❌ Ambiguous name `%s` — %d matches: %s. Use `!unban <PUID>` instead."),
+			FString::Printf(TEXT("❌ Ambiguous name `%s` — %d matches: %s. Use `/ban remove <PUID>` instead."),
 				*NameQuery, Matches.Num(), *List));
 		return;
 	}
@@ -2316,7 +2341,7 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 	if (Args.Num() < 2)
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `/ban extend <PUID|name> <minutes>`"));
+			TEXT("Usage: `/ban extend <PUID|name> <duration>`\nDuration: `30m`, `2h`, `1d`, `1w` or plain minutes"));
 		return;
 	}
 
@@ -2327,11 +2352,11 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 		return;
 	}
 
-	int32 Minutes = 0;
-	if (!FDefaultValueHelper::ParseInt(Args[1], Minutes) || Minutes <= 0)
+	const int32 Minutes = ParseDurationMinutes(Args[1]);
+	if (Minutes <= 0)
 	{
 		Respond(ChannelId,
-			TEXT("❌ `<minutes>` must be a positive integer."));
+			TEXT("❌ `<duration>` must be a positive value (e.g. `60`, `30m`, `2h`, `1d`)."));
 		return;
 	}
 
@@ -2356,8 +2381,9 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 	DB->AddBan(Entry);
 
 	const FString Msg = FString::Printf(
-		TEXT("✅ Extended ban for **%s** (`%s`) by **%d minute(s)**.\nNew expiry: %s UTC\nBy: %s"),
-		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, Minutes,
+		TEXT("✅ Extended ban for **%s** (`%s`) by **%s**.\nNew expiry: %s UTC\nBy: %s"),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid,
+		*BanDiscordHelpers::FormatDuration(Minutes),
 		*Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")),
 		*SenderName);
 	Respond(ChannelId, Msg);
@@ -2851,9 +2877,10 @@ void UBanDiscordSubsystem::HandleModBanCommand(const TArray<FString>& Args,
 		Entry.bIsPermanent, Entry.ExpireDate);
 
 	FString Msg = FString::Printf(
-		TEXT("🔨 **%s** (`%s`) has been banned for **%d minute(s)** (mod action).\n"
+		TEXT("🔨 **%s** (`%s`) has been banned for **%s** (mod action).\n"
 		     "Expires: %s UTC\nReason: %s\nBanned by: %s"),
-		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, DurationMinutes,
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid,
+		*BanDiscordHelpers::FormatDuration(DurationMinutes),
 		*Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")),
 		*Reason, *SenderName);
 	Msg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
@@ -2883,7 +2910,7 @@ void UBanDiscordSubsystem::HandleTempMuteCommand(const TArray<FString>& Args,
 	if (Args.Num() < 2)
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!tempmute <PUID|name> <minutes>`"));
+			TEXT("Usage: `/mod tempmute <PUID|name> <duration> [reason]`\nDuration: `30m`, `2h`, `1d`, `1w` or plain minutes"));
 		return;
 	}
 
@@ -2894,11 +2921,11 @@ void UBanDiscordSubsystem::HandleTempMuteCommand(const TArray<FString>& Args,
 		return;
 	}
 
-	int32 Minutes = 0;
-	if (!FDefaultValueHelper::ParseInt(Args[1], Minutes) || Minutes <= 0)
+	const int32 Minutes = ParseDurationMinutes(Args[1]);
+	if (Minutes <= 0)
 	{
 		Respond(ChannelId,
-			TEXT("❌ `<minutes>` must be a positive integer."));
+			TEXT("❌ `<duration>` must be a positive value (e.g. `60`, `30m`, `2h`, `1d`)."));
 		return;
 	}
 
@@ -2911,16 +2938,25 @@ void UBanDiscordSubsystem::HandleTempMuteCommand(const TArray<FString>& Args,
 		return;
 	}
 
-	MuteReg->MutePlayer(Uid, DisplayName, TEXT("Timed mute via Discord"), SenderName, Minutes);
+	const FString Reason = (Args.Num() > 2)
+		? BanDiscordHelpers::JoinArgs(Args, 2)
+		: TEXT("Timed mute via Discord");
 
+	MuteReg->MutePlayer(Uid, DisplayName, Reason, SenderName, Minutes);
+
+	// Write to audit log so Discord-issued timed mutes appear alongside other mutes.
+	if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
+		AuditLog->LogAction(TEXT("mute"), Uid, DisplayName, SenderName, SenderName, Reason);
+
+	const FString DurStr = BanDiscordHelpers::FormatDuration(Minutes);
 	const FString Msg = FString::Printf(
-		TEXT("🔇 Timed mute applied to **%s** (`%s`) for **%d minute(s)**.\nMuted by: %s"),
-		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, Minutes, *SenderName);
+		TEXT("🔇 Timed mute applied to **%s** (`%s`) for **%s**.\nReason: %s\nMuted by: %s"),
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *DurStr, *Reason, *SenderName);
 	Respond(ChannelId, Msg);
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
-		TEXT("%s Timed mute applied to @%s for %d minute(s). Reason: Timed mute via Discord. By: %s."),
-		*StaffPrefix, *DisplayName, Minutes, *SenderName));
-	PostModerationLog(Msg);
+		TEXT("%s Timed mute applied to @%s for %s. Reason: %s. By: %s."),
+		*StaffPrefix, *DisplayName, *DurStr, *Reason, *SenderName));
+	PostToPlayerModerationThread(DisplayName, Uid, Msg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3054,7 +3090,7 @@ void UBanDiscordSubsystem::HandleTempUnmuteCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!tempunmute <PUID|name>`"));
+			TEXT("Usage: `/mod tempunmute <PUID|name>`"));
 		return;
 	}
 
@@ -3387,7 +3423,7 @@ void UBanDiscordSubsystem::HandleDismissAppealCommand(const TArray<FString>& Arg
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!dismissappeal <id>`"));
+			TEXT("Usage: `/appeal dismiss <id>`"));
 		return;
 	}
 
@@ -3697,7 +3733,7 @@ void UBanDiscordSubsystem::HandleSayCommand(const TArray<FString>& Args,
 
 	if (Args.IsEmpty())
 	{
-		Respond(ChannelId, TEXT("Usage: `!say <message...>` — broadcasts as [ADMIN] in-game"));
+		Respond(ChannelId, TEXT("Usage: `/admin say <message...>` — broadcasts as [ADMIN] in-game"));
 		return;
 	}
 
@@ -3747,8 +3783,8 @@ void UBanDiscordSubsystem::HandlePollCommand(const TArray<FString>& Args,
 	if (Parts.Num() < 3)
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!poll <question> | <optionA> | <optionB> [| <optionC> ...]`\n"
-			     "Example: `!poll Restart tonight? | Yes | No | Maybe`"));
+			TEXT("Usage: `/admin poll <question> | <optionA> | <optionB> [| <optionC> ...]`\n"
+			     "Example: `/admin poll Restart tonight? | Yes | No | Maybe`"));
 		return;
 	}
 
@@ -3855,8 +3891,8 @@ void UBanDiscordSubsystem::HandleScheduleBanCommand(const TArray<FString>& Args,
 	if (Args.Num() < 2)
 	{
 		Respond(ChannelId,
-			TEXT("Usage: `!scheduleban <player|PUID> <delay> [banDuration] [reason...]`\n"
-			     "Example: `!scheduleban BadPlayer 2h 1d Griefing`"));
+			TEXT("Usage: `/ban schedule <player|PUID> <delay> [banDuration] [reason...]`\n"
+			     "Example: `/ban schedule BadPlayer 2h 1d Griefing`"));
 		return;
 	}
 
@@ -3912,10 +3948,10 @@ void UBanDiscordSubsystem::HandleScheduleBanCommand(const TArray<FString>& Args,
 
 	const FString DurStr = BanDurationMinutes == 0
 		? TEXT("permanent")
-		: FString::Printf(TEXT("%d min"), BanDurationMinutes);
+		: BanDiscordHelpers::FormatDuration(BanDurationMinutes);
 	Respond(ChannelId,
-		FString::Printf(TEXT(":calendar: Scheduled ban **#%lld** for `%s` in **%d min** (effective %s). Duration: %s. Reason: %s"),
-			Entry.Id, *DisplayName, DelayMinutes,
+		FString::Printf(TEXT(":calendar: Scheduled ban **#%lld** for `%s` in **%s** (effective %s). Duration: %s. Reason: %s"),
+			Entry.Id, *DisplayName, *BanDiscordHelpers::FormatDuration(DelayMinutes),
 			*EffectiveAt.ToString(TEXT("%Y-%m-%d %H:%M:%S")), *DurStr, *Reason));
 }
 
@@ -3945,7 +3981,7 @@ void UBanDiscordSubsystem::HandleQBanCommand(const TArray<FString>& Args,
 		FString List = TEXT("**Available ban templates:**\n");
 		for (const FBanTemplate& T : Templates)
 		{
-			const FString DurStr = T.DurationMinutes == 0 ? TEXT("permanent") : FString::Printf(TEXT("%dmin"), T.DurationMinutes);
+			const FString DurStr = T.DurationMinutes == 0 ? TEXT("permanent") : BanDiscordHelpers::FormatDuration(T.DurationMinutes);
 			List += FString::Printf(TEXT("`%s` — %s — %s\n"), *T.Slug, *DurStr, *T.Reason);
 		}
 		Respond(ChannelId, List);
@@ -3955,7 +3991,7 @@ void UBanDiscordSubsystem::HandleQBanCommand(const TArray<FString>& Args,
 	if (Args.Num() < 2)
 	{
 		Respond(ChannelId,
-		TEXT("Usage: `!qban <templateSlug> <player|PUID>`"));
+		TEXT("Usage: `/ban quick <templateSlug> <player|PUID>`"));
 		return;
 	}
 
@@ -3968,7 +4004,7 @@ void UBanDiscordSubsystem::HandleQBanCommand(const TArray<FString>& Args,
 	if (!Template)
 	{
 		Respond(ChannelId,
-		FString::Printf(TEXT(":x: Unknown template `%s`. Use `!qban` to list templates."), *Slug));
+		FString::Printf(TEXT(":x: Unknown template `%s`. Use `/ban quick` to list templates."), *Slug));
 		return;
 	}
 
@@ -4016,7 +4052,7 @@ void UBanDiscordSubsystem::HandleQBanCommand(const TArray<FString>& Args,
 
 	FBanDiscordNotifier::NotifyBanCreated(Ban);
 
-	const FString DurStr = Ban.bIsPermanent ? TEXT("permanent") : FString::Printf(TEXT("%dmin"), Template->DurationMinutes);
+	const FString DurStr = Ban.bIsPermanent ? TEXT("permanent") : BanDiscordHelpers::FormatDuration(Template->DurationMinutes);
 	FString QBanMsg = FString::Printf(TEXT(":hammer: [%s] Banned **%s** (%s). Reason: %s. Duration: %s."),
 	*Slug, *DisplayName, *Uid, *Template->Reason, *DurStr);
 	QBanMsg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
@@ -4035,7 +4071,7 @@ void UBanDiscordSubsystem::HandleReputationCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-		TEXT("Usage: `!reputation <player|PUID>`"));
+		TEXT("Usage: `/player reputation <player|PUID>`"));
 		return;
 	}
 
@@ -4130,7 +4166,7 @@ void UBanDiscordSubsystem::HandleBulkBanCommand(const TArray<FString>& Args,
 	if (Args.IsEmpty())
 	{
 		Respond(ChannelId,
-		TEXT("Usage: `!bulkban <PUID1> <PUID2> ... -- <reason>`"));
+		TEXT("Usage: `/ban bulk <PUID1> <PUID2> ... -- <reason>`"));
 		return;
 	}
 
@@ -4585,7 +4621,8 @@ void UBanDiscordSubsystem::OnDiscordInteraction(const TSharedPtr<FJsonObject>& I
 		else if (SubCmdName == TEXT("tempmute"))
 		{
 			Args.Add(GetOpt(TEXT("player")));
-			Args.Add(GetOpt(TEXT("minutes")));
+			Args.Add(GetOpt(TEXT("duration")));
+			const FString R = GetOpt(TEXT("reason")); if (!R.IsEmpty()) Args.Add(R);
 			HandleTempMuteCommand(Args, ChannelId, SenderName, StaffPrefix);
 		}
 		else if (SubCmdName == TEXT("tempunmute"))
@@ -5792,15 +5829,16 @@ FString UBanDiscordSubsystem::ExecutePanelTempBan(const FString& PlayerArg,
 	FBanDiscordNotifier::NotifyBanCreated(Entry);
 
 	FString Msg = FString::Printf(
-		TEXT("✅ **%s** (`%s`) has been temporarily banned for **%d minute(s)**.\n"
+		TEXT("✅ **%s** (`%s`) has been temporarily banned for **%s**.\n"
 		     "Expires: %s\nReason: %s\nBanned by: %s"),
-		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, DurationMinutes,
+		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid,
+		*BanDiscordHelpers::FormatDuration(DurationMinutes),
 		*BanDiscordHelpers::FormatExpiry(Entry), *Entry.Reason, *SenderName);
 	Msg += BanDiscordHelpers::FormatPlayerLookup(this, Uid);
 
 	UE_LOG(LogBanDiscord, Log,
-	       TEXT("BanDiscordSubsystem: [Panel] %s temp-banned %s (%s) for %d min. Reason: %s"),
-	       *SenderName, *DisplayName, *Uid, DurationMinutes, *Entry.Reason);
+	       TEXT("BanDiscordSubsystem: [Panel] %s temp-banned %s (%s) for %s. Reason: %s"),
+	       *SenderName, *DisplayName, *Uid, *BanDiscordHelpers::FormatDuration(DurationMinutes), *Entry.Reason);
 
 	// Write to audit log so panel-issued temp-bans appear alongside slash-command and REST bans.
 	if (UGameInstance* GI = GetGameInstance())
@@ -5810,8 +5848,8 @@ FString UBanDiscordSubsystem::ExecutePanelTempBan(const FString& PlayerArg,
 	}
 
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
-		TEXT("%s Temporarily banned @%s for %d minute(s). Reason: %s. By: %s."),
-		*StaffPrefix, *DisplayName, DurationMinutes, *Entry.Reason, *SenderName));
+		TEXT("%s Temporarily banned @%s for %s. Reason: %s. By: %s."),
+		*StaffPrefix, *DisplayName, *BanDiscordHelpers::FormatDuration(DurationMinutes), *Entry.Reason, *SenderName));
 	PostToPlayerModerationThread(DisplayName, Uid, Msg);
 	return Msg;
 }
@@ -5953,7 +5991,7 @@ FString UBanDiscordSubsystem::ExecutePanelMute(const FString& PlayerArg,
 	MuteReg->MutePlayer(Uid, DisplayName, MuteReason, SenderName, Minutes);
 
 	const FString DurStr = (Minutes > 0)
-		? FString::Printf(TEXT("%d minute(s)"), Minutes)
+		? BanDiscordHelpers::FormatDuration(Minutes)
 		: TEXT("indefinitely");
 
 	UE_LOG(LogBanDiscord, Log,
@@ -5969,7 +6007,7 @@ FString UBanDiscordSubsystem::ExecutePanelMute(const FString& PlayerArg,
 		*StaffPrefix, *DisplayName, *DurStr, *MuteReason, *SenderName));
 
 	const FString MuteMsg = FString::Printf(
-		TEXT("🔇 Muted **%s** (`%s`) %s.\nReason: %s\nMuted by: %s"),
+		TEXT("🔇 Muted **%s** (`%s`) for %s.\nReason: %s\nMuted by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *DurStr,
 		*MuteReason, *SenderName);
 	PostToPlayerModerationThread(DisplayName, Uid, MuteMsg);

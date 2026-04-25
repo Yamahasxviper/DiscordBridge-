@@ -5583,7 +5583,7 @@ Commands.Add(MakeCmd(TEXT("mod"), TEXT("Moderation commands (moderator or admin)
 	MakeSub(TEXT("unmute"),     TEXT("Lift a mute from a player."),
 		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("tempmute"),   TEXT("Apply a timed mute."),
-		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")), Int(TEXT("minutes"), TEXT("Duration in minutes")) }),
+		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")), Str(TEXT("duration"), TEXT("Duration: 30m, 2h, 1d, 1w or plain minutes")), Str(TEXT("reason"), TEXT("Reason for the mute (optional)")) }),
 	MakeSub(TEXT("tempunmute"), TEXT("Lift a timed mute."),
 		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("mutecheck"),  TEXT("Check mute status and expiry."),
