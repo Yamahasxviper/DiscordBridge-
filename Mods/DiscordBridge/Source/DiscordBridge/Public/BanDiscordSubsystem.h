@@ -10,6 +10,7 @@
 #include "BanDiscordSubsystem.generated.h"
 
 class AGameModeBase;
+class UMuteRegistry;
 
 /**
  * UBanDiscordSubsystem
@@ -547,6 +548,14 @@ private:
 	 * calls PostToPlayerModerationThread directly.
 	 */
 	FDelegateHandle UnmutedEventHandle;
+
+	/**
+	 * Weak pointer to the UMuteRegistry that owns MutedEventHandle and
+	 * UnmutedEventHandle.  Stored at bind time so Deinitialize() can reliably
+	 * remove the handles even when GetGameInstance() returns null during
+	 * world teardown.
+	 */
+	TWeakObjectPtr<UMuteRegistry> BoundMuteRegistry;
 
 	/**
 	 * Handle for FBanDiscordNotifier::OnPlayerKickedLogged.

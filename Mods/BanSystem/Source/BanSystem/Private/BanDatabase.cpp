@@ -584,6 +584,8 @@ bool UBanDatabase::LinkBans(const FString& UidA, const FString& UidB)
     FScopeLock Lock(&DbMutex);
 
     bool bDirty = false;
+    bool bFoundA = false;
+    bool bFoundB = false;
 
     auto AddLinkIfMissing = [&](FBanEntry& Entry, const FString& LinkUid) -> bool
     {
@@ -596,16 +598,32 @@ bool UBanDatabase::LinkBans(const FString& UidA, const FString& UidB)
     for (FBanEntry& E : Bans)
     {
         if (E.Uid.Equals(UidA, ESearchCase::IgnoreCase))
+        {
+            bFoundA = true;
             bDirty |= AddLinkIfMissing(E, UidB);
+        }
         if (E.Uid.Equals(UidB, ESearchCase::IgnoreCase))
+        {
+            bFoundB = true;
             bDirty |= AddLinkIfMissing(E, UidA);
+        }
     }
 
     if (bDirty)
+    {
+        if (!bFoundA)
+            UE_LOG(LogBanDatabase, Warning,
+                TEXT("BanDatabase: LinkBans — no ban found for '%s'; link added to '%s' only"),
+                *UidA, *UidB);
+        else if (!bFoundB)
+            UE_LOG(LogBanDatabase, Warning,
+                TEXT("BanDatabase: LinkBans — no ban found for '%s'; link added to '%s' only"),
+                *UidB, *UidA);
         return SaveToFile();
+    }
 
     UE_LOG(LogBanDatabase, Warning,
-        TEXT("BanDatabase: LinkBans — no ban found for either '%s' or '%s'"), *UidA, *UidB);
+        TEXT("BanDatabase: LinkBans — no ban found for '%s' or '%s'"), *UidA, *UidB);
     return false;
 }
 

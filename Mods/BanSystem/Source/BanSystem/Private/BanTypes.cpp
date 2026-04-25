@@ -57,7 +57,7 @@ FString FBanEntry::GetKickMessage() const
     {
         const FString ExpiryStr = bIsPermanent
             ? TEXT("never")
-            : ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S"));
+            : ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")) + TEXT(" UTC");
 
         const FString AppealUrlStr = (Cfg && !Cfg->AppealUrl.IsEmpty())
             ? Cfg->AppealUrl

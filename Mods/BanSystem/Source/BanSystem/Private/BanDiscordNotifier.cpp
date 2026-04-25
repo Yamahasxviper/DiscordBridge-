@@ -369,11 +369,16 @@ void FBanDiscordNotifier::NotifyGeoIpBlocked(const FString& PlayerName, const FS
 
 void FBanDiscordNotifier::NotifyPlayerMuted(const FString& Uid, const FString& PlayerName,
                                              const FString& MutedBy, const FString& Reason,
-                                             bool bIsTimed, const FDateTime& ExpireDate)
+                                             bool bIsTimed, const FDateTime& ExpireDate,
+                                             const FDateTime& MuteDate)
 {
+    // Use MuteDate if provided (non-zero) so the shown duration equals the
+    // configured value regardless of HTTP delivery delay.  Fall back to
+    // UtcNow() for callers that do not supply a start time.
+    const FDateTime EffectiveMuteDate = (MuteDate.GetTicks() > 0) ? MuteDate : FDateTime::UtcNow();
     const FString DurationStr = bIsTimed
         ? FString::Printf(TEXT("%lld min"), FMath::Max((int64)0,
-              static_cast<int64>((ExpireDate - FDateTime::UtcNow()).GetTotalMinutes())))
+              static_cast<int64>((ExpireDate - EffectiveMuteDate).GetTotalMinutes())))
         : TEXT("Indefinite");
 
     const FString Fields =

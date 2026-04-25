@@ -91,6 +91,9 @@ TArray<FAuditEntry> UBanAuditLog::GetRecentEntries(int32 Limit) const
 {
     FScopeLock Lock(&Mutex);
 
+    // A limit of 0 or negative is treated as "return nothing".
+    if (Limit <= 0) return {};
+
     // Return newest-first up to Limit entries.
     TArray<FAuditEntry> Result;
     const int32 Total = Entries.Num();

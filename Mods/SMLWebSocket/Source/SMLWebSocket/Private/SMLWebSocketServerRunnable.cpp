@@ -430,7 +430,7 @@ bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClient
             return false;
         }
 
-        if (Opcode == 0x1 || Opcode == 0x0) // Text or continuation
+        if (Opcode == 0x1 || Opcode == 0x2 || Opcode == 0x0) // Text, Binary, or Continuation
         {
             uint8 Mask[4] = {0,0,0,0};
             if (bMasked)
@@ -444,15 +444,28 @@ bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClient
             for (int32 i = 0; i < PayloadLen32; ++i)
                 Payload[i] = Buf[HeaderSize + MaskSize + i] ^ (bMasked ? Mask[i % 4] : 0);
 
-            const FString Text = FString(UTF8_TO_TCHAR(reinterpret_cast<const ANSICHAR*>(Payload.GetData())));
-
-            TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
-            const FString CId = ClientId;
-            AsyncTask(ENamedThreads::GameThread, [WeakOwner, CId, Text]()
+            if (Opcode == 0x2) // Binary frame — deliver raw bytes
             {
-                if (USMLWebSocketServer* O = WeakOwner.Get())
-                    O->Internal_OnClientMessage(CId, Text);
-            });
+                TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
+                const FString CId = ClientId;
+                AsyncTask(ENamedThreads::GameThread, [WeakOwner, CId, Payload = MoveTemp(Payload)]()
+                {
+                    if (USMLWebSocketServer* O = WeakOwner.Get())
+                        O->Internal_OnClientBinaryMessage(CId, Payload);
+                });
+            }
+            else // Text or Continuation — deliver as UTF-8 string
+            {
+                const FString Text = FString(UTF8_TO_TCHAR(reinterpret_cast<const ANSICHAR*>(Payload.GetData())));
+
+                TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
+                const FString CId = ClientId;
+                AsyncTask(ENamedThreads::GameThread, [WeakOwner, CId, Text]()
+                {
+                    if (USMLWebSocketServer* O = WeakOwner.Get())
+                        O->Internal_OnClientMessage(CId, Text);
+                });
+            }
         }
 
         Buf.RemoveAt(0, TotalSize);

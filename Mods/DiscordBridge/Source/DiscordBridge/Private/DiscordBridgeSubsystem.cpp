@@ -695,7 +695,16 @@ void UDiscordBridgeSubsystem::HandleHello(const TSharedPtr<FJsonObject>& DataObj
 	// Discord sends the heartbeat interval in milliseconds.
 	double HeartbeatMs = 41250.0; // sensible default
 	DataObj->TryGetNumberField(TEXT("heartbeat_interval"), HeartbeatMs);
-	HeartbeatIntervalSeconds = static_cast<float>(HeartbeatMs) / 1000.0f;
+	if (HeartbeatMs >= 1000.0 && HeartbeatMs <= 120000.0)
+	{
+		HeartbeatIntervalSeconds = static_cast<float>(HeartbeatMs) / 1000.0f;
+	}
+	else
+	{
+		UE_LOG(LogDiscordBridge, Warning,
+		       TEXT("DiscordBridge: Unexpected heartbeat_interval %.0f ms — using default %.2f s."),
+		       HeartbeatMs, HeartbeatIntervalSeconds);
+	}
 
 	UE_LOG(LogDiscordBridge, Log,
 	       TEXT("DiscordBridge: Hello received. Heartbeat interval: %.2f s"),
