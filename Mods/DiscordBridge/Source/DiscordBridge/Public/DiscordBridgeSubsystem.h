@@ -196,9 +196,9 @@ public:
 	 * the Discord REST API.
 	 *
 	 * @param PlayerName  The in-game name of the player who sent the message.
-	 *                    Substituted for {PlayerName} in GameToDiscordFormat.
+	 *                    Substituted for %PlayerName% in GameToDiscordFormat.
 	 * @param Message     The chat message text.
-	 *                    Substituted for {Message} in GameToDiscordFormat.
+	 *                    Substituted for %Message% in GameToDiscordFormat.
 	 */
 	UFUNCTION(BlueprintCallable, Category="Discord Bridge")
 	void SendGameMessageToDiscord(const FString& PlayerName, const FString& Message);

@@ -269,7 +269,6 @@ bool FWhitelistManager::AddPlayer(const FString& PlayerName,
 
 	// Capacity check — only count active (non-expired) entries so that
 	// expired slots do not permanently consume whitelist capacity.
-	const FDateTime Now = FDateTime::UtcNow();
 	if (MaxSlots > 0)
 	{
 		int32 ActiveCount = 0;

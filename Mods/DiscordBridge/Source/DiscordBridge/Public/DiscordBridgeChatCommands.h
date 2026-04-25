@@ -66,8 +66,7 @@ public:
 /**
  * /ingamewhitelist <subcommand> [args...]
  *
- * In-game whitelist management command. Replaces the removed
- * InGameWhitelistCommandPrefix=!whitelist config option.
+ * In-game whitelist management command.
  *
  * Supported subcommands:
  *   /ingamewhitelist on             – enable the whitelist
