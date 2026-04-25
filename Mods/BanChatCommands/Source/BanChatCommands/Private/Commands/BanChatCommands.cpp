@@ -2785,10 +2785,10 @@ EExecutionStatus AMuteCheckChatCommand::ExecuteCommand_Implementation(
         const FTimespan Remaining = Entry.ExpireDate - FDateTime::UtcNow();
         const int32 RemainingMin  = FMath::Max(0, static_cast<int32>(Remaining.GetTotalMinutes()));
         Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] '%s' is muted until %s UTC (%d min remaining). Reason: %s."),
+            FString::Printf(TEXT("[BanChatCommands] '%s' is muted until %s UTC (%s remaining). Reason: %s."),
                 *DisplayName,
                 *Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")),
-                RemainingMin,
+                *BanChat::FormatDuration(RemainingMin),
                 *Entry.Reason),
             FLinearColor::Yellow);
     }
@@ -3167,8 +3167,8 @@ EExecutionStatus AExtendBanChatCommand::ExecuteCommand_Implementation(
     }
 
     Sender->SendChatMessage(
-        FString::Printf(TEXT("[BanChatCommands] Ban for '%s' extended by %d minute(s). New expiry: %s UTC."),
-            *DisplayName, ExtraMinutes,
+        FString::Printf(TEXT("[BanChatCommands] Ban for '%s' extended by %s. New expiry: %s UTC."),
+            *DisplayName, *BanChat::FormatDuration(ExtraMinutes),
             *Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S"))),
         FLinearColor::Green);
     return EExecutionStatus::COMPLETED;
