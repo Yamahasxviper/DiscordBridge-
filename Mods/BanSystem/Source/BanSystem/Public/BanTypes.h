@@ -32,7 +32,7 @@ struct BANSYSTEM_API FBanTemplate
 {
     GENERATED_BODY()
 
-    /** Short identifier used with /qban and !qban (e.g. "griefing"). */
+    /** Short identifier used with /qban (e.g. "griefing"). */
     UPROPERTY(BlueprintReadOnly, Category = "Ban System")
     FString Slug;
 

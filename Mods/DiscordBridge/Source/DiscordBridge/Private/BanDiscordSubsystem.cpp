@@ -360,9 +360,11 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				if (Self->Config.ModerationLogChannelId.IsEmpty()) return;
 
 				const FString DurationStr = Entry.bIsPermanent
-					? TEXT("Permanent")
-					: FString::Printf(TEXT("%lld min"), FMath::Max((int64)0,
-					    static_cast<int64>((Entry.ExpireDate - Entry.BanDate).GetTotalMinutes())));
+					? TEXT("permanent")
+					: BanDiscordHelpers::FormatDuration(static_cast<int32>(FMath::Min(
+					    FMath::Max((int64)0,
+					        static_cast<int64>((Entry.ExpireDate - Entry.BanDate).GetTotalMinutes())),
+					    static_cast<int64>(INT32_MAX))));
 				const FString Msg = FString::Printf(
 					TEXT("🔨 **%s** (`%s`) banned.\nReason: %s\nBy: %s | Duration: %s"),
 					*Entry.PlayerName, *Entry.Uid,
@@ -1350,7 +1352,7 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
 
 		UE_LOG(LogBanDiscord, Log,
-		       TEXT("BanDiscordSubsystem: %s issued !unban for %s (%s) — no record in DB (already clear)."),
+		       TEXT("BanDiscordSubsystem: %s issued /ban remove for %s (%s) — no record in DB (already clear)."),
 		       *SenderName, *DisplayName, *Uid);
 
 		Respond(ChannelId, Msg);

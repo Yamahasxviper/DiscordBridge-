@@ -786,7 +786,7 @@ private:
 	 */
 	TWeakObjectPtr<UBanDiscordSubsystem> CachedBanDiscordSubsystem;
 
-	// ── !stats / !playerstats ─────────────────────────────────────────────────
+	// ── /stats / /playerstats ─────────────────────────────────────────────────
 
 	/** Handle the /stats Discord command — send a server-stats embed. */
 	void HandleStatsCommand(const FString& ResponseChannelId);
@@ -912,7 +912,7 @@ private:
 	/** Start one ticker per InGameMessagesConfig.Messages entry. */
 	void StartInGameMessageTickers();
 
-	// ── !server / !online commands ────────────────────────────────────────────
+	// ── /server / /online commands ────────────────────────────────────────────
 
 	/** Handle the /server Discord command — post a server info embed. */
 	void HandleServerCommand(const FString& ResponseChannelId);
@@ -920,7 +920,7 @@ private:
 	/** Handle the /online Discord command — post a list of online players with session times. */
 	void HandleOnlineCommand(const FString& ResponseChannelId);
 
-	// ── !help / bot info command ──────────────────────────────────────────────
+	// ── /help / bot info command ──────────────────────────────────────────────
 
 	/**
 	 * Post a comprehensive feature/command-reference embed to ResponseChannelId.

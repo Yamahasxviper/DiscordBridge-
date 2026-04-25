@@ -214,7 +214,7 @@ public:
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * Ban preset definitions for the /qban and !qban quick-ban commands.
+     * Ban preset definitions for the /qban quick-ban command.
      * Each entry is a pipe-delimited string: "slug|DurationMinutes|Reason[|Category]"
      *   slug            — short identifier used in the command (e.g. "griefing")
      *   DurationMinutes — 0 = permanent
