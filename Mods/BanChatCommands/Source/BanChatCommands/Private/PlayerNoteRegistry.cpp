@@ -11,7 +11,7 @@
 #include "HAL/PlatformFileManager.h"
 #include "HAL/FileManager.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogPlayerNoteRegistry, Log, All);
+DEFINE_LOG_CATEGORY(LogPlayerNoteRegistry);
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  USubsystem lifecycle

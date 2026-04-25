@@ -324,6 +324,7 @@ namespace BanDiscordHelpers
 
 bool UBanDiscordSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
+	if (!Super::ShouldCreateSubsystem(Outer)) return false;
 	return IsRunningDedicatedServer();
 }
 
@@ -623,8 +624,7 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 					TEXT("**Contact:** %s\n")
 					TEXT("**Submitted:** %s\n")
 					TEXT("**Reason:** %s\n\n")
-					TEXT("React with ✅ to approve (unban) or ❌ to deny (dismiss).\n")
-					TEXT("Use `/appeal approve %lld` or `/appeal deny %lld` to act."),
+					TEXT("Use `/appeal approve %lld` to unban or `/appeal deny %lld` to dismiss."),
 					Entry.Id, *Entry.Uid, *Contact, *SubmittedStr, *Reason,
 					Entry.Id, Entry.Id);
 
@@ -977,14 +977,26 @@ bool UBanDiscordSubsystem::IsValidEOSPUID(const FString& Id)
 
 bool UBanDiscordSubsystem::IsValidIPQuery(const FString& Query)
 {
-	// Accept explicit "IP:<addr>" prefix or a bare address that contains a dot
-	// (IPv4: "1.2.3.4" or partial "192.168.1.").
+	// Accept explicit "IP:<addr>" prefix.
 	FString Platform, RawId;
 	UBanDatabase::ParseUid(Query, Platform, RawId);
 	if (Platform == TEXT("IP") && !RawId.IsEmpty())
 		return true;
-	// "UNKNOWN" is what ParseUid returns for strings without a colon prefix.
-	return Platform == TEXT("UNKNOWN") && Query.Contains(TEXT("."));
+
+	// For bare addresses (no colon prefix), require the string to look like a
+	// numeric IPv4 address: every character must be a digit or '.', and the
+	// string must contain at least one dot.  This rejects player names such as
+	// "player.name" that happen to contain a dot but are clearly not IP addresses.
+	if (Platform == TEXT("UNKNOWN") && Query.Contains(TEXT(".")))
+	{
+		for (TCHAR C : Query)
+		{
+			if (!FChar::IsDigit(C) && C != TEXT('.'))
+				return false;
+		}
+		return true;
+	}
+	return false;
 }
 
 int32 UBanDiscordSubsystem::ParseDurationMinutes(const FString& DurationStr)

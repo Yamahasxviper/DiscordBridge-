@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "BanTypes.h"
 
+DECLARE_LOG_CATEGORY_EXTERN(LogBanDiscordNotifier, Log, All);
+
 /**
  * FBanDiscordNotifier
  *

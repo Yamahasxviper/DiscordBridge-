@@ -209,11 +209,14 @@ void USMLWebSocketClient::Internal_OnConnected()
 
 	if (bHasConnectedOnce)
 	{
+		OnConnected.Broadcast();
 		OnReconnected.Broadcast();
 	}
-	bHasConnectedOnce = true;
-
-	OnConnected.Broadcast();
+	else
+	{
+		bHasConnectedOnce = true;
+		OnConnected.Broadcast();
+	}
 }
 
 void USMLWebSocketClient::Internal_OnMessage(const FString& Message)

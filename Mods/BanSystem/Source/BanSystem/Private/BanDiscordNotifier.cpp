@@ -11,7 +11,7 @@
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogBanDiscordNotifier, Log, All);
+DEFINE_LOG_CATEGORY(LogBanDiscordNotifier);
 
 // Static delegate definition.
 FBanDiscordNotifier::FOnPlayerKickedLogged FBanDiscordNotifier::OnPlayerKickedLogged;
