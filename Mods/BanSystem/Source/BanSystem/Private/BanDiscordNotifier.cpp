@@ -34,7 +34,13 @@ namespace
             case TEXT('\n'): Out += TEXT("\\n");  break;
             case TEXT('\r'): Out += TEXT("\\r");  break;
             case TEXT('\t'): Out += TEXT("\\t");  break;
-            default:         Out += C;            break;
+            default:
+                // RFC 8259 §7: all control characters U+0000–U+001F must be escaped.
+                if (C < 0x20)
+                    Out += FString::Printf(TEXT("\\u%04x"), static_cast<uint32>(C));
+                else
+                    Out += C;
+                break;
             }
         }
         return Out;
@@ -95,7 +101,8 @@ void FBanDiscordNotifier::NotifyBanCreated(const FBanEntry& Entry)
     const FString DurationValue = Entry.bIsPermanent
         ? TEXT("Permanent")
         : FString::Printf(TEXT("%lld minutes"),
-            static_cast<int64>((Entry.ExpireDate - Entry.BanDate).GetTotalMinutes()));
+            FMath::Max((int64)0,
+                static_cast<int64>((Entry.ExpireDate - Entry.BanDate).GetTotalMinutes())));
 
     const FString Fields =
         Field(TEXT("Player"),    PlayerValue)         + TEXT(",") +
@@ -240,7 +247,8 @@ void FBanDiscordNotifier::NotifyAutoEscalationBan(const FBanEntry& Ban, int32 Wa
     const FString DurationValue = Ban.bIsPermanent
         ? TEXT("Permanent")
         : FString::Printf(TEXT("%lld minutes"),
-            static_cast<int64>((Ban.ExpireDate - Ban.BanDate).GetTotalMinutes()));
+            FMath::Max((int64)0,
+                static_cast<int64>((Ban.ExpireDate - Ban.BanDate).GetTotalMinutes())));
 
     const FString Fields =
         Field(TEXT("Player"),       PlayerValue)                    + TEXT(",") +

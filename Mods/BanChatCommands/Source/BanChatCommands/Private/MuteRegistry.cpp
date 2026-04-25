@@ -54,12 +54,13 @@ void UMuteRegistry::MutePlayer(const FString& Uid, const FString& PlayerName,
     Entry.PlayerName  = PlayerName;
     Entry.Reason      = Reason;
     Entry.MutedBy     = MutedBy;
-    Entry.MuteDate    = FDateTime::UtcNow();
+    const FDateTime Now = FDateTime::UtcNow();
+    Entry.MuteDate    = Now;
 
     if (ExpiryMinutes > 0)
     {
         Entry.bIsIndefinite = false;
-        Entry.ExpireDate    = FDateTime::UtcNow() + FTimespan::FromMinutes(ExpiryMinutes);
+        Entry.ExpireDate    = Now + FTimespan::FromMinutes(ExpiryMinutes);
     }
     else
     {

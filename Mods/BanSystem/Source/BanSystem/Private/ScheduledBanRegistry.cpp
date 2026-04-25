@@ -144,12 +144,13 @@ void UScheduledBanRegistry::ApplyScheduledBan(const FScheduledBanEntry& Entry)
     Ban.PlayerName      = Entry.PlayerName;
     Ban.Reason          = Entry.Reason;
     Ban.BannedBy        = Entry.ScheduledBy;
-    Ban.BanDate         = FDateTime::UtcNow();
+    const FDateTime Now = FDateTime::UtcNow();
+    Ban.BanDate         = Now;
     Ban.Category        = Entry.Category;
     Ban.bIsPermanent    = (Entry.DurationMinutes <= 0);
     Ban.ExpireDate      = Ban.bIsPermanent
         ? FDateTime(0)
-        : FDateTime::UtcNow() + FTimespan::FromMinutes(Entry.DurationMinutes);
+        : Now + FTimespan::FromMinutes(Entry.DurationMinutes);
 
     if (!DB->AddBan(Ban))
     {

@@ -499,11 +499,12 @@ void UBanRestApi::RegisterRoutes()
             Entry.PlayerName = PlayerName;
             Entry.Reason     = Reason;
             Entry.BannedBy   = BannedBy;
-            Entry.BanDate    = FDateTime::UtcNow();
+            const FDateTime Now = FDateTime::UtcNow();
+            Entry.BanDate    = Now;
             Entry.bIsPermanent = (DurationMinutes <= 0);
             Entry.ExpireDate = Entry.bIsPermanent
                 ? FDateTime(0)
-                : FDateTime::UtcNow() + FTimespan::FromMinutes(DurationMinutes);
+                : Now + FTimespan::FromMinutes(DurationMinutes);
 
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
             if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
@@ -828,8 +829,9 @@ void UBanRestApi::RegisterRoutes()
     Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/players")),
         EHttpServerRequestVerbs::VERB_GET,
-        [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UPlayerSessionRegistry* Reg = GI->GetSubsystem<UPlayerSessionRegistry>();
@@ -864,6 +866,7 @@ void UBanRestApi::RegisterRoutes()
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UPlayerSessionRegistry* Reg = GI->GetSubsystem<UPlayerSessionRegistry>();
@@ -1018,11 +1021,12 @@ void UBanRestApi::RegisterRoutes()
                         AutoBan.PlayerName   = PlayerName;
                         AutoBan.Reason       = TEXT("Auto-banned: reached warning threshold");
                         AutoBan.BannedBy     = TEXT("system");
-                        AutoBan.BanDate      = FDateTime::UtcNow();
+                        const FDateTime AutoNow = FDateTime::UtcNow();
+                        AutoBan.BanDate      = AutoNow;
                         AutoBan.bIsPermanent = (BanDurationMinutes <= 0);
                         AutoBan.ExpireDate   = AutoBan.bIsPermanent
                             ? FDateTime(0)
-                            : FDateTime::UtcNow() + FTimespan::FromMinutes(BanDurationMinutes);
+                            : AutoNow + FTimespan::FromMinutes(BanDurationMinutes);
 
                         DB->AddBan(AutoBan);
                         FBanDiscordNotifier::NotifyBanCreated(AutoBan);
@@ -1588,8 +1592,9 @@ void UBanRestApi::RegisterRoutes()
     Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/players/export-csv")),
         EHttpServerRequestVerbs::VERB_GET,
-        [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UPlayerSessionRegistry* PlayerReg = GI->GetSubsystem<UPlayerSessionRegistry>();
@@ -2536,12 +2541,13 @@ void UBanRestApi::RegisterRoutes()
                 Ban.PlayerName      = Uid;
                 Ban.Reason          = Reason;
                 Ban.BannedBy        = BannedBy;
-                Ban.BanDate         = FDateTime::UtcNow();
+                const FDateTime BatchBanNow = FDateTime::UtcNow();
+                Ban.BanDate         = BatchBanNow;
                 Ban.Category        = Category;
                 Ban.bIsPermanent    = (DurationMinutes <= 0);
                 Ban.ExpireDate      = Ban.bIsPermanent
                     ? FDateTime(0)
-                    : FDateTime::UtcNow() + FTimespan::FromMinutes(DurationMinutes);
+                    : BatchBanNow + FTimespan::FromMinutes(DurationMinutes);
 
                 if (DB->AddBan(Ban))
                 {

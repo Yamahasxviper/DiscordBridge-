@@ -363,7 +363,8 @@ namespace BanChat
             E.PlayerName = Name;
             E.Reason     = Reason;
             E.BannedBy   = BannedBy;
-            E.BanDate    = FDateTime::UtcNow();
+            const FDateTime EntryNow = FDateTime::UtcNow();
+            E.BanDate    = EntryNow;
             if (DurationMinutes <= 0)
             {
                 E.bIsPermanent = true;
@@ -372,7 +373,7 @@ namespace BanChat
             else
             {
                 E.bIsPermanent = false;
-                E.ExpireDate   = FDateTime::UtcNow() + FTimespan::FromMinutes(DurationMinutes);
+                E.ExpireDate   = EntryNow + FTimespan::FromMinutes(DurationMinutes);
             }
             E.LinkedUids.Add(PrimaryUid);
             return E;
@@ -521,7 +522,8 @@ namespace BanChat
         Entry.PlayerName = DisplayName;
         Entry.Reason     = Reason;
         Entry.BannedBy   = BannedBy;
-        Entry.BanDate    = FDateTime::UtcNow();
+        const FDateTime BanCmdNow = FDateTime::UtcNow();
+        Entry.BanDate    = BanCmdNow;
 
         if (DurationMinutes <= 0)
         {
@@ -531,7 +533,7 @@ namespace BanChat
         else
         {
             Entry.bIsPermanent = false;
-            Entry.ExpireDate   = FDateTime::UtcNow() + FTimespan::FromMinutes(DurationMinutes);
+            Entry.ExpireDate   = BanCmdNow + FTimespan::FromMinutes(DurationMinutes);
         }
 
         const FString DurStr = FormatDuration(DurationMinutes);
@@ -665,7 +667,7 @@ namespace BanChat
         if (DurationStr.IsNumeric())
             return FMath::Max(1, FCString::Atoi(*DurationStr));
 
-        int32 Total   = 0;
+        int64 Total   = 0;
         bool  bHadToken = false;
         const TCHAR* p = *DurationStr;
 
@@ -673,7 +675,7 @@ namespace BanChat
         {
             if (!FChar::IsDigit(*p)) return -1;
 
-            int32 Num = 0;
+            int64 Num = 0;
             while (*p && FChar::IsDigit(*p))
             {
                 Num = Num * 10 + (*p - TEXT('0'));
@@ -695,7 +697,8 @@ namespace BanChat
         }
 
         if (!bHadToken || Total <= 0) return -1;
-        return Total;
+        // Cap at INT32_MAX to avoid truncation when converting back to int32.
+        return static_cast<int32>(FMath::Min(Total, static_cast<int64>(INT32_MAX)));
     }
 
     /**
@@ -1853,11 +1856,12 @@ EExecutionStatus AWarnChatCommand::ExecuteCommand_Implementation(
                 ReviewBan.PlayerName = DisplayName;
                 ReviewBan.Reason     = TEXT("Auto-banned: reached warning threshold");
                 ReviewBan.BannedBy   = TEXT("system");
-                ReviewBan.BanDate    = FDateTime::UtcNow();
+                const FDateTime ReviewNow = FDateTime::UtcNow();
+                ReviewBan.BanDate    = ReviewNow;
                 ReviewBan.bIsPermanent = (BanDurationMinutes <= 0);
                 ReviewBan.ExpireDate   = ReviewBan.bIsPermanent
                     ? FDateTime(0)
-                    : FDateTime::UtcNow() + FTimespan::FromMinutes(BanDurationMinutes);
+                    : ReviewNow + FTimespan::FromMinutes(BanDurationMinutes);
                 FBanDiscordNotifier::NotifyAutoEscalationBan(ReviewBan, WarnCount);
             }
         }
@@ -3783,12 +3787,13 @@ EExecutionStatus AQBanChatCommand::ExecuteCommand_Implementation(
     Ban.PlayerName      = PlayerName;
     Ban.Reason          = Template->Reason;
     Ban.BannedBy        = AdminName;
-    Ban.BanDate         = FDateTime::UtcNow();
+    const FDateTime TemplateChatBanNow = FDateTime::UtcNow();
+    Ban.BanDate         = TemplateChatBanNow;
     Ban.Category        = Template->Category;
     Ban.bIsPermanent    = (Template->DurationMinutes <= 0);
     Ban.ExpireDate      = Ban.bIsPermanent
         ? FDateTime(0)
-        : FDateTime::UtcNow() + FTimespan::FromMinutes(Template->DurationMinutes);
+        : TemplateChatBanNow + FTimespan::FromMinutes(Template->DurationMinutes);
 
     if (!DB->AddBan(Ban))
     {
