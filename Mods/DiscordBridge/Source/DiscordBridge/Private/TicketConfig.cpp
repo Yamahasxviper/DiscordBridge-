@@ -331,7 +331,7 @@ void FTicketConfig::RestoreDefaultConfigIfNeeded()
 	const FString Template =
 		TEXT("[TicketSystem]\n")
 		TEXT("# TicketSystem - Configuration\n")
-		TEXT("# =============================\n")
+		TEXT("# ============================\n")
 		TEXT("#\n")
 		TEXT("# NOTE: this file is NOT overwritten by mod updates. Your settings persist\n")
 		TEXT("# across version upgrades. A backup is also written automatically to\n")
