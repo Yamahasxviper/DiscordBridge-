@@ -370,11 +370,21 @@ bool FSMLWebSocketServerRunnable::PerformHandshake(FClientState& Client)
                        + TEXT("Sec-WebSocket-Accept: ") + Accept + TEXT("\r\n")
                        + TEXT("\r\n");
     FTCHARToUTF8 ResponseUtf8(*Response);
-    int32 Sent = 0;
-    return Client.Socket->Send(
-        reinterpret_cast<const uint8*>(ResponseUtf8.Get()),
-        ResponseUtf8.Length(), Sent)
-        && Sent == ResponseUtf8.Length();
+    const int32 TotalLen = ResponseUtf8.Length();
+    int32 TotalSent = 0;
+    while (TotalSent < TotalLen)
+    {
+        int32 Sent = 0;
+        if (!Client.Socket->Send(
+                reinterpret_cast<const uint8*>(ResponseUtf8.Get()) + TotalSent,
+                TotalLen - TotalSent, Sent)
+            || Sent <= 0)
+        {
+            return false;
+        }
+        TotalSent += Sent;
+    }
+    return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -513,8 +523,16 @@ TArray<uint8> FSMLWebSocketServerRunnable::BuildTextFrame(const FString& Text)
 
 bool FSMLWebSocketServerRunnable::SendFrame(FSocket* Socket, const TArray<uint8>& Frame)
 {
-    int32 Sent = 0;
-    return Socket->Send(Frame.GetData(), Frame.Num(), Sent) && Sent == Frame.Num();
+    int32 TotalSent = 0;
+    const int32 TotalLen = Frame.Num();
+    while (TotalSent < TotalLen)
+    {
+        int32 Sent = 0;
+        if (!Socket->Send(Frame.GetData() + TotalSent, TotalLen - TotalSent, Sent) || Sent <= 0)
+            return false;
+        TotalSent += Sent;
+    }
+    return true;
 }
 
 void FSMLWebSocketServerRunnable::BroadcastText(const FString& Message)
