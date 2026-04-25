@@ -143,7 +143,7 @@ public:
      * Called periodically by BanChatCommandsModule (every ~30 s).
      * Thread-safe.
      */
-    void TickExpiry();
+    TArray<FString> TickExpiry();
 
     // ── Delegates ─────────────────────────────────────────────────────────
 

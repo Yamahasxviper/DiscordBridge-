@@ -749,17 +749,16 @@ public:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  /tempunmute  — timed mute that auto-expires
+//  /tempunmute  — lift a timed mute early
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * /tempunmute <player|PUID> <minutes>
+ * /tempunmute <player|PUID>
  *
- * Applies (or updates) a timed mute that automatically expires after
- * <minutes> minutes.  If the player is already muted indefinitely, this
- * replaces the indefinite mute with a timed one.
+ * Lifts a timed mute before its scheduled expiry.  Only works on timed
+ * (non-indefinite) mutes; use /unmute for indefinite mutes.
  *
- * Requires admin.
+ * Requires moderator or admin.
  */
 UCLASS()
 class BANCHATCOMMANDS_API ATempUnmuteChatCommand : public AChatCommandInstance

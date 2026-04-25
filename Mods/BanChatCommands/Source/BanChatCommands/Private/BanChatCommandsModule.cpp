@@ -392,7 +392,7 @@ void FBanChatCommandsModule::RestoreDefaultConfigIfNeeded()
         + TEXT("# +ModeratorEosPUIDs=MODERATOR_EOS_PUID_HERE\n")
         + TEXT("BanListPageSize=10\n")
         + TEXT("ModBanDurationMinutes=30\n")
-        + TEXT("# Maximum mute duration (minutes) a moderator may pass to /tempunmute.\n")
+        + TEXT("# Maximum mute duration (minutes) a moderator may pass to /tempmute.\n")
         + TEXT("# 0 = no ceiling (same as admins).\n")
         + TEXT("MaxModMuteDurationMinutes=0\n")
         + TEXT("# Set to True to allow moderators to use /note and /notes (default: only admins).\n")
@@ -459,7 +459,13 @@ bool FBanChatCommandsModule::OnMuteExpiryTick(float /*DeltaTime*/)
         UGameInstance* GI = WCtx.OwningGameInstance;
         if (!GI) continue;
         UMuteRegistry* MuteReg = GI->GetSubsystem<UMuteRegistry>();
-        if (MuteReg) MuteReg->TickExpiry();
+        if (!MuteReg) continue;
+        TArray<FString> Expired = MuteReg->TickExpiry();
+        if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+        {
+            for (const FString& ExpiredUid : Expired)
+                AuditLog->LogAction(TEXT("unmute"), ExpiredUid, TEXT(""), TEXT("system"), TEXT("system"), TEXT("Timed mute expired"));
+        }
     }
     return true; // keep ticking
 }

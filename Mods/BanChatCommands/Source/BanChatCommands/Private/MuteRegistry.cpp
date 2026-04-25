@@ -157,7 +157,7 @@ bool UMuteRegistry::UpdateMuteReason(const FString& Uid, const FString& NewReaso
     return false;
 }
 
-void UMuteRegistry::TickExpiry()
+TArray<FString> UMuteRegistry::TickExpiry()
 {
     TArray<FString> Expired;
 
@@ -190,6 +190,8 @@ void UMuteRegistry::TickExpiry()
 
     for (const FString& Uid : Expired)
         OnPlayerUnmuted.Broadcast(Uid);
+
+    return Expired;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
