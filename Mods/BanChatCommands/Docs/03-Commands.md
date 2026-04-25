@@ -22,13 +22,32 @@
 | `/warn` | Admin | `/warn <player\|UID> <reason...>` |
 | `/warnings` | Admin | `/warnings <player\|UID>` |
 | `/clearwarns` | Admin | `/clearwarns <player\|UID>` |
-| `/reason` | Admin | `/reason <UID>` |
+| `/clearwarn` | Admin | `/clearwarn <player\|UID> <id>` |
+| `/reason` | All | `/reason <UID>` |
+| `/banreason` | Admin | `/banreason <UID> <new reason>` |
 | `/announce` | Admin | `/announce <message...>` |
-| `/stafflist` | Admin | `/stafflist` |
+| `/stafflist` | Moderator | `/stafflist` |
+| `/note` | Admin | `/note <player\|UID> <text>` |
+| `/notes` | Admin | `/notes <player\|UID>` |
+| `/duration` | Admin | `/duration <UID>` |
+| `/extend` | Admin | `/extend <UID> <minutes>` |
+| `/appeal` | All | `/appeal <reason...>` |
+| `/staffchat` | Moderator | `/staffchat <message...>` |
+| `/scheduleban` | Admin | `/scheduleban <player\|UID> <timestamp> [reason]` |
+| `/qban` | Admin | `/qban <template> <player\|UID>` |
+| `/reputation` | Admin | `/reputation <player\|UID>` |
+| `/bulkban` | Admin | `/bulkban <UID1> <UID2> ... [reason]` |
 | `/kick` | Moderator | `/kick <player\|UID> [reason...]` |
 | `/modban` | Moderator | `/modban <player\|UID> [reason...]` |
-| `/mute` | Moderator | `/mute <player\|UID> [minutes] [reason...]` |
-| `/unmute` | Moderator | `/unmute <player\|UID>` |
+| `/mute` | Admin | `/mute <player\|UID> [duration] [reason...]` |
+| `/unmute` | Admin | `/unmute <player\|UID>` |
+| `/tempunmute` | Moderator | `/tempunmute <player\|UID>` |
+| `/mutecheck` | Moderator | `/mutecheck <player\|UID>` |
+| `/mutelist` | Moderator | `/mutelist` |
+| `/mutereason` | Admin | `/mutereason <player\|UID> <reason>` |
+| `/freeze` | Admin | `/freeze <player\|UID>` |
+| `/clearchat` | Admin | `/clearchat [reason...]` |
+| `/report` | All | `/report <player> [reason...]` |
 | `/history` | All | `/history` |
 | `/whoami` | All | `/whoami` |
 
@@ -530,7 +549,7 @@ installed).
 Lists all currently-online admins and moderators so players know who to contact
 for help or to report rule violations.
 
-**Requires admin.** (Server console can always run this.)
+**Requires moderator or admin.** (Server console can always run this.)
 
 ---
 
@@ -543,7 +562,7 @@ for help or to report rule violations.
 Displays the ban reason stored for a given compound UID. Useful when reviewing
 a `/banlist` entry to recall why a player was banned.
 
-**Requires admin.**
+**No role required — available to all players.**
 
 ```
 /reason EOS:00020aed06f0a6958c3c067fb4b73d51
@@ -568,22 +587,23 @@ received. No admin required — any connected player can run this.
 ## /mute
 
 ```
-/mute <player|UID> [minutes] [reason...]
+/mute <player|UID> [duration] [reason...]
 ```
 
 Silences a player's in-game chat messages. Mutes are held in the in-memory
 `UMuteRegistry` subsystem and are **not** persisted — they are cleared when the
 server restarts.
 
-- `minutes`: Optional duration in minutes. `0` or omitted = mute until manually
-  unmuted or server restart.
+- `duration`: Optional. Accepts an integer number of minutes (`30`), or shorthand
+  like `30m`, `1h`, `2h30m`, `1d`, `7d`, `1d12h`. Omit for an indefinite mute.
 
-**Requires moderator or admin.**
+**Requires admin.**
 
 ```
-/mute SpamBot 30 Spamming chat
-/mute 00020aed06f0a6958c3c067fb4b73d51 Harassment
-/mute SomePlayer          ; permanent (until unmuted or restart)
+/mute SpamBot 30m Spamming chat
+/mute SpamBot 2h Harassment
+/mute 00020aed06f0a6958c3c067fb4b73d51 1d Repeated violations
+/mute SomePlayer          ; indefinite (until unmuted or restart)
 ```
 
 ---
@@ -596,7 +616,7 @@ server restarts.
 
 Removes an in-memory mute immediately.
 
-**Requires moderator or admin.**
+**Requires admin.**
 
 ```
 /unmute SpamBot
@@ -707,12 +727,17 @@ Add time to an existing temporary ban.
 ## /appeal
 
 ```
-/appeal <UID>
+/appeal <reason...>
 ```
 
-Manage ban appeals for a player.
+Submit your own ban appeal to the server's appeal registry. The appeal is
+forwarded to configured staff channels for review.
 
-**Requires admin.**
+**No role required — available to all players.**
+
+```
+/appeal I understand the rules now and won't do it again
+```
 
 ---
 
@@ -724,26 +749,10 @@ Manage ban appeals for a player.
 
 Send a message visible only to online admins and moderators. Not relayed to Discord.
 
-**Requires admin.**
-
-```
-/staffchat Let's keep an eye on the new player
-```
-
----
-
-## /tempmute
-
-```
-/tempmute <player|UID> <minutes> [reason...]
-```
-
-Temporarily mute a player for a specified duration.
-
 **Requires moderator or admin.**
 
 ```
-/tempmute SomePlayer 15 Calm down
+/staffchat Let's keep an eye on the new player
 ```
 
 ---
@@ -796,7 +805,7 @@ List all currently active mutes.
 
 Edit the reason for an existing mute.
 
-**Requires moderator or admin.**
+**Requires admin.**
 
 ```
 /mutereason SomePlayer Updated: Continued spam after warning
@@ -813,7 +822,7 @@ Edit the reason for an existing mute.
 Toggle movement lock on a player. When frozen, the player cannot move but can
 still chat. Run again to unfreeze.
 
-**Requires moderator or admin.**
+**Requires admin.**
 
 ```
 /freeze SomePlayer
@@ -824,25 +833,26 @@ still chat. Run again to unfreeze.
 ## /clearchat
 
 ```
-/clearchat
+/clearchat [reason...]
 ```
 
 Flush the in-game chat history for all players and post a notification embed
 to the bridged Discord channel.
 
-**Requires moderator or admin.**
+**Requires admin.**
 
 ---
 
 ## /report
 
 ```
-/report <player|UID> <reason...>
+/report <player> [reason...]
 ```
 
-Submit a player report to the configured `ReportWebhookUrl` Discord webhook.
+Submit a player report to the configured staff channels. Available to any
+connected player — no role required.
 
-**Requires moderator or admin.**
+**No role required — available to all players.**
 
 ```
 /report SomePlayer Suspected speed hacking

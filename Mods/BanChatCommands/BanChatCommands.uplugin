@@ -5,7 +5,7 @@
 	"SemVersion": "1.1.0",
 	"GameVersion": ">=416835",
 	"FriendlyName": "Ban Chat Commands",
-	"Description": "Adds 43 in-game chat commands for ban management, moderation, warnings, mutes, notes, freeze, reporting, scheduled bans, and more to Satisfactory dedicated servers. Requires the BanSystem mod.",
+	"Description": "Adds 42 in-game chat commands for ban management, moderation, warnings, mutes, notes, freeze, reporting, scheduled bans, and more to Satisfactory dedicated servers. Requires the BanSystem mod.",
 	"Category": "Modding",
 	"CreatedBy": "Yamahasxviper",
 	"CreatedByURL": "",
@@ -38,7 +38,7 @@
 			"Name": "BanSystem",
 			"Enabled": true,
 			"Optional": false,
-			"SemVersion": "^1.0.0"
+			"SemVersion": "^1.1.0"
 		}
 	]
 }

@@ -333,8 +333,10 @@ The following endpoints were added in v1.1.0:
 | `GET` | `/bans/export-csv` | Export bans as CSV |
 | `POST` | `/bans/ip` | Create an IP ban |
 | `DELETE` | `/bans/ip/:ip` | Remove an IP ban |
-| `POST` | `/bans/bulk` | Bulk ban operations |
-| `POST` | `/notes` | Add admin notes |
+| `POST` | `/bans/bulk` | Bulk create bans |
+| `DELETE` | `/bans/bulk` | Bulk delete bans |
+| `PATCH` | `/appeals/:id` | Update an appeal (status, notes) |
+| `GET` | `/notes` | Get admin note count (requires BanChatCommands) |
 
 ---
 

@@ -6,7 +6,7 @@ BanChatCommands is a server-only Satisfactory mod that adds a full set of ban ma
 
 ---
 
-## Forty-three built-in commands
+## Forty-two built-in commands
 
 | Command | Role | Purpose |
 |---------|:----:|---------|
@@ -25,32 +25,31 @@ BanChatCommands is a server-only Satisfactory mod that adds a full set of ban ma
 | `/warnings` | Admin | List all recorded warnings for a player |
 | `/clearwarns` | Admin | Remove all warnings for a player |
 | `/clearwarn` | Admin | Remove a specific warning by ID |
-| `/reason` | Admin | Show the ban reason for a UID |
+| `/reason` | All | Show the ban reason for a UID |
 | `/banreason` | Admin | Edit the ban reason for a UID |
 | `/announce` | Admin | Broadcast a server-wide message (also posts to Discord) |
-| `/stafflist` | Admin | Show currently-online admins and moderators |
+| `/stafflist` | Moderator | Show currently-online admins and moderators |
 | `/note` | Admin | Add an admin note to a player |
 | `/notes` | Admin | List all admin notes for a player |
 | `/duration` | Admin | Show remaining tempban duration |
 | `/extend` | Admin | Extend a temporary ban duration |
-| `/appeal` | Admin | Manage ban appeals |
-| `/staffchat` | Admin | Staff-only message |
+| `/appeal` | All | Submit your own ban appeal |
+| `/staffchat` | Moderator | Staff-only message |
 | `/scheduleban` | Admin | Schedule a future ban |
 | `/qban` | Admin | Apply a quick-ban template |
 | `/reputation` | Admin | Show player reputation score |
 | `/bulkban` | Admin | Ban multiple players at once |
 | `/kick` | Moderator | Disconnect a player without banning them |
 | `/modban` | Moderator | 30-minute temporary ban (moderator shortcut) |
-| `/mute` | Moderator | Silence a player's chat |
-| `/unmute` | Moderator | Remove a chat mute |
-| `/tempmute` | Moderator | Timed mute |
+| `/mute` | Admin | Silence a player's chat (with optional timed duration) |
+| `/unmute` | Admin | Remove a chat mute |
 | `/tempunmute` | Moderator | Remove a timed mute |
 | `/mutecheck` | Moderator | Check mute status |
 | `/mutelist` | Moderator | List all active mutes |
-| `/mutereason` | Moderator | Edit mute reason |
-| `/freeze` | Moderator | Immobilise a player (toggle on/off) |
-| `/clearchat` | Moderator | Flush chat history (posts Discord embed) |
-| `/report` | Moderator | Submit a player report |
+| `/mutereason` | Admin | Edit mute reason |
+| `/freeze` | Admin | Immobilise a player (toggle on/off) |
+| `/clearchat` | Admin | Flush chat history (posts Discord embed) |
+| `/report` | All | Submit a player report to staff |
 | `/history` | All | Show your own session and warning history |
 | `/whoami` | All | Show your own compound UID — open to all players |
 
@@ -105,10 +104,9 @@ The `/playerhistory` command queries the **player session registry** provided by
 ## Moderator role
 
 In addition to full admins (`AdminEosPUIDs`), you can define a **moderator** tier
-(`ModeratorEosPUIDs`). Moderators can run `/kick`, `/modban`, `/mute`, `/unmute`,
-`/tempmute`, `/tempunmute`, `/mutecheck`, `/mutelist`, `/mutereason`, `/freeze`,
-`/clearchat`, and `/report`, but cannot run full admin commands like `/ban`, `/unban`,
-or `/warn`.
+(`ModeratorEosPUIDs`). Moderators can run `/kick`, `/modban`, `/tempunmute`,
+`/stafflist`, `/mutecheck`, `/mutelist`, and `/staffchat`, but cannot run admin
+commands like `/ban`, `/mute`, `/unban`, or `/warn`.
 
 ---
 
@@ -137,11 +135,14 @@ configured). Requires admin.
 
 ## In-memory muting with `/mute` / `/unmute`
 
-`/mute <player> [minutes] [reason]` blocks a player's chat messages from being
+`/mute <player> [duration] [reason...]` blocks a player's chat messages from being
 relayed or displayed to other players. Mutes are held in `UMuteRegistry` (a
 `GameInstance` subsystem) and do **not** persist across server restarts.
 
-`/unmute <player>` removes a mute immediately.
+- `duration`: Optional. Accepts an integer number of minutes (`30`), or shorthand
+  like `30m`, `1h`, `2h30m`, `1d`, `7d`, `1d12h`. Omit for an indefinite mute.
+
+**Requires admin.** `/unmute <player>` also requires admin.
 
 ---
 
@@ -223,15 +224,14 @@ and warnings without issuing formal warnings.
 
 ## Mute management
 
-| Command | Purpose |
-|---------|---------|
-| `/mute <player> [minutes] [reason]` | Silence chat |
-| `/unmute <player>` | Remove mute |
-| `/tempmute <player> <minutes> [reason]` | Timed mute |
-| `/tempunmute <player>` | Remove timed mute |
-| `/mutecheck <player>` | Check mute status |
-| `/mutelist` | List all mutes |
-| `/mutereason <player> <reason>` | Edit mute reason |
+| Command | Role | Purpose |
+|---------|:----:|---------|
+| `/mute <player> [duration] [reason...]` | Admin | Silence chat (duration: minutes or 30m/1h/1d) |
+| `/unmute <player>` | Admin | Remove mute |
+| `/tempunmute <player>` | Moderator | Remove a timed mute |
+| `/mutecheck <player>` | Moderator | Check mute status |
+| `/mutelist` | Moderator | List all mutes |
+| `/mutereason <player> <reason>` | Admin | Edit mute reason |
 
 ---
 

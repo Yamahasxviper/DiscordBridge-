@@ -311,26 +311,19 @@ Extend the duration of an existing temporary ban.
 
 ### `/appeal`
 
-Manage ban appeals for a player.
+Submit your own ban appeal. Available to all connected players — no admin required.
 
 ```
-/appeal <UID>
+/appeal <reason...>
 ```
 
 ### `/staffchat`
 
 Send a message visible only to online admins and moderators.
+Requires moderator or admin.
 
 ```
 /staffchat <message...>
-```
-
-### `/tempmute`
-
-Temporarily mute a player for a specified duration.
-
-```
-/tempmute <player|UID> <minutes> [reason...]
 ```
 
 ### `/tempunmute`
@@ -383,10 +376,11 @@ Flush the in-game chat history and post a notification embed to Discord.
 
 ### `/report`
 
-Submit a player report to the configured Discord webhook.
+Submit a player report to the configured staff channels. Available to all
+connected players — no admin required.
 
 ```
-/report <player|UID> <reason...>
+/report <player> [reason...]
 ```
 
 ### `/scheduleban`

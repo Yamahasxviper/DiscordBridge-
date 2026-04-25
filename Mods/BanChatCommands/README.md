@@ -1,8 +1,8 @@
 # BanChatCommands — In-Game Ban Commands for Satisfactory
 
-**Version 1.1.0** | Server-only | Requires SML `^3.11.3` + BanSystem `^1.0.0` | Game build `>=416835`
+**Version 1.1.0** | Server-only | Requires SML `^3.11.3` + BanSystem `^1.1.0` | Game build `>=416835`
 
-A server-only Satisfactory mod that adds 43 in-game chat commands for ban management, moderation, warnings, mutes, notes, freeze, reporting, scheduled bans, and more. Commands work from the Satisfactory in-game chat (for admin/moderator players) and from the server console.
+A server-only Satisfactory mod that adds 42 in-game chat commands for ban management, moderation, warnings, mutes, notes, freeze, reporting, scheduled bans, and more. Commands work from the Satisfactory in-game chat (for admin/moderator players) and from the server console.
 
 Requires the **BanSystem** mod.
 
@@ -28,31 +28,30 @@ Requires the **BanSystem** mod.
 | `/clearwarns <player\|UID>` | Admin | Remove all warnings for a player |
 | `/clearwarn <player\|UID> <id>` | Admin | Remove a specific warning by ID |
 | `/announce <message...>` | Admin | Broadcast a server-wide message (also posts to Discord) |
-| `/stafflist` | Admin | Show currently-online admins and moderators |
-| `/reason <UID>` | Admin | Show the ban reason for a UID |
+| `/stafflist` | Moderator | Show currently-online admins and moderators |
+| `/reason <UID>` | All | Show the ban reason for a UID |
 | `/banreason <UID> <new reason>` | Admin | Edit the ban reason for a UID |
 | `/note <player\|UID> <text>` | Admin | Add an admin note to a player |
 | `/notes <player\|UID>` | Admin | List all admin notes for a player |
 | `/duration <UID>` | Admin | Show remaining tempban duration |
 | `/extend <UID> <minutes>` | Admin | Extend a temporary ban duration |
-| `/appeal <UID>` | Admin | Manage ban appeals |
-| `/staffchat <message...>` | Admin | Staff-only message |
+| `/appeal <reason...>` | All | Submit your own ban appeal |
+| `/staffchat <message...>` | Moderator | Staff-only message |
 | `/scheduleban <player\|UID> <timestamp> [reason]` | Admin | Schedule a future ban |
 | `/qban <template> <player\|UID>` | Admin | Apply a quick-ban template |
 | `/reputation <player\|UID>` | Admin | Show player reputation score |
 | `/bulkban <UID1> <UID2> ... [reason]` | Admin | Ban multiple players at once |
 | `/kick <player\|UID> [reason...]` | Moderator | Disconnect a player without banning them |
 | `/modban <player\|UID> [reason...]` | Moderator | 30-minute temporary ban (moderator shortcut) |
-| `/mute <player\|UID> [minutes] [reason...]` | Moderator | Silence a player's chat |
-| `/unmute <player\|UID>` | Moderator | Remove a chat mute |
-| `/tempmute <player\|UID> <minutes> [reason...]` | Moderator | Timed mute |
+| `/mute <player\|UID> [duration] [reason...]` | Admin | Silence a player's chat (duration: minutes or 30m/1h/1d) |
+| `/unmute <player\|UID>` | Admin | Remove a chat mute |
 | `/tempunmute <player\|UID>` | Moderator | Remove a timed mute |
 | `/mutecheck <player\|UID>` | Moderator | Check mute status |
 | `/mutelist` | Moderator | List all active mutes |
-| `/mutereason <player\|UID> <reason>` | Moderator | Edit mute reason |
-| `/freeze <player\|UID>` | Moderator | Immobilise a player (toggle) |
-| `/clearchat` | Moderator | Flush chat history (posts Discord embed) |
-| `/report <player\|UID> <reason>` | Moderator | Submit a player report |
+| `/mutereason <player\|UID> <reason>` | Admin | Edit mute reason |
+| `/freeze <player\|UID>` | Admin | Immobilise a player (toggle) |
+| `/clearchat` | Admin | Flush chat history (posts Discord embed) |
+| `/report <player> [reason...]` | All | Submit a player report to staff |
 | `/history` | All | Show your own session and warning history |
 | `/whoami` | All | Show your own compound UID |
 
@@ -139,8 +138,14 @@ If a display name matches more than one connected player, the command lists all 
 ; List warnings
 /warnings SomePlayer
 
-; Mute a player for 30 minutes
-/mute SomePlayer 30 Spamming
+; Mute a player indefinitely
+/mute SomePlayer Spamming
+
+; Mute a player for 30 minutes with shorthand duration
+/mute SomePlayer 30m Spamming
+
+; Mute a player for 2 hours
+/mute SomePlayer 2h Toxic behaviour
 
 ; Unmute a player
 /unmute SomePlayer
@@ -168,6 +173,9 @@ If a display name matches more than one connected player, the command lists all 
 
 ; Bulk ban
 /bulkban EOS:aaa... EOS:bbb... Coordinated griefing
+
+; Submit your own ban appeal (available to all players)
+/appeal I understand the rules now and would like another chance
 
 ; Show ban duration remaining
 /duration EOS:00020aed06f0a6958c3c067fb4b73d51
@@ -210,7 +218,7 @@ If a display name matches more than one connected player, the command lists all 
 | Dependency | Version |
 |------------|---------|
 | SML | `^3.11.3` |
-| BanSystem | `^1.0.0` |
+| BanSystem | `^1.1.0` |
 | Satisfactory (dedicated server) | `>=416835` |
 
 ---

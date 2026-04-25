@@ -38,19 +38,19 @@
 			"Name": "SMLWebSocket",
 			"Enabled": true,
 			"Optional": false,
-			"SemVersion": "^1.0.0"
+			"SemVersion": "^1.1.0"
 		},
 		{
 			"Name": "BanSystem",
 			"Enabled": true,
 			"Optional": true,
-			"SemVersion": "^1.0.0"
+			"SemVersion": "^1.1.0"
 		},
 		{
 			"Name": "BanChatCommands",
 			"Enabled": true,
 			"Optional": true,
-			"SemVersion": "^1.0.0"
+			"SemVersion": "^1.1.0"
 		}
 	]
 }
