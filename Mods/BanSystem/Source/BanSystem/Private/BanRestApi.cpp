@@ -348,8 +348,9 @@ void UBanRestApi::RegisterRoutes()
     Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/health")),
         EHttpServerRequestVerbs::VERB_GET,
-        [](const FHttpServerRequest& /*Req*/, const FHttpResultCallback& Done) -> bool
+        [](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
             Obj->SetStringField(TEXT("status"),    TEXT("ok"));
             Obj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
@@ -1034,27 +1035,27 @@ void UBanRestApi::RegisterRoutes()
                         FBanEntry ExistingBan;
                         if (!DB->IsCurrentlyBanned(Uid, ExistingBan))
                         {
-                        FBanEntry AutoBan;
-                        AutoBan.Uid      = Uid;
-                        UBanDatabase::ParseUid(Uid, AutoBan.Platform, AutoBan.PlayerUID);
-                        AutoBan.PlayerName   = PlayerName;
-                        AutoBan.Reason       = TEXT("Auto-banned: reached warning threshold");
-                        AutoBan.BannedBy     = TEXT("system");
-                        const FDateTime AutoNow = FDateTime::UtcNow();
-                        AutoBan.BanDate      = AutoNow;
-                        AutoBan.bIsPermanent = (BanDurationMinutes <= 0);
-                        AutoBan.ExpireDate   = AutoBan.bIsPermanent
-                            ? FDateTime(0)
-                            : AutoNow + FTimespan::FromMinutes(BanDurationMinutes);
+                            FBanEntry AutoBan;
+                            AutoBan.Uid        = Uid;
+                            UBanDatabase::ParseUid(Uid, AutoBan.Platform, AutoBan.PlayerUID);
+                            AutoBan.PlayerName   = PlayerName;
+                            AutoBan.Reason       = TEXT("Auto-banned: reached warning threshold");
+                            AutoBan.BannedBy     = TEXT("system");
+                            const FDateTime AutoNow = FDateTime::UtcNow();
+                            AutoBan.BanDate      = AutoNow;
+                            AutoBan.bIsPermanent = (BanDurationMinutes <= 0);
+                            AutoBan.ExpireDate   = AutoBan.bIsPermanent
+                                ? FDateTime(0)
+                                : AutoNow + FTimespan::FromMinutes(BanDurationMinutes);
 
-                        DB->AddBan(AutoBan);
-                        FBanDiscordNotifier::NotifyBanCreated(AutoBan);
-                        FBanDiscordNotifier::NotifyAutoEscalationBan(AutoBan, WarnCount);
-                        if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-                            AuditLog->LogAction(TEXT("ban"), Uid, PlayerName, TEXT("system"), TEXT("system"), AutoBan.Reason);
-                        // Kick the player immediately if they are currently online.
-                        if (UWorld* World = GI->GetWorld())
-                            UBanEnforcer::KickConnectedPlayer(World, Uid, AutoBan.GetKickMessage());
+                            DB->AddBan(AutoBan);
+                            FBanDiscordNotifier::NotifyBanCreated(AutoBan);
+                            FBanDiscordNotifier::NotifyAutoEscalationBan(AutoBan, WarnCount);
+                            if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+                                AuditLog->LogAction(TEXT("ban"), Uid, PlayerName, TEXT("system"), TEXT("system"), AutoBan.Reason);
+                            // Kick the player immediately if they are currently online.
+                            if (UWorld* World = GI->GetWorld())
+                                UBanEnforcer::KickConnectedPlayer(World, Uid, AutoBan.GetKickMessage());
                         }
                     }
                 }
@@ -2333,9 +2334,9 @@ void UBanRestApi::RegisterRoutes()
                         if (DB->RemoveBanByUid(Appeal.Uid))
                         {
                             const FString PlayerName = bHadBan ? RemovedBan.PlayerName : Appeal.Uid;
-                            FBanDiscordNotifier::NotifyBanRemoved(PlayerName, Appeal.Uid, ReviewedBy);
+                            FBanDiscordNotifier::NotifyBanRemoved(Appeal.Uid, PlayerName, ReviewedBy);
                             if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-                                AuditLog->LogAction(TEXT("unban"), Appeal.Uid, TEXT(""), ReviewedBy, ReviewedBy,
+                                AuditLog->LogAction(TEXT("unban"), Appeal.Uid, PlayerName, ReviewedBy, ReviewedBy,
                                     FString::Printf(TEXT("Appeal #%lld approved: %s"), Id, *ReviewNote));
                         }
                     }
