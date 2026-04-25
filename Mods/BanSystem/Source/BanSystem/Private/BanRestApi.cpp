@@ -516,6 +516,11 @@ void UBanRestApi::RegisterRoutes()
             if (Reason.IsEmpty())   Reason   = TEXT("No reason given");
             if (BannedBy.IsEmpty()) BannedBy = TEXT("system");
 
+            // Normalize EOS PUIDs to lowercase so they always match the lowercase
+            // UIDs extracted from the ClientIdentity connection option in BanEnforcer.
+            if (Platform == TEXT("EOS"))
+                PlayerUID = PlayerUID.ToLower();
+
             FBanEntry Entry;
             Entry.Uid        = UBanDatabase::MakeUid(Platform, PlayerUID);
             Entry.PlayerUID  = PlayerUID;
@@ -761,11 +766,10 @@ void UBanRestApi::RegisterRoutes()
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
             if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
 
-            // Look up before deletion so we have the player name for notifications.
+            // Atomically look up and remove — eliminates the TOCTOU window that
+            // existed when GetBanByUid() + RemoveBanByUid() were called separately.
             FBanEntry OldEntry;
-            const bool bFoundEntry = DB->GetBanByUid(Uid, OldEntry);
-
-            if (!DB->RemoveBanByUid(Uid))
+            if (!DB->RemoveBanByUid(Uid, OldEntry))
             {
                 Done(BanJson::Error(
                     FString::Printf(TEXT("No ban found for uid '%s'"), *Uid),
@@ -773,9 +777,9 @@ void UBanRestApi::RegisterRoutes()
                 return true;
             }
 
-            FBanDiscordNotifier::NotifyBanRemoved(Uid, bFoundEntry ? OldEntry.PlayerName : TEXT(""), TEXT("api"));
+            FBanDiscordNotifier::NotifyBanRemoved(OldEntry.Uid, OldEntry.PlayerName, TEXT("api"));
             if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-                AuditLog->LogAction(TEXT("unban"), Uid, bFoundEntry ? OldEntry.PlayerName : TEXT(""), TEXT("api"), TEXT("api"), TEXT(""));
+                AuditLog->LogAction(TEXT("unban"), OldEntry.Uid, OldEntry.PlayerName, TEXT("api"), TEXT("api"), TEXT(""));
 
             Done(BanJson::Ok(FString::Printf(TEXT("Ban '%s' removed"), *Uid)));
             return true;
@@ -1031,27 +1035,27 @@ void UBanRestApi::RegisterRoutes()
                         FBanEntry ExistingBan;
                         if (!DB->IsCurrentlyBanned(Uid, ExistingBan))
                         {
-                        FBanEntry AutoBan;
-                        AutoBan.Uid      = Uid;
-                        UBanDatabase::ParseUid(Uid, AutoBan.Platform, AutoBan.PlayerUID);
-                        AutoBan.PlayerName   = PlayerName;
-                        AutoBan.Reason       = TEXT("Auto-banned: reached warning threshold");
-                        AutoBan.BannedBy     = TEXT("system");
-                        const FDateTime AutoNow = FDateTime::UtcNow();
-                        AutoBan.BanDate      = AutoNow;
-                        AutoBan.bIsPermanent = (BanDurationMinutes <= 0);
-                        AutoBan.ExpireDate   = AutoBan.bIsPermanent
-                            ? FDateTime(0)
-                            : AutoNow + FTimespan::FromMinutes(BanDurationMinutes);
+                            FBanEntry AutoBan;
+                            AutoBan.Uid        = Uid;
+                            UBanDatabase::ParseUid(Uid, AutoBan.Platform, AutoBan.PlayerUID);
+                            AutoBan.PlayerName   = PlayerName;
+                            AutoBan.Reason       = TEXT("Auto-banned: reached warning threshold");
+                            AutoBan.BannedBy     = TEXT("system");
+                            const FDateTime AutoNow = FDateTime::UtcNow();
+                            AutoBan.BanDate      = AutoNow;
+                            AutoBan.bIsPermanent = (BanDurationMinutes <= 0);
+                            AutoBan.ExpireDate   = AutoBan.bIsPermanent
+                                ? FDateTime(0)
+                                : AutoNow + FTimespan::FromMinutes(BanDurationMinutes);
 
-                        DB->AddBan(AutoBan);
-                        FBanDiscordNotifier::NotifyBanCreated(AutoBan);
-                        FBanDiscordNotifier::NotifyAutoEscalationBan(AutoBan, WarnCount);
-                        if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-                            AuditLog->LogAction(TEXT("ban"), Uid, PlayerName, TEXT("system"), TEXT("system"), AutoBan.Reason);
-                        // Kick the player immediately if they are currently online.
-                        if (UWorld* World = GI->GetWorld())
-                            UBanEnforcer::KickConnectedPlayer(World, Uid, AutoBan.GetKickMessage());
+                            DB->AddBan(AutoBan);
+                            FBanDiscordNotifier::NotifyBanCreated(AutoBan);
+                            FBanDiscordNotifier::NotifyAutoEscalationBan(AutoBan, WarnCount);
+                            if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+                                AuditLog->LogAction(TEXT("ban"), Uid, PlayerName, TEXT("system"), TEXT("system"), AutoBan.Reason);
+                            // Kick the player immediately if they are currently online.
+                            if (UWorld* World = GI->GetWorld())
+                                UBanEnforcer::KickConnectedPlayer(World, Uid, AutoBan.GetKickMessage());
                         }
                     }
                 }
@@ -1566,8 +1570,16 @@ void UBanRestApi::RegisterRoutes()
             // Notes array property — this is safe across module boundaries because we
             // only read the array's element count, not the element layout.
             int32 NoteCount = 0;
-            if (FArrayProperty* NotesProp = FindFProperty<FArrayProperty>(
-                    NoteSubsys->GetClass(), TEXT("Notes")))
+            FArrayProperty* NotesProp = FindFProperty<FArrayProperty>(
+                    NoteSubsys->GetClass(), TEXT("Notes"));
+            if (!NotesProp)
+            {
+                // Property not found — BanChatCommands may have been updated and the
+                // property renamed. Return a diagnostic error rather than silently
+                // returning count=0.
+                Done(BanJson::Error(TEXT("PlayerNoteRegistry.Notes property not found — BanChatCommands version mismatch"), EHttpServerResponseCodes::ServiceUnavail));
+                return true;
+            }
             {
                 FScriptArrayHelper Helper(NotesProp,
                     NotesProp->ContainerPtrToValuePtr<void>(NoteSubsys));
@@ -1687,6 +1699,20 @@ void UBanRestApi::RegisterRoutes()
             Body->TryGetStringField(TEXT("reason"),      Reason);
             Body->TryGetStringField(TEXT("contactInfo"), ContactInfo);
             if (Reason.IsEmpty()) Reason = TEXT("No reason given");
+
+            // Reject duplicate appeals: only one Pending appeal per UID is allowed
+            // to prevent appeal-flooding that would fill disk and spam the mod channel.
+            {
+                TArray<FBanAppealEntry> Existing = AppealsReg->GetAllAppeals();
+                for (const FBanAppealEntry& A : Existing)
+                {
+                    if (A.Uid.Equals(Uid, ESearchCase::IgnoreCase) && A.Status == EAppealStatus::Pending)
+                    {
+                        Done(BanJson::Error(TEXT("A pending appeal for this player already exists. Please wait for a response before submitting another.")));
+                        return true;
+                    }
+                }
+            }
 
             const FBanAppealEntry NewEntry = AppealsReg->AddAppeal(Uid, Reason, ContactInfo);
 
@@ -2084,8 +2110,20 @@ void UBanRestApi::RegisterRoutes()
   <p class="error-msg" id="errorMsg"></p>
 </main>)HTML");
             Html += TEXT(R"HTML(<script>
-  const API = '';
-  const KEY = new URLSearchParams(location.search).get('key') || '';
+  // Read the key from the URL once (so it can be bookmarked as ?key=xxx),
+  // persist it in sessionStorage, then immediately remove it from the address
+  // bar so it is not stored in browser history or leaked in referrer headers.
+  (function(){
+    const params = new URLSearchParams(location.search);
+    const urlKey = params.get('key');
+    if(urlKey){
+      sessionStorage.setItem('banApiKey', urlKey);
+      params.delete('key');
+      const newSearch = params.toString();
+      history.replaceState(null,'', location.pathname + (newSearch ? '?'+newSearch : '') + location.hash);
+    }
+  })();
+  const KEY = sessionStorage.getItem('banApiKey') || '';
 
   async function apiFetch(path){
     const hdrs = {};
@@ -2296,9 +2334,9 @@ void UBanRestApi::RegisterRoutes()
                         if (DB->RemoveBanByUid(Appeal.Uid))
                         {
                             const FString PlayerName = bHadBan ? RemovedBan.PlayerName : Appeal.Uid;
-                            FBanDiscordNotifier::NotifyBanRemoved(PlayerName, Appeal.Uid, ReviewedBy);
+                            FBanDiscordNotifier::NotifyBanRemoved(Appeal.Uid, PlayerName, ReviewedBy);
                             if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-                                AuditLog->LogAction(TEXT("unban"), Appeal.Uid, TEXT(""), ReviewedBy, ReviewedBy,
+                                AuditLog->LogAction(TEXT("unban"), Appeal.Uid, PlayerName, ReviewedBy, ReviewedBy,
                                     FString::Printf(TEXT("Appeal #%lld approved: %s"), Id, *ReviewNote));
                         }
                     }
@@ -2572,6 +2610,9 @@ void UBanRestApi::RegisterRoutes()
 
             int32 Added = 0;
             TArray<TSharedPtr<FJsonValue>> ResultArr;
+            // Capture a single timestamp for the entire batch so all entries share
+            // the same BanDate/ExpireDate regardless of how long the loop takes.
+            const FDateTime BatchBanNow = FDateTime::UtcNow();
 
             for (const TSharedPtr<FJsonValue>& Val : *UidsArr)
             {
@@ -2584,7 +2625,6 @@ void UBanRestApi::RegisterRoutes()
                 Ban.PlayerName      = Uid;
                 Ban.Reason          = Reason;
                 Ban.BannedBy        = BannedBy;
-                const FDateTime BatchBanNow = FDateTime::UtcNow();
                 Ban.BanDate         = BatchBanNow;
                 Ban.Category        = Category;
                 Ban.bIsPermanent    = (DurationMinutes <= 0);

@@ -128,6 +128,7 @@ private:
     FString GetRegistryPath() const;
 
     TArray<FWarningEntry> Warnings;
+    int64                 NextId = 1;
     mutable FCriticalSection Mutex;
     FString FilePath;
 };

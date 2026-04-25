@@ -68,6 +68,7 @@ private:
     void ApplyScheduledBan(const FScheduledBanEntry& Entry);
 
     TArray<FScheduledBanEntry> Pending;
+    int64                      NextId = 1;
     mutable FCriticalSection   Mutex;
     FString                    FilePath;
 

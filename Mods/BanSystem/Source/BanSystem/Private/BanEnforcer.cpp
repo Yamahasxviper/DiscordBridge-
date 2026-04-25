@@ -778,7 +778,7 @@ bool UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
             const FString RawId      = NetId.ToString().ToLower();
             const FString PlayerUid  = UBanDatabase::MakeUid(Platform, RawId);
 
-            if (PlayerUid == Uid)
+            if (Uid.Equals(PlayerUid, ESearchCase::IgnoreCase))
                 bMatched = true;
         }
 

@@ -58,12 +58,7 @@ FBanAppealEntry UBanAppealRegistry::AddAppeal(const FString& Uid,
     {
         FScopeLock Lock(&Mutex);
 
-        // Determine next Id (max existing + 1).
-        int64 NextId = 1;
-        for (const FBanAppealEntry& A : Appeals)
-            if (A.Id >= NextId) NextId = A.Id + 1;
-
-        Entry.Id          = NextId;
+        Entry.Id          = NextId++;
         Entry.Uid         = Uid;
         Entry.Reason      = Reason;
         Entry.ContactInfo = ContactInfo;
@@ -214,6 +209,11 @@ void UBanAppealRegistry::LoadFromFile()
                 Appeals.Add(Entry);
         }
     }
+
+    // Restore the O(1) counter from loaded data so AddAppeal never reuses an Id.
+    NextId = 1;
+    for (const FBanAppealEntry& A : Appeals)
+        if (A.Id >= NextId) NextId = A.Id + 1;
 }
 
 bool UBanAppealRegistry::SaveToFile() const
