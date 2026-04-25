@@ -705,9 +705,18 @@ bool FSMLWebSocketRunnable::PerformSslHandshake(const FString& Host)
 
 	// Run the TLS handshake. Because we use memory BIOs we must manually
 	// pump data between OpenSSL and the TCP socket.
+	// Guard against a slow/malicious server that never completes the handshake.
+	static constexpr double HandshakeTimeoutSecs = 30.0;
+	const double HandshakeStart = FPlatformTime::Seconds();
 	for (;;)
 	{
 		if (bStopRequested) return false;
+		if (FPlatformTime::Seconds() - HandshakeStart > HandshakeTimeoutSecs)
+		{
+			UE_LOG(LogSMLWebSocket, Error,
+			       TEXT("SMLWebSocket: TLS handshake timed out after %.0f seconds"), HandshakeTimeoutSecs);
+			return false;
+		}
 
 		const int32 Ret = SSL_do_handshake(SslInstance);
 		if (Ret == 1)
@@ -1116,15 +1125,17 @@ bool FSMLWebSocketRunnable::ReadHttpUpgradeResponse(const FString& ExpectedAccep
 		return false;
 	}
 
-	// Extract the accept value from the response (Lines is already populated above)
+	// Extract the accept value from the response (Lines is already populated above).
+	// Use RightChop to avoid splitting on any colon in the value (e.g. future extensions),
+	// and compare case-sensitively per RFC 6455 §4.1 (base64 is case-sensitive).
+	static const FString AcceptPrefix = TEXT("Sec-WebSocket-Accept:");
 	for (const FString& Line : Lines)
 	{
-		if (Line.StartsWith(TEXT("Sec-WebSocket-Accept:"), ESearchCase::IgnoreCase))
+		if (Line.StartsWith(AcceptPrefix, ESearchCase::IgnoreCase))
 		{
-			FString AcceptValue;
-			Line.Split(TEXT(":"), nullptr, &AcceptValue);
+			FString AcceptValue = Line.RightChop(AcceptPrefix.Len());
 			AcceptValue.TrimStartAndEndInline();
-			if (!AcceptValue.Equals(ExpectedAcceptKey, ESearchCase::IgnoreCase))
+			if (!AcceptValue.Equals(ExpectedAcceptKey, ESearchCase::CaseSensitive))
 			{
 				UE_LOG(LogSMLWebSocket, Error,
 				       TEXT("SMLWebSocket: Sec-WebSocket-Accept mismatch. Expected '%s', got '%s'"),
@@ -1278,9 +1289,23 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 		}
 	}
 
-	// Dispatch by opcode
-	// Record that we received a frame so the ping-idle timer resets.
-	LastReceivedFrameTime = FPlatformTime::Seconds();
+	// Dispatch by opcode.
+	// Only update the idle-ping timer for known RFC 6455 opcodes; unknown/garbage
+	// frames must not reset the liveness check or the server could appear healthy
+	// while delivering no real data.
+	switch (Opcode)
+	{
+	case WsOpcode::Text:
+	case WsOpcode::Binary:
+	case WsOpcode::Continuation:
+	case WsOpcode::Ping:
+	case WsOpcode::Pong:
+	case WsOpcode::Close:
+		LastReceivedFrameTime = FPlatformTime::Seconds();
+		break;
+	default:
+		break;
+	}
 
 	switch (Opcode)
 	{
