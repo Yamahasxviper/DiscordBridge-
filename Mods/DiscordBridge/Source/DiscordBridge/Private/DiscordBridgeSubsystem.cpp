@@ -110,7 +110,7 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	// Load (or create) the whitelist JSON from disk, using the config value as
 	// the default only on the very first server start (when no JSON file exists).
 	// After the first start the enabled/disabled state is saved in the JSON and
-	// survives restarts, so runtime !whitelist on / !whitelist off changes persist.
+	// survives restarts, so runtime /whitelist on / /whitelist off changes persist.
 	// To force-reset to this config value: delete ServerWhitelist.json and restart.
 	FWhitelistManager::Load(WhitelistConfig.bWhitelistEnabled);
 	FWhitelistManager::SetMaxSlots(WhitelistConfig.MaxWhitelistSlots);
@@ -3361,7 +3361,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 				if (!WhitelistConfig.WhitelistApprovedDmMessage.IsEmpty() && !AuthorDiscordId.IsEmpty())
 				{
 					// Only DM if the command was "add" and we have the target's Discord ID.
-					// For direct !whitelist add we don't know the target's Discord ID, so skip.
+					// For direct /whitelist add we don't know the target's Discord ID, so skip.
 				}
 			}
 			else
@@ -4504,7 +4504,7 @@ OnDiscordRawMessageReceived.Remove(Handle);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !stats command handler
+// /stats command handler
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UDiscordBridgeSubsystem::HandleStatsCommand(const FString& ResponseChannelId)
@@ -4552,7 +4552,7 @@ void UDiscordBridgeSubsystem::HandleStatsCommand(const FString& ResponseChannelI
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !playerstats command handler
+// /playerstats command handler
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UDiscordBridgeSubsystem::HandlePlayerStatsCommand(const FString& ResponseChannelId,
@@ -5189,7 +5189,7 @@ void UDiscordBridgeSubsystem::StartInGameMessageTickers()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !help / bot info command
+// /help / bot info command
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UDiscordBridgeSubsystem::HandleBotInfoCommand(const FString& ResponseChannelId)
@@ -5342,7 +5342,7 @@ SendMessageBodyToChannel(ResponseChannelId, Body);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !server command
+// /server command
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UDiscordBridgeSubsystem::HandleServerCommand(const FString& ResponseChannelId)
@@ -5383,7 +5383,7 @@ SendMessageBodyToChannel(ResponseChannelId, Body);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// !online command
+// /online command
 // ─────────────────────────────────────────────────────────────────────────────
 
 void UDiscordBridgeSubsystem::HandleOnlineCommand(const FString& ResponseChannelId)

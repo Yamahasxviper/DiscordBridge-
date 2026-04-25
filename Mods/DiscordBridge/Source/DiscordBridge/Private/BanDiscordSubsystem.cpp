@@ -1350,7 +1350,7 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
 
 		UE_LOG(LogBanDiscord, Log,
-		       TEXT("BanDiscordSubsystem: %s issued !unban for %s (%s) — no record in DB (already clear)."),
+		       TEXT("BanDiscordSubsystem: %s issued /ban remove for %s (%s) — no record in DB (already clear)."),
 		       *SenderName, *DisplayName, *Uid);
 
 		Respond(ChannelId, Msg);

@@ -160,7 +160,7 @@ private:
 	/**
 	 * Handle /ban add and /ban temp.
 	 * Usage: /ban add <player> [reason]
-	 *        !tempban <PUID|name> <minutes> [reason]
+	 *        /ban temp <player> <duration> [reason]
 	 */
 	void HandleBanCommand(const TArray<FString>& Args,
 	                      const FString& ChannelId,
@@ -296,7 +296,7 @@ private:
 	 * Handle /mod tempunmute.
 	 * Lifts a *timed* mute from a player.  Fails with an error when the mute
 	 * is indefinite (use /mod unmute for those).
-	 * Usage: !tempunmute <PUID|name>
+	 * Usage: /mod tempunmute <player>
 	 */
 	void HandleTempUnmuteCommand(const TArray<FString>& Args,
 	                              const FString& ChannelId,

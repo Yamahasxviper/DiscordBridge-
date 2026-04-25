@@ -206,7 +206,6 @@ void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
 
     UE_LOG(LogBanEnforcer, Log, TEXT("BanEnforcer: login enforcement active (PostLogin)"));
 
-    // Bind to UFGServerSubsystem::CheckHealthCheckCompatibility so that the
     // Cache the BanSystem mod version string before binding the health-check
     // lambda so that the version is available immediately when the delegate
     // fires (avoids an empty version string if the health check fires before

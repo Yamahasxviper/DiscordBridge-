@@ -178,7 +178,7 @@ void UBanDatabase::Initialize(FSubsystemCollectionBase& Collection)
 
     // Bootstrap the file the very first time (or if it was deleted).
     // Calling SaveToFile() here ensures bans.json always exists after
-    // initialization so that a subsequent !ban + server-restart cycle can
+    // initialization so that a subsequent /ban + server-restart cycle can
     // never leave the file absent.
     if (!PF.FileExists(*DbPath))
     {
