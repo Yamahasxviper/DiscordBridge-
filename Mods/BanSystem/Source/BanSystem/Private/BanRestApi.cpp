@@ -592,7 +592,7 @@ void UBanRestApi::RegisterRoutes()
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
 
             const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
-            if (IdStr.IsEmpty() || !IdStr.IsNumeric())
+            if (IdStr.IsEmpty() || !IdStr.IsNumeric() || IdStr.Len() > 19)
             {
                 Done(BanJson::Error(TEXT("id must be an integer")));
                 return true;
@@ -1823,7 +1823,7 @@ void UBanRestApi::RegisterRoutes()
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
 
             const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
-            if (IdStr.IsEmpty() || !IdStr.IsNumeric())
+            if (IdStr.IsEmpty() || !IdStr.IsNumeric() || IdStr.Len() > 19)
             {
                 Done(BanJson::Error(TEXT("id must be an integer")));
                 return true;
@@ -1993,7 +1993,7 @@ void UBanRestApi::RegisterRoutes()
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
 
             const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
-            if (IdStr.IsEmpty() || !IdStr.IsNumeric())
+            if (IdStr.IsEmpty() || !IdStr.IsNumeric() || IdStr.Len() > 19)
             {
                 Done(BanJson::Error(TEXT("id must be an integer")));
                 return true;
@@ -2294,7 +2294,7 @@ void UBanRestApi::RegisterRoutes()
             if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
-            if (IdStr.IsEmpty() || !IdStr.IsNumeric())
+            if (IdStr.IsEmpty() || !IdStr.IsNumeric() || IdStr.Len() > 19)
             {
                 Done(BanJson::Error(TEXT("id must be an integer")));
                 return true;
@@ -2483,7 +2483,7 @@ void UBanRestApi::RegisterRoutes()
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
 
             const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
-            if (IdStr.IsEmpty() || !IdStr.IsNumeric())
+            if (IdStr.IsEmpty() || !IdStr.IsNumeric() || IdStr.Len() > 19)
             {
                 Done(BanJson::Error(TEXT("id must be an integer")));
                 return true;
