@@ -26,7 +26,7 @@ class BANSYSTEM_API UScheduledBanRegistry : public UGameInstanceSubsystem
     GENERATED_BODY()
 
 public:
-    // ── USubsystem ────────────────────────────────────────────────────────────
+    // ── USubsystem ───────────────────────────────────────────────────────────
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 

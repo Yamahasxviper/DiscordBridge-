@@ -391,7 +391,7 @@ void UBanRestApi::RegisterRoutes()
         }
     ));
 
-    // ── GET /bans/search?name= ────────────────────────────────────────────────
+    // ── GET /bans/search?name= ───────────────────────────────────────────────
     // Search the ban list by player name substring (case-insensitive).
     // Must be registered BEFORE /bans/:uid to avoid route collision.
     Routes->Handles.Add(Router->BindRoute(
@@ -878,7 +878,7 @@ void UBanRestApi::RegisterRoutes()
         }
     ));
 
-    // ── GET /players/search?name= ─────────────────────────────────────────────
+    // ── GET /players/search?name= ────────────────────────────────────────────
     // Search player session records by display name substring (case-insensitive).
     // Must be registered BEFORE /players/:uid-type routes.
     Routes->Handles.Add(Router->BindRoute(
@@ -1271,7 +1271,7 @@ void UBanRestApi::RegisterRoutes()
                 }
             }
 
-            // ── Per-day ban counts for the last 30 days ───────────────────
+            // ── Per-day ban counts for the last 30 days ──────────────────────
             // Produces an array of { date: "YYYY-MM-DD", bans: N } objects.
             TArray<TSharedPtr<FJsonValue>> DailyBansArr;
             if (DB)
@@ -1298,7 +1298,7 @@ void UBanRestApi::RegisterRoutes()
                 }
             }
 
-            // ── Top offenders by total ban count ──────────────────────────
+            // ── Top offenders by total ban count ─────────────────────────────
             // Produces an array of { uid, playerName, banCount } sorted descending.
             TArray<TSharedPtr<FJsonValue>> TopOffendersArr;
             if (DB)
@@ -1538,7 +1538,7 @@ void UBanRestApi::RegisterRoutes()
         }
     ));
 
-    // ── GET /notes ────────────────────────────────────────────────────────────
+    // ── GET /notes ───────────────────────────────────────────────────────────
     Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/notes")),
         EHttpServerRequestVerbs::VERB_GET,
@@ -2358,7 +2358,7 @@ void UBanRestApi::RegisterRoutes()
         }
     ));
 
-    // ── GET /scheduled ──────────────────────────────────────────────────────
+    // ── GET /scheduled ───────────────────────────────────────────────────────
     Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/scheduled")),
         EHttpServerRequestVerbs::VERB_GET,
@@ -2385,7 +2385,7 @@ void UBanRestApi::RegisterRoutes()
         }
     ));
 
-    // ── POST /scheduled ─────────────────────────────────────────────────────
+    // ── POST /scheduled ──────────────────────────────────────────────────────
     // Body: { "uid", "playerName", "reason", "scheduledBy", "effectiveAt" (ISO8601),
     //         "durationMinutes" (0=permanent), "category" (optional) }
     Routes->Handles.Add(Router->BindRoute(

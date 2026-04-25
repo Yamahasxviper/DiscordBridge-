@@ -1,5 +1,4 @@
 // Copyright Yamahasxviper. All Rights Reserved.
-// Direct port of Tools/BanSystem/src/index.ts
 
 #include "BanSystemModule.h"
 #include "BanDatabase.h"

@@ -69,7 +69,7 @@ public:
     static void NotifyPlayerUnmuted(const FString& Uid, const FString& PlayerName,
                                     const FString& UnmutedBy);
 
-    // ── Delegates ─────────────────────────────────────────────────────────────
+    // ── Delegates ────────────────────────────────────────────────────────────
 
     /**
      * Fired (on the game thread) by NotifyPlayerKicked() when a non-empty Uid

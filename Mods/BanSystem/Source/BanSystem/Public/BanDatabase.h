@@ -30,11 +30,11 @@ class BANSYSTEM_API UBanDatabase : public UGameInstanceSubsystem
     GENERATED_BODY()
 
 public:
-    // ── USubsystem ────────────────────────────────────────────────────────
+    // ── USubsystem ───────────────────────────────────────────────────────────
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // ── Write ─────────────────────────────────────────────────────────────
+    // ── Write ────────────────────────────────────────────────────────────────
 
     /**
      * Insert or replace (upsert on uid) a ban record.
@@ -85,7 +85,7 @@ public:
      */
     int32 PruneExpiredBans(bool bSilent = false);
 
-    // ── Read ──────────────────────────────────────────────────────────────
+    // ── Read ─────────────────────────────────────────────────────────────────
 
     /**
      * Returns true and fills OutEntry if the UID is currently banned
@@ -120,7 +120,7 @@ public:
      */
     TArray<FBanEntry> GetAllBans() const;
 
-    // ── Cross-platform linking ─────────────────────────────────────────────
+    // ── Cross-platform linking ───────────────────────────────────────────────
 
     /**
      * Links two UIDs together so that a ban on one also blocks the other.
@@ -147,7 +147,7 @@ public:
      */
     FString Backup(const FString& BackupDir, int32 MaxKeep = 5) const;
 
-    // ── Helpers ───────────────────────────────────────────────────────────
+    // ── Helpers ──────────────────────────────────────────────────────────────
 
     /** Build compound UID: "EOS:00020aed..." */
     static FString MakeUid(const FString& Platform, const FString& PlayerUID);
@@ -170,7 +170,7 @@ public:
      */
     void ReloadIfChanged();
 
-    // ── Delegates (fired after every successful write) ─────────────────────
+    // ── Delegates (fired after every successful write) ───────────────────────
 
     /** Fired after a ban is successfully added (from any code path). */
     DECLARE_MULTICAST_DELEGATE_OneParam(FOnBanAdded, const FBanEntry&);

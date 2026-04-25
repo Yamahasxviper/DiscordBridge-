@@ -28,7 +28,7 @@ class UBanDiscordSubsystem;
 // forward declaration is sufficient and avoids pulling in the full schematic header.
 class UFGSchematic;
 
-// ── Delegate declarations ─────────────────────────────────────────────────────
+// ── Delegate declarations ────────────────────────────────────────────────────
 
 /**
  * Fired on the game thread when a message is received from the bridged Discord
@@ -78,7 +78,7 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FDiscordInteractionReceivedDelegate,
 DECLARE_MULTICAST_DELEGATE_OneParam(FDiscordRawMessageReceivedDelegate,
                                     const TSharedPtr<FJsonObject>& /*MessageObj*/);
 
-// ── Discord Gateway opcodes (Discord API reference §Gateway Opcodes) ──────────
+// ── Discord Gateway opcodes (Discord API reference §Gateway Opcodes) ─────────
 namespace EDiscordGatewayOpcode
 {
 	static constexpr int32 Dispatch          = 0;  // Server → Client: an event was dispatched
@@ -91,7 +91,7 @@ namespace EDiscordGatewayOpcode
 	static constexpr int32 HeartbeatAck     = 11;  // Server → Client: heartbeat was acknowledged
 }
 
-// ── Discord Gateway intent bit-flags (Discord API reference §Gateway Intents) ─
+// ── Discord Gateway intent bit-flags (Discord API reference §Gateway Intents) 
 namespace EDiscordGatewayIntent
 {
 	// Non-privileged

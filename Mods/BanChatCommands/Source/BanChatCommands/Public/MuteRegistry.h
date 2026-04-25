@@ -62,7 +62,7 @@ struct BANCHATCOMMANDS_API FMuteEntry
     }
 };
 
-// ── Delegates ─────────────────────────────────────────────────────────────────
+// ── Delegates ────────────────────────────────────────────────────────────────
 
 /** Fired (on the game thread) when a player is muted. */
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnPlayerMutedDelegate,
@@ -88,7 +88,7 @@ class BANCHATCOMMANDS_API UMuteRegistry : public UGameInstanceSubsystem
     GENERATED_BODY()
 
 public:
-    // ── USubsystem ────────────────────────────────────────────────────────
+    // ── USubsystem ───────────────────────────────────────────────────────────
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
@@ -145,7 +145,7 @@ public:
      */
     TArray<FString> TickExpiry();
 
-    // ── Delegates ─────────────────────────────────────────────────────────
+    // ── Delegates ────────────────────────────────────────────────────────────
 
     /** Fired on the game thread whenever a player is muted. */
     FOnPlayerMutedDelegate   OnPlayerMuted;

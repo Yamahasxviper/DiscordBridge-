@@ -9,13 +9,13 @@
 class FDiscordBridgeModule : public IModuleInterface
 {
 public:
-	// Begin IModuleInterface
-	virtual void StartupModule() override;
-	virtual void ShutdownModule() override;
-	// End IModuleInterface
+    // Begin IModuleInterface
+    virtual void StartupModule() override;
+    virtual void ShutdownModule() override;
+    // End IModuleInterface
 
 private:
-	/** Handle for the FWorldDelegates::OnWorldInitializedActors registration.
-	 *  Used to register /verify, /discord, /ingamewhitelist SML commands. */
-	FDelegateHandle WorldInitHandle;
+    /** Handle for the FWorldDelegates::OnWorldInitializedActors registration.
+     *  Used to register /verify, /discord, /ingamewhitelist SML commands. */
+    FDelegateHandle WorldInitHandle;
 };
