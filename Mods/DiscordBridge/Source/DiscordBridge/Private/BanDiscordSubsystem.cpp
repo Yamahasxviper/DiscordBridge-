@@ -5844,6 +5844,14 @@ FString UBanDiscordSubsystem::ExecutePanelKick(const FString& PlayerArg,
 		UE_LOG(LogBanDiscord, Log,
 		       TEXT("BanDiscordSubsystem: [Panel] %s kicked %s (%s). Reason: %s"),
 		       *SenderName, *DisplayName, *Uid, *KickReason);
+
+		// Write to audit log so panel-issued kicks appear alongside slash-command kicks.
+		if (UGameInstance* GI = GetGameInstance())
+		{
+			if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+				AuditLog->LogAction(TEXT("kick"), Uid, DisplayName, SenderName, SenderName, KickReason);
+		}
+
 		SendInGameModerationNoticeToUid(Uid, FString::Printf(
 			TEXT("%s Kicked @%s. Reason: %s. By: %s."),
 			*StaffPrefix, *DisplayName, *KickReason, *SenderName));

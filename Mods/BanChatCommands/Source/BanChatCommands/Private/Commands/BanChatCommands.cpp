@@ -2515,6 +2515,9 @@ EExecutionStatus ANoteChatCommand::ExecuteCommand_Implementation(
     const FString NoteText = BanChat::JoinArgs(Arguments, 1);
     NoteReg->AddNote(Uid, DisplayName, NoteText, Sender->GetSenderName());
 
+    if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+        AuditLog->LogAction(TEXT("note"), Uid, DisplayName, AdminId, Sender->GetSenderName(), NoteText);
+
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] Note added for '%s'."), *DisplayName),
         FLinearColor::Green);
@@ -3314,6 +3317,9 @@ EExecutionStatus AMuteReasonChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::COMPLETED;
     }
 
+    if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+        AuditLog->LogAction(TEXT("mutereason"), Uid, DisplayName, AdminId, Sender->GetSenderName(), NewReason);
+
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] Updated mute reason for '%s'."), *DisplayName),
         FLinearColor::Green);
@@ -3576,6 +3582,18 @@ EExecutionStatus AReportChatCommand::ExecuteCommand_Implementation(
         Req->ProcessRequest();
     }
 
+    // Log the report so staff can review it from the audit log.
+    UWorld* World = GetWorld();
+    UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
+    if (GI)
+    {
+        if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+        {
+            const FString CallerId = SenderUid.IsEmpty() ? ReporterName : SenderUid;
+            AuditLog->LogAction(TEXT("report"), TEXT(""), TargetName, CallerId, ReporterName, Reason);
+        }
+    }
+
     return EExecutionStatus::COMPLETED;
 }
 
@@ -3599,7 +3617,7 @@ EExecutionStatus AScheduleBanChatCommand::ExecuteCommand_Implementation(
     if (!BanChat::IsAdminSender(Sender, AdminUid)) return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
 
     UBanDatabase* DB = BanChat::GetDB(this);
-    if (!DB) { Sender->SendChatMessage(TEXT("[BanChatCommands] Database unavailable."), FLinearColor::Red); return EExecutionStatus::COMPLETED; }
+    if (!DB) { Sender->SendChatMessage(TEXT("[BanChatCommands] Database unavailable."), FLinearColor::Red); return EExecutionStatus::UNCOMPLETED; }
 
     // List pending scheduled bans when no arguments.
     if (Arguments.IsEmpty())
@@ -3610,7 +3628,7 @@ EExecutionStatus AScheduleBanChatCommand::ExecuteCommand_Implementation(
         if (!SchReg)
         {
             Sender->SendChatMessage(TEXT("[BanChatCommands] ScheduledBanRegistry unavailable."), FLinearColor::Red);
-            return EExecutionStatus::COMPLETED;
+            return EExecutionStatus::UNCOMPLETED;
         }
         TArray<FScheduledBanEntry> Pending = SchReg->GetAllPending();
         if (Pending.IsEmpty())
@@ -3796,7 +3814,7 @@ EExecutionStatus AQBanChatCommand::ExecuteCommand_Implementation(
     }
 
     UBanDatabase* DB = BanChat::GetDB(this);
-    if (!DB) { Sender->SendChatMessage(TEXT("[BanChatCommands] Database unavailable."), FLinearColor::Red); return EExecutionStatus::COMPLETED; }
+    if (!DB) { Sender->SendChatMessage(TEXT("[BanChatCommands] Database unavailable."), FLinearColor::Red); return EExecutionStatus::UNCOMPLETED; }
 
     const FString AdminName = Sender->GetSenderName();
 
@@ -3873,7 +3891,7 @@ EExecutionStatus AReputationChatCommand::ExecuteCommand_Implementation(
 
     UWorld* W = GetWorld();
     UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
-    if (!GI) { Sender->SendChatMessage(TEXT("[BanChatCommands] GameInstance unavailable."), FLinearColor::Red); return EExecutionStatus::COMPLETED; }
+    if (!GI) { Sender->SendChatMessage(TEXT("[BanChatCommands] GameInstance unavailable."), FLinearColor::Red); return EExecutionStatus::UNCOMPLETED; }
 
     UBanDatabase*           DB        = GI->GetSubsystem<UBanDatabase>();
     UPlayerWarningRegistry* WarnReg   = GI->GetSubsystem<UPlayerWarningRegistry>();
@@ -3964,7 +3982,7 @@ EExecutionStatus ABulkBanChatCommand::ExecuteCommand_Implementation(
     if (!BanChat::IsAdminSender(Sender, AdminUid)) return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
 
     UBanDatabase* DB = BanChat::GetDB(this);
-    if (!DB) { Sender->SendChatMessage(TEXT("[BanChatCommands] Database unavailable."), FLinearColor::Red); return EExecutionStatus::COMPLETED; }
+    if (!DB) { Sender->SendChatMessage(TEXT("[BanChatCommands] Database unavailable."), FLinearColor::Red); return EExecutionStatus::UNCOMPLETED; }
 
     // Split on " -- " to separate UIDs from reason.
     TArray<FString> Uids;
