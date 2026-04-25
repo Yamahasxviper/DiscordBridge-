@@ -37,7 +37,7 @@
 #include "PlayerWarningRegistry.h"
 #include "PlayerSessionRegistry.h"
 
-DEFINE_LOG_CATEGORY_STATIC(LogDiscordBridge, Log, All);
+DEFINE_LOG_CATEGORY(LogDiscordBridge);
 
 // Discord Gateway endpoint (v10, JSON encoding)
 static const FString DiscordGatewayUrl = TEXT("wss://gateway.discord.gg/?v=10&encoding=json");
@@ -2285,12 +2285,17 @@ void UDiscordBridgeSubsystem::UpdatePlayerCountPresence()
 	}
 
 	// Count connected players using the game state's player array.
+	// PlayerArray may contain null entries for pending/disconnecting players,
+	// so count only valid (non-null) APlayerState pointers.
 	int32 PlayerCount = 0;
 	if (UWorld* World = GetWorld())
 	{
 		if (AGameStateBase* GS = World->GetGameState<AGameStateBase>())
 		{
-			PlayerCount = GS->PlayerArray.Num();
+			for (APlayerState* PS : GS->PlayerArray)
+			{
+				if (PS) ++PlayerCount;
+			}
 		}
 	}
 
@@ -2579,7 +2584,7 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 					{
 						const FString WarnReason = FString::Printf(
 							TEXT("Auto-warn: triggered chat filter %d times within %d minutes"),
-							HitCount, BanCfg->ChatFilterAutoWarnWindowMinutes);
+							HitCount, EffectiveWindowMinutes);
 
 						FWarningEntry WarnEntry;
 						WarnEntry.Uid        = Uid;

@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 
+DECLARE_LOG_CATEGORY_EXTERN(LogDiscordBridge, Log, All);
+
 /**
  * A single scheduled announcement entry for the ScheduledAnnouncements array.
  * Each entry fires independently on its own interval.
