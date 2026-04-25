@@ -732,7 +732,7 @@ bool UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
     if (!World) return false;
 
     AGameModeBase* GM = World->GetAuthGameMode();
-    if (!GM || !GM->GameSession) return false;
+    if (!GM) return false;
 
     // Parse the platform and raw player ID from the compound UID so we can fall back
     // to a second matching strategy when GetUniqueId() is not yet populated.

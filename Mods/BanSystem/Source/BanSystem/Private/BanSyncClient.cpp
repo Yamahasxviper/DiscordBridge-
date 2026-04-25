@@ -197,12 +197,13 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
         Ban.PlayerName      = PlayerName;
         Ban.Reason          = Reason.IsEmpty() ? TEXT("Synced ban from peer server") : Reason;
         Ban.BannedBy        = BannedBy.IsEmpty() ? TEXT("peer") : BannedBy;
-        Ban.BanDate         = FDateTime::UtcNow();
+        const FDateTime Now = FDateTime::UtcNow();
+        Ban.BanDate         = Now;
         Ban.Category        = Category;
         Ban.bIsPermanent    = (DurationMinutes <= 0);
         Ban.ExpireDate      = Ban.bIsPermanent
             ? FDateTime(0)
-            : FDateTime::UtcNow() + FTimespan::FromMinutes(DurationMinutes);
+            : Now + FTimespan::FromMinutes(DurationMinutes);
 
         if (DB->AddBan(Ban))
         {

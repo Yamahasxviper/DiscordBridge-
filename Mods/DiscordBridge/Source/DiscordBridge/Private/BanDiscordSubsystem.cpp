@@ -1184,12 +1184,13 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 	Entry.PlayerName = DisplayName;
 	Entry.Reason     = Reason.IsEmpty() ? TEXT("No reason given") : Reason;
 	Entry.BannedBy   = SenderName;
-	Entry.BanDate    = FDateTime::UtcNow();
+	const FDateTime Now = FDateTime::UtcNow();
+	Entry.BanDate    = Now;
 
 	if (bTemporary)
 	{
 		Entry.bIsPermanent = false;
-		Entry.ExpireDate   = FDateTime::UtcNow() + FTimespan::FromMinutes(DurationMinutes);
+		Entry.ExpireDate   = Now + FTimespan::FromMinutes(DurationMinutes);
 	}
 	else
 	{
@@ -1880,11 +1881,12 @@ void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
 						AutoBan.PlayerName   = DisplayName;
 						AutoBan.Reason       = TEXT("Auto-banned: reached warning threshold");
 						AutoBan.BannedBy     = TEXT("system");
-						AutoBan.BanDate      = FDateTime::UtcNow();
+						const FDateTime AutoNow1 = FDateTime::UtcNow();
+						AutoBan.BanDate      = AutoNow1;
 						AutoBan.bIsPermanent = (BanDurationMinutes <= 0);
 						AutoBan.ExpireDate   = AutoBan.bIsPermanent
 							? FDateTime(0)
-							: FDateTime::UtcNow() + FTimespan::FromMinutes(BanDurationMinutes);
+							: AutoNow1 + FTimespan::FromMinutes(BanDurationMinutes);
 						if (DB->AddBan(AutoBan))
 						{
 							if (UWorld* World = GI->GetWorld())
@@ -2116,7 +2118,8 @@ void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
 	EosEntry.PlayerName = Record.DisplayName;
 	EosEntry.Reason     = Reason;
 	EosEntry.BannedBy   = SenderName;
-	EosEntry.BanDate    = FDateTime::UtcNow();
+	const FDateTime BanNow = FDateTime::UtcNow();
+	EosEntry.BanDate    = BanNow;
 	EosEntry.bIsPermanent = true;
 	EosEntry.ExpireDate   = FDateTime(0);
 	if (DB->AddBan(EosEntry)) ++Banned;
@@ -2133,7 +2136,7 @@ void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
 		IpEntry.PlayerName = Record.DisplayName;
 		IpEntry.Reason     = Reason;
 		IpEntry.BannedBy   = SenderName;
-		IpEntry.BanDate    = FDateTime::UtcNow();
+		IpEntry.BanDate    = BanNow;
 		IpEntry.bIsPermanent = true;
 		IpEntry.ExpireDate   = FDateTime(0);
 		IpEntry.LinkedUids.Add(Record.Uid);
@@ -2829,9 +2832,10 @@ void UBanDiscordSubsystem::HandleModBanCommand(const TArray<FString>& Args,
 	Entry.PlayerName   = DisplayName;
 	Entry.Reason       = Reason;
 	Entry.BannedBy     = SenderName;
-	Entry.BanDate      = FDateTime::UtcNow();
+	const FDateTime TempBanNow1 = FDateTime::UtcNow();
+	Entry.BanDate      = TempBanNow1;
 	Entry.bIsPermanent = false;
-	Entry.ExpireDate   = FDateTime::UtcNow() + FTimespan::FromMinutes(DurationMinutes);
+	Entry.ExpireDate   = TempBanNow1 + FTimespan::FromMinutes(DurationMinutes);
 
 	if (!DB->AddBan(Entry))
 	{
@@ -3989,12 +3993,13 @@ UBanDatabase::ParseUid(Uid, Ban.Platform, Ban.PlayerUID);
 Ban.PlayerName      = DisplayName;
 Ban.Reason          = Template->Reason;
 Ban.BannedBy        = SenderName;
-Ban.BanDate         = FDateTime::UtcNow();
+const FDateTime TemplateBanNow = FDateTime::UtcNow();
+Ban.BanDate         = TemplateBanNow;
 Ban.Category        = Template->Category;
 Ban.bIsPermanent    = (Template->DurationMinutes <= 0);
 Ban.ExpireDate      = Ban.bIsPermanent
 ? FDateTime(0)
-: FDateTime::UtcNow() + FTimespan::FromMinutes(Template->DurationMinutes);
+: TemplateBanNow + FTimespan::FromMinutes(Template->DurationMinutes);
 
 if (!DB->AddBan(Ban))
 {
@@ -5771,9 +5776,10 @@ FString UBanDiscordSubsystem::ExecutePanelTempBan(const FString& PlayerArg,
 	Entry.PlayerName   = DisplayName;
 	Entry.Reason       = Reason.IsEmpty() ? TEXT("No reason given") : Reason;
 	Entry.BannedBy     = SenderName;
-	Entry.BanDate      = FDateTime::UtcNow();
+	const FDateTime TempBanNow2 = FDateTime::UtcNow();
+	Entry.BanDate      = TempBanNow2;
 	Entry.bIsPermanent = false;
-	Entry.ExpireDate   = FDateTime::UtcNow() + FTimespan::FromMinutes(DurationMinutes);
+	Entry.ExpireDate   = TempBanNow2 + FTimespan::FromMinutes(DurationMinutes);
 
 	if (!DB->AddBan(Entry))
 		return TEXT("❌ Failed to write the ban to the database. Check server logs.");
@@ -5881,11 +5887,12 @@ FString UBanDiscordSubsystem::ExecutePanelWarn(const FString& PlayerArg,
 						AutoBan.PlayerName   = DisplayName;
 						AutoBan.Reason       = TEXT("Auto-banned: reached warning threshold");
 						AutoBan.BannedBy     = TEXT("system");
-						AutoBan.BanDate      = FDateTime::UtcNow();
+						const FDateTime AutoNow2 = FDateTime::UtcNow();
+						AutoBan.BanDate      = AutoNow2;
 						AutoBan.bIsPermanent = (BanDurationMinutes <= 0);
 						AutoBan.ExpireDate   = AutoBan.bIsPermanent
 							? FDateTime(0)
-							: FDateTime::UtcNow() + FTimespan::FromMinutes(BanDurationMinutes);
+							: AutoNow2 + FTimespan::FromMinutes(BanDurationMinutes);
 						if (DB->AddBan(AutoBan))
 						{
 							if (UWorld* World = GI->GetWorld())
