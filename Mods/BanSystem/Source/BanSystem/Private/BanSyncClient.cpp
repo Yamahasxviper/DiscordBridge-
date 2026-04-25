@@ -208,7 +208,15 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
             const bool bPermanentMatch     = (Existing.bIsPermanent == (DurationMinutes <= 0));
             const bool bReasonMatch        = (Existing.Reason == IncomingReason);
             const bool bCategoryMatch      = (Existing.Category == Category);
-            if (bPermanentMatch && bReasonMatch && bCategoryMatch)
+            // Also compare expiry so that duration-only updates are not silently dropped.
+            const FDateTime IncomingExpiry = (DurationMinutes <= 0)
+                ? FDateTime(0)
+                : FDateTime::UtcNow() + FTimespan::FromMinutes(DurationMinutes);
+            // Allow a 60-second tolerance to absorb transmission latency.
+            const bool bExpiryMatch = Existing.bIsPermanent
+                ? true
+                : FMath::Abs((Existing.ExpireDate - IncomingExpiry).GetTotalSeconds()) < 60.0;
+            if (bPermanentMatch && bReasonMatch && bCategoryMatch && bExpiryMatch)
                 return; // Identical — nothing to update.
             // Fields changed — remove the stale record and fall through to re-add.
             // Guard against re-broadcasting the removal back to peers (B3 fix).

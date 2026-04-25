@@ -265,9 +265,9 @@ bool FWhitelistManager::AddPlayer(const FString& PlayerName,
 
 	// Capacity check — only count active (non-expired) entries so that
 	// expired slots do not permanently consume whitelist capacity.
+	const FDateTime Now = FDateTime::UtcNow();
 	if (MaxSlots > 0)
 	{
-		const FDateTime Now = FDateTime::UtcNow();
 		int32 ActiveCount = 0;
 		for (const FWhitelistEntry& E : Entries)
 		{
@@ -279,10 +279,9 @@ bool FWhitelistManager::AddPlayer(const FString& PlayerName,
 	}
 
 	// Duplicate check (by name or PUID) — skip expired entries so they can be re-added.
-	const FDateTime NowForDup = FDateTime::UtcNow();
 	for (const FWhitelistEntry& E : Entries)
 	{
-		if (E.ExpiresAt.GetTicks() > 0 && E.ExpiresAt <= NowForDup) continue;
+		if (E.ExpiresAt.GetTicks() > 0 && E.ExpiresAt <= Now) continue;
 		if (E.Name.Equals(PlayerName, ESearchCase::IgnoreCase)) return false;
 		if (!EosPUID.IsEmpty() && !E.EosPUID.IsEmpty() &&
 		    E.EosPUID.Equals(EosPUID, ESearchCase::IgnoreCase)) return false;

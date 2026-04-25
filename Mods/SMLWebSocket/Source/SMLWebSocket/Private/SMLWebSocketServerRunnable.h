@@ -62,6 +62,13 @@ private:
         FString  RemoteAddress;
         TArray<uint8> RecvBuffer;
         bool bHandshakeDone{false};
+
+        // RFC 6455 fragmented-message reassembly state.
+        // When FIN=0 is received the payload is accumulated here until
+        // a continuation frame with FIN=1 completes the message.
+        TArray<uint8> FragmentBuffer;
+        uint8 FragmentOpcode{0}; // 0x1 = text, 0x2 = binary
+        bool  bInFragment{false};
     };
 
     /** Perform the RFC 6455 HTTP Upgrade handshake for a new connection.

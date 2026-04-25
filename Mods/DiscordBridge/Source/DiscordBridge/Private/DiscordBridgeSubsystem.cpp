@@ -802,6 +802,7 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 				UE_LOG(LogDiscordBridge, Log,
 				       TEXT("DiscordBridge: Guild ID set from GUILD_CREATE: %s"), *GuildId);
 			}
+			else
 			{
 				// The bot has been added to a second guild.  All moderation commands,
 				// role lookups, and channel operations target the first guild only.

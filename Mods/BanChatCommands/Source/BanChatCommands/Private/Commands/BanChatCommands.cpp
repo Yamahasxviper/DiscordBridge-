@@ -312,9 +312,12 @@ namespace BanChat
             {
                 OutUid         = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
                 OutDisplayName = Matches[0];
+                UE_LOG(LogBanChatCommands, Log,
+                    TEXT("BanChatCommands: Resolved '%s' → EOS:%s (via connection URL) for moderator action"),
+                    *Arg, *EosPuid);
                 Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] Resolved '%s' → EOS: %s (via connection URL)"),
-                        *Arg, *EosPuid),
+                    FString::Printf(TEXT("[BanChatCommands] Resolved '%s' to player '%s'."),
+                        *Arg, *Matches[0]),
                     FLinearColor::White);
                 return true;
             }
@@ -332,9 +335,12 @@ namespace BanChat
         OutUid         = UBanDatabase::MakeUid(TEXT("EOS"), RawId);
         OutDisplayName = Matches[0];
 
+        UE_LOG(LogBanChatCommands, Log,
+            TEXT("BanChatCommands: Resolved '%s' → EOS:%s for moderator action"),
+            *Arg, *RawId);
         Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] Resolved '%s' → EOS: %s"),
-                *Arg, *RawId),
+            FString::Printf(TEXT("[BanChatCommands] Resolved '%s' to player '%s'."),
+                *Arg, *Matches[0]),
             FLinearColor::White);
         return true;
     }
@@ -1698,6 +1704,8 @@ EExecutionStatus AKickChatCommand::ExecuteCommand_Implementation(
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Kicked '%s' — reason: %s"), *DisplayName, *Reason),
             FLinearColor::Green);
+
+        FBanDiscordNotifier::NotifyPlayerKicked(DisplayName, Reason, KickedBy, Uid);
     }
     else
     {
@@ -1705,8 +1713,6 @@ EExecutionStatus AKickChatCommand::ExecuteCommand_Implementation(
             FString::Printf(TEXT("[BanChatCommands] '%s' is not currently online — not kicked."), *DisplayName),
             FLinearColor::Yellow);
     }
-
-    FBanDiscordNotifier::NotifyPlayerKicked(DisplayName, Reason, KickedBy, Uid);
 
     // Optionally create a warning so kick reasons are preserved in history.
     const UBanChatCommandsConfig* CmdCfg = UBanChatCommandsConfig::Get();
@@ -1852,34 +1858,48 @@ EExecutionStatus AWarnChatCommand::ExecuteCommand_Implementation(
 
         if (BanDurationMinutes >= 0)
         {
-            Sender->SendChatMessage(
-                FString::Printf(TEXT("[BanChatCommands] '%s' reached the auto-ban threshold (%d warnings) — banning."),
-                    *DisplayName, WarnCount),
-                FLinearColor::Red);
-            const EExecutionStatus AutoBanResult = BanChat::DoBan(
-                this, Sender, Uid, DisplayName, BanDurationMinutes,
-                TEXT("Auto-banned: reached warning threshold"), TEXT("system"));
-            if (AutoBanResult != EExecutionStatus::COMPLETED)
+            // Only auto-ban if the player is not already serving a ban.
+            // Issuing an auto-ban over an active, potentially stricter ban
+            // would silently overwrite the existing record with a lighter one.
+            UBanDatabase* BanDB = GI->GetSubsystem<UBanDatabase>();
+            FBanEntry ExistingAutobanEntry;
+            if (BanDB && BanDB->IsCurrentlyBanned(Uid, ExistingAutobanEntry))
             {
-                UE_LOG(LogBanChatCommands, Warning,
-                    TEXT("BanChatCommands: auto-ban for '%s' (%s) failed after reaching warn threshold (%d)."),
-                    *DisplayName, *Uid, WarnCount);
+                UE_LOG(LogBanChatCommands, Log,
+                    TEXT("BanChatCommands: auto-ban skipped for '%s' (%s) — player is already banned."),
+                    *DisplayName, *Uid);
             }
-
-            // Post a Discord review embed so staff can approve or override.
+            else
             {
-                FBanEntry ReviewBan;
-                ReviewBan.Uid        = Uid;
-                ReviewBan.PlayerName = DisplayName;
-                ReviewBan.Reason     = TEXT("Auto-banned: reached warning threshold");
-                ReviewBan.BannedBy   = TEXT("system");
-                const FDateTime ReviewNow = FDateTime::UtcNow();
-                ReviewBan.BanDate    = ReviewNow;
-                ReviewBan.bIsPermanent = (BanDurationMinutes <= 0);
-                ReviewBan.ExpireDate   = ReviewBan.bIsPermanent
-                    ? FDateTime(0)
-                    : ReviewNow + FTimespan::FromMinutes(BanDurationMinutes);
-                FBanDiscordNotifier::NotifyAutoEscalationBan(ReviewBan, WarnCount);
+                Sender->SendChatMessage(
+                    FString::Printf(TEXT("[BanChatCommands] '%s' reached the auto-ban threshold (%d warnings) — banning."),
+                        *DisplayName, WarnCount),
+                    FLinearColor::Red);
+                const EExecutionStatus AutoBanResult = BanChat::DoBan(
+                    this, Sender, Uid, DisplayName, BanDurationMinutes,
+                    TEXT("Auto-banned: reached warning threshold"), TEXT("system"));
+                if (AutoBanResult != EExecutionStatus::COMPLETED)
+                {
+                    UE_LOG(LogBanChatCommands, Warning,
+                        TEXT("BanChatCommands: auto-ban for '%s' (%s) failed after reaching warn threshold (%d)."),
+                        *DisplayName, *Uid, WarnCount);
+                }
+
+                // Post a Discord review embed so staff can approve or override.
+                {
+                    FBanEntry ReviewBan;
+                    ReviewBan.Uid        = Uid;
+                    ReviewBan.PlayerName = DisplayName;
+                    ReviewBan.Reason     = TEXT("Auto-banned: reached warning threshold");
+                    ReviewBan.BannedBy   = TEXT("system");
+                    const FDateTime ReviewNow = FDateTime::UtcNow();
+                    ReviewBan.BanDate    = ReviewNow;
+                    ReviewBan.bIsPermanent = (BanDurationMinutes <= 0);
+                    ReviewBan.ExpireDate   = ReviewBan.bIsPermanent
+                        ? FDateTime(0)
+                        : ReviewNow + FTimespan::FromMinutes(BanDurationMinutes);
+                    FBanDiscordNotifier::NotifyAutoEscalationBan(ReviewBan, WarnCount);
+                }
             }
         }
     }

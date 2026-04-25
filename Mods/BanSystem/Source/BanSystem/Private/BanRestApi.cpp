@@ -1001,7 +1001,11 @@ void UBanRestApi::RegisterRoutes()
             {
                 double PointsDbl = 0.0;
                 if (Body->TryGetNumberField(TEXT("points"), PointsDbl) && PointsDbl > 0.0)
+                {
+                    if (PointsDbl > static_cast<double>(MAX_int32))
+                        PointsDbl = static_cast<double>(MAX_int32);
                     Points = static_cast<int32>(PointsDbl);
+                }
             }
 
             UPlayerWarningRegistry* WarnReg = GI->GetSubsystem<UPlayerWarningRegistry>();

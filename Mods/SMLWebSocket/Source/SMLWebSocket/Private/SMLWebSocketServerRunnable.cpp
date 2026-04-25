@@ -411,6 +411,10 @@ bool FSMLWebSocketServerRunnable::PerformHandshake(FClientState& Client)
 //  Frame processing
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Maximum total message size (after reassembly of all fragments), in bytes.
+// Prevents a malicious client from forcing a giant allocation via fragmented frames.
+static constexpr int32 MaxMessageBytes = 4 * 1024 * 1024; // 4 MB
+
 bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClientState& Client)
 {
     TArray<uint8>& Buf = Client.RecvBuffer;
@@ -419,9 +423,10 @@ bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClient
     {
         const uint8 B0 = Buf[0];
         const uint8 B1 = Buf[1];
-        const uint8 Opcode   = B0 & 0x0F;
-        const bool  bMasked  = (B1 & 0x80) != 0;
-        uint64 PayloadLen    = B1 & 0x7F;
+        const bool  bFin    = (B0 & 0x80) != 0;
+        const uint8 Opcode  = B0 & 0x0F;
+        const bool  bMasked = (B1 & 0x80) != 0;
+        uint64 PayloadLen   = B1 & 0x7F;
 
         int32 HeaderSize = 2;
         if (PayloadLen == 126)
@@ -460,6 +465,20 @@ bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClient
             return false;
         }
 
+        if (Opcode == 0x9) // Ping — respond with Pong
+        {
+            // Echo the payload back as a Pong (opcode 0xA, FIN=1).
+            const int32 PongPayloadLen = FMath::Min(PayloadLen32, 125); // Pong payload ≤ 125 bytes
+            TArray<uint8> PongFrame;
+            PongFrame.Add(0x8A); // FIN=1, opcode=0xA
+            PongFrame.Add(static_cast<uint8>(PongPayloadLen));
+            for (int32 i = 0; i < PongPayloadLen; ++i)
+                PongFrame.Add(Buf[HeaderSize + MaskSize + i]);
+            SendFrame(Client.Socket, PongFrame);
+            Buf.RemoveAt(0, TotalSize);
+            continue;
+        }
+
         if (Opcode == 0x1 || Opcode == 0x2 || Opcode == 0x0) // Text, Binary, or Continuation
         {
             uint8 Mask[4] = {0,0,0,0};
@@ -474,30 +493,104 @@ bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClient
             for (int32 i = 0; i < PayloadLen32; ++i)
                 Payload[i] = Buf[HeaderSize + MaskSize + i] ^ (bMasked ? Mask[i % 4] : 0);
 
-            if (Opcode == 0x2) // Binary frame — deliver raw bytes
+            if (Opcode == 0x1 || Opcode == 0x2) // Start of a new message (possibly fragmented)
             {
-                TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
-                const FString CId = ClientId;
-                AsyncTask(ENamedThreads::GameThread, [WeakOwner, CId, Payload = MoveTemp(Payload)]()
+                if (bFin)
                 {
-                    if (USMLWebSocketServer* O = WeakOwner.Get())
-                        O->Internal_OnClientBinaryMessage(CId, Payload);
-                });
-            }
-            else // Text or Continuation — deliver as UTF-8 string
-            {
-                // Null-terminate the payload bytes before converting to FString;
-                // UTF8_TO_TCHAR scans until '\0' and the frame payload has none.
-                Payload.Add(0);
-                const FString Text = FString(UTF8_TO_TCHAR(reinterpret_cast<const ANSICHAR*>(Payload.GetData())));
+                    // Single unfragmented frame — deliver immediately.
+                    if (Opcode == 0x2)
+                    {
+                        TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
+                        const FString CId = ClientId;
+                        AsyncTask(ENamedThreads::GameThread, [WeakOwner, CId, Payload = MoveTemp(Payload)]()
+                        {
+                            if (USMLWebSocketServer* O = WeakOwner.Get())
+                                O->Internal_OnClientBinaryMessage(CId, Payload);
+                        });
+                    }
+                    else
+                    {
+                        Payload.Add(0);
+                        const FString Text = FString(UTF8_TO_TCHAR(reinterpret_cast<const ANSICHAR*>(Payload.GetData())));
+                        TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
+                        const FString CId = ClientId;
+                        AsyncTask(ENamedThreads::GameThread, [WeakOwner, CId, Text]()
+                        {
+                            if (USMLWebSocketServer* O = WeakOwner.Get())
+                                O->Internal_OnClientMessage(CId, Text);
+                        });
+                    }
+                    // Ensure no stale fragment state remains.
+                    Client.bInFragment = false;
+                    Client.FragmentBuffer.Reset();
+                }
+                else
+                {
+                    // First fragment of a multi-frame message — begin accumulation.
+                    Client.bInFragment    = true;
+                    Client.FragmentOpcode = Opcode;
+                    Client.FragmentBuffer = MoveTemp(Payload);
 
-                TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
-                const FString CId = ClientId;
-                AsyncTask(ENamedThreads::GameThread, [WeakOwner, CId, Text]()
+                    if (Client.FragmentBuffer.Num() > MaxMessageBytes)
+                    {
+                        UE_LOG(LogWSServer, Error,
+                            TEXT("WSServer: Fragmented message exceeds %d byte limit – dropping client"),
+                            MaxMessageBytes);
+                        return false;
+                    }
+                }
+            }
+            else // Opcode == 0x0: Continuation frame
+            {
+                if (!Client.bInFragment)
                 {
-                    if (USMLWebSocketServer* O = WeakOwner.Get())
-                        O->Internal_OnClientMessage(CId, Text);
-                });
+                    UE_LOG(LogWSServer, Warning,
+                        TEXT("WSServer: Received continuation frame with no active fragment – dropping client"));
+                    return false;
+                }
+
+                // Guard accumulated size before appending.
+                if (Client.FragmentBuffer.Num() + PayloadLen32 > MaxMessageBytes)
+                {
+                    UE_LOG(LogWSServer, Error,
+                        TEXT("WSServer: Fragmented message exceeds %d byte limit – dropping client"),
+                        MaxMessageBytes);
+                    return false;
+                }
+
+                Client.FragmentBuffer.Append(Payload);
+
+                if (bFin)
+                {
+                    // Final continuation frame — deliver the reassembled message.
+                    if (Client.FragmentOpcode == 0x2)
+                    {
+                        TArray<uint8> Complete = MoveTemp(Client.FragmentBuffer);
+                        TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
+                        const FString CId = ClientId;
+                        AsyncTask(ENamedThreads::GameThread, [WeakOwner, CId, Complete = MoveTemp(Complete)]()
+                        {
+                            if (USMLWebSocketServer* O = WeakOwner.Get())
+                                O->Internal_OnClientBinaryMessage(CId, Complete);
+                        });
+                    }
+                    else
+                    {
+                        TArray<uint8> Complete = MoveTemp(Client.FragmentBuffer);
+                        Complete.Add(0);
+                        const FString Text = FString(UTF8_TO_TCHAR(reinterpret_cast<const ANSICHAR*>(Complete.GetData())));
+                        TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
+                        const FString CId = ClientId;
+                        AsyncTask(ENamedThreads::GameThread, [WeakOwner, CId, Text]()
+                        {
+                            if (USMLWebSocketServer* O = WeakOwner.Get())
+                                O->Internal_OnClientMessage(CId, Text);
+                        });
+                    }
+
+                    Client.bInFragment = false;
+                    Client.FragmentBuffer.Reset();
+                }
             }
         }
 
