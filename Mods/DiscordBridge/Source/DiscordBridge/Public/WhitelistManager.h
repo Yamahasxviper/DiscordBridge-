@@ -1,6 +1,7 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 
 #pragma once
+
 #include "CoreMinimal.h"
 
 /** A single whitelist entry with optional EOS PUID, expiry, and group. */
