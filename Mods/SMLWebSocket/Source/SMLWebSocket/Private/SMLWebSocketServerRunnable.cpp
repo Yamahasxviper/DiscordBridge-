@@ -354,10 +354,20 @@ bool FSMLWebSocketServerRunnable::PerformHandshake(FClientState& Client)
                 TEXT("Content-Length: 0\r\n")
                 TEXT("Connection: close\r\n\r\n");
             FTCHARToUTF8 R401Utf8(*Response401);
+            const int32 R401Len = R401Utf8.Length();
             int32 Sent401 = 0;
-            Client.Socket->Send(
-                reinterpret_cast<const uint8*>(R401Utf8.Get()),
-                R401Utf8.Length(), Sent401);
+            while (Sent401 < R401Len)
+            {
+                int32 Sent = 0;
+                if (!Client.Socket->Send(
+                        reinterpret_cast<const uint8*>(R401Utf8.Get()) + Sent401,
+                        R401Len - Sent401, Sent)
+                    || Sent <= 0)
+                {
+                    break; // best-effort: connection is being rejected anyway
+                }
+                Sent401 += Sent;
+            }
             UE_LOG(LogWSServer, Warning, TEXT("WSServer: Rejected client — invalid or missing API token."));
             return false;
         }
