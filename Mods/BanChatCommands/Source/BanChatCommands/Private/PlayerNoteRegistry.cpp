@@ -9,6 +9,9 @@
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
 #include "HAL/PlatformFileManager.h"
+#include "HAL/FileManager.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogPlayerNoteRegistry, Log, All);
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  USubsystem lifecycle
@@ -27,7 +30,7 @@ void UPlayerNoteRegistry::Initialize(FSubsystemCollectionBase& Collection)
 
     LoadFromFile();
 
-    UE_LOG(LogBanChatCommands, Log,
+    UE_LOG(LogPlayerNoteRegistry, Log,
         TEXT("PlayerNoteRegistry: loaded %s (%d note(s))"),
         *FilePath, Notes.Num());
 }
@@ -118,7 +121,7 @@ void UPlayerNoteRegistry::LoadFromFile()
     TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(RawJson);
     if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
     {
-        UE_LOG(LogBanChatCommands, Warning,
+        UE_LOG(LogPlayerNoteRegistry, Warning,
             TEXT("PlayerNoteRegistry: failed to parse %s — starting empty"), *FilePath);
         return;
     }
@@ -175,16 +178,23 @@ bool UPlayerNoteRegistry::SaveToFile() const
     TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonStr);
     if (!FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
     {
-        UE_LOG(LogBanChatCommands, Error,
+        UE_LOG(LogPlayerNoteRegistry, Error,
             TEXT("PlayerNoteRegistry: failed to serialize notes"));
         return false;
     }
 
-    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath,
+    const FString TmpPath = FilePath + TEXT(".tmp");
+    if (!FFileHelper::SaveStringToFile(JsonStr, *TmpPath,
         FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
-        UE_LOG(LogBanChatCommands, Error,
-            TEXT("PlayerNoteRegistry: failed to write %s"), *FilePath);
+        UE_LOG(LogPlayerNoteRegistry, Error,
+            TEXT("PlayerNoteRegistry: failed to write temp file %s"), *TmpPath);
+        return false;
+    }
+    if (!IFileManager::Get().Move(*FilePath, *TmpPath, /*bReplace=*/true))
+    {
+        UE_LOG(LogPlayerNoteRegistry, Error,
+            TEXT("PlayerNoteRegistry: failed to replace %s with temp file"), *FilePath);
         return false;
     }
 

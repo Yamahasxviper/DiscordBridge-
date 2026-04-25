@@ -66,5 +66,14 @@ private:
     void OnLocalBanRemoved(const FString& Uid, const FString& PlayerName);
 
     /** Active WebSocket client connections to each peer URL. */
+    UPROPERTY()
     TArray<USMLWebSocketClient*> PeerClients;
+
+    /**
+     * Re-entrancy guard set while OnPeerMessage is applying a peer-received ban.
+     * Prevents OnLocalBanAdded from re-broadcasting that ban back to the peer
+     * that just sent it (and causing an infinite broadcast loop).
+     * Only ever accessed on the game thread.
+     */
+    bool bProcessingPeerBan = false;
 };

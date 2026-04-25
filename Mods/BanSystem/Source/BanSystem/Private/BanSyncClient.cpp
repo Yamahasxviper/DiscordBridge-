@@ -40,6 +40,8 @@ void UBanSyncClient::Initialize(FSubsystemCollectionBase& Collection)
 
         // Auto-reconnect with default parameters.
         Client->bAutoReconnect = true;
+        Client->ReconnectInitialDelaySeconds = 5.0f;
+        Client->MaxReconnectDelaySeconds     = 60.0f;
         Client->Connect(Url, TArray<FString>(), TMap<FString, FString>());
 
         PeerClients.Add(Client);
@@ -125,6 +127,11 @@ void UBanSyncClient::BroadcastUnban(const FString& Uid, const FString& PlayerNam
 
 void UBanSyncClient::OnLocalBanAdded(const FBanEntry& Entry)
 {
+    // Do not re-broadcast a ban that was just applied from a peer message.
+    // Without this guard, OnPeerMessage → DB->AddBan() → OnBanAdded →
+    // OnLocalBanAdded → BroadcastBan() would create an infinite loop.
+    if (bProcessingPeerBan) return;
+
     // Skip IP bans (Platform=="IP") from sync by default to avoid interfering
     // with peer-specific CIDR bans.
     if (Entry.Platform == TEXT("IP")) return;
@@ -215,7 +222,13 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
             ? FDateTime(0)
             : Now + FTimespan::FromMinutes(DurationMinutes);
 
-        if (DB->AddBan(Ban))
+        // Set the re-entrancy guard so that AddBan()'s OnBanAdded broadcast
+        // does not cause OnLocalBanAdded to re-forward this ban back to peers.
+        bProcessingPeerBan = true;
+        const bool bAdded = DB->AddBan(Ban);
+        bProcessingPeerBan = false;
+
+        if (bAdded)
         {
             if (UWorld* World = GI->GetWorld())
                 UBanEnforcer::KickConnectedPlayer(World, Uid, Ban.GetKickMessage());

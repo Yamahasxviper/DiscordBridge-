@@ -68,8 +68,11 @@ public:
     /**
      * Delete all expired temporary bans.
      * Returns the number of bans removed.
+     * When bSilent is true, OnBanRemoved is NOT broadcast for each removed entry
+     * (use this during Initialize() to avoid sending Discord notifications for
+     * bans that expired while the server was offline).
      */
-    int32 PruneExpiredBans();
+    int32 PruneExpiredBans(bool bSilent = false);
 
     // ── Read ──────────────────────────────────────────────────────────────
 

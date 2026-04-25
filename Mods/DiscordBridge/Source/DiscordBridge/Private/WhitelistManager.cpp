@@ -4,6 +4,7 @@
 #include "Logging/LogMacros.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -20,6 +21,7 @@ bool                           FWhitelistManager::bEnabled  = false;
 TArray<FWhitelistEntry>        FWhitelistManager::Entries;
 TArray<FWhitelistAuditEntry>   FWhitelistManager::AuditLog;
 int32                          FWhitelistManager::MaxSlots  = 0;
+FCriticalSection               FWhitelistManager::Mutex;
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -36,6 +38,7 @@ FString FWhitelistManager::GetFilePath()
 
 void FWhitelistManager::Load(bool bDefaultEnabled)
 {
+	FScopeLock Lock(&Mutex);
 	const FString FilePath = GetFilePath();
 
 	if (!FPlatformFileManager::Get().GetPlatformFile().FileExists(*FilePath))
@@ -44,7 +47,7 @@ void FWhitelistManager::Load(bool bDefaultEnabled)
 		UE_LOG(LogWhitelistManager, Display,
 			TEXT("Whitelist file not found — creating default at %s (enabled=%s)"),
 			*FilePath, bEnabled ? TEXT("true") : TEXT("false"));
-		Save();
+		Save_Locked();
 		return;
 	}
 
@@ -64,7 +67,7 @@ void FWhitelistManager::Load(bool bDefaultEnabled)
 			TEXT("Whitelist JSON is malformed — resetting to defaults"));
 		bEnabled = bDefaultEnabled;
 		Entries.Empty();
-		Save();
+		Save_Locked();
 		return;
 	}
 
@@ -85,9 +88,9 @@ void FWhitelistManager::Load(bool bDefaultEnabled)
 		{
 			if (Val->Type == EJson::String)
 			{
-				// Legacy: plain string
+				// Legacy: plain string — store as-is; comparisons are case-insensitive.
 				FWhitelistEntry E;
-				E.Name      = Val->AsString().ToLower();
+				E.Name      = Val->AsString();
 				E.EosPUID   = TEXT("");
 				E.ExpiresAt = FDateTime(0);
 				Entries.Add(E);
@@ -98,9 +101,8 @@ void FWhitelistManager::Load(bool bDefaultEnabled)
 				if (Val->TryGetObject(ObjPtr) && ObjPtr)
 				{
 					FWhitelistEntry E;
-					FString NameStr;
-					(*ObjPtr)->TryGetStringField(TEXT("name"), NameStr);
-					E.Name = NameStr.ToLower();
+					// Store the original display name as loaded; all comparisons use ToLower().
+					(*ObjPtr)->TryGetStringField(TEXT("name"), E.Name);
 					(*ObjPtr)->TryGetStringField(TEXT("eos_puid"), E.EosPUID);
 					(*ObjPtr)->TryGetStringField(TEXT("group"), E.Group);
 					FString ExpiresStr;
@@ -140,8 +142,19 @@ void FWhitelistManager::Load(bool bDefaultEnabled)
 		Entries.Num());
 }
 
-void FWhitelistManager::Save()
+// Internal: caller must already hold Mutex.
+static bool WhitelistAtomicSave(const FString& JsonStr, const FString& FilePath)
 {
+	const FString TmpPath = FilePath + TEXT(".tmp");
+	if (!FFileHelper::SaveStringToFile(JsonStr, *TmpPath,
+		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+		return false;
+	return IFileManager::Get().Move(*FilePath, *TmpPath, /*bReplace=*/true);
+}
+
+void FWhitelistManager::Save_Locked()
+{
+	// Caller must already hold Mutex.
 	const FString FilePath = GetFilePath();
 	FPlatformFileManager::Get().GetPlatformFile().CreateDirectoryTree(*FPaths::GetPath(FilePath));
 
@@ -184,8 +197,7 @@ void FWhitelistManager::Save()
 		return;
 	}
 
-	if (!FFileHelper::SaveStringToFile(OutJson, *FilePath,
-		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	if (!WhitelistAtomicSave(OutJson, FilePath))
 	{
 		UE_LOG(LogWhitelistManager, Error,
 			TEXT("Failed to save whitelist to %s"), *FilePath);
@@ -195,20 +207,29 @@ void FWhitelistManager::Save()
 		TEXT("Whitelist saved to %s"), *FilePath);
 }
 
+void FWhitelistManager::Save()
+{
+	FScopeLock Lock(&Mutex);
+	Save_Locked();
+}
+
 bool FWhitelistManager::IsEnabled()
 {
+	FScopeLock Lock(&Mutex);
 	return bEnabled;
 }
 
 void FWhitelistManager::SetEnabled(bool bNewEnabled, const FString& AdminName)
 {
+	FScopeLock Lock(&Mutex);
 	bEnabled = bNewEnabled;
 	LogAudit(AdminName, bNewEnabled ? TEXT("enable") : TEXT("disable"), TEXT("whitelist"));
-	Save();
+	Save_Locked();
 }
 
 bool FWhitelistManager::IsWhitelisted(const FString& PlayerName, const FString& EosPUID)
 {
+	FScopeLock Lock(&Mutex);
 	const FString LowerName = PlayerName.ToLower();
 	const FDateTime Now = FDateTime::UtcNow();
 	for (const FWhitelistEntry& E : Entries)
@@ -216,20 +237,21 @@ bool FWhitelistManager::IsWhitelisted(const FString& PlayerName, const FString& 
 		// Skip expired entries
 		if (E.ExpiresAt.GetTicks() > 0 && E.ExpiresAt <= Now) continue;
 
-		if (E.Name == LowerName) return true;
-		if (!EosPUID.IsEmpty() && !E.EosPUID.IsEmpty() && E.EosPUID == EosPUID) return true;
+		if (E.Name.Equals(LowerName, ESearchCase::IgnoreCase)) return true;
+		if (!EosPUID.IsEmpty() && !E.EosPUID.IsEmpty() && E.EosPUID.Equals(EosPUID, ESearchCase::IgnoreCase)) return true;
 	}
 	return false;
 }
 
 bool FWhitelistManager::IsWhitelistedByPUID(const FString& EosPUID)
 {
+	FScopeLock Lock(&Mutex);
 	if (EosPUID.IsEmpty()) return false;
 	const FDateTime Now = FDateTime::UtcNow();
 	for (const FWhitelistEntry& E : Entries)
 	{
 		if (E.ExpiresAt.GetTicks() > 0 && E.ExpiresAt <= Now) continue;
-		if (!E.EosPUID.IsEmpty() && E.EosPUID == EosPUID) return true;
+		if (!E.EosPUID.IsEmpty() && E.EosPUID.Equals(EosPUID, ESearchCase::IgnoreCase)) return true;
 	}
 	return false;
 }
@@ -240,6 +262,8 @@ bool FWhitelistManager::AddPlayer(const FString& PlayerName,
                                    FDateTime      ExpiresAt,
                                    const FString& Group)
 {
+	FScopeLock Lock(&Mutex);
+
 	// Capacity check — only count active (non-expired) entries so that
 	// expired slots do not permanently consume whitelist capacity.
 	if (MaxSlots > 0)
@@ -255,31 +279,32 @@ bool FWhitelistManager::AddPlayer(const FString& PlayerName,
 			return false;
 	}
 
-	const FString LowerName = PlayerName.ToLower();
-
 	// Duplicate check (by name or PUID) — skip expired entries so they can be re-added.
 	const FDateTime NowForDup = FDateTime::UtcNow();
 	for (const FWhitelistEntry& E : Entries)
 	{
 		if (E.ExpiresAt.GetTicks() > 0 && E.ExpiresAt <= NowForDup) continue;
-		if (E.Name == LowerName) return false;
-		if (!EosPUID.IsEmpty() && !E.EosPUID.IsEmpty() && E.EosPUID == EosPUID) return false;
+		if (E.Name.Equals(PlayerName, ESearchCase::IgnoreCase)) return false;
+		if (!EosPUID.IsEmpty() && !E.EosPUID.IsEmpty() &&
+		    E.EosPUID.Equals(EosPUID, ESearchCase::IgnoreCase)) return false;
 	}
 
 	FWhitelistEntry NewEntry;
-	NewEntry.Name      = LowerName;
+	NewEntry.Name      = PlayerName; // store original casing; comparisons are case-insensitive
 	NewEntry.EosPUID   = EosPUID;
 	NewEntry.ExpiresAt = ExpiresAt;
 	NewEntry.Group     = Group;
 	Entries.Add(NewEntry);
 
 	LogAudit(AdminName, TEXT("add"), PlayerName);
-	Save();
+	Save_Locked();
 	return true;
 }
 
 bool FWhitelistManager::RemovePlayer(const FString& PlayerName, const FString& EosPUID, const FString& AdminName)
 {
+	FScopeLock Lock(&Mutex);
+
 	int32 RemovedIdx = INDEX_NONE;
 
 	if (!EosPUID.IsEmpty())
@@ -287,7 +312,7 @@ bool FWhitelistManager::RemovePlayer(const FString& PlayerName, const FString& E
 		// Remove by PUID
 		for (int32 i = 0; i < Entries.Num(); ++i)
 		{
-			if (Entries[i].EosPUID == EosPUID)
+			if (Entries[i].EosPUID.Equals(EosPUID, ESearchCase::IgnoreCase))
 			{
 				RemovedIdx = i;
 				break;
@@ -296,10 +321,9 @@ bool FWhitelistManager::RemovePlayer(const FString& PlayerName, const FString& E
 	}
 	else
 	{
-		const FString LowerName = PlayerName.ToLower();
 		for (int32 i = 0; i < Entries.Num(); ++i)
 		{
-			if (Entries[i].Name == LowerName)
+			if (Entries[i].Name.Equals(PlayerName, ESearchCase::IgnoreCase))
 			{
 				RemovedIdx = i;
 				break;
@@ -312,12 +336,13 @@ bool FWhitelistManager::RemovePlayer(const FString& PlayerName, const FString& E
 	const FString RemovedName = Entries[RemovedIdx].Name;
 	Entries.RemoveAt(RemovedIdx);
 	LogAudit(AdminName, TEXT("remove"), RemovedName);
-	Save();
+	Save_Locked();
 	return true;
 }
 
 TArray<FString> FWhitelistManager::GetAll()
 {
+	FScopeLock Lock(&Mutex);
 	TArray<FString> Names;
 	for (const FWhitelistEntry& E : Entries)
 		Names.Add(E.Name);
@@ -326,11 +351,13 @@ TArray<FString> FWhitelistManager::GetAll()
 
 TArray<FWhitelistEntry> FWhitelistManager::GetAllEntries()
 {
+	FScopeLock Lock(&Mutex);
 	return Entries;
 }
 
 void FWhitelistManager::LogAudit(const FString& Admin, const FString& Action, const FString& Target)
 {
+	// Caller must already hold Mutex.
 	FWhitelistAuditEntry Entry;
 	Entry.Timestamp = FDateTime::UtcNow();
 	Entry.AdminName = Admin;
@@ -345,6 +372,7 @@ void FWhitelistManager::LogAudit(const FString& Admin, const FString& Action, co
 
 TArray<FWhitelistAuditEntry> FWhitelistManager::GetAuditLog(int32 MaxEntries)
 {
+	FScopeLock Lock(&Mutex);
 	if (MaxEntries <= 0)  MaxEntries = 20;
 	if (MaxEntries > 100) MaxEntries = 100;
 
@@ -361,11 +389,13 @@ TArray<FWhitelistAuditEntry> FWhitelistManager::GetAuditLog(int32 MaxEntries)
 
 int32 FWhitelistManager::GetMaxSlots()
 {
+	FScopeLock Lock(&Mutex);
 	return MaxSlots;
 }
 
 void FWhitelistManager::SetMaxSlots(int32 InMaxSlots)
 {
+	FScopeLock Lock(&Mutex);
 	MaxSlots = InMaxSlots;
 }
 
@@ -386,6 +416,7 @@ FTimespan FWhitelistManager::ParseDuration(const FString& DurStr)
 
 void FWhitelistManager::RemoveExpiredEntries(TArray<FString>& OutExpiredNames)
 {
+	FScopeLock Lock(&Mutex);
 	const FDateTime Now = FDateTime::UtcNow();
 	TArray<int32> ToRemove;
 	for (int32 i = 0; i < Entries.Num(); ++i)
@@ -402,20 +433,19 @@ void FWhitelistManager::RemoveExpiredEntries(TArray<FString>& OutExpiredNames)
 		// Remove in reverse order to preserve indices
 		for (int32 i = ToRemove.Num() - 1; i >= 0; --i)
 			Entries.RemoveAt(ToRemove[i]);
-		Save();
+		Save_Locked();
 	}
 }
 
 TArray<FWhitelistEntry> FWhitelistManager::Search(const FString& PartialName)
 {
+	FScopeLock Lock(&Mutex);
 	TArray<FWhitelistEntry> Result;
 	if (PartialName.IsEmpty()) return Result;
-	const FString Lower = PartialName.ToLower();
 	for (const FWhitelistEntry& E : Entries)
 	{
-		if (E.Name.Contains(Lower, ESearchCase::IgnoreCase))
+		if (E.Name.Contains(PartialName, ESearchCase::IgnoreCase))
 			Result.Add(E);
 	}
 	return Result;
 }
-

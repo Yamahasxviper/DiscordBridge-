@@ -11,6 +11,7 @@
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
 #include "HAL/PlatformFileManager.h"
+#include "HAL/FileManager.h"
 
 DEFINE_LOG_CATEGORY(LogBanAuditLog);
 
@@ -213,11 +214,18 @@ bool UBanAuditLog::SaveToFile() const
         return false;
     }
 
-    if (!FFileHelper::SaveStringToFile(JsonStr, *FilePath,
+    const FString TmpPath = FilePath + TEXT(".tmp");
+    if (!FFileHelper::SaveStringToFile(JsonStr, *TmpPath,
         FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
         UE_LOG(LogBanAuditLog, Error,
-            TEXT("BanAuditLog: failed to write %s"), *FilePath);
+            TEXT("BanAuditLog: failed to write temp file %s"), *TmpPath);
+        return false;
+    }
+    if (!IFileManager::Get().Move(*FilePath, *TmpPath, /*bReplace=*/true))
+    {
+        UE_LOG(LogBanAuditLog, Error,
+            TEXT("BanAuditLog: failed to replace %s with temp file"), *FilePath);
         return false;
     }
     return true;

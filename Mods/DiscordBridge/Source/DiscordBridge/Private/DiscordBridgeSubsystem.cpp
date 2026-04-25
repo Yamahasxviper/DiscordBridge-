@@ -212,6 +212,12 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		UE_LOG(LogDiscordBridge, Warning,
 		       TEXT("DiscordBridge: BotToken or ChannelId is not configured. "
 		            "Edit Mods/DiscordBridge/Config/DefaultDiscordBridge.ini to enable the bridge."));
+		// Stop the ChatManager bind ticker — it serves no purpose without a bot connection.
+		if (ChatManagerBindTickHandle.IsValid())
+		{
+			FTSTicker::GetCoreTicker().RemoveTicker(ChatManagerBindTickHandle);
+			ChatManagerBindTickHandle.Reset();
+		}
 		return;
 	}
 
