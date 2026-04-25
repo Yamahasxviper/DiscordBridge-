@@ -349,7 +349,7 @@ void FBanChatCommandsModule::RestoreDefaultConfigIfNeeded()
     {
         FString Existing;
         FFileHelper::LoadFileToString(Existing, *DefaultIniPath);
-        if (Existing.Contains(TEXT("# ")))
+        if (Existing.Contains(TEXT("#")))
             return; // comment lines present — leave as-is
     }
 
@@ -486,6 +486,7 @@ bool FBanChatCommandsModule::OnMuteExpiryTick(float /*DeltaTime*/)
     // Walk all game instances and tick UMuteRegistry on each.
     // In practice there is one game instance on a dedicated server, but this
     // approach is future-proof if multiple worlds/instances ever run.
+    if (!GEngine) return true;
     for (const FWorldContext& WCtx : GEngine->GetWorldContexts())
     {
         UGameInstance* GI = WCtx.OwningGameInstance;

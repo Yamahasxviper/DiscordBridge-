@@ -200,8 +200,8 @@ void FBanDiscordNotifier::NotifyPlayerKicked(const FString& PlayerName, const FS
         Field(TEXT("Reason"),    Reason)     + TEXT(",") +
         Field(TEXT("Kicked By"), KickedBy);
 
-    // Orange: 15105570
-    PostWebhook(BuildEmbed(15105570, TEXT("👢 Player Kicked"), Fields));
+    // Red: 15158332
+    PostWebhook(BuildEmbed(15158332, TEXT("👢 Player Kicked"), Fields));
 
     // WebSocket push
     {
