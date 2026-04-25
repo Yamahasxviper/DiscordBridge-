@@ -1308,7 +1308,7 @@ EExecutionStatus ABanListChatCommand::ExecuteCommand_Implementation(
     if (TotalPages > 1)
     {
         Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] Use /banlist <page> to view more.")),
+            TEXT("[BanChatCommands] Use /banlist <page> to view more."),
             FLinearColor::White);
     }
 
@@ -3048,7 +3048,7 @@ EExecutionStatus AMuteListChatCommand::ExecuteCommand_Implementation(
     if (TotalPages > 1)
     {
         Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] Use /mutelist <page> to view more.")),
+            TEXT("[BanChatCommands] Use /mutelist <page> to view more."),
             FLinearColor::White);
     }
 

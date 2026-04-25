@@ -918,8 +918,8 @@ void UBanDiscordSubsystem::OnPostLoginModerationReminder(AGameModeBase* GameMode
 			}
 			else
 			{
-				const int32 RemainingMins = FMath::Max(
-					0, static_cast<int32>((MuteEntry.ExpireDate - FDateTime::UtcNow()).GetTotalMinutes()));
+				const int32 RemainingMins = static_cast<int32>(FMath::Max(
+					0.0, (MuteEntry.ExpireDate - FDateTime::UtcNow()).GetTotalMinutes()));
 				MuteStatus = FString::Printf(
 					TEXT("for %s more (until %s UTC)"),
 					*BanDiscordHelpers::FormatDuration(RemainingMins),
@@ -2436,7 +2436,13 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 
 	const FDateTime ExtendBase = FMath::Max(Entry.ExpireDate, FDateTime::UtcNow());
 	Entry.ExpireDate = ExtendBase + FTimespan::FromMinutes(Minutes);
-	DB->AddBan(Entry);
+	if (!DB->AddBan(Entry))
+	{
+		Respond(ChannelId,
+			FString::Printf(TEXT("❌ Failed to save extended ban for **%s** — database write error."),
+				*BanDiscordHelpers::EscapeMarkdown(DisplayName)));
+		return;
+	}
 
 	// Write to audit log so Discord-issued extend operations appear alongside in-game extends.
 	if (UGameInstance* GI = GetGameInstance())
@@ -3558,7 +3564,7 @@ void UBanDiscordSubsystem::HandleDismissAppealCommand(const TArray<FString>& Arg
 
 	if (Registry->DeleteAppeal(AppealId))
 	{
-		UE_LOG(LogTemp, Log,
+		UE_LOG(LogBanDiscord, Log,
 		       TEXT("BanDiscordSubsystem: Appeal #%lld dismissed by '%s'."),
 		       AppealId, *SenderName);
 
@@ -3679,7 +3685,7 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 		}
 	}
 
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: Appeal #%lld approved by '%s' (uid=%s, unbanned=%s)."),
 	       AppealId, *SenderName, *UnbannedUid, bUnbanned ? TEXT("yes") : TEXT("no"));
 }
@@ -3761,7 +3767,7 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 		}
 	}
 
-	UE_LOG(LogTemp, Log,
+	UE_LOG(LogBanDiscord, Log,
 	       TEXT("BanDiscordSubsystem: Appeal #%lld denied by '%s'."), AppealId, *SenderName);
 }
 
@@ -4326,7 +4332,7 @@ void UBanDiscordSubsystem::HandleBulkBanCommand(const TArray<FString>& Args,
 		if (Args[i] == TEXT("--")) { SepIdx = i; break; }
 	}
 
-	if (SepIdx > 0 && SepIdx < Args.Num() - 1)
+	if (SepIdx >= 0 && SepIdx < Args.Num() - 1)
 	{
 		for (int32 i = 0; i < SepIdx; ++i)
 			Uids.Add(Args[i]);
@@ -6579,7 +6585,7 @@ FString UBanDiscordSubsystem::ExecutePanelMuteCheck(const FString& PlayerArg) co
 	else
 	{
 		const FTimespan Remaining = Entry.ExpireDate - FDateTime::UtcNow();
-		const int32 TotalMins = FMath::Max(0, static_cast<int32>(Remaining.GetTotalMinutes()));
+		const int32 TotalMins = static_cast<int32>(FMath::Max(0.0, Remaining.GetTotalMinutes()));
 		ExpiryStr = FString::Printf(TEXT("for **%s** more (expires %s UTC)"),
 			*BanDiscordHelpers::FormatDuration(TotalMins),
 			*Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")));

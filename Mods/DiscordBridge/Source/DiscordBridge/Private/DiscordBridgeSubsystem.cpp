@@ -2531,8 +2531,9 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 			if (WarnReg)
 			{
 				const FDateTime Now       = FDateTime::UtcNow();
-				const FTimespan Window    = FTimespan::FromMinutes(BanCfg->ChatFilterAutoWarnWindowMinutes > 0
-					? BanCfg->ChatFilterAutoWarnWindowMinutes : 10);
+				const int32 EffectiveWindowMinutes = BanCfg->ChatFilterAutoWarnWindowMinutes > 0
+					? BanCfg->ChatFilterAutoWarnWindowMinutes : 10;
+				const FTimespan Window    = FTimespan::FromMinutes(EffectiveWindowMinutes);
 
 				// Update the hit-count tracker.
 				FFilterHitRecord& Rec = ChatFilterHits.FindOrAdd(PlayerName);
@@ -5401,15 +5402,17 @@ return;
 
 FString PlayerList;
 int32 Idx = 1;
+int32 NonNullCount = 0;
 for (APlayerState* PS : GS->PlayerArray)
 {
 if (!PS) continue;
 PlayerList += FString::Printf(TEXT("%d. **%s**\n"), Idx++, *PS->GetPlayerName());
+++NonNullCount;
 }
 
 TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
 EmbedObj->SetStringField(TEXT("title"),
-FString::Printf(TEXT("👥 Online Players (%d)"), GS->PlayerArray.Num()));
+FString::Printf(TEXT("👥 Online Players (%d)"), NonNullCount));
 EmbedObj->SetNumberField(TEXT("color"), 3066993); // green
 EmbedObj->SetStringField(TEXT("description"), PlayerList);
 EmbedObj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
@@ -6238,7 +6241,7 @@ if (!Query.IsEmpty()) SubCmd += TEXT(" ") + Query;
 }
 // "on", "off", "status" carry no extra arguments.
 
-HandleWhitelistCommand(SubCmd, AuthorName, Config.ChannelId, AuthorId);
+HandleWhitelistCommand(SubCmd, AuthorName, InteractionChannelId, AuthorId);
 return;
 }
 
