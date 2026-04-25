@@ -157,6 +157,11 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				for (const TPair<FString, FString>& SLAPair : TicketChannelToOpener)
 				{
 					const FString& SlaChanId = SLAPair.Key;
+
+					// Skip if SLA warning already sent for this ticket.
+					if (SlaWarnedChannels.Contains(SlaChanId)) continue;
+
+					// Also skip if staff has already replied (no need to warn).
 					const bool* bReplied = TicketChannelStaffReplied.Find(SlaChanId);
 					if (bReplied && *bReplied) continue;
 
@@ -176,8 +181,12 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 							if (!NChan.IsEmpty())
 								SlaB->SendDiscordChannelMessage(NChan, WarnMsg);
 						}
-						// Mark as warned to prevent repeated SLA warnings for this ticket.
-						TicketChannelStaffReplied.Add(SlaChanId, true);
+						// Record that the SLA warning was sent for this ticket so it
+						// is not repeated.  Use SlaWarnedChannels instead of
+						// TicketChannelStaffReplied so the "staff replied" flag stays
+						// accurate (it is persisted; overwriting it would incorrectly
+						// show the ticket as staff-answered after a restart).
+						SlaWarnedChannels.Add(SlaChanId);
 					}
 				}
 				return true;
@@ -321,6 +330,7 @@ void UTicketSubsystem::Deinitialize()
 	TicketChannelToTags.Empty();
 	TicketChannelToNotes.Empty();
 	TicketChannelStaffReplied.Empty();
+	SlaWarnedChannels.Empty();
 	TicketChannelToReminder.Empty();
 	TicketBlacklist.Empty();
 
@@ -752,6 +762,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		TicketChannelToNotes.Remove(SourceChannelId);
 		ReopenedOnceChannels.Remove(SourceChannelId);
 		TicketChannelStaffReplied.Remove(SourceChannelId);
+		SlaWarnedChannels.Remove(SourceChannelId);
 		TicketChannelToReminder.Remove(SourceChannelId);
 		SaveTicketState();
 
@@ -1011,6 +1022,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		TicketChannelToTags.Remove(SourceChannelId);
 		TicketChannelToNotes.Remove(SourceChannelId);
 		TicketChannelStaffReplied.Remove(SourceChannelId);
+		SlaWarnedChannels.Remove(SourceChannelId);
 		TicketChannelToReminder.Remove(SourceChannelId);
 		if (Config.bAllowMultipleTicketTypes && !RemovedOpener.IsEmpty() && !RemovedType.IsEmpty())
 		{
@@ -3950,6 +3962,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		TicketChannelToTags.Remove(SourceChannelId);
 		TicketChannelToNotes.Remove(SourceChannelId);
 		TicketChannelStaffReplied.Remove(SourceChannelId);
+		SlaWarnedChannels.Remove(SourceChannelId);
 		TicketChannelToReminder.Remove(SourceChannelId);
 		ReopenedOnceChannels.Remove(SourceChannelId);
 		if (Config.bAllowMultipleTicketTypes && !MergeRemovedOpener.IsEmpty() && !MergeRemovedType.IsEmpty())
@@ -4372,6 +4385,7 @@ void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
 	TicketChannelToTags.Remove(ChannelId);
 	TicketChannelToNotes.Remove(ChannelId);
 	TicketChannelStaffReplied.Remove(ChannelId);
+	SlaWarnedChannels.Remove(ChannelId);
 	TicketChannelToReminder.Remove(ChannelId);
 	ReopenedOnceChannels.Remove(ChannelId);
 	if (Config.bAllowMultipleTicketTypes && !RemovedOpener.IsEmpty() && !RemovedType.IsEmpty())
@@ -4521,6 +4535,7 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 	TicketChannelToTags.Remove(ChannelId);
 	TicketChannelToNotes.Remove(ChannelId);
 	TicketChannelStaffReplied.Remove(ChannelId);
+	SlaWarnedChannels.Remove(ChannelId);
 	TicketChannelToReminder.Remove(ChannelId);
 	SaveTicketState();
 
