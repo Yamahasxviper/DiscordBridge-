@@ -802,6 +802,7 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 				UE_LOG(LogDiscordBridge, Log,
 				       TEXT("DiscordBridge: Guild ID set from GUILD_CREATE: %s"), *GuildId);
 			}
+			else
 			{
 				// The bot has been added to a second guild.  All moderation commands,
 				// role lookups, and channel operations target the first guild only.
@@ -1022,14 +1023,24 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 				{
 					if (bHasRole && !SyncUsername.IsEmpty())
 					{
-						FWhitelistManager::AddPlayer(SyncUsername, TEXT(""), TEXT("sync-role"));
+						if (FWhitelistManager::AddPlayer(SyncUsername, TEXT(""), TEXT("sync-role")))
+						{
+							PostWhitelistEvent(
+								FString::Printf(TEXT("**%s** added via Discord role sync (joined guild)"), *SyncUsername),
+								SyncUsername, TEXT("sync-role"), 3066993);
+						}
 					}
 				}
 				else // GUILD_MEMBER_UPDATE
 				{
 					if (bHasRole && !SyncUsername.IsEmpty())
 					{
-						FWhitelistManager::AddPlayer(SyncUsername, TEXT(""), TEXT("sync-role"));
+						if (FWhitelistManager::AddPlayer(SyncUsername, TEXT(""), TEXT("sync-role")))
+						{
+							PostWhitelistEvent(
+								FString::Printf(TEXT("**%s** added via Discord role sync (role assigned)"), *SyncUsername),
+								SyncUsername, TEXT("sync-role"), 3066993);
+						}
 					}
 					else if (!bHasRole && !SyncUsername.IsEmpty())
 					{
@@ -4241,17 +4252,54 @@ void UDiscordBridgeSubsystem::SendInGameJoinBroadcast(const FString& PlayerName)
 
 void UDiscordBridgeSubsystem::HandleInGameVerify(const FString& PlayerName, const FString& Code)
 {
+	// Locate the invoking player's controller early so we can send private error
+	// feedback via the RCO instead of broadcasting to all players, and also to
+	// resolve the EOS PUID used by the whitelist on the success path.
+	APlayerController* InvokerPC    = nullptr;
+	FString            ResolvedEosPUID;
+	if (UWorld* VerWorld = GetWorld())
+	{
+		for (FConstPlayerControllerIterator It = VerWorld->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* PC = It->Get();
+			if (!PC || !PC->PlayerState) continue;
+			if (PC->PlayerState->GetPlayerName() != PlayerName) continue;
+			InvokerPC = PC;
+			const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+			if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
+				ResolvedEosPUID = NetId.ToString().ToLower();
+			break;
+		}
+	}
+
+	// Helper: send a message to the invoking player only.
+	// Falls back to a server-wide broadcast when the player's RCO is unavailable.
+	auto SendPrivate = [this, InvokerPC](const FString& Msg, FLinearColor Color)
+	{
+		if (AFGPlayerController* FGC = Cast<AFGPlayerController>(InvokerPC))
+		{
+			if (USMLRemoteCallObject* RCO = FGC->GetRemoteCallObjectOfClass<USMLRemoteCallObject>())
+			{
+				RCO->SendChatMessage(Msg, Color);
+				return;
+			}
+		}
+		SendGameChatStatusMessage(Msg);
+	};
+
 	const FString* DiscordUserIdPtr = PendingVerifications.Find(Code);
 	if (DiscordUserIdPtr && !DiscordUserIdPtr->IsEmpty())
 	{
 		const FDateTime* ExpiryPtr = PendingVerificationExpiry.Find(Code);
 		if (!ExpiryPtr || *ExpiryPtr <= FDateTime::UtcNow())
 		{
-			// Code expired.
+			// Code expired — clean up and notify the invoking player privately.
 			PendingVerifications.Remove(Code);
 			PendingVerificationNames.Remove(Code);
 			PendingVerificationExpiry.Remove(Code);
-			SendGameChatStatusMessage(TEXT("[DiscordBridge] Verification code has expired. Please request a new one with /whitelist link."));
+			SendPrivate(
+				TEXT("[DiscordBridge] Verification code has expired. Please request a new one with /whitelist link."),
+				FLinearColor::Yellow);
 		}
 		else
 		{
@@ -4261,26 +4309,6 @@ void UDiscordBridgeSubsystem::HandleInGameVerify(const FString& PlayerName, cons
 			// /verify. The Discord-submitted name is kept only for the audit log.
 			const FString  AuditName     = NamePtr && !NamePtr->IsEmpty() ? *NamePtr : PlayerName;
 
-			// Resolve EosPUID from the currently-connected player controller whose
-			// name matches PlayerName. Use the safe FUniqueNetIdRepl accessors
-			// (GetType/ToString) – never dereference via operator-> on CSS DS.
-			FString ResolvedEosPUID;
-			if (UWorld* VerWorld = GetWorld())
-			{
-				for (FConstPlayerControllerIterator It = VerWorld->GetPlayerControllerIterator(); It; ++It)
-				{
-					APlayerController* VerPC = It->Get();
-					if (!VerPC || !VerPC->PlayerState) continue;
-					if (VerPC->PlayerState->GetPlayerName() != PlayerName) continue;
-					const FUniqueNetIdRepl& NetId = VerPC->PlayerState->GetUniqueId();
-					if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
-					{
-						ResolvedEosPUID = NetId.ToString().ToLower();
-					}
-					break;
-				}
-			}
-
 			PendingVerifications.Remove(Code);
 			PendingVerificationNames.Remove(Code);
 			PendingVerificationExpiry.Remove(Code);
@@ -4288,6 +4316,7 @@ void UDiscordBridgeSubsystem::HandleInGameVerify(const FString& PlayerName, cons
 			// Add using the real in-game player name and resolved EosPUID (may be empty).
 			if (FWhitelistManager::AddPlayer(PlayerName, ResolvedEosPUID, TEXT("[Verification]")))
 			{
+				// Announce success to all players — it is appropriate as a broadcast.
 				SendGameChatStatusMessage(FString::Printf(
 					TEXT("[DiscordBridge] Account linked! **%s** has been added to the whitelist."),
 					*PlayerName));
@@ -4312,14 +4341,19 @@ void UDiscordBridgeSubsystem::HandleInGameVerify(const FString& PlayerName, cons
 			}
 			else
 			{
-				SendGameChatStatusMessage(FString::Printf(
-					TEXT("[DiscordBridge] **%s** is already on the whitelist."), *PlayerName));
+				// Already whitelisted — notify the invoking player privately.
+				SendPrivate(
+					FString::Printf(TEXT("[DiscordBridge] **%s** is already on the whitelist."), *PlayerName),
+					FLinearColor::Yellow);
 			}
 		}
 	}
 	else
 	{
-		SendGameChatStatusMessage(TEXT("[DiscordBridge] Unknown or expired verification code."));
+		// Unknown code — notify the invoking player privately.
+		SendPrivate(
+			TEXT("[DiscordBridge] Unknown or expired verification code."),
+			FLinearColor::Red);
 	}
 }
 
