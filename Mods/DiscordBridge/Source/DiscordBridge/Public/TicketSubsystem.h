@@ -368,6 +368,16 @@ private:
 	/** Maps ticket channel ID to whether a staff member has replied (for SLA tracking). */
 	TMap<FString, bool> TicketChannelStaffReplied;
 
+	/**
+	 * Channel IDs for which the SLA warning has already been sent.
+	 * Separate from TicketChannelStaffReplied so that firing the SLA alert does
+	 * not falsely mark the ticket as staff-replied (which would be persisted and
+	 * incorrectly suppress future first-reply DMs and metrics after a restart).
+	 * Not persisted — a restart resets the dedup set, but that is acceptable
+	 * (at worst a duplicate SLA warning is sent for one still-open ticket).
+	 */
+	TSet<FString> SlaWarnedChannels;
+
 	/** Ticker handle for the SLA warning check.  Valid only when TicketSlaWarningMinutes > 0. */
 	FTSTicker::FDelegateHandle SlaCheckHandle;
 

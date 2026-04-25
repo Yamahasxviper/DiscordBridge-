@@ -94,7 +94,17 @@ namespace BanDbJson
             FString ExpireDateStr;
             if (Obj->TryGetStringField(TEXT("expireDate"), ExpireDateStr) && !ExpireDateStr.IsEmpty())
             {
-                FDateTime::ParseIso8601(*ExpireDateStr, OutEntry.ExpireDate);
+                if (!FDateTime::ParseIso8601(*ExpireDateStr, OutEntry.ExpireDate))
+                {
+                    // Malformed expireDate — treat as permanent so the ban is not
+                    // silently discarded by PruneExpiredBans (ExpireDate epoch < UtcNow()
+                    // would make IsExpired() return true, allowing the player to join).
+                    UE_LOG(LogBanDatabase, Warning,
+                        TEXT("BanDatabase: record uid='%s' has malformed expireDate '%s' — treating as permanent"),
+                        *OutEntry.Uid, *ExpireDateStr);
+                    OutEntry.bIsPermanent = true;
+                    OutEntry.ExpireDate   = FDateTime(0);
+                }
             }
             else
             {
@@ -620,10 +630,12 @@ FString UBanDatabase::Backup(const FString& BackupDir, int32 MaxKeep) const
     TArray<FString> Files;
     IFileManager::Get().FindFiles(Files, *(BackupDir / TEXT("bans_*.json")), true, false);
     Files.Sort();
-    while (Files.Num() > MaxKeep)
+    // Files is sorted oldest-first by timestamp-stamped filename.
+    // Delete the surplus oldest entries in a single forward pass (O(n)).
+    const int32 ToDelete = Files.Num() - MaxKeep;
+    for (int32 i = 0; i < ToDelete; ++i)
     {
-        PF.DeleteFile(*(BackupDir / Files[0]));
-        Files.RemoveAt(0);
+        PF.DeleteFile(*(BackupDir / Files[i]));
     }
 
     return Dest;
