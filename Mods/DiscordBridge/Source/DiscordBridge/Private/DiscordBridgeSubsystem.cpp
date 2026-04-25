@@ -902,8 +902,8 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 						PendingWhitelistAppExpiry.Remove(TargetDiscordId);
 						RespondToInteraction(InteractionId, InteractionToken, 4,
 							FString::Printf(
-								TEXT(":red_circle: Whitelist application for **%s** (in-game: `%s`) has been denied."),
-								*TargetDiscordId, *PlayerNameCopy),
+								TEXT(":red_circle: Whitelist application for **%s** has been denied."),
+								*PlayerNameCopy),
 							/*bEphemeral=*/false);
 					}
 					else

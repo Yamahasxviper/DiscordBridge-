@@ -151,6 +151,12 @@ void UBanSyncClient::OnLocalBanAdded(const FBanEntry& Entry)
 
 void UBanSyncClient::OnLocalBanRemoved(const FString& Uid, const FString& PlayerName)
 {
+    // Do not re-broadcast an unban that was just applied from a peer message.
+    // Without this guard, OnPeerMessage → DB->RemoveBanByUid() → OnBanRemoved →
+    // OnLocalBanRemoved → BroadcastUnban() → peer receives it → DB->RemoveBanByUid() → …
+    // creates an infinite loop between the two servers whenever any unban fires.
+    if (bProcessingPeerBan) return;
+
     BroadcastUnban(Uid, PlayerName);
 }
 

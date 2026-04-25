@@ -57,12 +57,7 @@ void UPlayerWarningRegistry::AddWarning(const FString& Uid, const FString& Playe
     {
         FScopeLock Lock(&Mutex);
 
-        // Determine the next Id (max existing + 1).
-        int64 NextId = 1;
-        for (const FWarningEntry& W : Warnings)
-            if (W.Id >= NextId) NextId = W.Id + 1;
-
-        Entry.Id         = NextId;
+        Entry.Id         = NextId++;
         Entry.Uid        = Uid;
         Entry.PlayerName = PlayerName;
         Entry.Reason     = Reason;
@@ -85,13 +80,8 @@ void UPlayerWarningRegistry::AddWarning(const FWarningEntry& InEntry)
     {
         FScopeLock Lock(&Mutex);
 
-        // Determine the next Id (max existing + 1).
-        int64 NextId = 1;
-        for (const FWarningEntry& W : Warnings)
-            if (W.Id >= NextId) NextId = W.Id + 1;
-
         Entry = InEntry;
-        Entry.Id       = NextId;
+        Entry.Id       = NextId++;
         Entry.WarnDate = FDateTime::UtcNow();
 
         Warnings.Add(Entry);
@@ -176,11 +166,7 @@ void UPlayerWarningRegistry::AddWarning(const FString& Uid, const FString& Playe
     {
         FScopeLock Lock(&Mutex);
 
-        int64 NextId = 1;
-        for (const FWarningEntry& W : Warnings)
-            if (W.Id >= NextId) NextId = W.Id + 1;
-
-        Entry.Id         = NextId;
+        Entry.Id         = NextId++;
         Entry.Uid        = Uid;
         Entry.PlayerName = PlayerName;
         Entry.Reason     = Reason;
@@ -312,6 +298,11 @@ void UPlayerWarningRegistry::LoadFromFile()
                 Warnings.Add(Entry);
         }
     }
+
+    // Restore the O(1) counter from the loaded data so AddWarning never reuses an Id.
+    NextId = 1;
+    for (const FWarningEntry& W : Warnings)
+        if (W.Id >= NextId) NextId = W.Id + 1;
 }
 
 bool UPlayerWarningRegistry::SaveToFile() const

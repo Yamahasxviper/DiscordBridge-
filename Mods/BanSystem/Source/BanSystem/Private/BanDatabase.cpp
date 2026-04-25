@@ -381,16 +381,23 @@ bool UBanDatabase::AddBan(const FBanEntry& Entry)
 
 bool UBanDatabase::RemoveBanByUid(const FString& Uid)
 {
-    FString RemovedPlayerName;
-    bool bRemoved;
+    FBanEntry Ignored;
+    return RemoveBanByUid(Uid, Ignored);
+}
+
+bool UBanDatabase::RemoveBanByUid(const FString& Uid, FBanEntry& OutEntry)
+{
+    bool bRemoved = false;
 
     {
         FScopeLock Lock(&DbMutex);
 
-        // Capture player name before removal for the delegate.
+        // Capture the full entry before removal so callers have the data they
+        // need for notifications without a separate GetBanByUid() round-trip,
+        // eliminating the TOCTOU window.
         for (const FBanEntry& E : Bans)
         {
-            if (E.Uid.Equals(Uid, ESearchCase::IgnoreCase)) { RemovedPlayerName = E.PlayerName; break; }
+            if (E.Uid.Equals(Uid, ESearchCase::IgnoreCase)) { OutEntry = E; break; }
         }
 
         const int32 Removed = Bans.RemoveAll([&Uid](const FBanEntry& E){ return E.Uid.Equals(Uid, ESearchCase::IgnoreCase); });
@@ -399,7 +406,7 @@ bool UBanDatabase::RemoveBanByUid(const FString& Uid)
     }
 
     if (bRemoved)
-        OnBanRemoved.Broadcast(Uid, RemovedPlayerName);
+        OnBanRemoved.Broadcast(OutEntry.Uid, OutEntry.PlayerName);
 
     return bRemoved;
 }

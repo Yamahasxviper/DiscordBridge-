@@ -49,6 +49,17 @@ public:
     bool RemoveBanByUid(const FString& Uid);
 
     /**
+     * Atomically look up and remove a ban by its compound UID.
+     * If a matching record is found it is removed, OutEntry is filled with the
+     * deleted data, and the method returns true.  OutEntry is untouched on
+     * failure.  Use this overload when the caller needs the deleted entry's
+     * details (e.g. player name) for notifications — it eliminates the TOCTOU
+     * window that exists when GetBanByUid() + RemoveBanByUid() are called
+     * separately.
+     */
+    bool RemoveBanByUid(const FString& Uid, FBanEntry& OutEntry);
+
+    /**
      * Remove a ban by its integer row ID.
      * Returns true if a row was found and deleted.
      */

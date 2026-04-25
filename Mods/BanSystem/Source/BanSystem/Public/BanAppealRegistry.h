@@ -89,6 +89,7 @@ private:
     FString GetRegistryPath() const;
 
     TArray<FBanAppealEntry> Appeals;
+    int64                   NextId = 1;
     mutable FCriticalSection Mutex;
     FString FilePath;
 };

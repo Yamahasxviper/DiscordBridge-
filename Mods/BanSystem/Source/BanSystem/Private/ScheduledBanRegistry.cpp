@@ -58,12 +58,8 @@ FScheduledBanEntry UScheduledBanRegistry::AddScheduled(
 {
     FScopeLock Lock(&Mutex);
 
-    int64 NextId = 1;
-    for (const FScheduledBanEntry& E : Pending)
-        if (E.Id >= NextId) NextId = E.Id + 1;
-
     FScheduledBanEntry Entry;
-    Entry.Id              = NextId;
+    Entry.Id              = NextId++;
     Entry.Uid             = Uid;
     Entry.PlayerName      = PlayerName;
     Entry.Reason          = Reason;
@@ -233,6 +229,11 @@ void UScheduledBanRegistry::LoadFromFile()
                 Pending.Add(Entry);
         }
     }
+
+    // Restore the O(1) counter from loaded data so AddScheduled never reuses an Id.
+    NextId = 1;
+    for (const FScheduledBanEntry& E : Pending)
+        if (E.Id >= NextId) NextId = E.Id + 1;
 }
 
 bool UScheduledBanRegistry::SaveToFile() const
