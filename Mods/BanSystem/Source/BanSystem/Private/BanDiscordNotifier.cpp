@@ -364,7 +364,8 @@ void FBanDiscordNotifier::NotifyPlayerMuted(const FString& Uid, const FString& P
                                              bool bIsTimed, const FDateTime& ExpireDate)
 {
     const FString DurationStr = bIsTimed
-        ? FString::Printf(TEXT("%lld min"), (ExpireDate - FDateTime::UtcNow()).GetTotalMinutes())
+        ? FString::Printf(TEXT("%lld min"), FMath::Max((int64)0,
+              static_cast<int64>((ExpireDate - FDateTime::UtcNow()).GetTotalMinutes())))
         : TEXT("Indefinite");
 
     const FString Fields =

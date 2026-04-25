@@ -232,9 +232,13 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 						if (TypePair.Value != TEXT("banappeal")) continue;
 						const FString* OpenerId = TicketChannelToOpener.Find(TypePair.Key);
 						if (!OpenerId || OpenerId->IsEmpty()) continue;
-						const FString DiscordUid = FString::Printf(TEXT("Discord:%s"), **OpenerId);
+						// Only auto-close when we have the player's EOS UID from the
+						// appeal form.  Without it we cannot look up the ban in the DB
+						// (bans are stored as EOS UIDs, never as "Discord:<id>").
+						const FString* AppealEosUid = OpenerToEosUid.Find(*OpenerId);
+						if (!AppealEosUid || AppealEosUid->IsEmpty()) continue;
 						FBanEntry Dummy;
-						if (!BanDb->IsCurrentlyBannedByAnyId(DiscordUid, Dummy))
+						if (!BanDb->IsCurrentlyBannedByAnyId(*AppealEosUid, Dummy))
 						{
 							ToAutoClose.Add(*OpenerId);
 						}
@@ -312,6 +316,8 @@ void UTicketSubsystem::Deinitialize()
 	PendingReopenOpener.Empty();
 	ReopenedOnceChannels.Empty();
 	OpenerToTicketsByType.Empty();
+	OpenerToAppealId.Empty();
+	OpenerToEosUid.Empty();
 	TicketChannelToTags.Empty();
 	TicketChannelToNotes.Empty();
 	TicketChannelStaffReplied.Empty();
@@ -769,7 +775,9 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		const FString* NamePtr = TicketChannelToOpenerName.Find(SourceChannelId);
 		if (NamePtr) OpenerName = *NamePtr;
 
-		const FString DiscordUid = FString::Printf(TEXT("Discord:%s"), *AppealOpenerId);
+		// Use the EOS UID the player submitted in the appeal form to look up the ban.
+		// Bans are stored as "EOS:<puid>" UIDs — "Discord:<id>" never matches.
+		const FString* AppealEosUid = OpenerToEosUid.Find(AppealOpenerId);
 		FString ApproveResponse;
 		bool bUnbanned = false;
 
@@ -778,7 +786,9 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 			if (UBanDatabase* BanDb = GI->GetSubsystem<UBanDatabase>())
 			{
 				FBanEntry BanRecord;
-				if (BanDb->IsCurrentlyBannedByAnyId(DiscordUid, BanRecord))
+				const bool bFoundBan = AppealEosUid && !AppealEosUid->IsEmpty()
+					&& BanDb->IsCurrentlyBannedByAnyId(*AppealEosUid, BanRecord);
+				if (bFoundBan)
 				{
 					if (BanDb->RemoveBanByUid(BanRecord.Uid))
 					{
@@ -798,10 +808,9 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 				else
 				{
 					ApproveResponse = FString::Printf(
-						TEXT(":information_source: No active ban found for %s (Discord ID: `%s`). "
+						TEXT(":information_source: No active ban found for %s. "
 						     "The ticket will be closed."),
-						OpenerName.IsEmpty() ? TEXT("this player") : *OpenerName,
-						*AppealOpenerId);
+						OpenerName.IsEmpty() ? TEXT("this player") : *OpenerName);
 					bUnbanned = true; // treat as success so we close the ticket
 				}
 			}
@@ -864,9 +873,11 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		{
 			if (UBanDatabase* BanDb3 = GI3->GetSubsystem<UBanDatabase>())
 			{
-				const FString DiscordUidDeny = FString::Printf(TEXT("Discord:%s"), *AppealOpenerId);
+				// Use the EOS UID from the appeal form — bans are never stored as "Discord:<id>".
+				const FString* DenyEosUid = OpenerToEosUid.Find(AppealOpenerId);
 				FBanEntry DenyBanRecord;
-				if (BanDb3->IsCurrentlyBannedByAnyId(DiscordUidDeny, DenyBanRecord) && !DenyBanRecord.bIsPermanent)
+				if (DenyEosUid && !DenyEosUid->IsEmpty()
+					&& BanDb3->IsCurrentlyBannedByAnyId(*DenyEosUid, DenyBanRecord) && !DenyBanRecord.bIsPermanent)
 				{
 					const FString ExpiryMsg = FString::Printf(
 						TEXT(":calendar: Your temporary ban will expire naturally on **%s UTC** "
@@ -1040,6 +1051,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 							{
 								AppealReg->DeleteAppeal(E.Id);
 								OpenerToAppealId.Remove(RemovedOpener);
+								OpenerToEosUid.Remove(RemovedOpener);
 								UE_LOG(LogTicketSystem, Log,
 								       TEXT("TicketSystem: Auto-dismissed pending appeal id=%lld for Discord user %s on ticket close."),
 								       E.Id, *RemovedOpener);
@@ -1436,14 +1448,18 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 
 		FString ReportText = FString::Printf(
 			TEXT(":mag: **Ban / Appeal check for <@%s>**\n\n"), *CheckOpenerId);
+		// Appeals are stored as "Discord:<id>"; bans are stored as "EOS:<puid>".
 		const FString DiscordUid = FString::Printf(TEXT("Discord:%s"), *CheckOpenerId);
+		const FString* CheckEosUid = OpenerToEosUid.Find(CheckOpenerId);
 
 		if (UGameInstance* GI = GetGameInstance())
 		{
 			if (UBanDatabase* BanDb = GI->GetSubsystem<UBanDatabase>())
 			{
 				FBanEntry BanRecord;
-				if (BanDb->IsCurrentlyBannedByAnyId(DiscordUid, BanRecord))
+				const bool bHasBan = CheckEosUid && !CheckEosUid->IsEmpty()
+					&& BanDb->IsCurrentlyBannedByAnyId(*CheckEosUid, BanRecord);
+				if (bHasBan)
 				{
 					const FString DurStr = BanRecord.bIsPermanent
 						? TEXT("Permanent")
@@ -1458,7 +1474,9 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 				}
 				else
 				{
-					ReportText += TEXT(":white_check_mark: No active ban found for this Discord account.\n");
+					ReportText += CheckEosUid && !CheckEosUid->IsEmpty()
+						? TEXT(":white_check_mark: No active ban found for this player.\n")
+						: TEXT(":grey_question: EOS UID not captured from appeal form — ban status unknown.\n");
 				}
 			}
 
@@ -1847,6 +1865,17 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 			}
 		}
 
+		// Store the player-submitted EOS UID so the approve/deny buttons and the
+		// expired-ban ticker can look up the actual ban in BanDatabase (which
+		// stores EOS UIDs, never "Discord:<id>" UIDs).
+		if (!AppealEosUid.IsEmpty())
+		{
+			FString NormalizedEos = AppealEosUid.TrimStartAndEnd();
+			if (!NormalizedEos.StartsWith(TEXT("EOS:"), ESearchCase::IgnoreCase))
+				NormalizedEos = UBanDatabase::MakeUid(TEXT("EOS"), NormalizedEos.ToLower());
+			OpenerToEosUid.Add(DiscordUserId, NormalizedEos);
+		}
+
 		Bridge->RespondToInteraction(InteractionId, InteractionToken, /*type=*/4,
 			TEXT(":white_check_mark: Opening your ban appeal ticket…  "
 			     "A private channel will appear shortly."),
@@ -2224,18 +2253,20 @@ void UTicketSubsystem::CreateTicketChannel(
 					       "Please be patient; appeals are handled in the order they are received."),
 					*MentionPrefix, *UserMention);
 
-				// Attempt to look up the ban record using the Discord user ID so
+				// Attempt to look up the ban record using the player-submitted EOS UID so
 				// staff immediately see the ban context without having to search.
+				// (Bans are stored as EOS UIDs — "Discord:<id>" never matches.)
 				if (!OpenerUserIdCopy.IsEmpty())
 				{
-					const FString DiscordUid = FString::Printf(TEXT("Discord:%s"), *OpenerUserIdCopy);
+					const FString* WelcomeEosUid = Self->OpenerToEosUid.Find(OpenerUserIdCopy);
 					if (UGameInstance* GI = Self->GetGameInstance())
 					{
 						FString BanEosUid;
+						if (WelcomeEosUid && !WelcomeEosUid->IsEmpty())
 						if (UBanDatabase* BanDb = GI->GetSubsystem<UBanDatabase>())
 						{
 							FBanEntry BanRecord;
-							if (BanDb->IsCurrentlyBannedByAnyId(DiscordUid, BanRecord))
+							if (BanDb->IsCurrentlyBannedByAnyId(*WelcomeEosUid, BanRecord))
 							{
 								BanEosUid = BanRecord.Uid;
 								const bool bTempBan = !BanRecord.bIsPermanent;
@@ -2278,12 +2309,16 @@ void UTicketSubsystem::CreateTicketChannel(
 							}
 						}
 
-						// Feature 2: show warning history for the EOS UID from the ban record.
-						if (!BanEosUid.IsEmpty())
+						// Feature 2: show warning history for the EOS UID.
+						// Fall back to WelcomeEosUid if no ban record was found.
+						const FString WarnLookupUid = !BanEosUid.IsEmpty()
+							? BanEosUid
+							: (WelcomeEosUid ? *WelcomeEosUid : FString());
+						if (!WarnLookupUid.IsEmpty())
 						{
 							if (UPlayerWarningRegistry* WarnReg = GI->GetSubsystem<UPlayerWarningRegistry>())
 							{
-								const TArray<FWarningEntry> Warnings = WarnReg->GetWarningsForUid(BanEosUid);
+								const TArray<FWarningEntry> Warnings = WarnReg->GetWarningsForUid(WarnLookupUid);
 								if (!Warnings.IsEmpty())
 								{
 									WelcomeContent += FString::Printf(
@@ -3987,6 +4022,10 @@ void UTicketSubsystem::SaveTicketState() const
 		const FString* WlIgnSave = TicketChannelToWlIgn.Find(Pair.Key);
 		if (WlIgnSave && !WlIgnSave->IsEmpty())
 			Entry->SetStringField(TEXT("wl_ign"), *WlIgnSave);
+		// Persist the player-submitted EOS UID for banappeal tickets.
+		const FString* AppealEosSave = OpenerToEosUid.Find(Pair.Value);
+		if (AppealEosSave && !AppealEosSave->IsEmpty())
+			Entry->SetStringField(TEXT("appeal_eos_uid"), *AppealEosSave);
 
 		// Persist tags.
 		const TArray<FString>* SaveTags = TicketChannelToTags.Find(Pair.Key);
@@ -4142,6 +4181,10 @@ void UTicketSubsystem::LoadTicketState()
 			TicketChannelToOpenerName.Add(ChannelId, OpenerName);
 		if ((*EntryObj)->TryGetStringField(TEXT("wl_ign"), WlIgnLoad) && !WlIgnLoad.IsEmpty())
 			TicketChannelToWlIgn.Add(ChannelId, WlIgnLoad);
+		// Restore the player-submitted EOS UID for banappeal tickets.
+		FString AppealEosLoad;
+		if ((*EntryObj)->TryGetStringField(TEXT("appeal_eos_uid"), AppealEosLoad) && !AppealEosLoad.IsEmpty())
+			OpenerToEosUid.Add(OpenerId, AppealEosLoad);
 		if ((*EntryObj)->TryGetStringField(TEXT("open_time"), OpenTimeStr) && !OpenTimeStr.IsEmpty())
 		{
 			FDateTime OT;
@@ -4315,6 +4358,7 @@ void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
 		}
 	}
 	OpenerToAppealId.Remove(DiscordUserId);
+	OpenerToEosUid.Remove(DiscordUserId);
 
 	FString RemovedType;
 	TicketChannelToType.RemoveAndCopyValue(ChannelId, RemovedType);
@@ -4495,6 +4539,7 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 					{
 						AppealReg->DeleteAppeal(E.Id);
 						OpenerToAppealId.Remove(RemovedOpener);
+						OpenerToEosUid.Remove(RemovedOpener);
 						UE_LOG(LogTicketSystem, Log,
 						       TEXT("TicketSystem: Auto-dismissed pending appeal id=%lld for Discord user %s on inactivity close."),
 						       E.Id, *RemovedOpener);

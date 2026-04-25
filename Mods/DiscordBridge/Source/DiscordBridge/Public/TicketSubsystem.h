@@ -343,6 +343,14 @@ private:
 	 */
 	TMap<FString, int64> OpenerToAppealId;
 
+	/**
+	 * Maps Discord opener user ID → the normalized EOS UID the player provided
+	 * in the ban-appeal modal (e.g. "EOS:abcdef...").  Used by the approve/deny
+	 * buttons and the expired-ban ticker to look up the actual ban in BanDatabase,
+	 * since bans are stored as EOS UIDs, never as "Discord:<id>".
+	 */
+	TMap<FString, FString> OpenerToEosUid;
+
 	/** Stored panel message ID for auto-refresh. */
 	FString StoredPanelMessageId;
 	/** Stored panel channel ID for auto-refresh. */

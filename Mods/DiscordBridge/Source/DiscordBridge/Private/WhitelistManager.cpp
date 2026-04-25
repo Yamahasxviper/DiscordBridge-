@@ -350,7 +350,7 @@ AuditLog.RemoveAt(0);
 TArray<FWhitelistAuditEntry> FWhitelistManager::GetAuditLog(int32 MaxEntries)
 {
 if (MaxEntries <= 0) MaxEntries = 20;
-if (MaxEntries > 20) MaxEntries = 20;
+if (MaxEntries > 100) MaxEntries = 100;
 
 const int32 Total = AuditLog.Num();
 if (Total <= MaxEntries)
