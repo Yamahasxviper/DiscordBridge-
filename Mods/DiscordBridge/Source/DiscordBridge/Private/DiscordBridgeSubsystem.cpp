@@ -4898,7 +4898,17 @@ NotifyMuteEvent(Entry.PlayerName, Entry.Uid, true, Entry.Reason);
 UnmutedEventHandle = MuteReg->OnPlayerUnmuted.AddLambda(
 [this](const FString& Uid)
 {
-NotifyMuteEvent(TEXT(""), Uid, false, TEXT(""));
+FString PlayerName;
+if (UGameInstance* GI = GetGameInstance())
+{
+if (UPlayerSessionRegistry* Registry = GI->GetSubsystem<UPlayerSessionRegistry>())
+{
+FPlayerSessionRecord Record;
+if (Registry->FindByUid(Uid, Record) && !Record.DisplayName.IsEmpty())
+PlayerName = Record.DisplayName;
+}
+}
+NotifyMuteEvent(PlayerName, Uid, false, TEXT(""));
 });
 bBoundMuteEvents = true;
 UE_LOG(LogDiscordBridge, Log, TEXT("DiscordBridge: Bound to UMuteRegistry mute-event delegates."));
@@ -5440,12 +5450,12 @@ if (Target.IsEmpty()) return;
 
 const FString Emoji  = bIsMuted ? TEXT("🔇") : TEXT("🔊");
 const FString Action = bIsMuted ? TEXT("Muted") : TEXT("Unmuted");
-const FString Colour = bIsMuted ? TEXT("15158332") : TEXT("3066993"); // red / green
+const int32 Colour = bIsMuted ? 15158332 : 3066993; // red / green
 
 TSharedPtr<FJsonObject> EmbedObj = MakeShared<FJsonObject>();
 EmbedObj->SetStringField(TEXT("title"),
 FString::Printf(TEXT("%s Player %s: %s"), *Emoji, *Action, *PlayerName));
-EmbedObj->SetNumberField(TEXT("color"), FCString::Atoi(*Colour));
+EmbedObj->SetNumberField(TEXT("color"), Colour);
 if (bIsMuted && !Reason.IsEmpty())
 EmbedObj->SetStringField(TEXT("description"),
 FString::Printf(TEXT("**Reason:** %s"), *Reason));
@@ -5595,7 +5605,7 @@ Commands.Add(MakeCmd(TEXT("mod"), TEXT("Moderation commands (moderator or admin)
 	MakeSub(TEXT("unmute"),     TEXT("Lift a mute from a player."),
 		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("tempmute"),   TEXT("Apply a timed mute."),
-		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")), Str(TEXT("duration"), TEXT("Duration: 30m, 2h, 1d, 1w or plain minutes")), Str(TEXT("reason"), TEXT("Reason for the mute (optional)")) }),
+		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")), Str(TEXT("duration"), TEXT("Duration: 30m, 2h, 1d, 1w or plain minutes")), StrO(TEXT("reason"), TEXT("Reason for the mute")) }),
 	MakeSub(TEXT("tempunmute"), TEXT("Lift a timed mute."),
 		{ StrAC(TEXT("player"),     TEXT("Name, EOS:<puid>, or IP:<addr>")) }),
 	MakeSub(TEXT("mutecheck"),  TEXT("Check mute status and expiry."),
@@ -5719,6 +5729,7 @@ Commands.Add(MakeCmd(TEXT("ticket"), TEXT("Support ticket management commands.")
 }));
 
 // Serialize the commands array and send to Discord.
+const int32 NumCommands = Commands.Num();
 FString BodyStr;
 {
 	TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&BodyStr);
@@ -5733,14 +5744,14 @@ Request->SetHeader(TEXT("Authorization"), FString::Printf(TEXT("Bot %s"), *Confi
 Request->SetHeader(TEXT("Content-Type"),  TEXT("application/json"));
 Request->SetContentAsString(BodyStr);
 Request->OnProcessRequestComplete().BindLambda(
-	[](FHttpRequestPtr, FHttpResponsePtr Resp, bool bSuccess)
+	[NumCommands](FHttpRequestPtr, FHttpResponsePtr Resp, bool bSuccess)
 	{
 		if (bSuccess && Resp.IsValid() &&
 			(Resp->GetResponseCode() == 200 || Resp->GetResponseCode() == 201))
 		{
 			UE_LOG(LogDiscordBridge, Log,
 				TEXT("DiscordBridge: Slash commands registered successfully (%d commands)."),
-				13); // 5 standalone + 8 groups
+				NumCommands);
 		}
 		else
 		{
