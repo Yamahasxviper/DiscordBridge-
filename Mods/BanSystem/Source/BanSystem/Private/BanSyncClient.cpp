@@ -86,7 +86,12 @@ void UBanSyncClient::BroadcastBan(const FString& Uid, const FString& PlayerName,
 
     FString JsonStr;
     TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonStr);
-    FJsonSerializer::Serialize(Msg.ToSharedRef(), Writer);
+    if (!FJsonSerializer::Serialize(Msg.ToSharedRef(), Writer))
+    {
+        UE_LOG(LogBanSyncClient, Warning,
+            TEXT("BanSyncClient: failed to serialize ban broadcast for %s"), *Uid);
+        return;
+    }
 
     for (USMLWebSocketClient* Client : PeerClients)
     {
@@ -104,7 +109,12 @@ void UBanSyncClient::BroadcastUnban(const FString& Uid, const FString& PlayerNam
 
     FString JsonStr;
     TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonStr);
-    FJsonSerializer::Serialize(Msg.ToSharedRef(), Writer);
+    if (!FJsonSerializer::Serialize(Msg.ToSharedRef(), Writer))
+    {
+        UE_LOG(LogBanSyncClient, Warning,
+            TEXT("BanSyncClient: failed to serialize unban broadcast for %s"), *Uid);
+        return;
+    }
 
     for (USMLWebSocketClient* Client : PeerClients)
     {

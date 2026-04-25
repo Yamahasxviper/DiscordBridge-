@@ -373,8 +373,9 @@ void UBanRestApi::RegisterRoutes()
     Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/bans/all")),
         EHttpServerRequestVerbs::VERB_GET,
-        [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
@@ -392,6 +393,7 @@ void UBanRestApi::RegisterRoutes()
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();

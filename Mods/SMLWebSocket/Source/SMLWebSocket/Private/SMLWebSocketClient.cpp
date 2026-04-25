@@ -262,7 +262,7 @@ void USMLWebSocketClient::Internal_OnReconnecting(int32 AttemptNumber, float Del
 int32 USMLWebSocketClient::GetQueuedMessageCount() const
 {
 	FScopeLock Lock(&QueueMutex);
-	return PendingSendQueue.Num();
+	return PendingSendQueue.Num() + PendingSendBinaryQueue.Num();
 }
 
 void USMLWebSocketClient::ClearQueue()
