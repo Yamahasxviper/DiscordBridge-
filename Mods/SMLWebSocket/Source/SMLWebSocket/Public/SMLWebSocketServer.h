@@ -18,6 +18,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FSMLWebSocketServerOnClientDisconne
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FSMLWebSocketServerOnClientMessageDelegate,
                                               const FString&, ClientId,
                                               const FString&, Message);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FSMLWebSocketServerOnClientBinaryMessageDelegate,
+                                              const FString&, ClientId,
+                                              const TArray<uint8>&, Data);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FSMLWebSocketServerOnErrorDelegate,
                                              const FString&, ErrorMessage);
 
@@ -60,6 +63,10 @@ public:
     /** Fired when a text message is received from a connected client. */
     UPROPERTY(BlueprintAssignable, Category="SML|WebSocket|Server")
     FSMLWebSocketServerOnClientMessageDelegate OnClientMessage;
+
+    /** Fired when a binary message is received from a connected client. */
+    UPROPERTY(BlueprintAssignable, Category="SML|WebSocket|Server")
+    FSMLWebSocketServerOnClientBinaryMessageDelegate OnClientBinaryMessage;
 
     /** Fired when a server-level error occurs (e.g. bind failure). */
     UPROPERTY(BlueprintAssignable, Category="SML|WebSocket|Server")
@@ -150,6 +157,7 @@ private:
     void Internal_OnClientConnected(const FString& ClientId, const FString& RemoteAddress);
     void Internal_OnClientDisconnected(const FString& ClientId, const FString& Reason);
     void Internal_OnClientMessage(const FString& ClientId, const FString& Message);
+    void Internal_OnClientBinaryMessage(const FString& ClientId, const TArray<uint8>& Data);
     void Internal_OnError(const FString& ErrorMessage);
 
     TSharedPtr<FSMLWebSocketServerRunnable> ServerRunnable;

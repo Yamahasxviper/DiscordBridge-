@@ -164,7 +164,7 @@ void UScheduledBanRegistry::ApplyScheduledBan(const FScheduledBanEntry& Entry)
     FBanDiscordNotifier::NotifyBanCreated(Ban);
     if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
         AuditLog->LogAction(TEXT("ban"), Entry.Uid, Entry.PlayerName,
-            Entry.ScheduledBy, Entry.ScheduledBy,
+            TEXT("scheduled"), Entry.ScheduledBy,
             FString::Printf(TEXT("Scheduled ban applied. Reason: %s"), *Entry.Reason));
 
     UE_LOG(LogScheduledBanRegistry, Log,

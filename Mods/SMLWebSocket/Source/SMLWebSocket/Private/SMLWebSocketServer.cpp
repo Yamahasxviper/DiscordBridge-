@@ -207,6 +207,11 @@ void USMLWebSocketServer::Internal_OnClientMessage(const FString& ClientId, cons
         OnClientMessage.Broadcast(ClientId, Message);
 }
 
+void USMLWebSocketServer::Internal_OnClientBinaryMessage(const FString& ClientId, const TArray<uint8>& Data)
+{
+    OnClientBinaryMessage.Broadcast(ClientId, Data);
+}
+
 void USMLWebSocketServer::Internal_OnError(const FString& ErrorMessage)
 {
     UE_LOG(LogSMLWebSocketServer, Error, TEXT("WSServer error: %s"), *ErrorMessage);

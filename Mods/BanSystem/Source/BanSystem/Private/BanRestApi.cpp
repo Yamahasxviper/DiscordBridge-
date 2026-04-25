@@ -311,6 +311,14 @@ void UBanRestApi::StartServer()
 
     UE_LOG(LogBanRestApi, Log,
         TEXT("BanRestApi: REST API listening on port %d"), ApiPort);
+
+    // Warn operators when no API key is configured — the entire REST API is
+    // then accessible to any process that can reach the server's bind address.
+    const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
+    if (!Cfg || Cfg->RestApiKey.IsEmpty())
+        UE_LOG(LogBanRestApi, Warning,
+            TEXT("BanRestApi: RestApiKey is empty — REST API is accessible WITHOUT authentication. "
+                 "Set RestApiKey in DefaultBanSystem.ini to restrict access."));
 }
 
 void UBanRestApi::StopServer()
@@ -899,7 +907,7 @@ void UBanRestApi::RegisterRoutes()
             TArray<TSharedPtr<FJsonValue>> Arr;
             for (const FPlayerSessionRecord& P : All)
             {
-                if (Query.IsEmpty() || P.DisplayName.ToLower().Contains(Query))
+                if (Query.IsEmpty() || P.DisplayName.Contains(Query, ESearchCase::IgnoreCase))
                 {
                     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
                     Obj->SetStringField(TEXT("uid"),         P.Uid);

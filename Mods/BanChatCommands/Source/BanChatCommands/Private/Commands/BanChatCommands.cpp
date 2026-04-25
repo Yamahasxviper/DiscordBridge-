@@ -2378,10 +2378,11 @@ EExecutionStatus AMuteChatCommand::ExecuteCommand_Implementation(
     // Notify via webhook so the action is visible even without the Discord bot.
     {
         const bool bIsTimed = Minutes > 0;
+        const FDateTime MuteNow = FDateTime::UtcNow();
         const FDateTime Expiry = bIsTimed
-            ? FDateTime::UtcNow() + FTimespan::FromMinutes(static_cast<double>(Minutes))
+            ? MuteNow + FTimespan::FromMinutes(static_cast<double>(Minutes))
             : FDateTime(0);
-        FBanDiscordNotifier::NotifyPlayerMuted(Uid, DisplayName, MutedBy, Reason, bIsTimed, Expiry);
+        FBanDiscordNotifier::NotifyPlayerMuted(Uid, DisplayName, MutedBy, Reason, bIsTimed, Expiry, MuteNow);
     }
 
     const FString DurStr = Minutes > 0

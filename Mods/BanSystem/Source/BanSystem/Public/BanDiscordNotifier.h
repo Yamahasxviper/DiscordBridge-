@@ -60,10 +60,15 @@ public:
     static void NotifyGeoIpBlocked(const FString& PlayerName, const FString& Uid,
                                     const FString& IpAddress, const FString& CountryCode);
 
-    /** Called when a player is muted via the in-game /mute command. */
+    /** Called when a player is muted via the in-game /mute command.
+     *  @param MuteDate  The time at which the mute was applied; used to compute
+     *                   the displayed duration as (ExpireDate - MuteDate) so the
+     *                   webhook always shows the configured duration regardless of
+     *                   any HTTP delivery delay. */
     static void NotifyPlayerMuted(const FString& Uid, const FString& PlayerName,
                                   const FString& MutedBy, const FString& Reason,
-                                  bool bIsTimed, const FDateTime& ExpireDate);
+                                  bool bIsTimed, const FDateTime& ExpireDate,
+                                  const FDateTime& MuteDate = FDateTime(0));
 
     /** Called when a player is unmuted via the in-game /unmute command. */
     static void NotifyPlayerUnmuted(const FString& Uid, const FString& PlayerName,

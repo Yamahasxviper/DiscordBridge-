@@ -361,7 +361,8 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 				const FString DurationStr = Entry.bIsPermanent
 					? TEXT("Permanent")
-					: FString::Printf(TEXT("%lld min"), static_cast<int64>((Entry.ExpireDate - Entry.BanDate).GetTotalMinutes()));
+					: FString::Printf(TEXT("%lld min"), FMath::Max((int64)0,
+					    static_cast<int64>((Entry.ExpireDate - Entry.BanDate).GetTotalMinutes())));
 				const FString Msg = FString::Printf(
 					TEXT("🔨 **%s** (`%s`) banned.\nReason: %s\nBy: %s | Duration: %s"),
 					*Entry.PlayerName, *Entry.Uid,
@@ -466,6 +467,10 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 							TEXT("🔊 Unmuted **%s** (`%s`)."), *PlayerName, *Uid);
 						Self->PostToPlayerModerationThread(PlayerName, Uid, UnmuteMsg);
 					});
+
+				// Store a weak reference so Deinitialize() can remove the handles even
+				// when GetGameInstance() returns null during world teardown ordering.
+				BoundMuteRegistry = MuteReg;
 			}
 		}
 	}
@@ -515,16 +520,22 @@ void UBanDiscordSubsystem::Deinitialize()
 		UPlayerWarningRegistry::OnWarningAdded.Remove(WarnAddedHandle);
 		WarnAddedHandle.Reset();
 	}
-	if (UGameInstance* GI = GetGameInstance())
+	if (UMuteRegistry* MuteReg = BoundMuteRegistry.Get())
 	{
-		if (UMuteRegistry* MuteReg = GI->GetSubsystem<UMuteRegistry>())
+		MuteReg->OnPlayerMuted.Remove(MutedEventHandle);
+		MuteReg->OnPlayerUnmuted.Remove(UnmutedEventHandle);
+	}
+	else if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UMuteRegistry* FallbackReg = GI->GetSubsystem<UMuteRegistry>())
 		{
-			MuteReg->OnPlayerMuted.Remove(MutedEventHandle);
-			MuteReg->OnPlayerUnmuted.Remove(UnmutedEventHandle);
+			FallbackReg->OnPlayerMuted.Remove(MutedEventHandle);
+			FallbackReg->OnPlayerUnmuted.Remove(UnmutedEventHandle);
 		}
 	}
 	MutedEventHandle.Reset();
 	UnmutedEventHandle.Reset();
+	BoundMuteRegistry.Reset();
 	if (KickLoggedHandle.IsValid())
 	{
 		FBanDiscordNotifier::OnPlayerKickedLogged.Remove(KickLoggedHandle);

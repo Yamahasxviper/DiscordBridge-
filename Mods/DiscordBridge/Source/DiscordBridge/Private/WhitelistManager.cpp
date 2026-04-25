@@ -230,14 +230,13 @@ void FWhitelistManager::SetEnabled(bool bNewEnabled, const FString& AdminName)
 bool FWhitelistManager::IsWhitelisted(const FString& PlayerName, const FString& EosPUID)
 {
 	FScopeLock Lock(&Mutex);
-	const FString LowerName = PlayerName.ToLower();
 	const FDateTime Now = FDateTime::UtcNow();
 	for (const FWhitelistEntry& E : Entries)
 	{
 		// Skip expired entries
 		if (E.ExpiresAt.GetTicks() > 0 && E.ExpiresAt <= Now) continue;
 
-		if (E.Name.Equals(LowerName, ESearchCase::IgnoreCase)) return true;
+		if (E.Name.Equals(PlayerName, ESearchCase::IgnoreCase)) return true;
 		if (!EosPUID.IsEmpty() && !E.EosPUID.IsEmpty() && E.EosPUID.Equals(EosPUID, ESearchCase::IgnoreCase)) return true;
 	}
 	return false;
@@ -404,13 +403,25 @@ FTimespan FWhitelistManager::ParseDuration(const FString& DurStr)
 	if (DurStr.IsEmpty()) return FTimespan::Zero();
 	FString Lower = DurStr.ToLower().TrimStartAndEnd();
 	if (Lower.EndsWith(TEXT("w")))
-		return FTimespan::FromDays(FCString::Atod(*Lower.LeftChop(1)) * 7.0);
+	{
+		const double Val = FCString::Atod(*Lower.LeftChop(1));
+		return Val > 0.0 ? FTimespan::FromDays(Val * 7.0) : FTimespan::Zero();
+	}
 	if (Lower.EndsWith(TEXT("d")))
-		return FTimespan::FromDays(FCString::Atod(*Lower.LeftChop(1)));
+	{
+		const double Val = FCString::Atod(*Lower.LeftChop(1));
+		return Val > 0.0 ? FTimespan::FromDays(Val) : FTimespan::Zero();
+	}
 	if (Lower.EndsWith(TEXT("h")))
-		return FTimespan::FromHours(FCString::Atod(*Lower.LeftChop(1)));
+	{
+		const double Val = FCString::Atod(*Lower.LeftChop(1));
+		return Val > 0.0 ? FTimespan::FromHours(Val) : FTimespan::Zero();
+	}
 	if (Lower.EndsWith(TEXT("m")))
-		return FTimespan::FromMinutes(FCString::Atod(*Lower.LeftChop(1)));
+	{
+		const double Val = FCString::Atod(*Lower.LeftChop(1));
+		return Val > 0.0 ? FTimespan::FromMinutes(Val) : FTimespan::Zero();
+	}
 	return FTimespan::Zero();
 }
 

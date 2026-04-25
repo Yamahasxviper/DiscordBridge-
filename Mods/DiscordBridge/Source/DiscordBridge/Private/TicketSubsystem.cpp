@@ -425,12 +425,27 @@ FString UTicketSubsystem::SanitizeUsernameForChannel(const FString& Username)
 		}
 	}
 
-	// Collapse consecutive dashes and trim leading/trailing dashes.
-	while (Result.Contains(TEXT("--")))
+	// Collapse consecutive dashes in a single pass (O(n)), then trim leading/trailing dashes.
 	{
-		Result = Result.Replace(TEXT("--"), TEXT("-"), ESearchCase::CaseSensitive);
+		FString Collapsed;
+		Collapsed.Reserve(Result.Len());
+		bool bLastWasDash = false;
+		for (TCHAR C : Result)
+		{
+			if (C == TCHAR('-'))
+			{
+				if (!bLastWasDash)
+					Collapsed.AppendChar(C);
+				bLastWasDash = true;
+			}
+			else
+			{
+				Collapsed.AppendChar(C);
+				bLastWasDash = false;
+			}
+		}
+		Result = MoveTemp(Collapsed);
 	}
-	Result = Result.TrimStartAndEnd();
 	if (Result.StartsWith(TEXT("-")))
 	{
 		Result = Result.Mid(1);

@@ -447,6 +447,27 @@ void FBanChatCommandsModule::ShutdownModule()
     FWorldDelegates::OnWorldInitializedActors.Remove(WorldInitHandle);
     WorldInitHandle.Reset();
 
+    // Remove the MuteRegistry delegate bindings that were set up inside the
+    // OnWorldInitializedActors lambda.  Without this, the stale closures will
+    // remain in UMuteRegistry and fire after the module has been unloaded,
+    // potentially accessing freed memory (UBanWebSocketPusher is guarded by
+    // a weak pointer but the closure itself still executes until removed).
+    if (GEngine)
+    {
+        for (const FWorldContext& WCtx : GEngine->GetWorldContexts())
+        {
+            UGameInstance* GI = WCtx.OwningGameInstance;
+            if (!GI) continue;
+            if (UMuteRegistry* MuteReg = GI->GetSubsystem<UMuteRegistry>())
+            {
+                MuteReg->OnPlayerMuted.Remove(MutedDelegateHandle);
+                MuteReg->OnPlayerUnmuted.Remove(UnmutedDelegateHandle);
+            }
+        }
+    }
+    MutedDelegateHandle.Reset();
+    UnmutedDelegateHandle.Reset();
+
     UE_LOG(LogBanChatCommands, Log, TEXT("BanChatCommands module shut down."));
 }
 
