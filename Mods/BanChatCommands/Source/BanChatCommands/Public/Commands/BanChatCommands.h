@@ -862,6 +862,8 @@ public:
 //  UPlayerNoteRegistry  — per-player private admin notes
 // ─────────────────────────────────────────────────────────────────────────────
 
+DECLARE_LOG_CATEGORY_EXTERN(LogPlayerNoteRegistry, Log, All);
+
 USTRUCT(BlueprintType)
 struct BANCHATCOMMANDS_API FPlayerNoteEntry
 {

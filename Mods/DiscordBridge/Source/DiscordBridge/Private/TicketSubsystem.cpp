@@ -86,7 +86,7 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				}
 				return true;
 			}),
-			30.0f);
+			60.0f);
 	}
 
 	// Start the inactive-ticket check ticker when enabled.

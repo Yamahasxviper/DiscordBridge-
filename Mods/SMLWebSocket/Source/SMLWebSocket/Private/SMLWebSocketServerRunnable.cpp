@@ -30,7 +30,9 @@ FSMLWebSocketServerRunnable::~FSMLWebSocketServerRunnable()
 {
     if (ListenSocket)
     {
-        ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(ListenSocket);
+        ISocketSubsystem* SocketSS = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+        if (SocketSS)
+            SocketSS->DestroySocket(ListenSocket);
         ListenSocket = nullptr;
     }
 }
@@ -113,7 +115,9 @@ uint32 FSMLWebSocketServerRunnable::Run()
                 }
                 else
                 {
-                    ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(NewSocket);
+                    ISocketSubsystem* SocketSS = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+                    if (SocketSS)
+                        SocketSS->DestroySocket(NewSocket);
                 }
             }
         }
@@ -226,10 +230,12 @@ uint32 FSMLWebSocketServerRunnable::Run()
     TArray<FString> RemainingIds;
     {
         FScopeLock L(&ClientMutex);
+        ISocketSubsystem* SocketSS = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
         for (auto& KV : Clients)
         {
             RemainingIds.Add(KV.Key);
-            ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(KV.Value.Socket);
+            if (SocketSS)
+                SocketSS->DestroySocket(KV.Value.Socket);
         }
         Clients.Empty();
     }

@@ -276,7 +276,9 @@ void UPlayerWarningRegistry::LoadFromFile()
             if (!Val->TryGetObject(ObjPtr) || !ObjPtr) continue;
 
             FWarningEntry Entry;
-            (*ObjPtr)->TryGetNumberField(TEXT("id"),         Entry.Id);
+            double IdDbl = 0.0;
+            if ((*ObjPtr)->TryGetNumberField(TEXT("id"), IdDbl))
+                Entry.Id = static_cast<int64>(IdDbl);
             (*ObjPtr)->TryGetStringField(TEXT("uid"),        Entry.Uid);
             (*ObjPtr)->TryGetStringField(TEXT("playerName"), Entry.PlayerName);
             (*ObjPtr)->TryGetStringField(TEXT("reason"),     Entry.Reason);
