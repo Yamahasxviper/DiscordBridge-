@@ -7,7 +7,8 @@ BanSystem starts a local HTTP server on startup (default port **3000**) that exp
 Set `RestApiPort=0` in `DefaultBanSystem.ini` to disable the REST API entirely.
 
 > **Security:** Restrict external access with your server firewall so that only
-> trusted machines can reach the port.  
+> trusted machines can reach the port.
+>
 > Optionally set `RestApiKey` in `DefaultBanSystem.ini` to require an API key
 > on all mutating endpoints (`POST`, `DELETE`, `PATCH`). Include the key in the
 > `X-Api-Key` request header:

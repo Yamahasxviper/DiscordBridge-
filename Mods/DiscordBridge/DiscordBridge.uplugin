@@ -7,7 +7,7 @@
 	"FriendlyName": "Discord Bridge",
 	"Description": "Bridges Satisfactory game chat with a Discord channel using a bot token. Supports two-way chat, configurable display names, player join/leave notifications, whitelist enforcement with groups and search, 42 Discord slash commands for moderation (BanSystem integration), a 23-command ticket system with tags/notes/escalation/SLA, game event announcements, stats commands, vote-kick, AFK kick, and more. Requires Presence Intent, Server Members Intent, and Message Content Intent to be enabled on your Discord bot.",
 	"Category": "Networking",
-	"CreatedBy": "SML Community",
+	"CreatedBy": "Yamahasxviper",
 	"CreatedByURL": "",
 	"DocsURL": "",
 	"MarketplaceURL": "",

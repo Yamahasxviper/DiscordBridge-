@@ -6,7 +6,8 @@
 
 ## Config file location
 
-Settings are stored in the mod's own config file, **not** the project `DefaultGame.ini`.  
+Settings are stored in the mod's own config file, **not** the project `DefaultGame.ini`.
+
 The recommended way to configure without being overwritten by mod updates is to use the server override file:
 
 ```
