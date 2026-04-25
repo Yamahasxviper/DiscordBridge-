@@ -198,9 +198,8 @@ public:
 	float ConnectTimeoutSeconds{10.0f};
 
 	/**
-	 * When true, text messages sent while disconnected are queued and flushed
-	 * automatically when the connection (re)connects. Default: false.
-	 * Only text messages are queued; binary messages sent while disconnected are dropped.
+	 * When true, text and binary messages sent while disconnected are queued
+	 * and flushed automatically when the connection (re)connects. Default: false.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="SML|WebSocket")
 	bool bQueueMessagesWhileDisconnected{false};
@@ -383,7 +382,7 @@ public:
 	/**
 	 * Returns the number of text messages currently queued for delivery
 	 * (only non-zero when bQueueMessagesWhileDisconnected is true and the client
-	 * is not currently connected).
+	 * is not currently connected).  Does not count queued binary messages.
 	 * Thread-safe.
 	 */
 	UFUNCTION(BlueprintPure, Category="SML|WebSocket")
@@ -462,6 +461,14 @@ private:
 	 * Thread-safe via QueueMutex.
 	 */
 	TArray<FString> PendingSendQueue;
+
+	/**
+	 * Outgoing binary payloads queued while disconnected (mirrors PendingSendQueue).
+	 * Flushed alongside PendingSendQueue on successful connect/reconnect.
+	 * Thread-safe via QueueMutex.
+	 */
+	TArray<TArray<uint8>> PendingSendBinaryQueue;
+
 	mutable FCriticalSection QueueMutex;
 
 	/**

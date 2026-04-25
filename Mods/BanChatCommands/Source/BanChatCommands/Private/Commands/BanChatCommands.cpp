@@ -59,9 +59,21 @@ namespace BanChat
     /** Format ban duration for human-readable confirmation. */
     static FString FormatDuration(int32 DurationMinutes)
     {
-        return (DurationMinutes <= 0)
-            ? TEXT("permanently")
-            : FString::Printf(TEXT("for %d minute(s)"), DurationMinutes);
+        if (DurationMinutes <= 0)
+            return TEXT("permanently");
+
+        const int32 Weeks   = DurationMinutes / (60 * 24 * 7);
+        const int32 Days    = (DurationMinutes % (60 * 24 * 7)) / (60 * 24);
+        const int32 Hours   = (DurationMinutes % (60 * 24)) / 60;
+        const int32 Minutes = DurationMinutes % 60;
+
+        FString Result = TEXT("for ");
+        bool bNeedSpace = false;
+        if (Weeks > 0)   { Result += FString::Printf(TEXT("%dw"), Weeks);   bNeedSpace = true; }
+        if (Days > 0)    { if (bNeedSpace) Result += TEXT(" "); Result += FString::Printf(TEXT("%dd"), Days);    bNeedSpace = true; }
+        if (Hours > 0)   { if (bNeedSpace) Result += TEXT(" "); Result += FString::Printf(TEXT("%dh"), Hours);   bNeedSpace = true; }
+        if (Minutes > 0) { if (bNeedSpace) Result += TEXT(" "); Result += FString::Printf(TEXT("%dm"), Minutes); }
+        return Result;
     }
 
     /** Format ban expiry date for display output. */

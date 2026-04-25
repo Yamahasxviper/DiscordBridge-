@@ -101,6 +101,16 @@ void USMLWebSocketClient::SendBinary(const TArray<uint8>& Data)
 		StatBytesSent.fetch_add(Data.Num());
 		StatMessagesSent.fetch_add(1);
 		Runnable->EnqueueBinary(Data);
+		return;
+	}
+	if (bQueueMessagesWhileDisconnected)
+	{
+		FScopeLock Lock(&QueueMutex);
+		PendingSendBinaryQueue.Add(Data);
+		if (MaxQueuedMessages > 0 && PendingSendBinaryQueue.Num() > MaxQueuedMessages)
+		{
+			PendingSendBinaryQueue.RemoveAt(0);
+		}
 	}
 }
 
@@ -186,6 +196,15 @@ void USMLWebSocketClient::Internal_OnConnected()
 			}
 		}
 		PendingSendQueue.Empty();
+
+		for (const TArray<uint8>& Payload : PendingSendBinaryQueue)
+		{
+			if (Runnable.IsValid())
+			{
+				Runnable->EnqueueBinary(Payload);
+			}
+		}
+		PendingSendBinaryQueue.Empty();
 	}
 
 	if (bHasConnectedOnce)
@@ -250,6 +269,7 @@ void USMLWebSocketClient::ClearQueue()
 {
 	FScopeLock Lock(&QueueMutex);
 	PendingSendQueue.Empty();
+	PendingSendBinaryQueue.Empty();
 }
 
 void USMLWebSocketClient::FlushQueue()
@@ -259,9 +279,19 @@ void USMLWebSocketClient::FlushQueue()
 	FScopeLock Lock(&QueueMutex);
 	for (const FString& Msg : PendingSendQueue)
 	{
+		StatBytesSent.fetch_add(FTCHARToUTF8(Msg.GetCharArray().GetData()).Length());
+		StatMessagesSent.fetch_add(1);
 		Runnable->EnqueueText(Msg);
 	}
 	PendingSendQueue.Empty();
+
+	for (const TArray<uint8>& Payload : PendingSendBinaryQueue)
+	{
+		StatBytesSent.fetch_add(Payload.Num());
+		StatMessagesSent.fetch_add(1);
+		Runnable->EnqueueBinary(Payload);
+	}
+	PendingSendBinaryQueue.Empty();
 }
 
 void USMLWebSocketClient::SendJson(const FString& JsonString)

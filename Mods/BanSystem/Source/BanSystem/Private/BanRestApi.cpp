@@ -80,7 +80,11 @@ namespace BanJson
     {
         FString Out;
         TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Out);
-        FJsonSerializer::Serialize(Obj.ToSharedRef(), Writer);
+        if (!FJsonSerializer::Serialize(Obj.ToSharedRef(), Writer))
+        {
+            UE_LOG(LogBanRestApi, Error, TEXT("BanRestApi: failed to serialize JSON object"));
+            return TEXT("{}");
+        }
         return Out;
     }
 
@@ -156,6 +160,26 @@ namespace BanJson
         const TArray<FString>* KeyHeaderValues = Req.Headers.Find(TEXT("X-Api-Key"));
         if (!KeyHeaderValues || KeyHeaderValues->IsEmpty()) return false;
         return (*KeyHeaderValues)[0].Equals(Cfg->RestApiKey, ESearchCase::CaseSensitive);
+    }
+
+    /**
+     * Returns a non-null 413 error response when the request body exceeds the
+     * 1 MB limit, otherwise returns nullptr (caller should proceed normally).
+     * Use at the top of every POST/PATCH/PUT handler that doesn't already have
+     * its own size guard, to give the caller a proper HTTP 413 instead of
+     * silently treating the oversized body as an empty JSON object.
+     */
+    static TUniquePtr<FHttpServerResponse> CheckBodySize(const FHttpServerRequest& Req)
+    {
+        static constexpr int32 MaxBodyBytes = 1 * 1024 * 1024;
+        if (Req.Body.Num() > MaxBodyBytes)
+        {
+            return Error(
+                FString::Printf(TEXT("Request body too large (%d bytes, limit %d)"),
+                    Req.Body.Num(), MaxBodyBytes),
+                EHttpServerResponseCodes::RequestTooLarge);
+        }
+        return nullptr;
     }
 
     static TSharedPtr<FJsonObject> WarningToJson(const FWarningEntry& W)
@@ -380,7 +404,7 @@ void UBanRestApi::RegisterRoutes()
             TArray<TSharedPtr<FJsonValue>> Arr;
             for (const FBanEntry& B : All)
             {
-                if (Query.IsEmpty() || B.PlayerName.ToLower().Contains(Query))
+                if (Query.IsEmpty() || B.PlayerName.Contains(Query, ESearchCase::IgnoreCase))
                     Arr.Add(MakeShared<FJsonValueObject>(BanJson::EntryToJson(B)));
             }
 
@@ -408,7 +432,7 @@ void UBanRestApi::RegisterRoutes()
             if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
 
             FBanEntry Entry;
-            const bool bBanned = DB->IsCurrentlyBanned(Uid, Entry);
+            const bool bBanned = DB->IsCurrentlyBannedByAnyId(Uid, Entry);
 
             TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
             Obj->SetBoolField(TEXT("isBanned"), bBanned);
@@ -433,19 +457,10 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
-
-            // Reject oversized bodies before touching body content (HTTP 413).
-            static constexpr int32 MaxPostBodyBytes = 1 * 1024 * 1024;
-            if (Req.Body.Num() > MaxPostBodyBytes)
-            {
-                Done(BanJson::Error(
-                    FString::Printf(TEXT("Request body too large (%d bytes, limit %d)"), Req.Body.Num(), MaxPostBodyBytes),
-                    EHttpServerResponseCodes::RequestTooLarge));
-                return true;
-            }
 
             // Parse JSON body.
             const FString BodyStr = BanJson::BodyToString(Req);
@@ -606,8 +621,9 @@ void UBanRestApi::RegisterRoutes()
     Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/bans/export-csv")),
         EHttpServerRequestVerbs::VERB_GET,
-        [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
@@ -658,6 +674,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             const FString RawUid = Req.PathParams.FindRef(TEXT("uid"));
             const FString Uid    = FGenericPlatformHttp::UrlDecode(RawUid);
@@ -936,6 +953,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
@@ -1325,6 +1343,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
@@ -1630,6 +1649,7 @@ void UBanRestApi::RegisterRoutes()
         EHttpServerRequestVerbs::VERB_POST,
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UBanAppealRegistry* AppealsReg = GI->GetSubsystem<UBanAppealRegistry>();
@@ -2198,6 +2218,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
             if (IdStr.IsEmpty() || !IdStr.IsNumeric())
@@ -2318,6 +2339,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
@@ -2494,6 +2516,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
@@ -2577,6 +2600,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
