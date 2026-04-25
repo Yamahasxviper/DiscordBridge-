@@ -1789,7 +1789,8 @@ EExecutionStatus AWarnChatCommand::ExecuteCommand_Implementation(
     }
 
     WarnReg->AddWarning(Uid, DisplayName, Reason, WarnedBy);
-    const int32 WarnCount = WarnReg->GetWarningCount(Uid);
+    const int32 WarnCount  = WarnReg->GetWarningCount(Uid);
+    const int32 WarnPoints = WarnReg->GetWarningPoints(Uid);
 
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] Warned '%s' — reason: %s  (total warnings: %d)"),
@@ -1812,9 +1813,14 @@ EExecutionStatus AWarnChatCommand::ExecuteCommand_Implementation(
             int32 BestThreshold = -1;
             for (const FWarnEscalationTier& Tier : SysCfg->WarnEscalationTiers)
             {
-                if (WarnCount >= Tier.WarnCount && Tier.WarnCount > BestThreshold)
+                const bool bHit = (Tier.PointThreshold > 0)
+                    ? (WarnPoints >= Tier.PointThreshold)
+                    : (WarnCount  >= Tier.WarnCount);
+                const int32 ThisThreshold = (Tier.PointThreshold > 0)
+                    ? Tier.PointThreshold : Tier.WarnCount;
+                if (bHit && ThisThreshold > BestThreshold)
                 {
-                    BestThreshold      = Tier.WarnCount;
+                    BestThreshold      = ThisThreshold;
                     BanDurationMinutes = Tier.DurationMinutes;
                 }
             }
@@ -2363,7 +2369,7 @@ EExecutionStatus AMuteChatCommand::ExecuteCommand_Implementation(
     }
 
     const FString DurStr = Minutes > 0
-        ? FString::Printf(TEXT(" for %s"), *BanChat::FormatDuration(Minutes))
+        ? FString::Printf(TEXT(" %s"), *BanChat::FormatDuration(Minutes))
         : TEXT(" indefinitely");
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] Muted '%s'%s — %s"), *DisplayName, *DurStr, *Reason),
@@ -2699,7 +2705,7 @@ EExecutionStatus ATempUnmuteChatCommand::ExecuteCommand_Implementation(
     }
 
     Sender->SendChatMessage(
-        FString::Printf(TEXT("[BanChatCommands] Set timed mute for '%s' — expires in %s."),
+        FString::Printf(TEXT("[BanChatCommands] Set timed mute for '%s' — %s."),
             *DisplayName, *BanChat::FormatDuration(Minutes)),
         FLinearColor::Yellow);
 
@@ -3182,8 +3188,14 @@ EExecutionStatus AAppealChatCommand::ExecuteCommand_Implementation(
     if (PC && PC->PlayerState)
     {
         const FUniqueNetIdRepl& UniqueId = PC->PlayerState->GetUniqueId();
-        if (UniqueId.IsValid())
+        if (UniqueId.IsValid() && UniqueId.GetType() != FName(TEXT("NONE")))
             CallerUid = UBanDatabase::MakeUid(TEXT("EOS"), UniqueId.ToString().ToLower());
+        else
+        {
+            const FString EosPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+            if (!EosPuid.IsEmpty())
+                CallerUid = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
+        }
     }
 
     if (CallerUid.IsEmpty())
@@ -3485,7 +3497,11 @@ EExecutionStatus AReportChatCommand::ExecuteCommand_Implementation(
             if (Id.IsValid() && Id.GetType() != FName(TEXT("NONE")))
                 SenderUid = UBanDatabase::MakeUid(TEXT("EOS"), Id.ToString().ToLower());
             else
-                SenderUid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+            {
+                const FString EosPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+                if (!EosPuid.IsEmpty())
+                    SenderUid = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
+            }
         }
     }
 

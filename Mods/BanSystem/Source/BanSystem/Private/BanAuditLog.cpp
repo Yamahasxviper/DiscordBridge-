@@ -155,7 +155,9 @@ void UBanAuditLog::LoadFromFile()
             if (!Val->TryGetObject(ObjPtr) || !ObjPtr) continue;
 
             FAuditEntry Entry;
-            (*ObjPtr)->TryGetNumberField(TEXT("id"),         Entry.Id);
+            double IdDbl = 0.0;
+            if ((*ObjPtr)->TryGetNumberField(TEXT("id"), IdDbl))
+                Entry.Id = static_cast<int64>(IdDbl);
             (*ObjPtr)->TryGetStringField(TEXT("action"),     Entry.Action);
             (*ObjPtr)->TryGetStringField(TEXT("targetUid"),  Entry.TargetUid);
             (*ObjPtr)->TryGetStringField(TEXT("targetName"), Entry.TargetName);

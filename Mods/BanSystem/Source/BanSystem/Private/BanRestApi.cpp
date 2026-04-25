@@ -1114,8 +1114,7 @@ void UBanRestApi::RegisterRoutes()
             TSharedPtr<FJsonObject> Ok = MakeShared<FJsonObject>();
             Ok->SetBoolField(TEXT("success"), true);
             Ok->SetNumberField(TEXT("id"), static_cast<double>(Id));
-            auto Resp = FHttpServerResponse::Create(BanJson::ObjectToString(Ok), TEXT("application/json"));
-            OnComplete(MoveTemp(Resp));
+            OnComplete(BanJson::Json(BanJson::ObjectToString(Ok)));
             return true;
         }));
 

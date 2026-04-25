@@ -167,7 +167,9 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
 
         double DurDbl = 0.0;
         Root->TryGetNumberField(TEXT("durationMinutes"), DurDbl);
-        const int32 DurationMinutes = static_cast<int32>(DurDbl);
+        const int32 DurationMinutes = (DurDbl > 0.0 && DurDbl <= static_cast<double>(INT32_MAX))
+            ? static_cast<int32>(DurDbl)
+            : 0;
 
         if (Uid.IsEmpty()) return;
 
