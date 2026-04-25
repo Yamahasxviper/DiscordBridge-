@@ -149,17 +149,29 @@ namespace BanJson
     /**
      * Returns true when the request passes the API key check.
      * If RestApiKey is empty, always returns true (auth disabled).
-     * If RestApiKey is non-empty, the request must supply header X-Api-Key with
-     * the matching value (case-sensitive).
+     * If RestApiKey is non-empty, the request must supply EITHER:
+     *   • header X-Api-Key with the matching value (case-sensitive), OR
+     *   • query parameter ?key=<value> (for browser-based dashboard access where
+     *     adding custom request headers is impractical on the initial page load).
      */
     static bool CheckApiKey(const FHttpServerRequest& Req)
     {
         const UBanSystemConfig* Cfg = UBanSystemConfig::Get();
         if (!Cfg || Cfg->RestApiKey.IsEmpty()) return true;
 
+        // Header-based auth (primary, used by API clients and the dashboard JS).
         const TArray<FString>* KeyHeaderValues = Req.Headers.Find(TEXT("X-Api-Key"));
-        if (!KeyHeaderValues || KeyHeaderValues->IsEmpty()) return false;
-        return (*KeyHeaderValues)[0].Equals(Cfg->RestApiKey, ESearchCase::CaseSensitive);
+        if (KeyHeaderValues && !KeyHeaderValues->IsEmpty() &&
+            (*KeyHeaderValues)[0].Equals(Cfg->RestApiKey, ESearchCase::CaseSensitive))
+            return true;
+
+        // Query-parameter fallback — allows navigating directly to the dashboard
+        // page in a browser with ?key=<apikey> without extra tooling.
+        const FString* QueryKey = Req.QueryParams.Find(TEXT("key"));
+        if (QueryKey && QueryKey->Equals(Cfg->RestApiKey, ESearchCase::CaseSensitive))
+            return true;
+
+        return false;
     }
 
     /**
@@ -358,8 +370,9 @@ void UBanRestApi::RegisterRoutes()
     Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/bans")),
         EHttpServerRequestVerbs::VERB_GET,
-        [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
@@ -425,6 +438,7 @@ void UBanRestApi::RegisterRoutes()
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             const FString RawUid   = Req.PathParams.FindRef(TEXT("uid"));
             const FString Uid      = FGenericPlatformHttp::UrlDecode(RawUid);
 
@@ -923,6 +937,7 @@ void UBanRestApi::RegisterRoutes()
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UPlayerWarningRegistry* WarnReg = GI->GetSubsystem<UPlayerWarningRegistry>();
@@ -1053,6 +1068,9 @@ void UBanRestApi::RegisterRoutes()
                         FBanDiscordNotifier::NotifyAutoEscalationBan(AutoBan, WarnCount);
                         if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
                             AuditLog->LogAction(TEXT("ban"), Uid, PlayerName, TEXT("system"), TEXT("system"), AutoBan.Reason);
+                        // Kick the player immediately if they are currently online.
+                        if (UWorld* World = GI->GetWorld())
+                            UBanEnforcer::KickConnectedPlayer(World, Uid, AutoBan.GetKickMessage());
                         }
                     }
                 }
@@ -1148,6 +1166,7 @@ void UBanRestApi::RegisterRoutes()
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>();
@@ -1212,8 +1231,9 @@ void UBanRestApi::RegisterRoutes()
     Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/metrics")),
         EHttpServerRequestVerbs::VERB_GET,
-        [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
 
@@ -1486,8 +1506,9 @@ void UBanRestApi::RegisterRoutes()
     Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/audit/export-csv")),
         EHttpServerRequestVerbs::VERB_GET,
-        [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>();
@@ -1527,6 +1548,7 @@ void UBanRestApi::RegisterRoutes()
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
 
@@ -1577,8 +1599,9 @@ void UBanRestApi::RegisterRoutes()
     Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/warnings/export-csv")),
         EHttpServerRequestVerbs::VERB_GET,
-        [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UPlayerWarningRegistry* WarnReg = GI->GetSubsystem<UPlayerWarningRegistry>();
@@ -1791,8 +1814,9 @@ void UBanRestApi::RegisterRoutes()
     Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/metrics/prometheus")),
         EHttpServerRequestVerbs::VERB_GET,
-        [WeakGI](const FHttpServerRequest&, const FHttpResultCallback& Done) -> bool
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
 
@@ -1850,13 +1874,9 @@ void UBanRestApi::RegisterRoutes()
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
-            // Derive the base URL from the Host header so the form action works
-            // regardless of whether the player uses IP or hostname.
-            FString Host;
-            const TArray<FString>* HostHeader = Req.Headers.Find(TEXT("Host"));
-            if (HostHeader && HostHeader->Num() > 0) Host = (*HostHeader)[0];
-            const FString ApiBase = Host.IsEmpty() ? TEXT("") : FString::Printf(TEXT("http://%s"), *Host);
-
+            // NOTE: The Host header is intentionally NOT injected into the page.
+            // All API calls use relative URLs so the form works from any origin
+            // without risking header-injection XSS.
             UGameInstance* GI = WeakGI.Get();
             const FString ServerName = [GI]() -> FString
             {
@@ -1906,7 +1926,7 @@ void UBanRestApi::RegisterRoutes()
       const st = document.getElementById('status');
       st.style.display='block'; st.className=''; st.textContent='Submitting…';
       try{
-        const r = await fetch('%s/appeals',{method:'POST',headers:{'Content-Type':'application/json'},
+        const r = await fetch('/appeals',{method:'POST',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({uid:uid,contactInfo:contact,reason:reason,platform:'EOS'})});
         const j = await r.json();
         if(r.ok){st.className='ok';st.textContent='✅ Appeal submitted (ID #'+j.id+'). Staff will review it shortly.';}
@@ -1915,7 +1935,7 @@ void UBanRestApi::RegisterRoutes()
     });
   </script>
 </body>
-</html>)HTML"), *ServerName, *ServerName, *ApiBase);
+</html>)HTML"), *ServerName, *ServerName);
 
             auto R = FHttpServerResponse::Create(Html, TEXT("text/html; charset=utf-8"));
             R->Code = EHttpServerResponseCodes::Ok;
@@ -1960,16 +1980,15 @@ void UBanRestApi::RegisterRoutes()
 
     // ── GET /dashboard ───────────────────────────────────────────────────────
     // Unified single-page HTML dashboard aggregating bans, players, warnings,
-    // mutes, appeals, and audit log.  No authentication required — read-only view.
+    // mutes, appeals, and audit log.
+    // Access requires the API key (via X-Api-Key header or ?key= query param).
+    // All JS API calls use relative URLs to avoid Host-header injection.
     Routes->Handles.Add(Router->BindRoute(
         FHttpPath(TEXT("/dashboard")),
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
-            FString Host;
-            const TArray<FString>* HostHeader = Req.Headers.Find(TEXT("Host"));
-            if (HostHeader && HostHeader->Num() > 0) Host = (*HostHeader)[0];
-            const FString Api = Host.IsEmpty() ? TEXT("") : FString::Printf(TEXT("http://%s"), *Host);
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
 
             // Split the HTML into two string literals to stay within MSVC's 16380-char
             // string-literal limit (C2026).  Only the second part uses FString::Printf
@@ -2075,8 +2094,8 @@ void UBanRestApi::RegisterRoutes()
 
   <p class="error-msg" id="errorMsg"></p>
 </main>)HTML");
-            Html += FString::Printf(TEXT(R"HTML(<script>
-  const API = '%s';
+            Html += TEXT(R"HTML(<script>
+  const API = '';
   const KEY = new URLSearchParams(location.search).get('key') || '';
 
   async function apiFetch(path){
@@ -2202,7 +2221,7 @@ void UBanRestApi::RegisterRoutes()
   loadAll();
 </script>
 </body>
-</html>)HTML"), *Api);
+</html>)HTML");
 
             auto R = FHttpServerResponse::Create(Html, TEXT("text/html; charset=utf-8"));
             R->Code = EHttpServerResponseCodes::Ok;
@@ -2278,17 +2297,21 @@ void UBanRestApi::RegisterRoutes()
                 if (!Appeal.Uid.IsEmpty())
                 {
                     UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
-                    if (DB && DB->RemoveBanByUid(Appeal.Uid))
+                    if (DB)
                     {
-                        // Look up the player name from the ban record so the
-                        // Discord notification shows a name instead of the raw UID.
+                        // Fetch the ban entry BEFORE removing it so the player name
+                        // is available for the Discord notification (the record no
+                        // longer exists once RemoveBanByUid returns true).
                         FBanEntry RemovedBan;
-                        const FString PlayerName = DB->GetBanByUid(Appeal.Uid, RemovedBan)
-                            ? RemovedBan.PlayerName : Appeal.Uid;
-                        FBanDiscordNotifier::NotifyBanRemoved(PlayerName, Appeal.Uid, ReviewedBy);
-                        if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-                            AuditLog->LogAction(TEXT("unban"), Appeal.Uid, TEXT(""), ReviewedBy, ReviewedBy,
-                                FString::Printf(TEXT("Appeal #%lld approved: %s"), Id, *ReviewNote));
+                        const bool bHadBan = DB->GetBanByUid(Appeal.Uid, RemovedBan);
+                        if (DB->RemoveBanByUid(Appeal.Uid))
+                        {
+                            const FString PlayerName = bHadBan ? RemovedBan.PlayerName : Appeal.Uid;
+                            FBanDiscordNotifier::NotifyBanRemoved(PlayerName, Appeal.Uid, ReviewedBy);
+                            if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+                                AuditLog->LogAction(TEXT("unban"), Appeal.Uid, TEXT(""), ReviewedBy, ReviewedBy,
+                                    FString::Printf(TEXT("Appeal #%lld approved: %s"), Id, *ReviewNote));
+                        }
                     }
                 }
             }
@@ -2373,12 +2396,16 @@ void UBanRestApi::RegisterRoutes()
             if (ScheduledBy.IsEmpty()) ScheduledBy = TEXT("api");
 
             FDateTime EffectiveAt = FDateTime::UtcNow() + FTimespan::FromMinutes(5.0);
-            if (!EffectiveAtStr.IsEmpty())
-                FDateTime::ParseIso8601(*EffectiveAtStr, EffectiveAt);
+            if (!EffectiveAtStr.IsEmpty() && !FDateTime::ParseIso8601(*EffectiveAtStr, EffectiveAt))
+            {
+                Done(BanJson::Error(TEXT("effectiveAt must be a valid ISO 8601 datetime")));
+                return true;
+            }
 
             double DurDbl = 0.0;
             Body->TryGetNumberField(TEXT("durationMinutes"), DurDbl);
-            const int32 DurationMinutes = static_cast<int32>(DurDbl);
+            const int32 DurationMinutes = (DurDbl <= 0.0 || DurDbl > static_cast<double>(INT_MAX))
+                ? 0 : static_cast<int32>(DurDbl);
 
             const FScheduledBanEntry NewEntry = SchReg->AddScheduled(
                 Uid, PlayerName, Reason, ScheduledBy, EffectiveAt, DurationMinutes, Category);
@@ -2437,6 +2464,7 @@ void UBanRestApi::RegisterRoutes()
         EHttpServerRequestVerbs::VERB_GET,
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
             const FString RawUid = Req.PathParams.FindRef(TEXT("uid"));
             const FString Uid    = FGenericPlatformHttp::UrlDecode(RawUid);
 
@@ -2550,7 +2578,8 @@ void UBanRestApi::RegisterRoutes()
 
             double DurDbl = 0.0;
             Body->TryGetNumberField(TEXT("durationMinutes"), DurDbl);
-            const int32 DurationMinutes = static_cast<int32>(DurDbl);
+            const int32 DurationMinutes = (DurDbl <= 0.0 || DurDbl > static_cast<double>(INT_MAX))
+                ? 0 : static_cast<int32>(DurDbl);
 
             int32 Added = 0;
             TArray<TSharedPtr<FJsonValue>> ResultArr;
@@ -2579,6 +2608,9 @@ void UBanRestApi::RegisterRoutes()
                     FBanDiscordNotifier::NotifyBanCreated(Ban);
                     if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
                         AuditLog->LogAction(TEXT("ban"), Uid, TEXT(""), BannedBy, BannedBy, Reason);
+                    // Kick the player if currently online.
+                    if (UWorld* World = GI->GetWorld())
+                        UBanEnforcer::KickConnectedPlayer(World, Uid, Ban.GetKickMessage());
                     ResultArr.Add(MakeShared<FJsonValueObject>(BanJson::EntryToJson(Ban)));
                     ++Added;
                 }

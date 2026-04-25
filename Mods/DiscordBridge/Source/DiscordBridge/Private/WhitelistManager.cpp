@@ -74,7 +74,8 @@ void FWhitelistManager::Load(bool bDefaultEnabled)
 	// Load max_slots
 	double MaxSlotsD = 0.0;
 	if (Root->TryGetNumberField(TEXT("max_slots"), MaxSlotsD))
-		MaxSlots = static_cast<int32>(MaxSlotsD);
+		MaxSlots = (MaxSlotsD >= 0.0 && MaxSlotsD <= static_cast<double>(INT_MAX))
+		           ? static_cast<int32>(MaxSlotsD) : 0;
 
 	// Load players array (backward compat: string or object)
 	Entries.Empty();
@@ -256,9 +257,11 @@ bool FWhitelistManager::AddPlayer(const FString& PlayerName,
 
 	const FString LowerName = PlayerName.ToLower();
 
-	// Duplicate check (by name or PUID)
+	// Duplicate check (by name or PUID) — skip expired entries so they can be re-added.
+	const FDateTime NowForDup = FDateTime::UtcNow();
 	for (const FWhitelistEntry& E : Entries)
 	{
+		if (E.ExpiresAt.GetTicks() > 0 && E.ExpiresAt <= NowForDup) continue;
 		if (E.Name == LowerName) return false;
 		if (!EosPUID.IsEmpty() && !E.EosPUID.IsEmpty() && E.EosPUID == EosPUID) return false;
 	}
@@ -335,9 +338,9 @@ void FWhitelistManager::LogAudit(const FString& Admin, const FString& Action, co
 	Entry.Target    = Target;
 	AuditLog.Add(Entry);
 
-	// Keep max 100 entries
-	while (AuditLog.Num() > 100)
-		AuditLog.RemoveAt(0);
+	// Keep max 100 entries — use a single RemoveAt call to avoid O(n²) shifting.
+	if (AuditLog.Num() > 100)
+		AuditLog.RemoveAt(0, AuditLog.Num() - 100);
 }
 
 TArray<FWhitelistAuditEntry> FWhitelistManager::GetAuditLog(int32 MaxEntries)
@@ -371,13 +374,13 @@ FTimespan FWhitelistManager::ParseDuration(const FString& DurStr)
 	if (DurStr.IsEmpty()) return FTimespan::Zero();
 	FString Lower = DurStr.ToLower().TrimStartAndEnd();
 	if (Lower.EndsWith(TEXT("w")))
-		return FTimespan::FromDays(FCString::Atof(*Lower.LeftChop(1)) * 7.0);
+		return FTimespan::FromDays(FCString::Atod(*Lower.LeftChop(1)) * 7.0);
 	if (Lower.EndsWith(TEXT("d")))
-		return FTimespan::FromDays(FCString::Atof(*Lower.LeftChop(1)));
+		return FTimespan::FromDays(FCString::Atod(*Lower.LeftChop(1)));
 	if (Lower.EndsWith(TEXT("h")))
-		return FTimespan::FromHours(FCString::Atof(*Lower.LeftChop(1)));
+		return FTimespan::FromHours(FCString::Atod(*Lower.LeftChop(1)));
 	if (Lower.EndsWith(TEXT("m")))
-		return FTimespan::FromMinutes(FCString::Atof(*Lower.LeftChop(1)));
+		return FTimespan::FromMinutes(FCString::Atod(*Lower.LeftChop(1)));
 	return FTimespan::Zero();
 }
 
