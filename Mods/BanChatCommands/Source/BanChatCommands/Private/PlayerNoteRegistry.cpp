@@ -1,6 +1,6 @@
 // Copyright Yamahasxviper. All Rights Reserved.
 
-#include "Commands/BanChatCommands.h"
+#include "PlayerNoteRegistry.h"
 
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
