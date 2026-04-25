@@ -991,10 +991,25 @@ void UBanRestApi::RegisterRoutes()
             if (Reason.IsEmpty())   Reason   = TEXT("No reason given");
             if (WarnedBy.IsEmpty()) WarnedBy = TEXT("console");
 
+            // Optional: caller may specify a custom point weight (defaults to 1).
+            int32 Points = 1;
+            {
+                double PointsDbl = 0.0;
+                if (Body->TryGetNumberField(TEXT("points"), PointsDbl) && PointsDbl > 0.0)
+                    Points = static_cast<int32>(PointsDbl);
+            }
+
             UPlayerWarningRegistry* WarnReg = GI->GetSubsystem<UPlayerWarningRegistry>();
             if (!WarnReg) { Done(BanJson::Error(TEXT("WarningRegistry unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
 
-            WarnReg->AddWarning(Uid, PlayerName, Reason, WarnedBy);
+            // Use the struct overload so a non-default point weight is preserved.
+            FWarningEntry NewWarnEntry;
+            NewWarnEntry.Uid        = Uid;
+            NewWarnEntry.PlayerName = PlayerName;
+            NewWarnEntry.Reason     = Reason;
+            NewWarnEntry.WarnedBy   = WarnedBy;
+            NewWarnEntry.Points     = Points;
+            WarnReg->AddWarning(NewWarnEntry);
             const int32 WarnCount          = WarnReg->GetWarningCount(Uid);
             TArray<FWarningEntry> AllForUid = WarnReg->GetWarningsForUid(Uid);
             const FWarningEntry   NewEntry  = AllForUid.Num() > 0 ? AllForUid.Last() : FWarningEntry();
