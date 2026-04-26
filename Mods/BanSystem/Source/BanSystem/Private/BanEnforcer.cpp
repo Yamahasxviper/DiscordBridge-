@@ -983,11 +983,11 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
                             APlayerController* PCKick = WeakPC.Get();
                             if (!IsValid(PCKick)) return;
 
-                            UGameInstance* GI2 = Enforcer ? Enforcer->GetGameInstance() : nullptr;
+                            UGameInstance* GI2 = (Enforcer && IsValid(Enforcer)) ? Enforcer->GetGameInstance() : nullptr;
                             UWorld* W2 = GI2 ? GI2->GetWorld() : nullptr;
 
                             const FString FinalMsg = KickMsg.Replace(TEXT("{country}"), *CountryCode);
-                            if (W2)
+                            if (W2 && IsValid(W2))
                             {
                                 UBanEnforcer::KickConnectedPlayer(W2, CapturedUid, FinalMsg);
                                 FBanDiscordNotifier::NotifyGeoIpBlocked(

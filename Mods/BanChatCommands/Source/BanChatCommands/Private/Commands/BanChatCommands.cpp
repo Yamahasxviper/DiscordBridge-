@@ -702,7 +702,10 @@ namespace BanChat
             int64 Num = 0;
             while (*p && FChar::IsDigit(*p))
             {
-                Num = Num * 10 + (*p - TEXT('0'));
+                const int64 Digit = static_cast<int64>(*p - TEXT('0'));
+                // Guard against int64 overflow for pathologically large digit strings.
+                if (Num > (INT64_MAX - Digit) / 10) return -1;
+                Num = Num * 10 + Digit;
                 ++p;
             }
 
