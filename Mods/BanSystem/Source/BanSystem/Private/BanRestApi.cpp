@@ -1578,7 +1578,11 @@ void UBanRestApi::RegisterRoutes()
 
             auto CsvQ = [](const FString& S) -> FString
             {
-                return TEXT("\"") + S.Replace(TEXT("\""), TEXT("\"\"")) + TEXT("\"");
+                FString Escaped = S.Replace(TEXT("\""), TEXT("\"\""));
+                Escaped = Escaped.Replace(TEXT("\r\n"), TEXT(" "));
+                Escaped = Escaped.Replace(TEXT("\r"),   TEXT(" "));
+                Escaped = Escaped.Replace(TEXT("\n"),   TEXT(" "));
+                return TEXT("\"") + Escaped + TEXT("\"");
             };
 
             FString Csv = TEXT("id,action,targetUid,targetName,adminUid,adminName,details,modVersion,timestamp\n");
@@ -1679,7 +1683,11 @@ void UBanRestApi::RegisterRoutes()
 
             auto CsvQ = [](const FString& S) -> FString
             {
-                return TEXT("\"") + S.Replace(TEXT("\""), TEXT("\"\"")) + TEXT("\"");
+                FString Escaped = S.Replace(TEXT("\""), TEXT("\"\""));
+                Escaped = Escaped.Replace(TEXT("\r\n"), TEXT(" "));
+                Escaped = Escaped.Replace(TEXT("\r"),   TEXT(" "));
+                Escaped = Escaped.Replace(TEXT("\n"),   TEXT(" "));
+                return TEXT("\"") + Escaped + TEXT("\"");
             };
 
             FString Csv = TEXT("id,uid,playerName,reason,warnedBy,warnDate\n");
@@ -1716,7 +1724,11 @@ void UBanRestApi::RegisterRoutes()
 
             auto CsvQ = [](const FString& S) -> FString
             {
-                return TEXT("\"") + S.Replace(TEXT("\""), TEXT("\"\"")) + TEXT("\"");
+                FString Escaped = S.Replace(TEXT("\""), TEXT("\"\""));
+                Escaped = Escaped.Replace(TEXT("\r\n"), TEXT(" "));
+                Escaped = Escaped.Replace(TEXT("\r"),   TEXT(" "));
+                Escaped = Escaped.Replace(TEXT("\n"),   TEXT(" "));
+                return TEXT("\"") + Escaped + TEXT("\"");
             };
 
             FString Csv = TEXT("uid,displayName,lastSeen,ipAddress\n");
