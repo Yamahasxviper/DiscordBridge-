@@ -59,6 +59,52 @@ class Help(commands.Cog):
         )
 
         embed.add_field(
+            name="🏷️ Tag system",
+            value="`!<tagname> [args]` | `/tag show|list|add|edit|remove|alias`",
+            inline=False,
+        )
+        embed.add_field(
+            name="🔍 `/mod <name>`",
+            value="Look up a mod on ficsit.app.",
+            inline=False,
+        )
+        embed.add_field(
+            name="📖 `/docsearch <query>`",
+            value="Search the Satisfactory modding documentation.",
+            inline=False,
+        )
+        embed.add_field(
+            name="🏭 `/version`",
+            value="Show the current Satisfactory Mod Loader (SML) version.",
+            inline=False,
+        )
+        embed.add_field(
+            name="🪲 Crash analysis",
+            value="Auto-detects `.log` and `.zip` file attachments and pastebin links for known crash patterns.",
+            inline=False,
+        )
+        embed.add_field(
+            name="🖼️ Media-only channels",
+            value="Channels where only media posts (images/files) are allowed.",
+            inline=False,
+        )
+        embed.add_field(
+            name="⭐ Levelling",
+            value="`!level [user]` | `!leaderboard` | `/xp give|take|set|multiplier` *(staff)*",
+            inline=False,
+        )
+        embed.add_field(
+            name="🔗 `/set_webhook_channel` *(staff)*",
+            value="Set the channel for GitHub event notifications.",
+            inline=False,
+        )
+        embed.add_field(
+            name="🎉 `/set_welcome` *(staff)*",
+            value="Configure welcome DMs sent to new members.",
+            inline=False,
+        )
+
+        embed.add_field(
             name="📖 Useful links",
             value=(
                 "• Modding docs: https://docs.ficsit.app/satisfactory-modding/latest/\n"
