@@ -316,6 +316,35 @@ namespace BanDiscordHelpers
 		}
 		return Removed;
 	}
+
+	/** Escape a string for embedding inside a JSON string literal.
+	 *  Handles backslash, double-quote, newlines, tabs, carriage returns,
+	 *  other control characters (U+0000–U+001F), and lone UTF-16 surrogates
+	 *  (U+D800–U+DFFF) so the output is always well-formed JSON. */
+	static FString JsonEscape(const FString& S)
+	{
+		FString Out;
+		Out.Reserve(S.Len() + 8);
+		for (int32 i = 0; i < S.Len(); ++i)
+		{
+			const TCHAR C = S[i];
+			switch (C)
+			{
+			case TEXT('"'):  Out += TEXT("\\\""); break;
+			case TEXT('\\'): Out += TEXT("\\\\"); break;
+			case TEXT('\n'): Out += TEXT("\\n");  break;
+			case TEXT('\r'): Out += TEXT("\\r");  break;
+			case TEXT('\t'): Out += TEXT("\\t");  break;
+			default:
+				if ((C >= 0xD800 && C <= 0xDFFF) || C < 0x20)
+					Out += FString::Printf(TEXT("\\u%04x"), static_cast<uint32>(C));
+				else
+					Out += C;
+				break;
+			}
+		}
+		return Out;
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3926,7 +3955,7 @@ void UBanDiscordSubsystem::HandlePollCommand(const TArray<FString>& Args,
 			*BanDiscordHelpers::Truncate(Options[i], 1024));
 		FieldsJson += FString::Printf(
 			TEXT("{\"name\":\"%s\",\"value\":\"React with %s to vote\",\"inline\":false}"),
-			*Label.Replace(TEXT("\""), TEXT("\\\"")),
+			*BanDiscordHelpers::JsonEscape(Label),
 			NumEmoji[i]);
 	}
 
@@ -3935,7 +3964,7 @@ void UBanDiscordSubsystem::HandlePollCommand(const TArray<FString>& Args,
 		TEXT("{\"embeds\":[{\"title\":\"📊 %s\",\"color\":5793266,\"fields\":[%s],"
 		     "\"footer\":{\"text\":\"React to vote! Results visible on the reactions.\"},"
 		     "\"timestamp\":\"%s\"}]}"),
-		*Question.Replace(TEXT("\""), TEXT("\\\"")),
+		*BanDiscordHelpers::JsonEscape(Question),
 		*FieldsJson,
 		*FDateTime::UtcNow().ToIso8601());
 
