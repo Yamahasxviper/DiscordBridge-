@@ -4132,10 +4132,17 @@ void UTicketSubsystem::SaveTicketState() const
 		MultiArray.Add(MakeShared<FJsonValueObject>(MTEntry));
 	}
 
+	// Persist SLA warning dedup set so warnings don't re-fire on server restart.
+	TArray<TSharedPtr<FJsonValue>> SlaWarnedArr;
+	for (const FString& SlaCh : SlaWarnedChannels)
+		SlaWarnedArr.Add(MakeShared<FJsonValueString>(SlaCh));
+
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetArrayField(TEXT("tickets"),   TicketArray);
 	Root->SetArrayField(TEXT("cooldowns"), CooldownArray);
 	Root->SetArrayField(TEXT("multi_tickets"), MultiArray);
+	if (SlaWarnedArr.Num() > 0)
+		Root->SetArrayField(TEXT("sla_warned_channels"), SlaWarnedArr);
 	if (!StoredPanelMessageId.IsEmpty()) Root->SetStringField(TEXT("panel_message_id"), StoredPanelMessageId);
 	if (!StoredPanelChannelId.IsEmpty()) Root->SetStringField(TEXT("panel_channel_id"), StoredPanelChannelId);
 
@@ -4327,6 +4334,18 @@ void UTicketSubsystem::LoadTicketState()
 						OpenerToTicketsByType.FindOrAdd(OpenerId).Add(TP.Key, ChanId);
 				}
 			}
+		}
+	}
+
+	// Restore SLA warning dedup set so warnings are not re-sent after a restart.
+	const TArray<TSharedPtr<FJsonValue>>* SlaWarnedLoad = nullptr;
+	if (Root->TryGetArrayField(TEXT("sla_warned_channels"), SlaWarnedLoad) && SlaWarnedLoad)
+	{
+		for (const TSharedPtr<FJsonValue>& SlaV : *SlaWarnedLoad)
+		{
+			FString SlaCh;
+			if (SlaV->TryGetString(SlaCh) && !SlaCh.IsEmpty())
+				SlaWarnedChannels.Add(SlaCh);
 		}
 	}
 
