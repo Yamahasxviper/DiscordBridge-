@@ -77,7 +77,9 @@ void UMuteRegistry::MutePlayer(const FString& Uid, const FString& PlayerName,
             return M.Uid.Equals(Uid, ESearchCase::IgnoreCase);
         });
         Mutes.Add(Entry);
-        SaveToFile();
+        if (!SaveToFile())
+            UE_LOG(LogMuteRegistry, Error,
+                TEXT("MuteRegistry: failed to save mutes.json after muting %s"), *Uid);
     }
 
     // Broadcast outside the lock.
@@ -110,7 +112,9 @@ bool UMuteRegistry::UnmutePlayer(const FString& Uid)
             return M.Uid.Equals(Uid, ESearchCase::IgnoreCase);
         });
         bRemoved = Mutes.Num() < Before;
-        if (bRemoved) SaveToFile();
+        if (bRemoved && !SaveToFile())
+            UE_LOG(LogMuteRegistry, Error,
+                TEXT("MuteRegistry: failed to save mutes.json after unmuting %s"), *Uid);
     }
 
     if (bRemoved && bWasActive)
@@ -164,7 +168,9 @@ bool UMuteRegistry::UpdateMuteReason(const FString& Uid, const FString& NewReaso
         if (M.Uid.Equals(Uid, ESearchCase::IgnoreCase) && !M.IsExpired())
         {
             M.Reason = NewReason;
-            SaveToFile();
+            if (!SaveToFile())
+                UE_LOG(LogMuteRegistry, Error,
+                    TEXT("MuteRegistry: failed to save mutes.json after updating reason for %s"), *Uid);
             return true;
         }
     }
@@ -255,9 +261,25 @@ void UMuteRegistry::LoadFromFile()
 
             FString DateStr;
             if ((*ObjPtr)->TryGetStringField(TEXT("muteDate"), DateStr))
-                FDateTime::ParseIso8601(*DateStr, Entry.MuteDate);
+            {
+                if (!FDateTime::ParseIso8601(*DateStr, Entry.MuteDate))
+                {
+                    UE_LOG(LogMuteRegistry, Warning,
+                        TEXT("MuteRegistry: uid='%s' has malformed muteDate '%s' — skipping entry"),
+                        *Entry.Uid, *DateStr);
+                    continue;
+                }
+            }
             if ((*ObjPtr)->TryGetStringField(TEXT("expireDate"), DateStr))
-                FDateTime::ParseIso8601(*DateStr, Entry.ExpireDate);
+            {
+                if (!Entry.bIsIndefinite && !FDateTime::ParseIso8601(*DateStr, Entry.ExpireDate))
+                {
+                    UE_LOG(LogMuteRegistry, Warning,
+                        TEXT("MuteRegistry: uid='%s' has malformed expireDate '%s' — skipping entry"),
+                        *Entry.Uid, *DateStr);
+                    continue;
+                }
+            }
 
             if (Entry.Uid.IsEmpty()) continue;
 
@@ -280,7 +302,10 @@ void UMuteRegistry::LoadFromFile()
         UE_LOG(LogMuteRegistry, Log,
             TEXT("MuteRegistry: discarding %d expired mute(s) from disk during load."),
             ExpiredSkipped);
-        SaveToFile();
+        if (!SaveToFile())
+            UE_LOG(LogMuteRegistry, Error,
+                TEXT("MuteRegistry: failed to compact mutes.json after skipping %d expired entry(s)"),
+                ExpiredSkipped);
     }
 }
 

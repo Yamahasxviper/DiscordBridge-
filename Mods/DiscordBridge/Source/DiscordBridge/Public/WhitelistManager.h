@@ -69,6 +69,7 @@ public:
 
     // ── Audit log ────────────────────────────────────────────────────────────
 
+    /** Caller must already hold Mutex. */
     static void LogAudit(const FString& Admin, const FString& Action, const FString& Target);
     static TArray<FWhitelistAuditEntry> GetAuditLog(int32 MaxEntries = 20);
 

@@ -74,9 +74,10 @@ public:
     /**
      * Add a new warning from a pre-populated FWarningEntry struct.
      * The entry's Id and WarnDate are overwritten with auto-generated values.
+     * Returns the stored entry (with the assigned Id and WarnDate filled in).
      * Saves to disk immediately. Thread-safe.
      */
-    void AddWarning(const FWarningEntry& Entry);
+    FWarningEntry AddWarning(const FWarningEntry& Entry);
 
     /**
      * Add a new warning with an optional expiry time (Points defaults to 1).

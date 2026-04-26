@@ -52,6 +52,12 @@ void UPlayerNoteRegistry::AddNote(const FString& Uid, const FString& PlayerName,
     FScopeLock Lock(&Mutex);
 
     FPlayerNoteEntry Entry;
+    if (NextId == INT64_MAX)
+    {
+        UE_LOG(LogPlayerNoteRegistry, Error,
+            TEXT("PlayerNoteRegistry: NextId has reached INT64_MAX — cannot add more notes"));
+        return;
+    }
     Entry.Id         = NextId++;
     Entry.Uid        = Uid;
     Entry.PlayerName = PlayerName;
@@ -60,7 +66,9 @@ void UPlayerNoteRegistry::AddNote(const FString& Uid, const FString& PlayerName,
     Entry.NoteDate   = FDateTime::UtcNow();
 
     Notes.Add(Entry);
-    SaveToFile();
+    if (!SaveToFile())
+        UE_LOG(LogPlayerNoteRegistry, Error,
+            TEXT("PlayerNoteRegistry: failed to save notes.json after adding note for %s"), *Uid);
 }
 
 TArray<FPlayerNoteEntry> UPlayerNoteRegistry::GetNotesForUid(const FString& Uid) const
@@ -90,7 +98,9 @@ bool UPlayerNoteRegistry::DeleteNote(int64 Id)
         return N.Id == Id;
     });
     const bool bRemoved = Notes.Num() < Before;
-    if (bRemoved) SaveToFile();
+    if (bRemoved && !SaveToFile())
+        UE_LOG(LogPlayerNoteRegistry, Error,
+            TEXT("PlayerNoteRegistry: failed to save notes.json after deleting note id=%lld"), Id);
     return bRemoved;
 }
 
@@ -141,7 +151,15 @@ void UPlayerNoteRegistry::LoadFromFile()
 
             FString DateStr;
             if ((*ObjPtr)->TryGetStringField(TEXT("noteDate"), DateStr))
-                FDateTime::ParseIso8601(*DateStr, Entry.NoteDate);
+            {
+                if (!FDateTime::ParseIso8601(*DateStr, Entry.NoteDate))
+                {
+                    UE_LOG(LogPlayerNoteRegistry, Warning,
+                        TEXT("PlayerNoteRegistry: uid='%s' has malformed noteDate '%s' — skipping entry"),
+                        *Entry.Uid, *DateStr);
+                    continue;
+                }
+            }
 
             if (!Entry.Uid.IsEmpty())
                 Notes.Add(Entry);

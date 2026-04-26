@@ -461,6 +461,12 @@ void FSMLWebSocketRunnable::CleanupConnection()
 
 void FSMLWebSocketRunnable::EnqueueText(const FString& Text)
 {
+	// NOTE: The bConnected check and the Enqueue call below are not atomic.
+	// A disconnect that occurs between these two operations will cause the
+	// message to be silently dropped when CleanupConnection drains the queue.
+	// Callers that require guaranteed delivery should use the
+	// bQueueMessagesWhileDisconnected option on USMLWebSocketClient, which
+	// buffers messages at the client layer and re-sends them on reconnect.
 	if (!bConnected) return;
 	FSMLWebSocketOutboundMessage Msg;
 	Msg.bIsBinary = false;
@@ -1351,8 +1357,9 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 		else if (!FragmentBuffer.IsEmpty())
 		{
 			// RFC 6455 §5.4: A new data frame must not start while a fragmented
-			// message is still being assembled. The server is misbehaving — discard
-			// the in-progress fragment, log a warning, and close the connection.
+			// message is still being assembled. The server is misbehaving — send a
+			// Close frame (1002 Protocol Error) as required by RFC 6455 §7.2, then
+			// discard the in-progress fragment and close the connection.
 			UE_LOG(LogSMLWebSocket, Warning,
 			       TEXT("SMLWebSocket: Received a new Text/Binary frame while a fragmented "
 			            "message was still in progress (RFC 6455 §5.4 violation). "
@@ -1360,6 +1367,8 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 			       FragmentBuffer.Num());
 			FragmentBuffer.Empty();
 			bFragmentIsBinary = false;
+			const uint8 ClosePayload[2] = { 0x03, 0xEA }; // status 1002
+			SendWsFrame(WsOpcode::Close, ClosePayload, 2);
 			return false;
 		}
 		else
@@ -1386,6 +1395,8 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 				       NewTotalSize);
 				FragmentBuffer.Empty();
 				bFragmentIsBinary = false;
+				const uint8 ClosePayload[2] = { 0x03, 0xEA }; // status 1002
+				SendWsFrame(WsOpcode::Close, ClosePayload, 2);
 				return false;
 			}
 		}
@@ -1445,8 +1456,14 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 	}
 
 	default:
-		UE_LOG(LogSMLWebSocket, Warning, TEXT("SMLWebSocket: Unknown opcode 0x%02X – ignoring"), Opcode);
-		break;
+		// RFC 6455 §5.2: reserved opcodes must cause the endpoint to fail the
+		// WebSocket connection. Send Close(1002 Protocol Error) and exit.
+		UE_LOG(LogSMLWebSocket, Warning, TEXT("SMLWebSocket: Unknown/reserved opcode 0x%02X — sending Close(1002) and disconnecting"), Opcode);
+		{
+			const uint8 ClosePayload[2] = { 0x03, 0xEA }; // status 1002
+			SendWsFrame(WsOpcode::Close, ClosePayload, 2);
+		}
+		return false;
 	}
 
 	return true;

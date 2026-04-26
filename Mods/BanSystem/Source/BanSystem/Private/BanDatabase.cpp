@@ -150,7 +150,7 @@ namespace BanDbJson
             }
         }
 
-        return !OutEntry.Uid.IsEmpty();
+        return !OutEntry.Uid.IsEmpty() && !OutEntry.BannedBy.IsEmpty();
     }
 } // namespace BanDbJson
 

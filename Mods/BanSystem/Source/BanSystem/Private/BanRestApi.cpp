@@ -253,6 +253,24 @@ namespace BanJson
         Obj->SetStringField(TEXT("timestamp"),  E.Timestamp.ToIso8601());
         return Obj;
     }
+
+    /**
+     * Safe int64 parser for path parameters.
+     * Returns true and sets OutId when IdStr is a valid positive int64.
+     * Rejects empty strings, non-numeric strings, strings longer than 19 digits,
+     * and 19-digit strings whose value exceeds INT64_MAX ("9223372036854775807").
+     */
+    static bool ParseInt64Param(const FString& IdStr, int64& OutId)
+    {
+        if (IdStr.IsEmpty() || !IdStr.IsNumeric()) return false;
+        const int32 Len = IdStr.Len();
+        if (Len > 19) return false;
+        // A 19-digit string could still exceed INT64_MAX (e.g. "9999999999999999999").
+        // Compare lexicographically against the decimal representation of INT64_MAX.
+        if (Len == 19 && IdStr > TEXT("9223372036854775807")) return false;
+        OutId = FCString::Atoi64(*IdStr);
+        return OutId > 0;
+    }
 } // namespace BanJson
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -613,7 +631,8 @@ void UBanRestApi::RegisterRoutes()
             if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
-            if (IdStr.IsEmpty() || !IdStr.IsNumeric() || IdStr.Len() > 19)
+            int64 Id = 0;
+            if (!BanJson::ParseInt64Param(IdStr, Id))
             {
                 Done(BanJson::Error(TEXT("id must be an integer")));
                 return true;
@@ -623,13 +642,6 @@ void UBanRestApi::RegisterRoutes()
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
             if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
-
-            const int64 Id = FCString::Atoi64(*IdStr);
-            if (Id <= 0)
-            {
-                Done(BanJson::Error(TEXT("Invalid ban ID"), EHttpServerResponseCodes::BadRequest));
-                return true;
-            }
 
             // Use the overload that atomically captures the deleted entry's data
             // inside the database lock, eliminating the TOCTOU window that existed
@@ -1048,10 +1060,10 @@ void UBanRestApi::RegisterRoutes()
             NewWarnEntry.Reason     = Reason;
             NewWarnEntry.WarnedBy   = WarnedBy;
             NewWarnEntry.Points     = Points;
-            WarnReg->AddWarning(NewWarnEntry);
-            const int32 WarnCount          = WarnReg->GetWarningCount(Uid);
-            TArray<FWarningEntry> AllForUid = WarnReg->GetWarningsForUid(Uid);
-            const FWarningEntry   NewEntry  = AllForUid.Num() > 0 ? AllForUid.Last() : FWarningEntry();
+            // AddWarning returns the stored entry (with the assigned Id and WarnDate) in
+            // a single lock acquisition, avoiding a TOCTOU race with concurrent warnings.
+            const FWarningEntry NewEntry = WarnReg->AddWarning(NewWarnEntry);
+            const int32 WarnCount = WarnReg->GetWarningCount(Uid);
 
             FBanDiscordNotifier::NotifyWarningIssued(Uid, PlayerName, Reason, WarnedBy, WarnCount);
             if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
@@ -1174,16 +1186,8 @@ void UBanRestApi::RegisterRoutes()
             if (!GI) { OnComplete(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
 
             const FString* IdParam = Request.PathParams.Find(TEXT("id"));
-            // Validate before Atoi64: the string must be numeric and short enough
-            // to fit in int64 (max 19 decimal digits) to avoid undefined behaviour
-            // from overflow in FCString::Atoi64.
-            if (!IdParam || !IdParam->IsNumeric() || IdParam->Len() > 19)
-            {
-                OnComplete(BanJson::Error(TEXT("Invalid warning ID"), EHttpServerResponseCodes::BadRequest));
-                return true;
-            }
-            const int64 Id = FCString::Atoi64(**IdParam);
-            if (Id <= 0)
+            int64 Id = 0;
+            if (!IdParam || !BanJson::ParseInt64Param(*IdParam, Id))
             {
                 OnComplete(BanJson::Error(TEXT("Invalid warning ID"), EHttpServerResponseCodes::BadRequest));
                 return true;
@@ -1905,13 +1909,8 @@ void UBanRestApi::RegisterRoutes()
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
 
             const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
-            if (IdStr.IsEmpty() || !IdStr.IsNumeric() || IdStr.Len() > 19)
-            {
-                Done(BanJson::Error(TEXT("id must be an integer")));
-                return true;
-            }
-            const int64 Id = FCString::Atoi64(*IdStr);
-            if (Id <= 0)
+            int64 Id = 0;
+            if (!BanJson::ParseInt64Param(IdStr, Id))
             {
                 Done(BanJson::Error(TEXT("Invalid appeal ID"), EHttpServerResponseCodes::BadRequest));
                 return true;
@@ -2081,13 +2080,8 @@ void UBanRestApi::RegisterRoutes()
             if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
-            if (IdStr.IsEmpty() || !IdStr.IsNumeric() || IdStr.Len() > 19)
-            {
-                Done(BanJson::Error(TEXT("id must be an integer")));
-                return true;
-            }
-            const int64 Id = FCString::Atoi64(*IdStr);
-            if (Id <= 0)
+            int64 Id = 0;
+            if (!BanJson::ParseInt64Param(IdStr, Id))
             {
                 Done(BanJson::Error(TEXT("Invalid appeal ID"), EHttpServerResponseCodes::BadRequest));
                 return true;
@@ -2387,13 +2381,8 @@ void UBanRestApi::RegisterRoutes()
             if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
-            if (IdStr.IsEmpty() || !IdStr.IsNumeric() || IdStr.Len() > 19)
-            {
-                Done(BanJson::Error(TEXT("id must be an integer")));
-                return true;
-            }
-            const int64 Id = FCString::Atoi64(*IdStr);
-            if (Id <= 0)
+            int64 Id = 0;
+            if (!BanJson::ParseInt64Param(IdStr, Id))
             {
                 Done(BanJson::Error(TEXT("Invalid appeal ID"), EHttpServerResponseCodes::BadRequest));
                 return true;
@@ -2582,13 +2571,8 @@ void UBanRestApi::RegisterRoutes()
             if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
-            if (IdStr.IsEmpty() || !IdStr.IsNumeric() || IdStr.Len() > 19)
-            {
-                Done(BanJson::Error(TEXT("id must be an integer")));
-                return true;
-            }
-            const int64 Id = FCString::Atoi64(*IdStr);
-            if (Id <= 0)
+            int64 Id = 0;
+            if (!BanJson::ParseInt64Param(IdStr, Id))
             {
                 Done(BanJson::Error(TEXT("Invalid scheduled ban ID"), EHttpServerResponseCodes::BadRequest));
                 return true;

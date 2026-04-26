@@ -687,9 +687,14 @@ namespace BanChat
         if (DurationStr.IsEmpty()) return -1;
 
         // Bare integer — legacy format, treat as minutes.
-        // Return the raw value; callers are responsible for rejecting zero.
+        // Use Atoi64 so values above INT32_MAX are caught rather than silently
+        // wrapping; cap at INT32_MAX to match the suffix-based path below.
         if (DurationStr.IsNumeric())
-            return FCString::Atoi(*DurationStr);
+        {
+            const int64 Raw = FCString::Atoi64(*DurationStr);
+            if (Raw <= 0 || Raw > static_cast<int64>(INT32_MAX)) return -1;
+            return static_cast<int32>(Raw);
+        }
 
         int64 Total   = 0;
         bool  bHadToken = false;
@@ -714,10 +719,33 @@ namespace BanChat
             const TCHAR Unit = FChar::ToLower(*p);
             ++p;
 
-            if      (Unit == TEXT('w')) Total += Num * 10080; // weeks
-            else if (Unit == TEXT('d')) Total += Num * 1440;
-            else if (Unit == TEXT('h')) Total += Num * 60;
-            else if (Unit == TEXT('m')) Total += Num;
+            if      (Unit == TEXT('w'))
+            {
+                // Guard: Num * 10080 must not overflow int64, and adding to Total must not overflow.
+                if (Num > INT64_MAX / 10080) return -1;
+                const int64 Product = Num * 10080;
+                if (Total > INT64_MAX - Product) return -1;
+                Total += Product;
+            }
+            else if (Unit == TEXT('d'))
+            {
+                if (Num > INT64_MAX / 1440) return -1;
+                const int64 Product = Num * 1440;
+                if (Total > INT64_MAX - Product) return -1;
+                Total += Product;
+            }
+            else if (Unit == TEXT('h'))
+            {
+                if (Num > INT64_MAX / 60) return -1;
+                const int64 Product = Num * 60;
+                if (Total > INT64_MAX - Product) return -1;
+                Total += Product;
+            }
+            else if (Unit == TEXT('m'))
+            {
+                if (Total > INT64_MAX - Num) return -1;
+                Total += Num;
+            }
             else return -1;
 
             bHadToken = true;
