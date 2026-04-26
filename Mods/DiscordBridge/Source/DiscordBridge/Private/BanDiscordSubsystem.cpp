@@ -358,7 +358,6 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				// Skip when a bot interaction is in flight — the command handler
 				// already posts to the moderation log for that case.
 				if (!Self->PendingInteractionToken.IsEmpty()) return;
-				if (Self->Config.ModerationLogChannelId.IsEmpty()) return;
 
 				const FString DurationStr = Entry.bIsPermanent
 					? TEXT("permanent")
@@ -385,7 +384,6 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				UBanDiscordSubsystem* Self = WeakThis.Get();
 				if (!Self || !Self->CachedProvider) return;
 				if (!Self->PendingInteractionToken.IsEmpty()) return;
-				if (Self->Config.ModerationLogChannelId.IsEmpty()) return;
 
 				const FString DisplayName = PlayerName.IsEmpty() ? Uid : PlayerName;
 				const FString Msg = FString::Printf(
@@ -4625,8 +4623,15 @@ void UBanDiscordSubsystem::OnDiscordInteraction(const TSharedPtr<FJsonObject>& I
 			const FString DurStr = GetOpt(TEXT("duration"));
 			const int32 Minutes  = ParseDurationMinutes(DurStr);
 			const FString Reason = GetOpt(TEXT("reason"));
+			if (Minutes <= 0)
+			{
+				Respond(ChannelId,
+					TEXT("❌ Invalid duration. Use formats like: `30m`, `2h`, `1d`, `1w`.\n"
+					     "Usage: `/ban temp <PUID|name> <duration> [reason]`"));
+				return;
+			}
 			Args.Add(Player);
-			Args.Add(FString::FromInt(FMath::Max(1, Minutes)));
+			Args.Add(FString::FromInt(Minutes));
 			if (!Reason.IsEmpty()) Args.Add(Reason);
 			HandleBanCommand(Args, ChannelId, SenderName, true, StaffPrefix);
 		}
