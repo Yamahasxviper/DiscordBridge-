@@ -791,17 +791,17 @@ namespace BanChat
         const FDateTime Now    = FDateTime::UtcNow();
         const FTimespan Window = FTimespan::FromMinutes(LimitMins);
 
-        TArray<FDateTime>& Timestamps = AdminBanTimestamps.FindOrAdd(AdminUid);
-        // Prune old timestamps outside the window.
-        Timestamps.RemoveAll([&Now, &Window](const FDateTime& T){ return (Now - T) > Window; });
-
-        // M3: Prune stale admin entries that have accumulated no recent bans so
-        // the outer map doesn't grow unbounded over long server uptimes.
+        // Prune stale timestamps and empty entries first, before acquiring a
+        // reference via FindOrAdd — iterating the map after FindOrAdd could
+        // invalidate the reference if RemoveCurrent() removes that entry.
         for (auto It = AdminBanTimestamps.CreateIterator(); It; ++It)
         {
+            It.Value().RemoveAll([&Now, &Window](const FDateTime& T){ return (Now - T) > Window; });
             if (It.Value().IsEmpty())
                 It.RemoveCurrent();
         }
+
+        TArray<FDateTime>& Timestamps = AdminBanTimestamps.FindOrAdd(AdminUid);
 
         if (Timestamps.Num() >= LimitCount)
         {
@@ -819,6 +819,33 @@ namespace BanChat
         return false;
     }
 
+    /** Escape a string for embedding in a JSON string literal.
+     *  Handles control characters and lone UTF-16 surrogates (U+D800–U+DFFF)
+     *  so the output is always well-formed JSON. */
+    static FString JsonEscape(const FString& S)
+    {
+        FString Out;
+        Out.Reserve(S.Len() + 8);
+        for (int32 i = 0; i < S.Len(); ++i)
+        {
+            const TCHAR C = S[i];
+            switch (C)
+            {
+            case TEXT('"'):  Out += TEXT("\\\""); break;
+            case TEXT('\\'): Out += TEXT("\\\\"); break;
+            case TEXT('\n'): Out += TEXT("\\n");  break;
+            case TEXT('\r'): Out += TEXT("\\r");  break;
+            case TEXT('\t'): Out += TEXT("\\t");  break;
+            default:
+                if ((C >= 0xD800 && C <= 0xDFFF) || C < 0x20)
+                    Out += FString::Printf(TEXT("\\u%04x"), static_cast<uint32>(C));
+                else
+                    Out += C;
+                break;
+            }
+        }
+        return Out;
+    }
 } // namespace BanChat
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3505,35 +3532,12 @@ EExecutionStatus AClearChatChatCommand::ExecuteCommand_Implementation(
         if (SysCfg && !SysCfg->DiscordWebhookUrl.IsEmpty()
             && FModuleManager::Get().IsModuleLoaded(TEXT("HTTP")))
         {
-            auto Esc = [](const FString& S) -> FString
-            {
-                FString Out;
-                Out.Reserve(S.Len() + 8);
-                for (TCHAR C : S)
-                {
-                    switch (C)
-                    {
-                    case TEXT('"'):  Out += TEXT("\\\""); break;
-                    case TEXT('\\'): Out += TEXT("\\\\"); break;
-                    case TEXT('\n'): Out += TEXT("\\n");  break;
-                    case TEXT('\r'): Out += TEXT("\\r");  break;
-                    case TEXT('\t'): Out += TEXT("\\t");  break;
-                    default:
-                        if (C < 0x20)
-                            Out += FString::Printf(TEXT("\\u%04x"), static_cast<uint32>(C));
-                        else
-                            Out += C;
-                        break;
-                    }
-                }
-                return Out;
-            };
             const FString JsonPayload = FString::Printf(
                 TEXT("{\"embeds\":[{\"title\":\"Chat Cleared\",\"color\":3447003,\"fields\":["
                     "{\"name\":\"Admin\",\"value\":\"%s\",\"inline\":true},"
                     "{\"name\":\"Reason\",\"value\":\"%s\",\"inline\":false}],"
                     "\"timestamp\":\"%s\"}]}"),
-                *Esc(AdminName), *Esc(Reason), *FDateTime::UtcNow().ToIso8601());
+                *BanChat::JsonEscape(AdminName), *BanChat::JsonEscape(Reason), *FDateTime::UtcNow().ToIso8601());
 
             TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req =
                 FHttpModule::Get().CreateRequest();
@@ -3612,38 +3616,14 @@ EExecutionStatus AReportChatCommand::ExecuteCommand_Implementation(
     const FString WebhookUrl = Cfg ? Cfg->ReportWebhookUrl : TEXT("");
     if (!WebhookUrl.IsEmpty() && FModuleManager::Get().IsModuleLoaded(TEXT("HTTP")))
     {
-        auto Esc = [](const FString& S) -> FString
-        {
-            FString Out;
-            Out.Reserve(S.Len() + 8);
-            for (TCHAR C : S)
-            {
-                switch (C)
-                {
-                case TEXT('"'):  Out += TEXT("\\\""); break;
-                case TEXT('\\'): Out += TEXT("\\\\"); break;
-                case TEXT('\n'): Out += TEXT("\\n");  break;
-                case TEXT('\r'): Out += TEXT("\\r");  break;
-                case TEXT('\t'): Out += TEXT("\\t");  break;
-                default:
-                    if (C < 0x20)
-                        Out += FString::Printf(TEXT("\\u%04x"), static_cast<uint32>(C));
-                    else
-                        Out += C;
-                    break;
-                }
-            }
-            return Out;
-        };
-
         const FString JsonPayload = FString::Printf(
             TEXT("{\"embeds\":[{\"title\":\"Player Report\",\"color\":16744272,\"fields\":["
                 "{\"name\":\"Reported Player\",\"value\":\"%s\",\"inline\":true},"
                 "{\"name\":\"Reported By\",\"value\":\"%s\",\"inline\":true},"
                 "{\"name\":\"Reason\",\"value\":\"%s\",\"inline\":false}],"
                 "\"timestamp\":\"%s\"}]}"),
-            *Esc(TargetName), *Esc(ReporterName),
-            *Esc(Reason), *FDateTime::UtcNow().ToIso8601());
+            *BanChat::JsonEscape(TargetName), *BanChat::JsonEscape(ReporterName),
+            *BanChat::JsonEscape(Reason), *FDateTime::UtcNow().ToIso8601());
 
         TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req =
             FHttpModule::Get().CreateRequest();
@@ -3804,7 +3784,7 @@ EExecutionStatus AScheduleBanChatCommand::ExecuteCommand_Implementation(
         FLinearColor::Green);
 
     if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
-        AuditLog->LogAction(TEXT("schedule_ban"), Uid, PlayerName, AdminName, AdminName, Reason);
+        AuditLog->LogAction(TEXT("schedule_ban"), Uid, PlayerName, AdminUid, AdminName, Reason);
 
     return EExecutionStatus::COMPLETED;
 }
@@ -3923,7 +3903,7 @@ EExecutionStatus AQBanChatCommand::ExecuteCommand_Implementation(
     UWorld* W = GetWorld();
     UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
     if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
-        AuditLog->LogAction(TEXT("ban"), Uid, PlayerName, AdminName, AdminName,
+        AuditLog->LogAction(TEXT("ban"), Uid, PlayerName, AdminUid, AdminName,
             FString::Printf(TEXT("[qban:%s] %s"), *Slug, *Template->Reason));
 
     Sender->SendChatMessage(

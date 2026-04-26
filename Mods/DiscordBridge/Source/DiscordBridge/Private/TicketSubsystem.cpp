@@ -4069,6 +4069,10 @@ void UTicketSubsystem::SaveTicketState() const
 		const FString* AppealEosSave = OpenerToEosUid.Find(Pair.Value);
 		if (AppealEosSave && !AppealEosSave->IsEmpty())
 			Entry->SetStringField(TEXT("appeal_eos_uid"), *AppealEosSave);
+		// Persist the appeal registry ID so approve/deny buttons survive restart.
+		const int64* AppealIdSave = OpenerToAppealId.Find(Pair.Value);
+		if (AppealIdSave && *AppealIdSave > 0)
+			Entry->SetNumberField(TEXT("appeal_id"), static_cast<double>(*AppealIdSave));
 
 		// Persist tags.
 		const TArray<FString>* SaveTags = TicketChannelToTags.Find(Pair.Key);
@@ -4235,6 +4239,10 @@ void UTicketSubsystem::LoadTicketState()
 		FString AppealEosLoad;
 		if ((*EntryObj)->TryGetStringField(TEXT("appeal_eos_uid"), AppealEosLoad) && !AppealEosLoad.IsEmpty())
 			OpenerToEosUid.Add(OpenerId, AppealEosLoad);
+		// Restore the appeal registry ID so approve/deny buttons work after restart.
+		double AppealIdLoad = 0.0;
+		if ((*EntryObj)->TryGetNumberField(TEXT("appeal_id"), AppealIdLoad) && AppealIdLoad > 0.0)
+			OpenerToAppealId.Add(OpenerId, static_cast<int64>(AppealIdLoad));
 		if ((*EntryObj)->TryGetStringField(TEXT("open_time"), OpenTimeStr) && !OpenTimeStr.IsEmpty())
 		{
 			FDateTime OT;
