@@ -2858,8 +2858,18 @@ void UTicketSubsystem::HandleSlashTicketCommand(const TSharedPtr<FJsonObject>& D
 	IDiscordBridgeProvider* Bridge = GetBridge();
 	if (!Bridge) return;
 
+	FString InteractionId;
+	DataObj->TryGetStringField(TEXT("id"), InteractionId);
+
 	FString InteractionToken;
 	DataObj->TryGetStringField(TEXT("token"), InteractionToken);
+
+	// Acknowledge the slash command immediately with a deferred ephemeral response
+	// (type 5 = DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE).  Discord requires a callback
+	// within 3 seconds; without it the user sees an "interaction failed" error and
+	// the follow-up webhook call below returns HTTP 404 (interaction unknown).
+	if (!InteractionId.IsEmpty() && !InteractionToken.IsEmpty())
+		Bridge->RespondToInteraction(InteractionId, InteractionToken, 5, TEXT(""), true);
 
 	const auto SendSlashFollowUp = [&](const FString& Message)
 	{

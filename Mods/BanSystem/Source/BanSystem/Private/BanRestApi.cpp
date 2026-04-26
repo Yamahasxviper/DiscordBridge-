@@ -590,6 +590,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
             if (IdStr.IsEmpty() || !IdStr.IsNumeric() || IdStr.Len() > 19)
@@ -771,6 +772,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             const FString RawUid = Req.PathParams.FindRef(TEXT("uid"));
             const FString Uid    = FGenericPlatformHttp::UrlDecode(RawUid);
@@ -807,6 +809,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
@@ -831,6 +834,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
@@ -1108,6 +1112,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             const FString RawUid = Req.PathParams.FindRef(TEXT("uid"));
             const FString Uid    = FGenericPlatformHttp::UrlDecode(RawUid);
@@ -1137,6 +1142,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete) -> bool
         {
             if (!BanJson::CheckApiKey(Request)) { OnComplete(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Request)) { OnComplete(MoveTemp(SizeErr)); return true; }
 
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { OnComplete(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
@@ -1455,6 +1461,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             const FString IpAddress = FGenericPlatformHttp::UrlDecode(Req.PathParams.FindRef(TEXT("ip")));
 
@@ -2027,6 +2034,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
             if (IdStr.IsEmpty() || !IdStr.IsNumeric() || IdStr.Len() > 19)
@@ -2527,6 +2535,7 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
 
             const FString IdStr = Req.PathParams.FindRef(TEXT("id"));
             if (IdStr.IsEmpty() || !IdStr.IsNumeric() || IdStr.Len() > 19)
