@@ -310,12 +310,15 @@ uint32 FSMLWebSocketRunnable::Run()
 				bConnected = false;
 
 				// Build and send close frame payload (2-byte code + UTF-8 reason).
+				// RFC 6455 §5.5: control frames MUST NOT carry payload > 125 bytes.
+				// Close payload = 2-byte status code + reason, so reason is capped at 123 bytes.
 				const FTCHARToUTF8 Utf8Reason(*CloseReq.Reason);
+				const int32 ReasonLen = FMath::Min(Utf8Reason.Length(), 123);
 				TArray<uint8> ClosePayload;
-				ClosePayload.SetNum(2 + Utf8Reason.Length());
+				ClosePayload.SetNum(2 + ReasonLen);
 				ClosePayload[0] = static_cast<uint8>((CloseReq.Code >> 8) & 0xFF);
 				ClosePayload[1] = static_cast<uint8>(CloseReq.Code & 0xFF);
-				FMemory::Memcpy(ClosePayload.GetData() + 2, Utf8Reason.Get(), Utf8Reason.Length());
+				FMemory::Memcpy(ClosePayload.GetData() + 2, Utf8Reason.Get(), ReasonLen);
 
 				SendWsFrame(WsOpcode::Close, ClosePayload.GetData(), ClosePayload.Num());
 				NotifyClosed(CloseReq.Code, CloseReq.Reason);
@@ -655,6 +658,11 @@ bool FSMLWebSocketRunnable::InitSslContext()
 		char ErrBuf[256];
 		ERR_error_string_n(ERR_get_error(), ErrBuf, sizeof(ErrBuf));
 		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: SSL_new failed: %s"), UTF8_TO_TCHAR(ErrBuf));
+		// Free the context we just created — it is not freed by DestroySsl() because
+		// SslInstance is null and SSL_free (which would normally release SslCtx) was
+		// never called.
+		SSL_CTX_free(SslCtx);
+		SslCtx = nullptr;
 		return false;
 	}
 

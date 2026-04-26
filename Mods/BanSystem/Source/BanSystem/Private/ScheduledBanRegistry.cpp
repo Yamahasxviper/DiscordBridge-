@@ -231,12 +231,20 @@ void UScheduledBanRegistry::LoadFromFile()
                 Entry.DurationMinutes = static_cast<int32>(DurDbl);
 
             FString EffStr, CreatedStr;
+            bool bEffectiveAtValid = false;
             if ((*ObjPtr)->TryGetStringField(TEXT("effectiveAt"), EffStr))
-                FDateTime::ParseIso8601(*EffStr, Entry.EffectiveAt);
+            {
+                if (FDateTime::ParseIso8601(*EffStr, Entry.EffectiveAt))
+                    bEffectiveAtValid = true;
+                else
+                    UE_LOG(LogScheduledBanRegistry, Warning,
+                        TEXT("ScheduledBanRegistry: skipping entry for uid '%s' — malformed effectiveAt '%s'"),
+                        *Entry.Uid, *EffStr);
+            }
             if ((*ObjPtr)->TryGetStringField(TEXT("createdAt"), CreatedStr))
                 FDateTime::ParseIso8601(*CreatedStr, Entry.CreatedAt);
 
-            if (!Entry.Uid.IsEmpty())
+            if (!Entry.Uid.IsEmpty() && bEffectiveAtValid)
                 Pending.Add(Entry);
         }
     }

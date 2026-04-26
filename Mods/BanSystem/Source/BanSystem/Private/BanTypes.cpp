@@ -27,7 +27,12 @@ bool FBanTemplate::FromConfigString(const FString& ConfigStr, FBanTemplate& OutT
             return false;
         }
     }
-    OutTemplate.DurationMinutes = FCString::Atoi(*Parts[1]);
+    // Use Atoi64 + clamp to safely handle very large digit strings that would
+    // overflow FCString::Atoi (int32).  Values outside [INT32_MIN, INT32_MAX] are
+    // clamped; negative values are treated as permanent (DurationMinutes <= 0).
+    const int64 DurI64 = FCString::Atoi64(*Parts[1]);
+    OutTemplate.DurationMinutes = static_cast<int32>(
+        FMath::Clamp<int64>(DurI64, static_cast<int64>(INT32_MIN), static_cast<int64>(INT32_MAX)));
     OutTemplate.Reason          = Parts[2];
     OutTemplate.Category        = Parts.Num() > 3 ? Parts[3] : FString();
     return true;
