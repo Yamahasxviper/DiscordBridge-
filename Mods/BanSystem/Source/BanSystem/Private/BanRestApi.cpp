@@ -359,8 +359,7 @@ void UBanRestApi::RegisterRoutes()
         [](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-            Obj->SetStringField(TEXT("status"),    TEXT("ok"));
-            Obj->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
+            Obj->SetStringField(TEXT("status"), TEXT("ok"));
             Done(BanJson::Json(BanJson::ObjectToString(Obj)));
             return true;
         }
@@ -526,7 +525,24 @@ void UBanRestApi::RegisterRoutes()
             // Normalize EOS PUIDs to lowercase so they always match the lowercase
             // UIDs extracted from the ClientIdentity connection option in BanEnforcer.
             if (Platform == TEXT("EOS"))
+            {
                 PlayerUID = PlayerUID.ToLower();
+
+                // Validate: EOS PUIDs must be exactly 32 lowercase hex characters.
+                // A misformatted PUID will never match a real player in BanEnforcer,
+                // silently polluting the ban database.
+                bool bValidPuid = (PlayerUID.Len() == 32);
+                for (int32 i = 0; bValidPuid && i < 32; ++i)
+                {
+                    const TCHAR C = PlayerUID[i];
+                    bValidPuid = (C >= TEXT('0') && C <= TEXT('9')) || (C >= TEXT('a') && C <= TEXT('f'));
+                }
+                if (!bValidPuid)
+                {
+                    Done(BanJson::Error(TEXT("playerUID must be a valid 32-character hexadecimal EOS PUID")));
+                    return true;
+                }
+            }
 
             FBanEntry Entry;
             Entry.Uid        = UBanDatabase::MakeUid(Platform, PlayerUID);

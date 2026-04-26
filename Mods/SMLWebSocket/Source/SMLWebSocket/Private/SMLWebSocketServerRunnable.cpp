@@ -44,6 +44,11 @@ FSMLWebSocketServerRunnable::~FSMLWebSocketServerRunnable()
 bool FSMLWebSocketServerRunnable::Init()
 {
     ISocketSubsystem* SocketSub = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+    if (!SocketSub)
+    {
+        UE_LOG(LogWSServer, Error, TEXT("WSServer: socket subsystem unavailable"));
+        return false;
+    }
     ListenSocket = SocketSub->CreateSocket(NAME_Stream, TEXT("SMLWSServer"), false);
     if (!ListenSocket)
     {
@@ -90,38 +95,44 @@ uint32 FSMLWebSocketServerRunnable::Run()
         bool bHasPending = false;
         if (ListenSocket && ListenSocket->HasPendingConnection(bHasPending) && bHasPending)
         {
-            TSharedRef<FInternetAddr> RemoteAddr = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateInternetAddr();
-            FSocket* NewSocket = ListenSocket->Accept(*RemoteAddr, TEXT("SMLWSClient"));
-            if (NewSocket)
+            ISocketSubsystem* AcceptSS = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+            if (!AcceptSS)
             {
-                const FString ClientId = FString::Printf(TEXT("%llu"), NextClientId.fetch_add(1));
-                const FString Remote   = RemoteAddr->ToString(true);
-
-                FClientState State;
-                State.Socket        = NewSocket;
-                State.RemoteAddress = Remote;
-                State.bHandshakeDone = false;
-
-                if (PerformHandshake(State))
+                UE_LOG(LogWSServer, Warning, TEXT("WSServer: socket subsystem unavailable, cannot accept connection"));
+            }
+            else
+            {
+                TSharedRef<FInternetAddr> RemoteAddr = AcceptSS->CreateInternetAddr();
+                FSocket* NewSocket = ListenSocket->Accept(*RemoteAddr, TEXT("SMLWSClient"));
+                if (NewSocket)
                 {
-                    State.bHandshakeDone = true;
+                    const FString ClientId = FString::Printf(TEXT("%llu"), NextClientId.fetch_add(1));
+                    const FString Remote   = RemoteAddr->ToString(true);
+
+                    FClientState State;
+                    State.Socket        = NewSocket;
+                    State.RemoteAddress = Remote;
+                    State.bHandshakeDone = false;
+
+                    if (PerformHandshake(State))
                     {
-                        FScopeLock L(&ClientMutex);
-                        Clients.Add(ClientId, MoveTemp(State));
+                        State.bHandshakeDone = true;
+                        {
+                            FScopeLock L(&ClientMutex);
+                            Clients.Add(ClientId, MoveTemp(State));
+                        }
+
+                        TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
+                        AsyncTask(ENamedThreads::GameThread, [WeakOwner, ClientId, Remote]()
+                        {
+                            if (USMLWebSocketServer* O = WeakOwner.Get())
+                                O->Internal_OnClientConnected(ClientId, Remote);
+                        });
                     }
-
-                    TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
-                    AsyncTask(ENamedThreads::GameThread, [WeakOwner, ClientId, Remote]()
+                    else
                     {
-                        if (USMLWebSocketServer* O = WeakOwner.Get())
-                            O->Internal_OnClientConnected(ClientId, Remote);
-                    });
-                }
-                else
-                {
-                    ISocketSubsystem* SocketSS = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
-                    if (SocketSS)
-                        SocketSS->DestroySocket(NewSocket);
+                        AcceptSS->DestroySocket(NewSocket);
+                    }
                 }
             }
         }
@@ -216,7 +227,11 @@ uint32 FSMLWebSocketServerRunnable::Run()
                 FScopeLock L(&ClientMutex);
                 if (Clients.RemoveAndCopyValue(Id, Removed))
                 {
-                    ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(Removed.Socket);
+                    ISocketSubsystem* RemoveSS = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+                    if (RemoveSS)
+                        RemoveSS->DestroySocket(Removed.Socket);
+                    else
+                        delete Removed.Socket;
                 }
             }
             TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
@@ -277,6 +292,10 @@ bool FSMLWebSocketServerRunnable::PerformHandshake(FClientState& Client)
     uint8 Ch = 0;
     int32 Recv = 0;
     bool bFoundHeaderEnd = false;
+
+    // Prevent a slow/adversarial client from pinning this thread indefinitely
+    // by reading one byte at a time with no deadline.
+    Client.Socket->SetReceiveTimeout(FTimespan::FromSeconds(5));
 
     for (int32 i = 0; i < 8192 && !bStopping.load(); ++i)
     {

@@ -640,6 +640,10 @@ bool FSMLWebSocketRunnable::InitSslContext()
 	else
 	{
 		SSL_CTX_set_verify(SslCtx, SSL_VERIFY_NONE, nullptr);
+		UE_LOG(LogSMLWebSocket, Warning,
+		       TEXT("SMLWebSocket: SSL certificate verification is DISABLED. "
+		            "TLS connections will accept any server certificate (including self-signed or invalid). "
+		            "Set bVerifySSLCertificate=true if a CA bundle is available on this server."));
 	}
 
 	// Require at least TLS 1.2
