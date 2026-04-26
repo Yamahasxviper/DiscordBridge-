@@ -2720,7 +2720,7 @@ EExecutionStatus ATempUnmuteChatCommand::ExecuteCommand_Implementation(
     UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
 {
     FString AdminId;
-    if (!BanChat::IsModeratorSender(Sender, AdminId))
+    if (!BanChat::IsAdminSender(Sender, AdminId))
         return EExecutionStatus::INSUFFICIENT_PERMISSIONS;
 
     FString Uid, DisplayName;
@@ -4125,10 +4125,20 @@ EExecutionStatus ABulkBanChatCommand::ExecuteCommand_Implementation(
         }
     }
 
-    Sender->SendChatMessage(
-        FString::Printf(TEXT("[BanChatCommands] Bulk ban complete: %d/%d players banned. Reason: %s"),
-            BannedCount, Uids.Num(), *Reason),
-        FLinearColor::Green);
+    if (BannedCount == 0)
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Bulk ban failed — no valid UIDs were banned (0/%d). Reason: %s"),
+                Uids.Num(), *Reason),
+            FLinearColor::Red);
+    }
+    else
+    {
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Bulk ban complete: %d/%d players banned. Reason: %s"),
+                BannedCount, Uids.Num(), *Reason),
+            BannedCount == Uids.Num() ? FLinearColor::Green : FLinearColor::Yellow);
+    }
 
     return EExecutionStatus::COMPLETED;
 }

@@ -29,6 +29,11 @@ void UBanWebSocketPusher::Initialize(FSubsystemCollectionBase& Collection)
     }
 
     Client = NewObject<USMLWebSocketClient>(this);
+    if (!Client)
+    {
+        UE_LOG(LogBanWebSocketPusher, Error, TEXT("BanWebSocketPusher: failed to create USMLWebSocketClient."));
+        return;
+    }
     Client->bAutoReconnect = true;
     Client->ReconnectInitialDelaySeconds = 5.0f;
     Client->MaxReconnectDelaySeconds     = 60.0f;

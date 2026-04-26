@@ -855,7 +855,8 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 					{
 						AppealReg->ReviewAppeal(*AppealIdPtr, EAppealStatus::Approved,
 							DiscordUsername, TEXT("Appeal approved via ticket."));
-						OpenerToAppealId.Remove(AppealOpenerId);
+						// Do NOT remove from OpenerToAppealId here — CloseAppealTicketForOpener
+						// reads it to capture the ReviewNote for the transcript before clearing it.
 					}
 				}
 			}
@@ -924,7 +925,8 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 				{
 					AppealReg->ReviewAppeal(*AppealIdPtr, EAppealStatus::Denied,
 						DiscordUsername, TEXT("Appeal denied via ticket."));
-					OpenerToAppealId.Remove(AppealOpenerId);
+					// Do NOT remove from OpenerToAppealId here — CloseAppealTicketForOpener
+					// reads it to capture the ReviewNote for the transcript before clearing it.
 				}
 			}
 		}
