@@ -73,9 +73,9 @@ void UPlayerWarningRegistry::AddWarning(const FString& Uid, const FString& Playe
     OnWarningAdded.Broadcast(Entry);
 }
 
-void UPlayerWarningRegistry::AddWarning(const FWarningEntry& InEntry)
+FWarningEntry UPlayerWarningRegistry::AddWarning(const FWarningEntry& InEntry)
 {
-    if (InEntry.Uid.IsEmpty()) return;
+    if (InEntry.Uid.IsEmpty()) return FWarningEntry();
 
     FWarningEntry Entry;
     {
@@ -91,6 +91,7 @@ void UPlayerWarningRegistry::AddWarning(const FWarningEntry& InEntry)
 
     // Broadcast outside the lock so listeners can safely call back into the registry.
     OnWarningAdded.Broadcast(Entry);
+    return Entry;
 }
 
 TArray<FWarningEntry> UPlayerWarningRegistry::GetWarningsForUid(const FString& Uid) const
@@ -286,12 +287,28 @@ void UPlayerWarningRegistry::LoadFromFile()
 
             FString WarnDateStr;
             if ((*ObjPtr)->TryGetStringField(TEXT("warnDate"), WarnDateStr))
-                FDateTime::ParseIso8601(*WarnDateStr, Entry.WarnDate);
+            {
+                if (!FDateTime::ParseIso8601(*WarnDateStr, Entry.WarnDate))
+                {
+                    UE_LOG(LogPlayerWarningRegistry, Warning,
+                        TEXT("PlayerWarningRegistry: uid='%s' has malformed warnDate '%s' — skipping entry"),
+                        *Entry.Uid, *WarnDateStr);
+                    continue;
+                }
+            }
 
             (*ObjPtr)->TryGetBoolField(TEXT("hasExpiry"), Entry.bHasExpiry);
             FString ExpireDateStr;
             if ((*ObjPtr)->TryGetStringField(TEXT("expireDate"), ExpireDateStr) && !ExpireDateStr.IsEmpty())
-                FDateTime::ParseIso8601(*ExpireDateStr, Entry.ExpireDate);
+            {
+                if (!FDateTime::ParseIso8601(*ExpireDateStr, Entry.ExpireDate))
+                {
+                    UE_LOG(LogPlayerWarningRegistry, Warning,
+                        TEXT("PlayerWarningRegistry: uid='%s' has malformed expireDate '%s' — skipping entry"),
+                        *Entry.Uid, *ExpireDateStr);
+                    continue;
+                }
+            }
 
             // Points (default 1 for records written before this feature).
             double PointsDbl = 1.0;

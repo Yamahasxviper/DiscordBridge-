@@ -595,7 +595,7 @@ bool FBanSystemModule::OnBackupTick(float DeltaTime)
             const float IntervalSeconds = Cfg->BackupIntervalHours * 3600.0f;
             if (BackupAccumulatedSeconds < IntervalSeconds) return true;
 
-            BackupAccumulatedSeconds = 0.0f;
+            BackupAccumulatedSeconds -= IntervalSeconds;
 
             UGameInstance* GI = World->GetGameInstance();
             if (!GI) break;
@@ -639,7 +639,7 @@ bool FBanSystemModule::OnPruneTick(float DeltaTime)
             const float IntervalSeconds = Cfg->PruneIntervalHours * 3600.0f;
             if (PruneAccumulatedSeconds < IntervalSeconds) return true;
 
-            PruneAccumulatedSeconds = 0.0f;
+            PruneAccumulatedSeconds -= IntervalSeconds;
 
             UGameInstance* GI = World->GetGameInstance();
             if (!GI) break;
@@ -686,7 +686,7 @@ bool FBanSystemModule::OnSessionPruneTick(float DeltaTime)
             SessionPruneAccumulatedSeconds += DeltaTime;
             if (SessionPruneAccumulatedSeconds < SessionPruneIntervalSeconds) return true;
 
-            SessionPruneAccumulatedSeconds = 0.0f;
+            SessionPruneAccumulatedSeconds -= SessionPruneIntervalSeconds;
 
             UGameInstance* GI = World->GetGameInstance();
             if (!GI) break;

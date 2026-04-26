@@ -104,7 +104,7 @@ void UScheduledBanRegistry::Tick(float DeltaTime)
 {
     AccumulatedSeconds += DeltaTime;
     if (AccumulatedSeconds < TickIntervalSeconds) return;
-    AccumulatedSeconds = 0.0f;
+    AccumulatedSeconds -= TickIntervalSeconds;
 
     const FDateTime Now = FDateTime::UtcNow();
     TArray<FScheduledBanEntry> Due;

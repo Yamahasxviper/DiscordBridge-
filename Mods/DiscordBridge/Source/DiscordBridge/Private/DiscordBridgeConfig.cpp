@@ -527,7 +527,12 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 					{
 						const int32 Start = Idx + Search.Len();
 						const int32 End   = Cleaned.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, Start);
-						if (End != INDEX_NONE) SA.Message = Cleaned.Mid(Start, End - Start);
+						if (End != INDEX_NONE && End > Start)
+							SA.Message = Cleaned.Mid(Start, End - Start);
+						else
+							UE_LOG(LogDiscordBridge, Warning,
+								TEXT("DiscordBridgeConfig: malformed ScheduledAnnouncements entry — "
+								     "could not extract Message value"));
 					}
 				}
 				// Extract ChannelId
@@ -538,7 +543,12 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 					{
 						const int32 Start = Idx + Search.Len();
 						const int32 End   = Cleaned.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, Start);
-						if (End != INDEX_NONE) SA.ChannelId = Cleaned.Mid(Start, End - Start);
+						if (End != INDEX_NONE && End > Start)
+							SA.ChannelId = Cleaned.Mid(Start, End - Start);
+						else
+							UE_LOG(LogDiscordBridge, Warning,
+								TEXT("DiscordBridgeConfig: malformed ScheduledAnnouncements entry — "
+								     "could not extract ChannelId value"));
 					}
 				}
 				if (SA.IntervalMinutes > 0 && !SA.Message.IsEmpty())
