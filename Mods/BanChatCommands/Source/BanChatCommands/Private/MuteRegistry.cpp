@@ -87,9 +87,23 @@ void UMuteRegistry::MutePlayer(const FString& Uid, const FString& PlayerName,
 bool UMuteRegistry::UnmutePlayer(const FString& Uid)
 {
     bool bRemoved = false;
+    bool bWasActive = false;
 
     {
         FScopeLock Lock(&Mutex);
+        // Capture whether the entry was actively muting before removal so we
+        // only broadcast OnPlayerUnmuted for entries that were actually live.
+        // If the mute had already expired but TickExpiry() hasn't run yet,
+        // the player is not muted and a manual /unmute should not fire a
+        // spurious "player was unmuted" notification.
+        for (const FMuteEntry& M : Mutes)
+        {
+            if (M.Uid.Equals(Uid, ESearchCase::IgnoreCase))
+            {
+                bWasActive = !M.IsExpired();
+                break;
+            }
+        }
         const int32 Before = Mutes.Num();
         Mutes.RemoveAll([&Uid](const FMuteEntry& M)
         {
@@ -99,7 +113,7 @@ bool UMuteRegistry::UnmutePlayer(const FString& Uid)
         if (bRemoved) SaveToFile();
     }
 
-    if (bRemoved)
+    if (bRemoved && bWasActive)
         OnPlayerUnmuted.Broadcast(Uid);
 
     return bRemoved;

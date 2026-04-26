@@ -1233,15 +1233,21 @@ void UBanRestApi::RegisterRoutes()
             int32 Limit = 100;
             if (const FString* LimitStr = Req.QueryParams.Find(TEXT("limit")))
             {
-                const int32 Parsed = FCString::Atoi(**LimitStr);
-                if (Parsed > 0) Limit = FMath::Min(Parsed, 1000);
+                if (LimitStr->IsNumeric() && LimitStr->Len() <= 10)
+                {
+                    const int32 Parsed = FCString::Atoi(**LimitStr);
+                    if (Parsed > 0) Limit = FMath::Min(Parsed, 1000);
+                }
             }
 
             int32 Page = 1;
             if (const FString* PageStr = Req.QueryParams.Find(TEXT("page")))
             {
-                const int32 Parsed = FCString::Atoi(**PageStr);
-                if (Parsed > 0) Page = Parsed;
+                if (PageStr->IsNumeric() && PageStr->Len() <= 10)
+                {
+                    const int32 Parsed = FCString::Atoi(**PageStr);
+                    if (Parsed > 0) Page = Parsed;
+                }
             }
 
             TArray<FAuditEntry> Entries;

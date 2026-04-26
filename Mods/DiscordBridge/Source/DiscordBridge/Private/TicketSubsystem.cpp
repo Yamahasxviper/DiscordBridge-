@@ -235,7 +235,10 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 			{
 				if (UBanDatabase* BanDb = GI->GetSubsystem<UBanDatabase>())
 				{
-					TArray<FString> ToAutoClose;
+					// Use TSet to deduplicate opener IDs: a user with two open
+					// appeal channels (e.g. after a crash/restart) should only be
+					// auto-closed once, preventing duplicate Discord messages.
+					TSet<FString> ToAutoClose;
 					for (const TPair<FString, FString>& TypePair : TicketChannelToType)
 					{
 						if (TypePair.Value != TEXT("banappeal")) continue;
