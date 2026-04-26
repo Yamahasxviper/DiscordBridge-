@@ -21,7 +21,7 @@ class Help(commands.Cog):
     )
     async def help_cmd(self, interaction: discord.Interaction) -> None:
         embed = discord.Embed(
-            title="🤖 Satisfactory Q&A Bot — Help",
+            title="🐍 ViperBot — Help",
             description=(
                 "I answer questions about **Satisfactory** and its **mods**. "
                 "Here are all my commands:"

@@ -18,7 +18,7 @@ from discord import app_commands
 from discord.ext import commands
 
 if TYPE_CHECKING:
-    from bot import FredBot
+    from bot import ViperBot
 
 FICSIT_API = "https://api.ficsit.app/v2/query"
 
@@ -52,7 +52,7 @@ async def _graphql(session: Any, query: str) -> dict:
 class Ficsit(commands.Cog):
     """Commands for querying ficsit.app and the modding documentation."""
 
-    def __init__(self, bot: "FredBot") -> None:
+    def __init__(self, bot: "ViperBot") -> None:
         self.bot = bot
 
     # ── /mod ──────────────────────────────────────────────────────────────────

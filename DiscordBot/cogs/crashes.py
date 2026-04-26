@@ -25,7 +25,7 @@ from discord.ext import commands
 from db import db
 
 if TYPE_CHECKING:
-    from bot import FredBot
+    from bot import ViperBot
 
 
 def _is_staff(member: discord.Member, staff_role_name: str) -> bool:
@@ -39,7 +39,7 @@ def _is_staff(member: discord.Member, staff_role_name: str) -> bool:
 class Crashes(commands.Cog):
     """Automatic crash-log analysis and crash-pattern management."""
 
-    def __init__(self, bot: "FredBot") -> None:
+    def __init__(self, bot: "ViperBot") -> None:
         self.bot = bot
         self.staff_role: str = os.getenv("STAFF_ROLE", "Staff")
 

@@ -1,5 +1,5 @@
 """
-FredBot — main entry point.
+ViperBot — main entry point.
 
 Loads all cogs, syncs slash commands, and manages the shared aiohttp session.
 """
@@ -24,7 +24,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-log = logging.getLogger("fredbot")
+log = logging.getLogger("viperbot")
 
 COGS = [
     "cogs.faq",
@@ -39,7 +39,7 @@ COGS = [
 ]
 
 
-class FredBot(commands.Bot):
+class ViperBot(commands.Bot):
     """Main bot class with shared HTTP session and SQLite database."""
 
     http_session: aiohttp.ClientSession
@@ -95,7 +95,7 @@ class FredBot(commands.Bot):
         log.info("Logged in as %s (ID: %s)", self.user, self.user.id if self.user else "?")
 
 
-bot = FredBot()
+bot = ViperBot()
 
 if __name__ == "__main__":
     token = os.environ["DISCORD_TOKEN"]

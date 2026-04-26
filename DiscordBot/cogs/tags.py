@@ -18,7 +18,7 @@ from discord.ext import commands
 from db import db, get_config
 
 if TYPE_CHECKING:
-    from bot import FredBot
+    from bot import ViperBot
 
 
 def _is_staff(member: discord.Member, staff_role_name: str) -> bool:
@@ -64,7 +64,7 @@ def _resolve_tag(name: str, args: list[str], depth: int = 0) -> Optional[tuple[s
 class Tags(commands.Cog):
     """Runtime tag system — !<tag> prefix and /tag slash commands."""
 
-    def __init__(self, bot: "FredBot") -> None:
+    def __init__(self, bot: "ViperBot") -> None:
         self.bot = bot
         self.staff_role: str = os.getenv("STAFF_ROLE", "Staff")
 

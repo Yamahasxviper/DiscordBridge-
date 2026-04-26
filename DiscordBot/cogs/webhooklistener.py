@@ -24,9 +24,9 @@ from discord.ext import commands
 from db import get_config, set_config
 
 if TYPE_CHECKING:
-    from bot import FredBot
+    from bot import ViperBot
 
-log = logging.getLogger("fredbot.webhooklistener")
+log = logging.getLogger("viperbot.webhooklistener")
 
 
 def _is_staff(member: discord.Member, staff_role_name: str) -> bool:
@@ -128,7 +128,7 @@ def _build_embed(event: str, payload: dict) -> Optional[discord.Embed]:
 class WebhookListener(commands.Cog):
     """Receives GitHub webhook events and posts them as Discord embeds."""
 
-    def __init__(self, bot: "FredBot") -> None:
+    def __init__(self, bot: "ViperBot") -> None:
         self.bot = bot
         self.staff_role: str = os.getenv("STAFF_ROLE", "Staff")
         self._runner: Optional[aiohttp.web.AppRunner] = None
