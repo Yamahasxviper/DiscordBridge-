@@ -70,7 +70,12 @@ FScheduledBanEntry UScheduledBanRegistry::AddScheduled(
     Entry.Category        = Category;
 
     Pending.Add(Entry);
-    SaveToFile();
+    if (!SaveToFile())
+    {
+        UE_LOG(LogScheduledBanRegistry, Error,
+            TEXT("ScheduledBanRegistry: failed to save after adding scheduled ban #%lld for %s"),
+            Entry.Id, *Uid);
+    }
 
     UE_LOG(LogScheduledBanRegistry, Log,
         TEXT("ScheduledBanRegistry: scheduled ban #%lld for %s at %s"),
@@ -92,7 +97,14 @@ bool UScheduledBanRegistry::DeleteScheduled(int64 Id)
     const int32 Before = Pending.Num();
     Pending.RemoveAll([Id](const FScheduledBanEntry& E) { return E.Id == Id; });
     const bool bRemoved = Pending.Num() < Before;
-    if (bRemoved) SaveToFile();
+    if (bRemoved)
+    {
+        if (!SaveToFile())
+        {
+            UE_LOG(LogScheduledBanRegistry, Error,
+                TEXT("ScheduledBanRegistry: failed to save after deleting scheduled ban #%lld"), Id);
+        }
+    }
     return bRemoved;
 }
 
@@ -120,7 +132,14 @@ void UScheduledBanRegistry::Tick(float DeltaTime)
             }
         }
         if (!Due.IsEmpty())
-            SaveToFile();
+        {
+            if (!SaveToFile())
+            {
+                UE_LOG(LogScheduledBanRegistry, Error,
+                    TEXT("ScheduledBanRegistry: failed to save after dequeuing %d due entry(ies)"),
+                    Due.Num());
+            }
+        }
     }
 
     for (const FScheduledBanEntry& S : Due)
@@ -252,7 +271,7 @@ void UScheduledBanRegistry::LoadFromFile()
     // Restore the O(1) counter from loaded data so AddScheduled never reuses an Id.
     NextId = 1;
     for (const FScheduledBanEntry& E : Pending)
-        if (E.Id >= NextId) NextId = E.Id + 1;
+        if (E.Id >= NextId) NextId = (E.Id < INT64_MAX) ? E.Id + 1 : E.Id;
 }
 
 bool UScheduledBanRegistry::SaveToFile() const

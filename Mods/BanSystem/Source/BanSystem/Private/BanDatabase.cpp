@@ -182,9 +182,16 @@ void UBanDatabase::Initialize(FSubsystemCollectionBase& Collection)
     // never leave the file absent.
     if (!PF.FileExists(*DbPath))
     {
-        SaveToFile();
-        UE_LOG(LogBanDatabase, Log,
-            TEXT("BanDatabase: created empty ban database at %s"), *DbPath);
+        if (SaveToFile())
+        {
+            UE_LOG(LogBanDatabase, Log,
+                TEXT("BanDatabase: created empty ban database at %s"), *DbPath);
+        }
+        else
+        {
+            UE_LOG(LogBanDatabase, Error,
+                TEXT("BanDatabase: failed to create initial ban database at %s"), *DbPath);
+        }
     }
 
     // Capture the mtime so we can detect external edits in ReloadIfChanged().
@@ -256,19 +263,22 @@ void UBanDatabase::LoadFromFile()
     // are shared, so we take the lock here for safety.
     FScopeLock Lock(&DbMutex);
 
-    Bans.Empty();
-    NextId = 1;
-
     FString RawJson;
     if (!FFileHelper::LoadFileToString(RawJson, *DbPath))
-        return; // File doesn't exist yet — that's fine on first run.
+    {
+        // File doesn't exist yet — clear atomically so callers never see a
+        // partial list.  This is fine on first run.
+        Bans.Empty();
+        NextId = 1;
+        return;
+    }
 
     TSharedPtr<FJsonObject> Root;
     TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(RawJson);
     if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
     {
         UE_LOG(LogBanDatabase, Warning,
-            TEXT("BanDatabase: failed to parse %s — starting with empty ban list"), *DbPath);
+            TEXT("BanDatabase: failed to parse %s — keeping existing in-memory list"), *DbPath);
         // Rename the corrupt file so it is not silently re-discarded on every
         // server restart.  A fresh empty database will be written on the next
         // SaveToFile() call (e.g. when the first ban is added or at Initialize).
@@ -279,16 +289,23 @@ void UBanDatabase::LoadFromFile()
                 TEXT("BanDatabase: corrupt file moved to %s — a fresh database will be created on next write."),
                 *CorruptPath);
         }
+        // Do NOT clear Bans here: on hot-reload a parse failure must not wipe
+        // the live in-memory ban list that is currently protecting the server.
         return;
     }
 
     double NextIdDbl = 1.0;
     Root->TryGetNumberField(TEXT("nextId"), NextIdDbl);
-    NextId = FMath::Max((int64)1, static_cast<int64>(NextIdDbl));
+    const int64 NewNextId = FMath::Max((int64)1, static_cast<int64>(NextIdDbl));
 
+    // Build the new ban list into a local array first so that concurrent readers
+    // never observe an empty list during the parse phase.  The live Bans field is
+    // only updated once the new list is fully constructed (atomic swap).
+    TArray<FBanEntry> NewBans;
     const TArray<TSharedPtr<FJsonValue>>* BanArray = nullptr;
     if (Root->TryGetArrayField(TEXT("bans"), BanArray) && BanArray)
     {
+        NewBans.Reserve(BanArray->Num());
         for (const TSharedPtr<FJsonValue>& Val : *BanArray)
         {
             if (!Val.IsValid()) continue;
@@ -297,9 +314,14 @@ void UBanDatabase::LoadFromFile()
 
             FBanEntry E;
             if (BanDbJson::JsonToEntry(*ObjPtr, E))
-                Bans.Add(E);
+                NewBans.Add(E);
         }
     }
+
+    // Atomic swap: readers either see the old complete list or the new complete
+    // list — never an empty intermediate state.
+    Bans    = MoveTemp(NewBans);
+    NextId  = NewNextId;
 }
 
 bool UBanDatabase::SaveToFile() const

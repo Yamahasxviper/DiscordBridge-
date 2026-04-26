@@ -65,7 +65,12 @@ FBanAppealEntry UBanAppealRegistry::AddAppeal(const FString& Uid,
         Entry.SubmittedAt = FDateTime::UtcNow();
 
         Appeals.Add(Entry);
-        SaveToFile();
+        if (!SaveToFile())
+        {
+            UE_LOG(LogBanAppealRegistry, Error,
+                TEXT("BanAppealRegistry: failed to save after adding appeal id=%lld for uid='%s'"),
+                Entry.Id, *Entry.Uid);
+        }
     }
 
     // Broadcast outside the lock so listeners can safely call back into the registry.
@@ -101,7 +106,14 @@ bool UBanAppealRegistry::DeleteAppeal(int64 Id)
         return A.Id == Id;
     });
     const bool bRemoved = Appeals.Num() < Before;
-    if (bRemoved) SaveToFile();
+    if (bRemoved)
+    {
+        if (!SaveToFile())
+        {
+            UE_LOG(LogBanAppealRegistry, Error,
+                TEXT("BanAppealRegistry: failed to save after deleting appeal id=%lld"), Id);
+        }
+    }
     return bRemoved;
 }
 
@@ -126,7 +138,13 @@ bool UBanAppealRegistry::ReviewAppeal(int64 Id, EAppealStatus NewStatus,
             break;
         }
         if (bFound)
-            SaveToFile();
+        {
+            if (!SaveToFile())
+            {
+                UE_LOG(LogBanAppealRegistry, Error,
+                    TEXT("BanAppealRegistry: failed to save after reviewing appeal id=%lld"), Id);
+            }
+        }
     }
 
     if (bFound)
@@ -213,7 +231,7 @@ void UBanAppealRegistry::LoadFromFile()
     // Restore the O(1) counter from loaded data so AddAppeal never reuses an Id.
     NextId = 1;
     for (const FBanAppealEntry& A : Appeals)
-        if (A.Id >= NextId) NextId = A.Id + 1;
+        if (A.Id >= NextId) NextId = (A.Id < INT64_MAX) ? A.Id + 1 : A.Id;
 }
 
 bool UBanAppealRegistry::SaveToFile() const

@@ -78,9 +78,9 @@ void USMLWebSocketClient::SendText(const FString& Message)
 {
 	if (bIsConnected && Runnable.IsValid())
 	{
+		Runnable->EnqueueText(Message);
 		StatBytesSent.fetch_add(FTCHARToUTF8(Message.GetCharArray().GetData()).Length());
 		StatMessagesSent.fetch_add(1);
-		Runnable->EnqueueText(Message);
 		return;
 	}
 	if (bQueueMessagesWhileDisconnected)
@@ -101,9 +101,9 @@ void USMLWebSocketClient::SendBinary(const TArray<uint8>& Data)
 {
 	if (bIsConnected && Runnable.IsValid())
 	{
+		Runnable->EnqueueBinary(Data);
 		StatBytesSent.fetch_add(Data.Num());
 		StatMessagesSent.fetch_add(1);
-		Runnable->EnqueueBinary(Data);
 		return;
 	}
 	if (bQueueMessagesWhileDisconnected)

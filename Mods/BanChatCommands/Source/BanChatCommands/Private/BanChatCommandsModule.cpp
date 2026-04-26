@@ -221,7 +221,10 @@ uint32 FBanChatCommandsModule::ComputeAdminHash()
 bool FBanChatCommandsModule::OnConfigPollTick(float /*DeltaTime*/)
 {
     // Force UE to re-read all UPROPERTY(Config) fields from the ini files on disk.
-    GetMutableDefault<UBanChatCommandsConfig>()->ReloadConfig();
+    UBanChatCommandsConfig* MutableCfg = GetMutableDefault<UBanChatCommandsConfig>();
+    if (!MutableCfg)
+        return true; // Safety: CDO unavailable (should never happen, but guard anyway).
+    MutableCfg->ReloadConfig();
 
     const uint32 NewHash = ComputeAdminHash();
     if (NewHash != LastConfigHash)
@@ -229,7 +232,8 @@ bool FBanChatCommandsModule::OnConfigPollTick(float /*DeltaTime*/)
         LastConfigHash = NewHash;
         BackupConfigIfNeeded();
 
-        const int32 AdminCount = UBanChatCommandsConfig::Get()->AdminEosPUIDs.Num();
+        const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
+        const int32 AdminCount = Cfg ? Cfg->AdminEosPUIDs.Num() : 0;
         UE_LOG(LogBanChatCommands, Log,
             TEXT("BanChatCommands: config auto-reloaded — %d admin(s) now active."),
             AdminCount);

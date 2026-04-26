@@ -42,7 +42,7 @@ public:
      * Retrieve the client registered under Name, or nullptr if none exists.
      */
     UFUNCTION(BlueprintPure, Category="SML|WebSocket|Registry")
-    USMLWebSocketClient* GetClient(const FString& Name) const;
+    USMLWebSocketClient* GetClient(const FString& Name);
 
     /**
      * Remove the client registered under Name from the registry.
