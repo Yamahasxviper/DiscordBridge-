@@ -215,6 +215,14 @@ uint32 FSMLWebSocketServerRunnable::Run()
                 }
                 C.RecvBuffer.SetNum(OldLen + Read);
 
+                // Read == 0 means the remote peer closed the connection (EOF).
+                // Treat it as a disconnect so the client slot is cleaned up.
+                if (Read == 0)
+                {
+                    ToRemove.Add(KV.Key);
+                    continue;
+                }
+
                 if (!ProcessFrames(KV.Key, C))
                     ToRemove.Add(KV.Key);
             }

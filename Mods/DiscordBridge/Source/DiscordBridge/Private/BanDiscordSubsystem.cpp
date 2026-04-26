@@ -3571,6 +3571,13 @@ void UBanDiscordSubsystem::HandleDismissAppealCommand(const TArray<FString>& Arg
 		return;
 	}
 
+	if (!Args[0].IsNumeric() || Args[0].Len() > 19)
+	{
+		Respond(ChannelId,
+			TEXT(":x: Invalid appeal ID. Must be a positive integer."));
+		return;
+	}
+
 	const int64 AppealId = FCString::Atoi64(*Args[0]);
 	if (AppealId <= 0)
 	{
@@ -3619,6 +3626,13 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 	{
 		Respond(ChannelId,
 			TEXT("Usage: `/appeal approve <id> [note...]`"));
+		return;
+	}
+
+	if (!Args[0].IsNumeric() || Args[0].Len() > 19)
+	{
+		Respond(ChannelId,
+			TEXT(":x: Invalid appeal ID. Must be a positive integer."));
 		return;
 	}
 
@@ -3731,6 +3745,13 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 	{
 		Respond(ChannelId,
 			TEXT("Usage: `/appeal deny <id> [note...]`"));
+		return;
+	}
+
+	if (!Args[0].IsNumeric() || Args[0].Len() > 19)
+	{
+		Respond(ChannelId,
+			TEXT(":x: Invalid appeal ID. Must be a positive integer."));
 		return;
 	}
 

@@ -478,7 +478,7 @@ private:
 	 * and are silently dropped when it no longer matches, preventing stale
 	 * events from a replaced connection from firing on the game thread.
 	 */
-	uint32 ConnectionGeneration{0};
+	std::atomic<uint32> ConnectionGeneration{0};
 
 	// ── Stats ─────────────────────────────────────────────────────────────────
 
