@@ -87,10 +87,13 @@ void USMLWebSocketClient::SendText(const FString& Message)
 	{
 		FScopeLock Lock(&QueueMutex);
 		PendingSendQueue.Add(Message);
-		if (MaxQueuedMessages > 0 && PendingSendQueue.Num() > MaxQueuedMessages)
+		// Enforce the limit against the combined text+binary count so the total
+		// queue never exceeds MaxQueuedMessages regardless of message type mix.
+		if (MaxQueuedMessages > 0 &&
+		    (PendingSendQueue.Num() + PendingSendBinaryQueue.Num()) > MaxQueuedMessages)
 		{
 			UE_LOG(LogSMLWebSocket, VeryVerbose,
-				TEXT("SMLWebSocketClient: outbound text queue full (%d) — oldest message dropped"),
+				TEXT("SMLWebSocketClient: outbound queue full (%d) — oldest text message dropped"),
 				MaxQueuedMessages);
 			PendingSendQueue.RemoveAt(0);
 		}
@@ -110,10 +113,13 @@ void USMLWebSocketClient::SendBinary(const TArray<uint8>& Data)
 	{
 		FScopeLock Lock(&QueueMutex);
 		PendingSendBinaryQueue.Add(Data);
-		if (MaxQueuedMessages > 0 && PendingSendBinaryQueue.Num() > MaxQueuedMessages)
+		// Enforce the limit against the combined text+binary count so the total
+		// queue never exceeds MaxQueuedMessages regardless of message type mix.
+		if (MaxQueuedMessages > 0 &&
+		    (PendingSendQueue.Num() + PendingSendBinaryQueue.Num()) > MaxQueuedMessages)
 		{
 			UE_LOG(LogSMLWebSocket, VeryVerbose,
-				TEXT("SMLWebSocketClient: outbound binary queue full (%d) — oldest message dropped"),
+				TEXT("SMLWebSocketClient: outbound queue full (%d) — oldest binary message dropped"),
 				MaxQueuedMessages);
 			PendingSendBinaryQueue.RemoveAt(0);
 		}

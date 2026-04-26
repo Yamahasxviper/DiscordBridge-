@@ -850,17 +850,32 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 					? CustomId.Mid(FString(TEXT("wl_approve:")).Len())
 					: CustomId.Mid(FString(TEXT("wl_deny:")).Len());
 
-				// Guard against malformed button custom_ids (e.g. "wl_approve:" with no ID).
-				if (TargetDiscordId.IsEmpty())
+				// Guard against malformed button custom_ids (e.g. "wl_approve:" with no ID,
+			// or IDs containing non-digit characters that can't be valid Discord snowflakes).
+			{
+				bool bValidSnowflake = !TargetDiscordId.IsEmpty();
+				if (bValidSnowflake)
+				{
+					for (TCHAR Ch : TargetDiscordId)
+					{
+						if (!FChar::IsDigit(Ch))
+						{
+							bValidSnowflake = false;
+							break;
+						}
+					}
+				}
+				if (!bValidSnowflake)
 				{
 					FString InteractionId, InteractionToken;
 					DataObj->TryGetStringField(TEXT("id"),    InteractionId);
 					DataObj->TryGetStringField(TEXT("token"), InteractionToken);
 					RespondToInteraction(InteractionId, InteractionToken, 4,
-						TEXT(":warning: Malformed button interaction — missing target Discord ID."),
+						TEXT(":warning: Malformed button interaction — invalid or missing target Discord ID."),
 						/*bEphemeral=*/true);
 					return;
 				}
+			}
 
 				FString InteractionId, InteractionToken;
 				DataObj->TryGetStringField(TEXT("id"),    InteractionId);
@@ -1661,6 +1676,7 @@ void UDiscordBridgeSubsystem::SendMessageToChannel(const FString& TargetChannelI
 	Request->SetHeader(TEXT("Authorization"),
 	                   FString::Printf(TEXT("Bot %s"), *Config.BotToken));
 	Request->SetContentAsString(BodyString);
+	Request->SetTimeout(10.0f);
 
 	Request->OnProcessRequestComplete().BindWeakLambda(
 		this,
@@ -1757,6 +1773,7 @@ void UDiscordBridgeSubsystem::RespondToInteraction(const FString& InteractionId,
 	Request->SetHeader(TEXT("Authorization"),
 	                   FString::Printf(TEXT("Bot %s"), *Config.BotToken));
 	Request->SetContentAsString(BodyString);
+	Request->SetTimeout(10.0f);
 
 	Request->OnProcessRequestComplete().BindLambda(
 		[InteractionId](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
@@ -1808,6 +1825,7 @@ void UDiscordBridgeSubsystem::FollowUpInteraction(const FString& InteractionToke
 	Request->SetHeader(TEXT("Authorization"),
 	                   FString::Printf(TEXT("Bot %s"), *Config.BotToken));
 	Request->SetContentAsString(BodyString);
+	Request->SetTimeout(10.0f);
 	Request->OnProcessRequestComplete().BindLambda(
 		[](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
 		{
@@ -1922,6 +1940,7 @@ void UDiscordBridgeSubsystem::SendMessageBodyToChannel(const FString& TargetChan
 	Request->SetHeader(TEXT("Authorization"),
 	                   FString::Printf(TEXT("Bot %s"), *Config.BotToken));
 	Request->SetContentAsString(BodyString);
+	Request->SetTimeout(10.0f);
 
 	Request->OnProcessRequestComplete().BindLambda(
 		[this, TargetChannelId, BodyString](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
@@ -1943,6 +1962,7 @@ void UDiscordBridgeSubsystem::SendMessageBodyToChannel(const FString& TargetChan
 					FbReq->SetVerb(TEXT("POST"));
 					FbReq->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 					FbReq->SetContentAsString(BodyString);
+					FbReq->SetTimeout(10.0f);
 					FbReq->ProcessRequest();
 				}
 			}
@@ -6232,20 +6252,29 @@ return;
 // ── /whitelist – handled within DiscordBridgeSubsystem ───────────────────────
 if (CmdName == TEXT("whitelist"))
 {
-// Acknowledge the interaction immediately.
+// Validate the slash-command structure before sending any interaction response.
+if (!TopOptions || TopOptions->IsEmpty())
+{
 RespondToInteraction(InteractionId, InteractionToken, 4,
-    TEXT("✅ Processing whitelist command…"), true);
-
-if (!TopOptions || TopOptions->IsEmpty()) return;
+    TEXT(":warning: Malformed whitelist command — no subcommand provided."), true);
+return;
+}
 const TSharedPtr<FJsonObject>* SubObjPtr = nullptr;
-if (!(*TopOptions)[0]->TryGetObject(SubObjPtr) || !SubObjPtr) return;
+if (!(*TopOptions)[0]->TryGetObject(SubObjPtr) || !SubObjPtr)
+{
+RespondToInteraction(InteractionId, InteractionToken, 4,
+    TEXT(":warning: Malformed whitelist command."), true);
+return;
+}
 
 FString SubName;
 (*SubObjPtr)->TryGetStringField(TEXT("name"), SubName);
 const TArray<TSharedPtr<FJsonValue>>* SubOpts = nullptr;
 (*SubObjPtr)->TryGetArrayField(TEXT("options"), SubOpts);
 
-// Check whitelist role permission (same logic as HandleMessageCreate).
+// Check whitelist role permission BEFORE acknowledging the interaction so
+// Discord receives either a success ACK or an ephemeral error — never a
+// channel message while the interaction token stays unresolved.
 const bool bIsPublicVerb = (SubName == TEXT("apply") || SubName == TEXT("link"));
 bool bHasRole = (!GuildOwnerId.IsEmpty() && AuthorId == GuildOwnerId) || bIsPublicVerb;
 if (!bHasRole && !WhitelistConfig.WhitelistCommandRoleId.IsEmpty())
@@ -6262,11 +6291,16 @@ break;
 }
 if (!bHasRole)
 {
-if (!Config.ChannelId.IsEmpty())
-SendMessageToChannel(Config.ChannelId,
-    TEXT(":no_entry: You do not have permission to use whitelist commands."));
+// Respond to the interaction with an ephemeral error so Discord shows it
+// only to the invoker and the interaction is properly acknowledged.
+RespondToInteraction(InteractionId, InteractionToken, 4,
+    TEXT(":no_entry: You do not have permission to use whitelist commands."), true);
 return;
 }
+
+// Permission OK — acknowledge the interaction then process the subcommand.
+RespondToInteraction(InteractionId, InteractionToken, 4,
+    TEXT("✅ Processing whitelist command…"), true);
 
 // Build the sub-command string matching HandleWhitelistCommand's expected format.
 FString SubCmd = SubName;

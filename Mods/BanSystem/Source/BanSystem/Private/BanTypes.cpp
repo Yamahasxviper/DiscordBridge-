@@ -27,7 +27,17 @@ bool FBanTemplate::FromConfigString(const FString& ConfigStr, FBanTemplate& OutT
             return false;
         }
     }
-    OutTemplate.DurationMinutes = FCString::Atoi(*Parts[1]);
+    // Use Atoi64 to avoid overflow on large values (e.g. "9999999999999").
+    // Then validate the result fits in int32 before storing it.
+    const int64 Duration64 = FCString::Atoi64(*Parts[1]);
+    if (Duration64 < 0 || Duration64 > static_cast<int64>(MAX_int32))
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("BanTypes: template slug='%s' has out-of-range durationMinutes '%s' — skipping"),
+            *Parts[0], *Parts[1]);
+        return false;
+    }
+    OutTemplate.DurationMinutes = static_cast<int32>(Duration64);
     OutTemplate.Reason          = Parts[2];
     OutTemplate.Category        = Parts.Num() > 3 ? Parts[3] : FString();
     return true;

@@ -310,12 +310,18 @@ uint32 FSMLWebSocketRunnable::Run()
 				bConnected = false;
 
 				// Build and send close frame payload (2-byte code + UTF-8 reason).
+				// RFC 6455 §5.5: control frames MUST have a payload ≤ 125 bytes.
+				// The 2-byte status code occupies the first two bytes, so the
+				// reason string is limited to 123 UTF-8 bytes.
 				const FTCHARToUTF8 Utf8Reason(*CloseReq.Reason);
+				const int32 MaxReasonBytes = 123;
+				const int32 ReasonLen = FMath::Min(Utf8Reason.Length(), MaxReasonBytes);
 				TArray<uint8> ClosePayload;
-				ClosePayload.SetNum(2 + Utf8Reason.Length());
+				ClosePayload.SetNum(2 + ReasonLen);
 				ClosePayload[0] = static_cast<uint8>((CloseReq.Code >> 8) & 0xFF);
 				ClosePayload[1] = static_cast<uint8>(CloseReq.Code & 0xFF);
-				FMemory::Memcpy(ClosePayload.GetData() + 2, Utf8Reason.Get(), Utf8Reason.Length());
+				if (ReasonLen > 0)
+					FMemory::Memcpy(ClosePayload.GetData() + 2, Utf8Reason.Get(), ReasonLen);
 
 				SendWsFrame(WsOpcode::Close, ClosePayload.GetData(), ClosePayload.Num());
 				NotifyClosed(CloseReq.Code, CloseReq.Reason);
@@ -783,6 +789,15 @@ bool FSMLWebSocketRunnable::FlushSslWriteBio()
 		{
 			return false;
 		}
+	}
+	// n == 0  → BIO is empty (normal drain-complete case).
+	// n <  0  → BIO error.  For BIO_s_mem(), BIO_should_retry() is false on
+	//           real errors; treat any non-retriable negative return as fatal so
+	//           we don't continue with a corrupt SSL write BIO.
+	if (n < 0 && !BIO_should_retry(WriteBio))
+	{
+		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: BIO_read error in FlushSslWriteBio — closing connection"));
+		return false;
 	}
 	return true;
 }

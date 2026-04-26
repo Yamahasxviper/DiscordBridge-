@@ -732,7 +732,9 @@ namespace BanChat
      * Per-player command cooldown tracker.
      * Maps "commandName:uid" → last-used FDateTime.
      * Cleaned up lazily; not persisted across restarts (intentional).
+     * Protected by CommandCooldownsMutex for thread safety.
      */
+    static FCriticalSection CommandCooldownsMutex;
     static TMap<FString, FDateTime> CommandCooldowns;
 
     /**
@@ -748,6 +750,8 @@ namespace BanChat
 
         const FString Key = CommandName + TEXT(":") + SenderUid;
         const FDateTime Now = FDateTime::UtcNow();
+
+        FScopeLock Lock(&CommandCooldownsMutex);
 
         // Prune stale entries for players who have disconnected so the map
         // doesn't grow for the entire server process lifetime.
@@ -774,7 +778,9 @@ namespace BanChat
     /**
      * Admin ban rate-limit tracker.
      * Maps AdminUid → array of timestamps of recent bans.
+     * Protected by AdminBanTimestampsMutex for thread safety.
      */
+    static FCriticalSection AdminBanTimestampsMutex;
     static TMap<FString, TArray<FDateTime>> AdminBanTimestamps;
 
     /**
@@ -790,6 +796,8 @@ namespace BanChat
         const int32 LimitMins  = FMath::Max(1, Cfg->AdminBanRateLimitMinutes);
         const FDateTime Now    = FDateTime::UtcNow();
         const FTimespan Window = FTimespan::FromMinutes(LimitMins);
+
+        FScopeLock Lock(&AdminBanTimestampsMutex);
 
         // Prune stale timestamps and empty entries first, before acquiring a
         // reference via FindOrAdd — iterating the map after FindOrAdd could
@@ -2012,7 +2020,7 @@ EExecutionStatus AWarningsChatCommand::ExecuteCommand_Implementation(
 
     const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
     const int32 PageSize   = Cfg ? Cfg->BanListPageSize : 10;
-    const int32 TotalPages = (Warnings.Num() + PageSize - 1) / FMath::Max(PageSize, 1);
+    const int32 TotalPages = FMath::DivideAndRoundUp(Warnings.Num(), FMath::Max(PageSize, 1));
     Page = FMath::Clamp(Page, 1, TotalPages);
     const int32 StartIdx   = (Page - 1) * PageSize;
     const int32 EndIdx     = FMath::Min(StartIdx + PageSize, Warnings.Num());

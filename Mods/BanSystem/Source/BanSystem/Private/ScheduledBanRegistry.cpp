@@ -232,9 +232,25 @@ void UScheduledBanRegistry::LoadFromFile()
 
             FString EffStr, CreatedStr;
             if ((*ObjPtr)->TryGetStringField(TEXT("effectiveAt"), EffStr))
-                FDateTime::ParseIso8601(*EffStr, Entry.EffectiveAt);
+            {
+                if (!FDateTime::ParseIso8601(*EffStr, Entry.EffectiveAt))
+                {
+                    UE_LOG(LogTemp, Warning,
+                        TEXT("ScheduledBanRegistry: malformed effectiveAt '%s' for uid '%s' — defaulting to epoch"),
+                        *EffStr, *Entry.Uid);
+                    Entry.EffectiveAt = FDateTime(0);
+                }
+            }
             if ((*ObjPtr)->TryGetStringField(TEXT("createdAt"), CreatedStr))
-                FDateTime::ParseIso8601(*CreatedStr, Entry.CreatedAt);
+            {
+                if (!FDateTime::ParseIso8601(*CreatedStr, Entry.CreatedAt))
+                {
+                    UE_LOG(LogTemp, Warning,
+                        TEXT("ScheduledBanRegistry: malformed createdAt '%s' for uid '%s' — defaulting to epoch"),
+                        *CreatedStr, *Entry.Uid);
+                    Entry.CreatedAt = FDateTime(0);
+                }
+            }
 
             if (!Entry.Uid.IsEmpty())
                 Pending.Add(Entry);

@@ -486,12 +486,22 @@ bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClient
 
         if (Opcode == 0x9) // Ping — respond with Pong
         {
-            // Echo the payload back as a Pong (opcode 0xA, FIN=1).
-            const int32 PongPayloadLen = FMath::Min(PayloadLen32, 125); // Pong payload ≤ 125 bytes
+            // RFC 6455 §5.5: control frames MUST have a payload of ≤ 125 bytes.
+            // A ping with a larger payload is malformed — close the connection with
+            // a 1002 Protocol Error instead of truncating and echoing a malformed pong.
+            if (PayloadLen32 > 125)
+            {
+                UE_LOG(LogWSServer, Warning,
+                    TEXT("WSServer: Rejected client — Ping frame payload exceeds 125 bytes (%d)."),
+                    PayloadLen32);
+                Buf.RemoveAt(0, TotalSize);
+                return false;
+            }
+            // Echo the exact payload back as a Pong (opcode 0xA, FIN=1).
             TArray<uint8> PongFrame;
             PongFrame.Add(0x8A); // FIN=1, opcode=0xA
-            PongFrame.Add(static_cast<uint8>(PongPayloadLen));
-            for (int32 i = 0; i < PongPayloadLen; ++i)
+            PongFrame.Add(static_cast<uint8>(PayloadLen32));
+            for (int32 i = 0; i < PayloadLen32; ++i)
                 PongFrame.Add(Buf[HeaderSize + MaskSize + i]);
             SendFrame(Client.Socket, PongFrame);
             Buf.RemoveAt(0, TotalSize);
@@ -691,7 +701,18 @@ void FSMLWebSocketServerRunnable::DisconnectClient(const FString& ClientId)
         if (!Clients.RemoveAndCopyValue(ClientId, Removed))
             return;
     }
-    ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(Removed.Socket);
+    ISocketSubsystem* SocketSS = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+    if (SocketSS)
+    {
+        SocketSS->DestroySocket(Removed.Socket);
+    }
+    else
+    {
+        // Last-resort cleanup: ISocketSubsystem is unavailable (late shutdown).
+        // Delete directly so the OS handle is released.
+        delete Removed.Socket;
+    }
+    Removed.Socket = nullptr;
 
     TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
     AsyncTask(ENamedThreads::GameThread, [WeakOwner, ClientId]()

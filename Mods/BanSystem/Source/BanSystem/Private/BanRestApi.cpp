@@ -512,10 +512,17 @@ void UBanRestApi::RegisterRoutes()
 
             double DurationMinutesDbl = 0.0;
             Body->TryGetNumberField(TEXT("durationMinutes"), DurationMinutesDbl);
-            // Guard against out-of-range doubles: values outside [0, INT_MAX] would
-            // produce undefined behaviour when cast to int32.  Negative/zero means
-            // permanent; anything larger than INT_MAX is clamped to INT_MAX.
-            const int32 DurationMinutes = (DurationMinutesDbl <= 0.0 || DurationMinutesDbl > static_cast<double>(INT_MAX))
+            // Reject durations that can't be represented as int32 — values beyond INT_MAX
+            // minutes (~4085 years) are almost certainly caller errors, and silently
+            // converting them to a permanent ban would be a security surprise.
+            if (DurationMinutesDbl > static_cast<double>(INT_MAX))
+            {
+                Done(BanJson::Error(TEXT("durationMinutes exceeds maximum allowed value (INT_MAX)"),
+                    EHttpServerResponseCodes::BadRequest));
+                return true;
+            }
+            // Negative or zero means permanent; cast is now safe.
+            const int32 DurationMinutes = (DurationMinutesDbl <= 0.0)
                 ? 0
                 : static_cast<int32>(DurationMinutesDbl);
 
@@ -666,7 +673,27 @@ void UBanRestApi::RegisterRoutes()
 
             auto CsvQuote = [](const FString& S) -> FString
             {
-                return TEXT("\"") + S.Replace(TEXT("\""), TEXT("\"\"")) + TEXT("\"");
+                // Strip embedded newlines/carriage-returns so a single ban row is
+                // always exactly one CSV line.  A malicious user-controlled field
+                // with \n could otherwise split the row and confuse CSV parsers.
+                FString Safe = S;
+                Safe.ReplaceInline(TEXT("\r"), TEXT(" "), ESearchCase::CaseSensitive);
+                Safe.ReplaceInline(TEXT("\n"), TEXT(" "), ESearchCase::CaseSensitive);
+                // Prefix fields that start with a formula-injection character so
+                // spreadsheet applications (Excel, LibreOffice, Google Sheets) do
+                // not execute them as formulas.
+                if (!Safe.IsEmpty())
+                {
+                    const TCHAR First = Safe[0];
+                    if (First == TEXT('=') || First == TEXT('+') ||
+                        First == TEXT('-') || First == TEXT('@') ||
+                        First == TEXT('\t'))
+                    {
+                        Safe = TEXT("'") + Safe;
+                    }
+                }
+                // Wrap in double-quotes and escape internal double-quotes by doubling.
+                return TEXT("\"") + Safe.Replace(TEXT("\""), TEXT("\"\"")) + TEXT("\"");
             };
 
             FString Csv = TEXT("id,uid,playerUID,platform,playerName,reason,bannedBy,banDate,expireDate,isPermanent,linkedUids\n");

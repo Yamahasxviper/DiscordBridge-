@@ -221,7 +221,9 @@ uint32 FBanChatCommandsModule::ComputeAdminHash()
 bool FBanChatCommandsModule::OnConfigPollTick(float /*DeltaTime*/)
 {
     // Force UE to re-read all UPROPERTY(Config) fields from the ini files on disk.
-    GetMutableDefault<UBanChatCommandsConfig>()->ReloadConfig();
+    UBanChatCommandsConfig* MutableCfg = GetMutableDefault<UBanChatCommandsConfig>();
+    if (!MutableCfg) return true;
+    MutableCfg->ReloadConfig();
 
     const uint32 NewHash = ComputeAdminHash();
     if (NewHash != LastConfigHash)
