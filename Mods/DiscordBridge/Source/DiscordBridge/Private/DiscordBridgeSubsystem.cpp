@@ -6232,20 +6232,25 @@ return;
 // ── /whitelist – handled within DiscordBridgeSubsystem ───────────────────────
 if (CmdName == TEXT("whitelist"))
 {
-// Acknowledge the interaction immediately.
-RespondToInteraction(InteractionId, InteractionToken, 4,
-    TEXT("✅ Processing whitelist command…"), true);
-
-if (!TopOptions || TopOptions->IsEmpty()) return;
+if (!TopOptions || TopOptions->IsEmpty())
+{
+RespondToInteraction(InteractionId, InteractionToken, 4, TEXT("❌ Invalid whitelist command."), true);
+return;
+}
 const TSharedPtr<FJsonObject>* SubObjPtr = nullptr;
-if (!(*TopOptions)[0]->TryGetObject(SubObjPtr) || !SubObjPtr) return;
+if (!(*TopOptions)[0]->TryGetObject(SubObjPtr) || !SubObjPtr)
+{
+RespondToInteraction(InteractionId, InteractionToken, 4, TEXT("❌ Invalid whitelist command."), true);
+return;
+}
 
 FString SubName;
 (*SubObjPtr)->TryGetStringField(TEXT("name"), SubName);
 const TArray<TSharedPtr<FJsonValue>>* SubOpts = nullptr;
 (*SubObjPtr)->TryGetArrayField(TEXT("options"), SubOpts);
 
-// Check whitelist role permission (same logic as HandleMessageCreate).
+// Check whitelist role permission BEFORE acknowledging the interaction so that
+// the error reaches the user ephemerally (not as a separate channel message).
 const bool bIsPublicVerb = (SubName == TEXT("apply") || SubName == TEXT("link"));
 bool bHasRole = (!GuildOwnerId.IsEmpty() && AuthorId == GuildOwnerId) || bIsPublicVerb;
 if (!bHasRole && !WhitelistConfig.WhitelistCommandRoleId.IsEmpty())
@@ -6262,11 +6267,14 @@ break;
 }
 if (!bHasRole)
 {
-if (!Config.ChannelId.IsEmpty())
-SendMessageToChannel(Config.ChannelId,
-    TEXT(":no_entry: You do not have permission to use whitelist commands."));
+RespondToInteraction(InteractionId, InteractionToken, 4,
+    TEXT("❌ You do not have permission to use whitelist commands."), true);
 return;
 }
+
+// Permission granted — acknowledge and process.
+RespondToInteraction(InteractionId, InteractionToken, 4,
+    TEXT("✅ Processing whitelist command…"), true);
 
 // Build the sub-command string matching HandleWhitelistCommand's expected format.
 FString SubCmd = SubName;

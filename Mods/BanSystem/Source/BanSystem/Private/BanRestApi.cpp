@@ -512,12 +512,16 @@ void UBanRestApi::RegisterRoutes()
 
             double DurationMinutesDbl = 0.0;
             Body->TryGetNumberField(TEXT("durationMinutes"), DurationMinutesDbl);
-            // Guard against out-of-range doubles: values outside [0, INT_MAX] would
-            // produce undefined behaviour when cast to int32.  Negative/zero means
-            // permanent; anything larger than INT_MAX is clamped to INT_MAX.
-            const int32 DurationMinutes = (DurationMinutesDbl <= 0.0 || DurationMinutesDbl > static_cast<double>(INT_MAX))
-                ? 0
-                : static_cast<int32>(DurationMinutesDbl);
+            // Guard against out-of-range doubles: negative/zero means permanent.
+            // Values larger than INT_MAX are clamped to INT_MAX (~4083 years) rather
+            // than silently becoming a permanent ban (PATCH /bans/:uid uses the same cap).
+            int32 DurationMinutes;
+            if (DurationMinutesDbl <= 0.0)
+                DurationMinutes = 0;                              // permanent
+            else if (DurationMinutesDbl > static_cast<double>(INT_MAX))
+                DurationMinutes = INT_MAX;                        // cap, not permanent
+            else
+                DurationMinutes = static_cast<int32>(DurationMinutesDbl);
 
             if (Reason.IsEmpty())   Reason   = TEXT("No reason given");
             if (BannedBy.IsEmpty()) BannedBy = TEXT("system");
@@ -666,7 +670,13 @@ void UBanRestApi::RegisterRoutes()
 
             auto CsvQuote = [](const FString& S) -> FString
             {
-                return TEXT("\"") + S.Replace(TEXT("\""), TEXT("\"\"")) + TEXT("\"");
+                // Escape embedded double-quotes per RFC 4180 and replace embedded
+                // newlines with a space so that line-oriented CSV parsers don't break.
+                FString Escaped = S.Replace(TEXT("\""), TEXT("\"\""));
+                Escaped = Escaped.Replace(TEXT("\r\n"), TEXT(" "));
+                Escaped = Escaped.Replace(TEXT("\r"),   TEXT(" "));
+                Escaped = Escaped.Replace(TEXT("\n"),   TEXT(" "));
+                return TEXT("\"") + Escaped + TEXT("\"");
             };
 
             FString Csv = TEXT("id,uid,playerUID,platform,playerName,reason,bannedBy,banDate,expireDate,isPermanent,linkedUids\n");
@@ -1568,7 +1578,11 @@ void UBanRestApi::RegisterRoutes()
 
             auto CsvQ = [](const FString& S) -> FString
             {
-                return TEXT("\"") + S.Replace(TEXT("\""), TEXT("\"\"")) + TEXT("\"");
+                FString Escaped = S.Replace(TEXT("\""), TEXT("\"\""));
+                Escaped = Escaped.Replace(TEXT("\r\n"), TEXT(" "));
+                Escaped = Escaped.Replace(TEXT("\r"),   TEXT(" "));
+                Escaped = Escaped.Replace(TEXT("\n"),   TEXT(" "));
+                return TEXT("\"") + Escaped + TEXT("\"");
             };
 
             FString Csv = TEXT("id,action,targetUid,targetName,adminUid,adminName,details,modVersion,timestamp\n");
@@ -1669,7 +1683,11 @@ void UBanRestApi::RegisterRoutes()
 
             auto CsvQ = [](const FString& S) -> FString
             {
-                return TEXT("\"") + S.Replace(TEXT("\""), TEXT("\"\"")) + TEXT("\"");
+                FString Escaped = S.Replace(TEXT("\""), TEXT("\"\""));
+                Escaped = Escaped.Replace(TEXT("\r\n"), TEXT(" "));
+                Escaped = Escaped.Replace(TEXT("\r"),   TEXT(" "));
+                Escaped = Escaped.Replace(TEXT("\n"),   TEXT(" "));
+                return TEXT("\"") + Escaped + TEXT("\"");
             };
 
             FString Csv = TEXT("id,uid,playerName,reason,warnedBy,warnDate\n");
@@ -1706,7 +1724,11 @@ void UBanRestApi::RegisterRoutes()
 
             auto CsvQ = [](const FString& S) -> FString
             {
-                return TEXT("\"") + S.Replace(TEXT("\""), TEXT("\"\"")) + TEXT("\"");
+                FString Escaped = S.Replace(TEXT("\""), TEXT("\"\""));
+                Escaped = Escaped.Replace(TEXT("\r\n"), TEXT(" "));
+                Escaped = Escaped.Replace(TEXT("\r"),   TEXT(" "));
+                Escaped = Escaped.Replace(TEXT("\n"),   TEXT(" "));
+                return TEXT("\"") + Escaped + TEXT("\"");
             };
 
             FString Csv = TEXT("uid,displayName,lastSeen,ipAddress\n");

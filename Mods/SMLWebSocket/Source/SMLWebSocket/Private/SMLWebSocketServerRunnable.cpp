@@ -691,7 +691,17 @@ void FSMLWebSocketServerRunnable::DisconnectClient(const FString& ClientId)
         if (!Clients.RemoveAndCopyValue(ClientId, Removed))
             return;
     }
-    ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(Removed.Socket);
+    ISocketSubsystem* SocketSS = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+    if (SocketSS)
+    {
+        SocketSS->DestroySocket(Removed.Socket);
+    }
+    else
+    {
+        UE_LOG(LogWSServer, Warning,
+            TEXT("WSServer: ISocketSubsystem unavailable in DisconnectClient — deleting socket directly"));
+        delete Removed.Socket;
+    }
 
     TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
     AsyncTask(ENamedThreads::GameThread, [WeakOwner, ClientId]()
