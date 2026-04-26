@@ -127,10 +127,11 @@ void UBanSyncClient::BroadcastUnban(const FString& Uid, const FString& PlayerNam
 
 void UBanSyncClient::OnLocalBanAdded(const FBanEntry& Entry)
 {
-    // Do not re-broadcast a ban that was just applied from a peer message.
-    // Without this guard, OnPeerMessage → DB->AddBan() → OnBanAdded →
-    // OnLocalBanAdded → BroadcastBan() would create an infinite loop.
-    if (bProcessingPeerBan) return;
+    // Consume-once: if OnPeerMessage registered this UID before calling AddBan(),
+    // suppress re-broadcasting and remove the guard entry.  Using a UID set means
+    // the guard survives even when OnBanAdded fires asynchronously after AddBan()
+    // returns — a plain bool would have been cleared too early in that case.
+    if (PeerAppliedBanUids.Remove(Entry.Uid) > 0) return;
 
     // Skip IP bans (Platform=="IP") from sync by default to avoid interfering
     // with peer-specific CIDR bans.
@@ -164,11 +165,9 @@ void UBanSyncClient::OnLocalBanAdded(const FBanEntry& Entry)
 
 void UBanSyncClient::OnLocalBanRemoved(const FString& Uid, const FString& PlayerName)
 {
-    // Do not re-broadcast an unban that was just applied from a peer message.
-    // Without this guard, OnPeerMessage → DB->RemoveBanByUid() → OnBanRemoved →
-    // OnLocalBanRemoved → BroadcastUnban() → peer receives it → DB->RemoveBanByUid() → …
-    // creates an infinite loop between the two servers whenever any unban fires.
-    if (bProcessingPeerBan) return;
+    // Consume-once: suppress re-broadcast for peer-sourced removals (both the
+    // unban path and the stale-record removal that precedes a peer-sourced update).
+    if (PeerAppliedUnbanUids.Remove(Uid) > 0) return;
 
     BroadcastUnban(Uid, PlayerName);
 }
@@ -232,10 +231,10 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
             if (bPermanentMatch && bReasonMatch && bCategoryMatch && bExpiryMatch)
                 return; // Identical — nothing to update.
             // Fields changed — remove the stale record and fall through to re-add.
-            // Guard against re-broadcasting the removal back to peers (B3 fix).
-            bProcessingPeerBan = true;
+            // Register the UID in PeerAppliedUnbanUids so OnLocalBanRemoved does
+            // not re-broadcast this peer-sourced removal back to peers.
+            PeerAppliedUnbanUids.Add(Uid);
             DB->RemoveBanByUid(Uid);
-            bProcessingPeerBan = false;
         }
 
         FBanEntry Ban;
@@ -252,11 +251,18 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
             ? FDateTime(0)
             : Now + FTimespan::FromMinutes(DurationMinutes);
 
-        // Set the re-entrancy guard so that AddBan()'s OnBanAdded broadcast
-        // does not cause OnLocalBanAdded to re-forward this ban back to peers.
-        bProcessingPeerBan = true;
+        // Register the UID in PeerAppliedBanUids before calling AddBan() so that
+        // OnLocalBanAdded suppresses re-broadcasting this peer-sourced ban.
+        // Consume-once semantics: OnLocalBanAdded removes the entry when it fires,
+        // so the guard holds whether OnBanAdded fires synchronously or asynchronously.
+        PeerAppliedBanUids.Add(Uid);
         const bool bAdded = DB->AddBan(Ban);
-        bProcessingPeerBan = false;
+        if (!bAdded)
+        {
+            // AddBan failed and will not fire OnBanAdded — clean up the pre-added entry
+            // so it does not silently suppress a future legitimate local ban for this UID.
+            PeerAppliedBanUids.Remove(Uid);
+        }
 
         if (bAdded)
         {
@@ -280,10 +286,16 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
 
         if (Uid.IsEmpty()) return;
 
-        // Guard against re-broadcasting this peer-sourced unban back to peers.
-        bProcessingPeerBan = true;
+        // Register the UID in PeerAppliedUnbanUids before calling RemoveBanByUid()
+        // so OnLocalBanRemoved suppresses re-broadcasting this peer-sourced unban.
+        PeerAppliedUnbanUids.Add(Uid);
         const bool bRemoved = DB->RemoveBanByUid(Uid);
-        bProcessingPeerBan = false;
+        if (!bRemoved)
+        {
+            // Ban was not found — RemoveBanByUid will not fire OnBanRemoved,
+            // so clean up the pre-added entry to avoid a spurious future suppression.
+            PeerAppliedUnbanUids.Remove(Uid);
+        }
 
         if (bRemoved)
         {

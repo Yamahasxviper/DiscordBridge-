@@ -70,11 +70,25 @@ private:
     TArray<USMLWebSocketClient*> PeerClients;
 
     /**
-     * Re-entrancy guard set while OnPeerMessage is applying a peer-received ban.
-     * Prevents OnLocalBanAdded from re-broadcasting that ban back to the peer
-     * that just sent it (and causing an infinite broadcast loop).
-     * Only ever accessed on the game thread, but kept as FThreadSafeBool so that
-     * future refactors that move ban callbacks off the game thread are safe.
+     * Consume-once set of UIDs whose OnBanAdded delegate should be suppressed.
+     * OnPeerMessage adds a UID here before calling DB->AddBan(); OnLocalBanAdded
+     * removes the UID on its first invocation and returns without re-broadcasting.
+     *
+     * Using a UID set instead of a plain bool means the guard persists until the
+     * delegate actually fires — it is immune to the race where AddBan() dispatches
+     * OnBanAdded asynchronously (e.g. queued to the game thread) after returning,
+     * which would have reset a bool guard too early and allowed an infinite loop.
+     *
+     * Only accessed on the game thread.
      */
-    FThreadSafeBool bProcessingPeerBan{false};
+    TSet<FString> PeerAppliedBanUids;
+
+    /**
+     * Consume-once set of UIDs whose OnBanRemoved delegate should be suppressed.
+     * Used by both the unban path and the stale-record removal that precedes a
+     * peer-sourced update.  Mirrors the semantics of PeerAppliedBanUids.
+     *
+     * Only accessed on the game thread.
+     */
+    TSet<FString> PeerAppliedUnbanUids;
 };
