@@ -349,7 +349,7 @@ void FBanChatCommandsModule::RestoreDefaultConfigIfNeeded()
     {
         FString Existing;
         FFileHelper::LoadFileToString(Existing, *DefaultIniPath);
-        if (Existing.Contains(TEXT("#")))
+        if (Existing.Contains(TEXT("#")) || Existing.Contains(TEXT(";")))
             return; // comment lines present — leave as-is
     }
 
