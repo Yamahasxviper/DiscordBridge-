@@ -136,17 +136,30 @@ void UBanSyncClient::OnLocalBanAdded(const FBanEntry& Entry)
     // with peer-specific CIDR bans.
     if (Entry.Platform == TEXT("IP")) return;
 
-    const int32 DurationMinutes = Entry.bIsPermanent
-        ? 0
-        : static_cast<int32>((Entry.ExpireDate - FDateTime::UtcNow()).GetTotalMinutes());
+    // Compute remaining lifetime in minutes as a floating-point value so we
+    // can distinguish "truly expired" (≤ 0.0) from "< 1 minute remaining".
+    const double RemainingMinutesDbl = Entry.bIsPermanent
+        ? 0.0
+        : (Entry.ExpireDate - FDateTime::UtcNow()).GetTotalMinutes();
 
-    // Do not sync a temporary ban that has already expired — a duration of 0 or
-    // less would be misread by the receiving peer as a permanent ban.
-    if (!Entry.bIsPermanent && DurationMinutes <= 0)
+    // Do not sync a temporary ban that has already expired — the peer would
+    // have no meaningful duration to enforce.
+    if (!Entry.bIsPermanent && RemainingMinutesDbl <= 0.0)
         return;
 
+    // Round UP fractional minutes so a ban with < 1 minute remaining maps to
+    // 1 min rather than 0.  The previous static_cast<int32> (floor) caused
+    // 1-minute bans to truncate to 0, which both triggered the early-return
+    // guard above (ban silently never synced) and would have been read by the
+    // receiver as a permanent ban had the guard not existed.  Ceiling also
+    // prevents any ban from losing up to 59 seconds of enforced duration on
+    // the receiving peer.
+    const int32 DurationMinutes = Entry.bIsPermanent
+        ? 0
+        : FMath::Max(1, FMath::CeilToInt(RemainingMinutesDbl));
+
     BroadcastBan(Entry.Uid, Entry.PlayerName, Entry.Reason, Entry.BannedBy,
-                 FMath::Max(0, DurationMinutes), Entry.Category);
+                 DurationMinutes, Entry.Category);
 }
 
 void UBanSyncClient::OnLocalBanRemoved(const FString& Uid, const FString& PlayerName)
