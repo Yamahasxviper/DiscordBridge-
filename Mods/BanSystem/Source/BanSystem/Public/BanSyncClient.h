@@ -73,7 +73,8 @@ private:
      * Re-entrancy guard set while OnPeerMessage is applying a peer-received ban.
      * Prevents OnLocalBanAdded from re-broadcasting that ban back to the peer
      * that just sent it (and causing an infinite broadcast loop).
-     * Only ever accessed on the game thread.
+     * Only ever accessed on the game thread, but kept as FThreadSafeBool so that
+     * future refactors that move ban callbacks off the game thread are safe.
      */
-    bool bProcessingPeerBan = false;
+    FThreadSafeBool bProcessingPeerBan{false};
 };

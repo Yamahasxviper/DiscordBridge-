@@ -178,10 +178,20 @@ void UBanAuditLog::LoadFromFile()
     if (Entries.Num() > MaxEntries)
         Entries.RemoveAt(0, Entries.Num() - MaxEntries);
 
-    // Restore the O(1) counter from loaded data so LogAction never reuses an Id.
-    NextId = 1;
-    for (const FAuditEntry& E : Entries)
-        if (E.Id >= NextId) NextId = E.Id + 1;
+    // Restore counter: prefer the persisted nextId (avoids O(n) scan on large
+    // logs and also handles the case where all entries were externally removed).
+    double StoredNextId = 0.0;
+    if (Root->TryGetNumberField(TEXT("nextId"), StoredNextId) && StoredNextId >= 1.0)
+    {
+        NextId = static_cast<int64>(StoredNextId);
+    }
+    else
+    {
+        // Fallback: derive from loaded entries.
+        NextId = 1;
+        for (const FAuditEntry& E : Entries)
+            if (E.Id >= NextId) NextId = E.Id + 1;
+    }
 }
 
 bool UBanAuditLog::SaveToFile() const
@@ -206,6 +216,7 @@ bool UBanAuditLog::SaveToFile() const
     }
 
     TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetNumberField(TEXT("nextId"),  static_cast<double>(NextId));
     Root->SetArrayField(TEXT("entries"), EntryArr);
 
     FString JsonStr;
@@ -229,6 +240,7 @@ bool UBanAuditLog::SaveToFile() const
     {
         UE_LOG(LogBanAuditLog, Error,
             TEXT("BanAuditLog: failed to replace %s with temp file"), *FilePath);
+        IFileManager::Get().Delete(*TmpPath);
         return false;
     }
     return true;

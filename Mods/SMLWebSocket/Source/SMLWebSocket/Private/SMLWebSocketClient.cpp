@@ -126,6 +126,7 @@ void USMLWebSocketClient::Close(int32 Code, const FString& Reason)
 {
 	if (Runnable.IsValid())
 	{
+		bIsConnected = false;
 		SetConnectionState(EWebSocketState::Closing);
 		Runnable->EnqueueClose(Code, Reason);
 	}

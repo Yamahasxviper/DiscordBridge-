@@ -274,6 +274,7 @@ bool UBanAppealRegistry::SaveToFile() const
     {
         UE_LOG(LogBanAppealRegistry, Error,
             TEXT("BanAppealRegistry: failed to replace %s with temp file"), *FilePath);
+        IFileManager::Get().Delete(*TmpPath);
         return false;
     }
 

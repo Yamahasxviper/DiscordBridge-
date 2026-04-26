@@ -353,6 +353,7 @@ bool UPlayerWarningRegistry::SaveToFile() const
     {
         UE_LOG(LogPlayerWarningRegistry, Error,
             TEXT("PlayerWarningRegistry: failed to replace %s with temp file"), *FilePath);
+        IFileManager::Get().Delete(*TmpPath);
         return false;
     }
     return true;

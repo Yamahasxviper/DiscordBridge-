@@ -1710,6 +1710,28 @@ void UBanRestApi::RegisterRoutes()
         [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
         {
             if (auto SizeErr = BanJson::CheckBodySize(Req)) { Done(MoveTemp(SizeErr)); return true; }
+
+            // C1: Global rate limit — max 5 appeal submissions per minute regardless
+            // of UID, preventing flooding with cycling UIDs.
+            {
+                static FCriticalSection AppealRateMutex;
+                static TArray<FDateTime> AppealSubmissions;
+                static constexpr int32 MaxAppealsPerMinute = 5;
+
+                FScopeLock RateLock(&AppealRateMutex);
+                const FDateTime Now = FDateTime::UtcNow();
+                AppealSubmissions.RemoveAll([&Now](const FDateTime& T)
+                {
+                    return (Now - T).GetTotalMinutes() >= 1.0;
+                });
+                if (AppealSubmissions.Num() >= MaxAppealsPerMinute)
+                {
+                    Done(BanJson::Error(TEXT("Too many appeal submissions. Please try again later.")));
+                    return true;
+                }
+                AppealSubmissions.Add(Now);
+            }
+
             UGameInstance* GI = WeakGI.Get();
             if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
             UBanAppealRegistry* AppealsReg = GI->GetSubsystem<UBanAppealRegistry>();

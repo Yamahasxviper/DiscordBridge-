@@ -149,7 +149,12 @@ static bool WhitelistAtomicSave(const FString& JsonStr, const FString& FilePath)
 	if (!FFileHelper::SaveStringToFile(JsonStr, *TmpPath,
 		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 		return false;
-	return IFileManager::Get().Move(*FilePath, *TmpPath, /*bReplace=*/true);
+	if (!IFileManager::Get().Move(*FilePath, *TmpPath, /*bReplace=*/true))
+	{
+		IFileManager::Get().Delete(*TmpPath);
+		return false;
+	}
+	return true;
 }
 
 void FWhitelistManager::Save_Locked()

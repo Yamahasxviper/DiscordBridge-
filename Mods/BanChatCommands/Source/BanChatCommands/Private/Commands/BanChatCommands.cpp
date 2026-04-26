@@ -791,6 +791,14 @@ namespace BanChat
         // Prune old timestamps outside the window.
         Timestamps.RemoveAll([&Now, &Window](const FDateTime& T){ return (Now - T) > Window; });
 
+        // M3: Prune stale admin entries that have accumulated no recent bans so
+        // the outer map doesn't grow unbounded over long server uptimes.
+        for (auto It = AdminBanTimestamps.CreateIterator(); It; ++It)
+        {
+            if (It.Value().IsEmpty())
+                It.RemoveCurrent();
+        }
+
         if (Timestamps.Num() >= LimitCount)
         {
             if (Sender)
@@ -1573,7 +1581,7 @@ EExecutionStatus ABanNameChatCommand::ExecuteCommand_Implementation(
 
     // Ban the EOS PUID.  DoBan also kicks the player if they are currently online
     // and creates counterpart bans (IP↔EOS) via AddCounterpartBans.
-    return BanChat::DoBan(this, Sender, Rec.Uid, Rec.DisplayName, 0, Reason, BannedBy);
+    return BanChat::DoBan(this, Sender, Rec.Uid, Rec.DisplayName, 0, Reason, BannedBy, AdminId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

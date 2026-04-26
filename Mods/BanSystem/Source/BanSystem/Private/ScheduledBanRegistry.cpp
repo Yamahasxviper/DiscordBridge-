@@ -149,6 +149,19 @@ void UScheduledBanRegistry::ApplyScheduledBan(const FScheduledBanEntry& Entry)
         ? FDateTime(0)
         : Now + FTimespan::FromMinutes(Entry.DurationMinutes);
 
+    // H1: Skip the scheduled ban if the player already has a permanent ban —
+    // a permanent ban should not be silently downgraded to a temp ban.
+    {
+        FBanEntry Existing;
+        if (DB->IsCurrentlyBanned(Entry.Uid, Existing) && Existing.bIsPermanent)
+        {
+            UE_LOG(LogScheduledBanRegistry, Log,
+                TEXT("ScheduledBanRegistry: skipping scheduled ban #%lld for %s — permanent ban already active"),
+                Entry.Id, *Entry.Uid);
+            return;
+        }
+    }
+
     if (!DB->AddBan(Ban))
     {
         UE_LOG(LogScheduledBanRegistry, Warning,
@@ -156,8 +169,6 @@ void UScheduledBanRegistry::ApplyScheduledBan(const FScheduledBanEntry& Entry)
             Entry.Id, *Entry.Uid);
         return;
     }
-
-    // Kick the player immediately if online.
     if (UWorld* World = GI->GetWorld())
         UBanEnforcer::KickConnectedPlayer(World, Entry.Uid, Ban.GetKickMessage());
 
@@ -280,6 +291,7 @@ bool UScheduledBanRegistry::SaveToFile() const
     {
         UE_LOG(LogScheduledBanRegistry, Error,
             TEXT("ScheduledBanRegistry: failed to replace %s with temp file"), *FilePath);
+        IFileManager::Get().Delete(*TmpPath);
         return false;
     }
     return true;
