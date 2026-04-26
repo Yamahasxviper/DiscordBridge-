@@ -4063,6 +4063,11 @@ void UTicketSubsystem::SaveTicketState() const
 		const FDateTime* OpenTime = TicketChannelToOpenTime.Find(Pair.Key);
 		if (OpenTime && OpenTime->GetTicks() > 0)
 			Entry->SetStringField(TEXT("open_time"), OpenTime->ToIso8601());
+		// Persist the last-activity timestamp so the inactive-timeout clock
+		// is not reset to "now" after a server restart.
+		const FDateTime* LastActivity = TicketChannelToLastActivity.Find(Pair.Key);
+		if (LastActivity && LastActivity->GetTicks() > 0)
+			Entry->SetStringField(TEXT("last_activity"), LastActivity->ToIso8601());
 		const FString* OpenerName = TicketChannelToOpenerName.Find(Pair.Key);
 		if (OpenerName)   Entry->SetStringField(TEXT("opener_name"),   *OpenerName);
 		const FString* WlIgnSave = TicketChannelToWlIgn.Find(Pair.Key);
@@ -4251,6 +4256,15 @@ void UTicketSubsystem::LoadTicketState()
 			FDateTime OT;
 			if (FDateTime::ParseIso8601(*OpenTimeStr, OT))
 				TicketChannelToOpenTime.Add(ChannelId, OT);
+		}
+
+		// Restore last-activity timestamp.
+		FString LastActivityStr;
+		if ((*EntryObj)->TryGetStringField(TEXT("last_activity"), LastActivityStr) && !LastActivityStr.IsEmpty())
+		{
+			FDateTime LA;
+			if (FDateTime::ParseIso8601(*LastActivityStr, LA))
+				TicketChannelToLastActivity.Add(ChannelId, LA);
 		}
 
 		// Restore tags.

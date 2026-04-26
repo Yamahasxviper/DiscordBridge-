@@ -9,10 +9,10 @@ void USMLWebSocketRegistry::RegisterClient(const FString& Name, USMLWebSocketCli
     Clients.Add(Name, Client);
 }
 
-USMLWebSocketClient* USMLWebSocketRegistry::GetClient(const FString& Name) const
+USMLWebSocketClient* USMLWebSocketRegistry::GetClient(const FString& Name)
 {
-    const USMLWebSocketClient* const* Found = Clients.Find(Name);
-    return Found ? const_cast<USMLWebSocketClient*>(*Found) : nullptr;
+    USMLWebSocketClient** Found = Clients.Find(Name);
+    return Found ? *Found : nullptr;
 }
 
 void USMLWebSocketRegistry::UnregisterClient(const FString& Name)

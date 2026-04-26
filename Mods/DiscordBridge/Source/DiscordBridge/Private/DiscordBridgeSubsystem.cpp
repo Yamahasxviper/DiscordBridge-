@@ -103,6 +103,9 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	FWhitelistConfig::RestoreDefaultConfigIfNeeded();
 	WhitelistConfig = FWhitelistConfig::Load();
 
+	// Restore expiry-warning dedup set so warnings are not re-fired on restart.
+	LoadWarnedExpiryNames();
+
 	// Load the in-game broadcast messages config file (DefaultInGameMessages.ini + backup).
 	FInGameMessagesConfig::RestoreDefaultConfigIfNeeded();
 	InGameMessagesConfig = FInGameMessagesConfig::Load();
@@ -135,6 +138,8 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				}
 				WarnedExpiryNames.Remove(Name);
 			}
+			if (!ExpiredNames.IsEmpty())
+				SaveWarnedExpiryNames();
 
 			// ── Post expiry warnings ─────────────────────────────────────────
 			if (WhitelistConfig.WhitelistExpiryWarningHours > 0.0f)
@@ -149,16 +154,30 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 					if (Remaining > FTimespan::Zero() && Remaining <= WarnWindow)
 					{
 						WarnedExpiryNames.Add(E.Name);
+						SaveWarnedExpiryNames();
 						const FString WarnChan = WhitelistConfig.WhitelistEventsChannelId.IsEmpty()
 							? Config.ChannelId : WhitelistConfig.WhitelistEventsChannelId;
 						if (!WarnChan.IsEmpty())
 						{
-							const FString WarnMsg = FString::Printf(
-								TEXT(":warning: **%s**'s whitelist entry expires in **%dh %dm** (%s UTC)."),
-								*E.Name,
-								static_cast<int32>(Remaining.GetTotalHours()),
-								static_cast<int32>(Remaining.GetMinutes()),
-								*E.ExpiresAt.ToString(TEXT("%Y-%m-%d %H:%M")));
+							const int32 RemDays  = static_cast<int32>(Remaining.GetDays());
+							const int32 RemHours = static_cast<int32>(Remaining.GetHours());
+							const int32 RemMins  = static_cast<int32>(Remaining.GetMinutes());
+							FString WarnMsg;
+							if (RemDays > 0)
+								WarnMsg = FString::Printf(
+									TEXT(":warning: **%s**'s whitelist entry expires in **%dd %dh** (%s UTC)."),
+									*E.Name, RemDays, RemHours,
+									*E.ExpiresAt.ToString(TEXT("%Y-%m-%d %H:%M")));
+							else if (RemHours > 0)
+								WarnMsg = FString::Printf(
+									TEXT(":warning: **%s**'s whitelist entry expires in **%dh %dm** (%s UTC)."),
+									*E.Name, RemHours, RemMins,
+									*E.ExpiresAt.ToString(TEXT("%Y-%m-%d %H:%M")));
+							else
+								WarnMsg = FString::Printf(
+									TEXT(":warning: **%s**'s whitelist entry expires in **%dm** (%s UTC)."),
+									*E.Name, FMath::Max(1, static_cast<int32>(Remaining.GetTotalMinutes())),
+									*E.ExpiresAt.ToString(TEXT("%Y-%m-%d %H:%M")));
 							SendMessageToChannel(WarnChan, WarnMsg);
 						}
 					}
@@ -6382,4 +6401,67 @@ return;
 RespondToInteraction(InteractionId, InteractionToken, 5, FString(), true);
 OnDiscordInteractionReceived.Broadcast(DataObj);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WarnedExpiryNames persistence
+// ─────────────────────────────────────────────────────────────────────────────
+
+static FString GetWarnedExpiryNamesPath()
+{
+	return FPaths::ProjectSavedDir() / TEXT("DiscordBridge") / TEXT("WarnedExpiryNames.json");
+}
+
+void UDiscordBridgeSubsystem::SaveWarnedExpiryNames() const
+{
+	const FString Path = GetWarnedExpiryNamesPath();
+	const FString Dir  = FPaths::GetPath(Path);
+	IPlatformFile& PF  = FPlatformFileManager::Get().GetPlatformFile();
+	if (!PF.DirectoryExists(*Dir))
+		PF.CreateDirectoryTree(*Dir);
+
+	TArray<TSharedPtr<FJsonValue>> Arr;
+	for (const FString& Name : WarnedExpiryNames)
+		Arr.Add(MakeShared<FJsonValueString>(Name));
+
+	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetArrayField(TEXT("warned"), Arr);
+
+	FString JsonStr;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonStr);
+	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
+
+	if (!FFileHelper::SaveStringToFile(JsonStr, *Path,
+		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	{
+		UE_LOG(LogDiscordBridge, Warning,
+			TEXT("DiscordBridge: failed to save WarnedExpiryNames to %s"), *Path);
+	}
+}
+
+void UDiscordBridgeSubsystem::LoadWarnedExpiryNames()
+{
+	const FString Path = GetWarnedExpiryNamesPath();
+	FString JsonStr;
+	if (!FFileHelper::LoadFileToString(JsonStr, *Path))
+		return; // File absent on first run — that's fine.
+
+	TSharedPtr<FJsonObject> Root;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonStr);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		UE_LOG(LogDiscordBridge, Warning,
+			TEXT("DiscordBridge: failed to parse WarnedExpiryNames from %s"), *Path);
+		return;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+	if (Root->TryGetArrayField(TEXT("warned"), Arr) && Arr)
+	{
+		for (const TSharedPtr<FJsonValue>& V : *Arr)
+		{
+			FString Name;
+			if (V->TryGetString(Name) && !Name.IsEmpty())
+				WarnedExpiryNames.Add(Name);
+		}
+	}
 }

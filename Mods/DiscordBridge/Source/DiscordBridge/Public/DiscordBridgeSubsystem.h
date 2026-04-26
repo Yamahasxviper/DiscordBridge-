@@ -980,8 +980,15 @@ private:
 
 	// ── Whitelist expiry warnings (Feature 5) ─────────────────────────────────
 
-	/** Player names that have already received an expiry-warning notification. */
+	/** Player names that have already received an expiry-warning notification.
+	 *  Persisted to disk so warnings are not re-sent after a server restart. */
 	TSet<FString> WarnedExpiryNames;
+
+	/** Persist WarnedExpiryNames to ProjectSaved/DiscordBridge/WarnedExpiryNames.json. */
+	void SaveWarnedExpiryNames() const;
+
+	/** Load WarnedExpiryNames from disk (called during Initialize()). */
+	void LoadWarnedExpiryNames();
 
 	// ── Linked account verification (Feature 6) ───────────────────────────────
 
