@@ -687,8 +687,9 @@ namespace BanChat
         if (DurationStr.IsEmpty()) return -1;
 
         // Bare integer — legacy format, treat as minutes.
+        // Return the raw value; callers are responsible for rejecting zero.
         if (DurationStr.IsNumeric())
-            return FMath::Max(1, FCString::Atoi(*DurationStr));
+            return FCString::Atoi(*DurationStr);
 
         int64 Total   = 0;
         bool  bHadToken = false;
@@ -981,11 +982,10 @@ EExecutionStatus ATempBanChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::BAD_ARGUMENTS;
 
     const int32 DurationMinutes = BanChat::ParseDurationMinutes(Arguments[1]);
-    if (DurationMinutes < 0)
+    if (DurationMinutes <= 0)
     {
         Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] Invalid duration '%s'. "
-                "Use minutes (e.g. 60) or shorthand (e.g. 30m, 1h, 2h30m, 1d, 7d, 1d12h)."),
+            FString::Printf(TEXT("[BanChatCommands] Duration must be positive (e.g. 60) or shorthand (e.g. 30m, 1h, 2h30m, 1d, 7d, 1d12h). Got: '%s'."),
                 *Arguments[1]),
             FLinearColor::Red);
         return EExecutionStatus::BAD_ARGUMENTS;
@@ -1780,7 +1780,7 @@ EExecutionStatus AModBanChatCommand::ExecuteCommand_Implementation(
 
     const UBanChatCommandsConfig* ModBanCfg = UBanChatCommandsConfig::Get();
     const int32 ModBanMinutes = (ModBanCfg && ModBanCfg->ModBanDurationMinutes > 0) ? ModBanCfg->ModBanDurationMinutes : 30;
-    return BanChat::DoBan(this, Sender, Uid, DisplayName, ModBanMinutes, Reason, BannedBy);
+    return BanChat::DoBan(this, Sender, Uid, DisplayName, ModBanMinutes, Reason, BannedBy, ModUid);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1885,7 +1885,7 @@ EExecutionStatus AWarnChatCommand::ExecuteCommand_Implementation(
                     FLinearColor::Red);
                 const EExecutionStatus AutoBanResult = BanChat::DoBan(
                     this, Sender, Uid, DisplayName, BanDurationMinutes,
-                    TEXT("Auto-banned: reached warning threshold"), TEXT("system"));
+                    TEXT("Auto-banned: reached warning threshold"), TEXT("system"), TEXT("system"));
                 if (AutoBanResult != EExecutionStatus::COMPLETED)
                 {
                     UE_LOG(LogBanChatCommands, Warning,
