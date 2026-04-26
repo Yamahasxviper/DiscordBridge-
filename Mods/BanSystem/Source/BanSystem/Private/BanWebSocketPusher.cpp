@@ -70,11 +70,16 @@ void UBanWebSocketPusher::PushEvent(const FString& EventType,
     Envelope->SetStringField(TEXT("event"),     EventType);
     Envelope->SetStringField(TEXT("timestamp"), FDateTime::UtcNow().ToIso8601());
 
-    // Merge caller-supplied fields into the envelope.
+    // Merge caller-supplied fields into the envelope, skipping reserved keys
+    // ("event" and "timestamp") that are already set above.
     if (Fields.IsValid())
     {
         for (const auto& Pair : Fields->Values)
+        {
+            if (Pair.Key == TEXT("event") || Pair.Key == TEXT("timestamp"))
+                continue;
             Envelope->SetField(Pair.Key, Pair.Value);
+        }
     }
 
     FString JsonStr;

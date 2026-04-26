@@ -163,7 +163,11 @@ int32 UPlayerSessionRegistry::PruneOldRecords(int32 DaysToKeep)
     Records.RemoveAll([&Cutoff](const FPlayerSessionRecord& R) -> bool
     {
         FDateTime LastSeenDt;
-        return FDateTime::ParseIso8601(*R.LastSeen, LastSeenDt) && LastSeenDt < Cutoff;
+        // M13: treat a corrupted LastSeen as if the record is expired so that
+        // bad data doesn't prevent the record from being pruned.
+        if (!FDateTime::ParseIso8601(*R.LastSeen, LastSeenDt))
+            return true;
+        return LastSeenDt < Cutoff;
     });
     const int32 Pruned = Before - Records.Num();
     if (Pruned > 0)
@@ -262,6 +266,7 @@ bool UPlayerSessionRegistry::SaveToFile() const
     {
         UE_LOG(LogPlayerSessionRegistry, Error,
             TEXT("PlayerSessionRegistry: failed to replace %s with temp file"), *FilePath);
+        IFileManager::Get().Delete(*TmpPath);
         return false;
     }
     return true;

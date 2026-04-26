@@ -13,7 +13,20 @@ bool FBanTemplate::FromConfigString(const FString& ConfigStr, FBanTemplate& OutT
     ConfigStr.ParseIntoArray(Parts, TEXT("|"));
     if (Parts.Num() < 3) return false;
 
-    OutTemplate.Slug            = Parts[0];
+    OutTemplate.Slug = Parts[0];
+
+    // H2: Reject templates whose duration field is non-numeric to avoid silent
+    // 0-minute (permanent) bans from misconfigured or typo'd ini entries.
+    for (TCHAR Ch : Parts[1])
+    {
+        if (!FChar::IsDigit(Ch) && Ch != TEXT('-'))
+        {
+            UE_LOG(LogTemp, Warning,
+                TEXT("BanTypes: template slug='%s' has non-numeric durationMinutes '%s' — skipping"),
+                *Parts[0], *Parts[1]);
+            return false;
+        }
+    }
     OutTemplate.DurationMinutes = FCString::Atoi(*Parts[1]);
     OutTemplate.Reason          = Parts[2];
     OutTemplate.Category        = Parts.Num() > 3 ? Parts[3] : FString();

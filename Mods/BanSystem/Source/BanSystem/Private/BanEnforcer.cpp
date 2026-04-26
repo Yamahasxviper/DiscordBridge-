@@ -794,21 +794,6 @@ bool UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
             }
         }
 
-        if (!bMatched)
-        {
-            // ── Fallback B: match by the raw player ID embedded in the UID
-            //    against the PlayerState name (best-effort — only fires when
-            //    UniqueId is not yet set).
-            const FString PlayerName = PC->PlayerState->GetPlayerName();
-            if (PlayerName.Equals(UidRawId, ESearchCase::IgnoreCase))
-            {
-                UE_LOG(LogBanEnforcer, Warning,
-                    TEXT("BanEnforcer: KickConnectedPlayer — matched '%s' by name fallback (UniqueId not yet set)"),
-                    *PlayerName);
-                bMatched = true;
-            }
-        }
-
         if (!bMatched && UidPlatform == TEXT("IP"))
         {
             // ── Fallback C: IP ban — compare against the remote address cached

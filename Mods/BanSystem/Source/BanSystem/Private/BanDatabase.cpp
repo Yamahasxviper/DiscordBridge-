@@ -342,6 +342,7 @@ bool UBanDatabase::SaveToFile() const
     {
         UE_LOG(LogBanDatabase, Error,
             TEXT("BanDatabase: failed to rename temp file to %s"), *DbPath);
+        IFileManager::Get().Delete(*(DbPath + TEXT(".tmp")));
         return false;
     }
 
