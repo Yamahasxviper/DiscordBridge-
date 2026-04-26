@@ -1269,7 +1269,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 	// ── Prevent duplicate tickets ─────────────────────────────────────────────
 	if (OpenerToTicketChannel.Contains(DiscordUserId))
 	{
-		const FString ExistingChanId = OpenerToTicketChannel[DiscordUserId];
+		const FString ExistingChanId = OpenerToTicketChannel.FindRef(DiscordUserId);
 		Bridge->RespondToInteraction(InteractionId, InteractionToken,
 			/*type=*/4,
 			FString::Printf(
@@ -1718,7 +1718,7 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 	// Prevent duplicate tickets.
 	if (OpenerToTicketChannel.Contains(DiscordUserId))
 	{
-		const FString ExistingChanId = OpenerToTicketChannel[DiscordUserId];
+		const FString ExistingChanId = OpenerToTicketChannel.FindRef(DiscordUserId);
 		Bridge->RespondToInteraction(InteractionId, InteractionToken,
 			/*type=*/4,
 			FString::Printf(
@@ -3191,7 +3191,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 			(*AuthorPtr)->TryGetStringField(TEXT("id"), AuthorId);
 			bool bIsBot = false;
 			(*AuthorPtr)->TryGetBoolField(TEXT("bot"), bIsBot);
-			const FString OpenerId = TicketChannelToOpener[SourceChannelId];
+			const FString OpenerId = TicketChannelToOpener.FindRef(SourceChannelId);
 			if (!bIsBot && !AuthorId.IsEmpty() && AuthorId != OpenerId && Bridge)
 			{
 				const FString BotToken = Bridge->GetBotToken();
@@ -3364,7 +3364,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 		{
 			const FString BotToken = Bridge->GetBotToken();
 			const FString OpenerMention = FString::Printf(TEXT("<@%s>"),
-				*TicketChannelToOpener[SourceChannelId]);
+				*TicketChannelToOpener.FindRef(SourceChannelId));
 			const FString TopicBody = FString::Printf(
 				TEXT("{\"topic\":\"Priority: %s | Opened by: %s\"}"),
 				*Matched, *OpenerMention);

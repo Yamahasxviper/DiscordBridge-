@@ -1677,11 +1677,9 @@ EExecutionStatus AReloadConfigChatCommand::ExecuteCommand_Implementation(
             ? TEXT("No changes detected")
             : FString::Join(Changes, TEXT("\n• "));
 
-        // Escape for JSON — backslash must be escaped first to avoid double-escaping.
-        FString EscReloader = Sender->GetSenderName()
-            .Replace(TEXT("\\"), TEXT("\\\\")).Replace(TEXT("\""), TEXT("\\\"")).Replace(TEXT("\n"), TEXT("\\n"));
-        FString EscChanges = ChangeList
-            .Replace(TEXT("\\"), TEXT("\\\\")).Replace(TEXT("\""), TEXT("\\\"")).Replace(TEXT("\n"), TEXT("\\n"));
+        // Escape for JSON using the shared helper (handles all control characters and surrogates).
+        const FString EscReloader = BanChat::JsonEscape(Sender->GetSenderName());
+        const FString EscChanges  = BanChat::JsonEscape(ChangeList);
 
         const FString Payload = FString::Printf(
             TEXT("{\"embeds\":[{\"title\":\"🔄 Config Reloaded\",\"color\":3066993,\"fields\":["
@@ -4102,7 +4100,7 @@ EExecutionStatus ABulkBanChatCommand::ExecuteCommand_Implementation(
             FBanDiscordNotifier::NotifyBanCreated(Ban);
 
             if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
-                AuditLog->LogAction(TEXT("ban"), Uid, RawUid, AdminName, AdminName, Reason);
+                AuditLog->LogAction(TEXT("ban"), Uid, RawUid, AdminUid, AdminName, Reason);
 
             ++BannedCount;
         }

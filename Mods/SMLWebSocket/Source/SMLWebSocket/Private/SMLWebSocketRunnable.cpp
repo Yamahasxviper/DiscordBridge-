@@ -845,7 +845,7 @@ int32 FSMLWebSocketRunnable::SslRead(uint8* Buffer, int32 BufferSize)
 		if (Err == SSL_ERROR_WANT_READ)
 		{
 			// Flush any outgoing SSL data (e.g. renegotiation records) first.
-			FlushSslWriteBio();
+			if (!FlushSslWriteBio()) return -1; // socket broken during flush
 
 			// Wait briefly for incoming TCP data. Return 0 (not -1) on timeout
 			// so that callers can retry and check bStopRequested / send queues.
