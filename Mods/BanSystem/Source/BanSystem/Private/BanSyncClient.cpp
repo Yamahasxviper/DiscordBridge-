@@ -138,7 +138,7 @@ void UBanSyncClient::OnLocalBanAdded(const FBanEntry& Entry)
 
     const int32 DurationMinutes = Entry.bIsPermanent
         ? 0
-        : static_cast<int32>((Entry.ExpireDate - FDateTime::UtcNow()).GetTotalMinutes());
+        : FMath::CeilToInt((Entry.ExpireDate - FDateTime::UtcNow()).GetTotalMinutes());
 
     // Do not sync a temporary ban that has already expired — a duration of 0 or
     // less would be misread by the receiving peer as a permanent ban.
