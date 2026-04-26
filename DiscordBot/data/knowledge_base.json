@@ -149,7 +149,157 @@
       "keywords": ["cloud saves", "save file", "save location", "where is save"],
       "question": "Where are Satisfactory save files stored?",
       "answer": "Save files are stored at:\n- **Windows:** `%LOCALAPPDATA%\\FactoryGame\\Saved\\SaveGames\\`\n- The subfolder is your Steam/Epic user ID.\nCloud saves sync automatically via Steam or Epic. Back up this folder before major updates."
+    },
+    {
+      "id": 26,
+      "keywords": ["bansystem", "ban system", "what is bansystem", "ban mod"],
+      "question": "What is the BanSystem mod?",
+      "answer": "**BanSystem** is a server-side Satisfactory mod that provides a full player-moderation backend. It stores bans, temp-bans, warnings, mutes, and IP bans in a persistent JSON database, enforces ban expiry automatically, and exposes a REST API so other mods (and external tools) can read and write moderation records."
+    },
+    {
+      "id": 27,
+      "keywords": ["ban player", "how to ban", "tempban", "temp ban", "permanent ban"],
+      "question": "How do I ban a player with BanSystem?",
+      "answer": "Bans can be issued three ways:\n1. **In-game chat** via BanChatCommands: `!ban <PlayerName> <reason>` (permanent) or `!tempban <PlayerName> <duration> <reason>` (e.g. `1h`, `2d`).\n2. **Discord slash commands** via DiscordBridge: `/ban add`, `/ban temp`.\n3. **REST API**: `POST /bans` with a JSON body containing the player's EOS UID and reason.\nBanned players are kicked immediately and cannot rejoin until the ban expires or is lifted."
+    },
+    {
+      "id": 28,
+      "keywords": ["unban", "remove ban", "lift ban", "unban player"],
+      "question": "How do I unban a player?",
+      "answer": "Remove a ban with:\n- **In-game chat**: `!unban <PlayerName>`\n- **Discord slash command**: `/ban remove <uid>`\n- **REST API**: `DELETE /bans/<uid>`\nTemporary bans also expire automatically when their duration elapses — the BanEnforcer prunes them on a regular tick."
+    },
+    {
+      "id": 29,
+      "keywords": ["warn", "warning", "warnings", "warn player", "warn escalation", "auto ban"],
+      "question": "How does the warning system work?",
+      "answer": "Staff can issue warnings with:\n- **In-game chat**: `!warn <PlayerName> <points> <reason>`\n- **Discord slash command**: `/mod warn`\n- **REST API**: `POST /warnings`\nWarning *points* accumulate per player. When a player's total reaches the configured **PointThreshold**, the system automatically escalates to a temporary (or permanent) ban. Warning history is stored in the BanSystem database."
+    },
+    {
+      "id": 30,
+      "keywords": ["ip ban", "ban ip", "ip address ban", "evade ban"],
+      "question": "Does BanSystem support IP bans?",
+      "answer": "Yes. IP bans are stored separately from EOS-UID bans. Issue them via:\n- **Discord slash command**: `/ban ip <address>`\n- **REST API**: `POST /bans/ip`\nA player whose IP is banned will be kicked at connection time even if their EOS account is not in the ban list."
+    },
+    {
+      "id": 31,
+      "keywords": ["ban appeal", "appeal", "appeal ban", "appeal mute"],
+      "question": "How do players appeal a ban or mute?",
+      "answer": "If DiscordBridge is configured with a ticket channel, players can open an appeal ticket directly in Discord. When they click the **Ban Appeal** or **Mute Appeal** button, a modal opens asking for their in-game name, EOS UID, IP address, and reason. Staff can then approve or deny the appeal from within the ticket channel."
+    },
+    {
+      "id": 32,
+      "keywords": ["bansystem rest api", "rest api", "ban api", "http api bansystem"],
+      "question": "What endpoints does the BanSystem REST API expose?",
+      "answer": "BanSystem's built-in HTTP server exposes these main endpoints:\n- `GET/POST /bans` — list or create bans\n- `PATCH /bans/:uid` — edit an existing ban\n- `DELETE /bans/:uid` — remove a ban\n- `POST /bans/bulk` / `DELETE /bans/bulk` — batch operations\n- `POST /bans/ip` — add an IP ban\n- `POST /warnings` — add a warning\n- `GET /warnings/:uid` — get a player's warning history\n- `POST /appeals` / `PATCH /appeals/:id` — manage ban appeals\n- `POST /scheduled` — schedule a future ban\nAll write endpoints validate the request body size (returns HTTP 413 if too large)."
+    },
+    {
+      "id": 33,
+      "keywords": ["mute", "mute player", "unmute", "server mute"],
+      "question": "How do I mute or unmute a player?",
+      "answer": "Mutes are managed through DiscordBridge:\n- **Discord slash command**: `/mod mute <player> <duration> <reason>` — duration supports suffixes like `30m`, `2h`, `1d`, `1w`.\n- **Moderation panel**: use the Mute button on a player's profile.\n- **In-game chat** (BanChatCommands): `!mute <PlayerName> <duration>`\nMuted players cannot send in-game chat messages. Use `/mod unmute <player>` or `!unmute <PlayerName>` to lift the mute early. Mutes expire automatically when their duration ends."
+    },
+    {
+      "id": 34,
+      "keywords": ["banchatcommands", "ban chat commands", "in-game commands", "chat commands", "!ban", "!kick"],
+      "question": "What is the BanChatCommands mod?",
+      "answer": "**BanChatCommands** is a server-side mod that gives admins moderation commands usable directly in the Satisfactory in-game chat. Available commands include:\n- `!ban <name> <reason>` — permanently ban a player\n- `!tempban <name> <duration> <reason>` — temp-ban (e.g. `1h`, `2d`)\n- `!unban <name>` — lift a ban\n- `!kick <name> <reason>` — kick without banning\n- `!mute <name> <duration>` — mute a player\n- `!unmute <name>` — remove a mute\n- `!warn <name> <points> <reason>` — issue a warning\nAll actions are backed by the BanSystem database and will trigger DiscordBridge notifications if configured."
+    },
+    {
+      "id": 35,
+      "keywords": ["discordbridge", "discord bridge", "what is discordbridge", "discord mod"],
+      "question": "What is the DiscordBridge mod?",
+      "answer": "**DiscordBridge** is a server-side Satisfactory mod that connects your game server to a Discord server. It provides:\n- **Moderation slash commands** (`/ban`, `/mod`, `/ticket`) usable directly from Discord\n- An in-game **moderation panel** accessible via Discord interactions\n- A **ticket system** for support, whitelist requests, and ban/mute appeals\n- Real-time notifications for bans, unbans, kicks, mutes, and warn escalations posted to a configured Discord channel\n- In-game broadcast of moderation actions with staff role prefixes ([Admin], [Moderator], [Staff])"
+    },
+    {
+      "id": 36,
+      "keywords": ["discord slash commands", "discordbridge commands", "/ban", "/mod", "discord mod commands"],
+      "question": "What Discord slash commands does DiscordBridge add?",
+      "answer": "DiscordBridge registers the following Discord slash commands:\n- `/ban add` — permanently ban a player\n- `/ban temp` — temp-ban a player\n- `/ban remove` — lift a ban\n- `/ban extend` — extend an existing ban's duration\n- `/ban ip` — ban by IP address\n- `/mod kick` — kick a player\n- `/mod mute` — mute a player (supports `30m`/`2h`/`1d`/`1w` durations)\n- `/mod unmute` — remove a mute\n- `/mod tempmute` — apply a timed mute\n- `/mod warn` — issue a warning (with auto-ban escalation)\n- `/ticket` — manage support tickets\nAll commands use `/slash` syntax. The old `!command` prefix is for in-game chat only."
+    },
+    {
+      "id": 37,
+      "keywords": ["ticket system", "tickets", "support ticket", "whitelist ticket", "appeal ticket"],
+      "question": "How does the DiscordBridge ticket system work?",
+      "answer": "Use `/ticket` in Discord to open a support ticket. Ticket types include:\n- **General support** — staff assistance\n- **Whitelist request** — player provides their in-game name; staff approve with the approve button\n- **Ban appeal** — modal collects IGN, EOS UID, IP, and reason; staff can approve or deny\n- **Mute appeal** — same multi-field modal as ban appeal\nEach ticket gets a private channel. Staff can use buttons inside the channel to approve, deny, ban-check, or close the ticket. SLA warnings are posted if staff haven't replied within the configured time."
+    },
+    {
+      "id": 38,
+      "keywords": ["discordbridge config", "configure discordbridge", "setup discordbridge", "discord channel config"],
+      "question": "How do I configure DiscordBridge?",
+      "answer": "DiscordBridge is configured through the SML mod configuration system (accessible in-game or via the config JSON files). Key settings include:\n- **Discord bot token** — the bot that connects to your Discord server\n- **Guild ID** — your Discord server's ID\n- **Moderation log channel** — where ban/kick/mute notifications are posted\n- **Ticket category** — the Discord category where ticket channels are created\n- **Staff roles** — which Discord roles map to Admin / Moderator / Staff (controls the `[Admin]`/`[Moderator]`/`[Staff]` prefix in in-game broadcasts)\n- **Warn point threshold** — total warning points before auto-ban escalation triggers"
+    },
+    {
+      "id": 39,
+      "keywords": ["smlwebsocket", "sml websocket", "websocket mod", "what is smlwebsocket"],
+      "question": "What is the SMLWebSocket mod?",
+      "answer": "**SMLWebSocket** is a server-side utility mod that provides a reusable, production-grade WebSocket client (`USMLWebSocketClient`) for other Satisfactory mods. It supports:\n- Automatic reconnection with configurable back-off\n- Sending and receiving both **text** and **binary** frames\n- A **message queue** that buffers outgoing messages while disconnected (up to a configurable maximum)\n- Optional **SSL/TLS** certificate verification\nDiscordBridge uses SMLWebSocket under the hood to maintain its connection to the Discord gateway."
+    },
+    {
+      "id": 40,
+      "keywords": ["smlwebsocket ssl", "websocket ssl", "ssl certificate", "tls websocket", "verify ssl"],
+      "question": "How do I enable SSL certificate verification in SMLWebSocket?",
+      "answer": "Set `bVerifySSLCertificate = true` on your `USMLWebSocketClient` instance (or in the `FSMLWebSocketReconnectConfig` passed at construction). When enabled, the client uses `SSL_VERIFY_PEER` and validates the server's certificate chain. When disabled (the default), `SSL_VERIFY_NONE` is used, which accepts self-signed certificates."
+    },
+    {
+      "id": 41,
+      "keywords": ["smlwebsocket queue", "websocket queue", "message queue", "queued messages", "offline queue"],
+      "question": "How does the SMLWebSocket message queue work?",
+      "answer": "When `bQueueMessagesWhileDisconnected` is enabled on `USMLWebSocketClient`, calls to `Send()` and `SendBinary()` store messages in an internal queue instead of dropping them. The queue is capped at `MaxQueuedMessages` entries. When the connection is re-established, all queued messages are flushed in order. You can call `FlushQueue()` manually or `ClearQueue()` to discard pending messages."
+    },
+    {
+      "id": 42,
+      "keywords": ["audit log", "ban audit", "moderation log", "action log"],
+      "question": "Is there an audit log for moderation actions?",
+      "answer": "Yes. DiscordBridge writes an audit log entry for every moderation action performed through Discord slash commands or the panel, including: ban, temp-ban, unban, kick, mute, unmute (manual and auto-expiry), and warn. The audit log is also updated when BanSystem's automatic ban pruning removes expired bans. All entries record the staff member, the target player, the reason, and a timestamp."
+    },
+    {
+      "id": 43,
+      "keywords": ["staff prefix", "admin prefix", "moderator prefix", "in-game staff message"],
+      "question": "What do the [Admin], [Moderator], and [Staff] prefixes mean in-game?",
+      "answer": "When DiscordBridge broadcasts a moderation action in-game (e.g. a ban or kick notice), it prepends a prefix based on the Discord roles of the staff member who issued the command:\n- **[Admin]** — member has the configured Admin role\n- **[Moderator]** — member has the Moderator role (but not Admin)\n- **[Staff]** — member has the generic Staff role\nThis replaced the old hardcoded `[Moderation]` prefix."
+    },
+    {
+      "id": 44,
+      "keywords": ["ban expiry", "temp ban expire", "when does ban expire", "auto unban"],
+      "question": "How does automatic ban expiry work?",
+      "answer": "BanSystem's **BanEnforcer** runs a periodic tick that prunes expired bans from the database. Any ban whose expiry date is in the past is removed automatically. DiscordBridge listens for the `OnBanRemoved` event and posts an expiry notification to the moderation log channel. Each expired ban only fires a notification once (deduplication is tracked in memory)."
+    },
+    {
+      "id": 45,
+      "keywords": ["scheduled ban", "future ban", "schedule", "ban schedule"],
+      "question": "Can I schedule a ban to take effect in the future?",
+      "answer": "Yes. Use the BanSystem REST API endpoint `POST /scheduled` with a JSON body specifying the target player's EOS UID, reason, start time, and optional duration. The BanEnforcer will apply the ban automatically when the scheduled time is reached."
+    },
+    {
+      "id": 46,
+      "keywords": ["bulk ban", "ban multiple", "mass ban", "bulk unban"],
+      "question": "Can I ban or unban multiple players at once?",
+      "answer": "Yes via the BanSystem REST API:\n- `POST /bans/bulk` — create multiple bans in a single request\n- `DELETE /bans/bulk` — remove multiple bans by their IDs in a single request\nBoth endpoints validate the request body size and return HTTP 413 if it is too large."
+    },
+    {
+      "id": 47,
+      "keywords": ["eos uid", "eos id", "epic online services", "player id", "uid"],
+      "question": "What is an EOS UID and where do I find it?",
+      "answer": "An **EOS UID** (Epic Online Services User ID) is the unique identifier for each player's Epic Games account. BanSystem uses it as the primary key for bans and warnings (not the player's display name, which can change). You can find a player's EOS UID in:\n- The Satisfactory server logs when the player connects\n- The BanSystem REST API (`GET /bans` returns the EOS UID for each record)\n- The DiscordBridge moderation panel when you look up a player"
+    },
+    {
+      "id": 48,
+      "keywords": ["discordbridge notification", "ban notification", "discord notification", "mod notification channel"],
+      "question": "Where does DiscordBridge post ban and moderation notifications?",
+      "answer": "DiscordBridge posts embed messages to a configured **moderation log channel** in your Discord server. Notifications are sent for: bans (including the ban reason and duration), unbans, kicks, mutes, unmutes, and warn escalations. When a moderation action is triggered by a Discord slash command, the notification is posted as a follow-up to that interaction to avoid duplicate messages."
+    },
+    {
+      "id": 49,
+      "keywords": ["smlwebsocket reconnect", "websocket reconnect", "auto reconnect", "reconnection"],
+      "question": "Does SMLWebSocket automatically reconnect if the connection drops?",
+      "answer": "Yes. `USMLWebSocketClient` uses an `FSMLWebSocketReconnectConfig` to control reconnection behaviour: you can set the initial retry delay, maximum retry delay, and back-off multiplier. The client automatically attempts to reconnect after an unexpected disconnect. If `bQueueMessagesWhileDisconnected` is enabled, any messages sent while disconnected are buffered and flushed once the connection is restored."
+    },
+    {
+      "id": 50,
+      "keywords": ["discordbridge ticket sla", "sla", "staff reply", "ticket warning", "response time"],
+      "question": "What is the ticket SLA warning in DiscordBridge?",
+      "answer": "DiscordBridge can be configured with an SLA (Service Level Agreement) timer for tickets. If no staff member replies in a ticket channel within the configured time window, the bot posts a warning message in that channel. SLA warnings are deduplicated per ticket so each ticket only receives one warning. The deduplication state is cleared when the ticket is closed."
     }
   ],
-  "next_id": 26
+  "next_id": 51
 }
