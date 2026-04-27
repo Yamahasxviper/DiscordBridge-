@@ -2149,12 +2149,12 @@ EExecutionStatus AClearWarnsChatCommand::ExecuteCommand_Implementation(
 
     const int32 Cleared = WarnReg->ClearWarningsForUid(Uid);
 
-    if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-        AuditLog->LogAction(TEXT("clearwarns"), Uid, DisplayName, AdminUid, Sender->GetSenderName(),
-            FString::Printf(TEXT("cleared=%d"), Cleared));
-
     if (Cleared > 0)
     {
+        if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+            AuditLog->LogAction(TEXT("clearwarns"), Uid, DisplayName, AdminUid, Sender->GetSenderName(),
+                FString::Printf(TEXT("cleared=%d"), Cleared));
+
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Cleared %d warning(s) for '%s'."),
                 Cleared, *DisplayName),

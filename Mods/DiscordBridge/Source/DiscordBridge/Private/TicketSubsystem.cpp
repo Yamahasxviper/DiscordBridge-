@@ -15,7 +15,11 @@
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 #include "BanAppealRegistry.h"
+#include "BanAuditLog.h"
 #include "BanDatabase.h"
+#include "BanDiscordNotifier.h"
+#include "BanEnforcer.h"
+#include "BanSystemConfig.h"
 #include "PlayerWarningRegistry.h"
 #include "MuteRegistry.h"
 #include "WhitelistManager.h"
@@ -1044,6 +1048,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		TicketChannelStaffReplied.Remove(SourceChannelId);
 		SlaWarnedChannels.Remove(SourceChannelId);
 		TicketChannelToReminder.Remove(SourceChannelId);
+		ReopenedOnceChannels.Remove(SourceChannelId);
 		if (Config.bAllowMultipleTicketTypes && !RemovedOpener.IsEmpty() && !RemovedType.IsEmpty())
 		{
 			if (TMap<FString, FString>* TypeMap = OpenerToTicketsByType.Find(RemovedOpener))
@@ -2030,20 +2035,87 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 		{
 			if (UPlayerWarningRegistry* WarnReg = GI->GetSubsystem<UPlayerWarningRegistry>())
 			{
-				WarnReg->AddWarning(WarnUid,
-					WarnName.IsEmpty() ? TEXT("Unknown") : WarnName,
-					WarnReason, DiscordUsername, /*ExpiryMinutes=*/0);
+				const FString ResolvedName = WarnName.IsEmpty() ? TEXT("Unknown") : WarnName;
+				WarnReg->AddWarning(WarnUid, ResolvedName, WarnReason, DiscordUsername,
+				                    /*ExpiryMinutes=*/0);
 
-				const int32 TotalWarnings = WarnReg->GetWarningCount(WarnUid);
+				const int32 WarnCount  = WarnReg->GetWarningCount(WarnUid);
+				const int32 WarnPoints = WarnReg->GetWarningPoints(WarnUid);
+
+				// Audit log — mirrors all other warn paths (slash, panel, chat, REST).
+				if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+					AuditLog->LogAction(TEXT("warn"), WarnUid, ResolvedName,
+					                    DiscordUserId, DiscordUsername, WarnReason);
+
+				// Auto-ban escalation — mirrors HandleWarnCommand and ExecutePanelWarn.
+				{
+					const UBanSystemConfig* SysCfg = UBanSystemConfig::Get();
+					if (SysCfg)
+					{
+						int32 BanDurationMinutes = -1;
+						if (SysCfg->WarnEscalationTiers.Num() > 0)
+						{
+							int32 BestThreshold = -1;
+							for (const FWarnEscalationTier& Tier : SysCfg->WarnEscalationTiers)
+							{
+								const bool bHit = (Tier.PointThreshold > 0)
+									? (WarnPoints >= Tier.PointThreshold)
+									: (WarnCount  >= Tier.WarnCount);
+								const int32 ThisThreshold = (Tier.PointThreshold > 0)
+									? Tier.PointThreshold : Tier.WarnCount;
+								if (bHit && ThisThreshold > BestThreshold)
+								{
+									BestThreshold      = ThisThreshold;
+									BanDurationMinutes = Tier.DurationMinutes;
+								}
+							}
+						}
+						else if (SysCfg->AutoBanWarnCount > 0 && WarnCount >= SysCfg->AutoBanWarnCount)
+						{
+							BanDurationMinutes = SysCfg->AutoBanWarnMinutes;
+						}
+
+						if (BanDurationMinutes >= 0)
+						{
+							if (UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>())
+							{
+								FBanEntry Existing;
+								if (!DB->IsCurrentlyBanned(WarnUid, Existing))
+								{
+									FBanEntry AutoBan;
+									AutoBan.Uid        = WarnUid;
+									UBanDatabase::ParseUid(WarnUid, AutoBan.Platform, AutoBan.PlayerUID);
+									AutoBan.PlayerName   = ResolvedName;
+									AutoBan.Reason       = TEXT("Auto-banned: reached warning threshold");
+									AutoBan.BannedBy     = TEXT("system");
+									const FDateTime AutoNow = FDateTime::UtcNow();
+									AutoBan.BanDate      = AutoNow;
+									AutoBan.bIsPermanent = (BanDurationMinutes <= 0);
+									AutoBan.ExpireDate   = AutoBan.bIsPermanent
+										? FDateTime(0)
+										: AutoNow + FTimespan::FromMinutes(BanDurationMinutes);
+									if (DB->AddBan(AutoBan))
+									{
+										if (UWorld* World = GI->GetWorld())
+											UBanEnforcer::KickConnectedPlayer(World, WarnUid,
+											                                  AutoBan.GetKickMessage());
+										FBanDiscordNotifier::NotifyBanCreated(AutoBan);
+										FBanDiscordNotifier::NotifyAutoEscalationBan(AutoBan, WarnCount);
+										if (UBanAuditLog* AL = GI->GetSubsystem<UBanAuditLog>())
+											AL->LogAction(TEXT("ban"), WarnUid, ResolvedName,
+											              TEXT("system"), TEXT("system"), AutoBan.Reason);
+									}
+								}
+							}
+						}
+					}
+				}
+
 				WarnResult = FString::Printf(
 					TEXT(":warning: Warning issued for `%s` (%s) by <@%s>.\n"
 					     "Reason: %s\n"
 					     "Total warnings for this player: **%d**"),
-					*WarnUid,
-					WarnName.IsEmpty() ? TEXT("Unknown") : *WarnName,
-					*DiscordUserId,
-					*WarnReason,
-					TotalWarnings);
+					*WarnUid, *ResolvedName, *DiscordUserId, *WarnReason, WarnCount);
 			}
 			else
 			{
