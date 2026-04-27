@@ -169,7 +169,7 @@ void UPlayerNoteRegistry::LoadFromFile()
     // Restore the O(1) counter from loaded data so AddNote never reuses an Id.
     NextId = 1;
     for (const FPlayerNoteEntry& N : Notes)
-        if (N.Id >= NextId) NextId = N.Id + 1;
+        if (N.Id >= NextId) NextId = (N.Id < INT64_MAX) ? N.Id + 1 : N.Id;
 }
 
 bool UPlayerNoteRegistry::SaveToFile() const
@@ -213,6 +213,7 @@ bool UPlayerNoteRegistry::SaveToFile() const
     {
         UE_LOG(LogPlayerNoteRegistry, Error,
             TEXT("PlayerNoteRegistry: failed to replace %s with temp file"), *FilePath);
+        IFileManager::Get().Delete(*TmpPath);
         return false;
     }
 

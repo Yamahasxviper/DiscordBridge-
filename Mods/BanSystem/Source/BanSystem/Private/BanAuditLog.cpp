@@ -167,7 +167,12 @@ void UBanAuditLog::LoadFromFile()
 
             FString TimestampStr;
             if ((*ObjPtr)->TryGetStringField(TEXT("timestamp"), TimestampStr))
-                FDateTime::ParseIso8601(*TimestampStr, Entry.Timestamp);
+            {
+                if (!FDateTime::ParseIso8601(*TimestampStr, Entry.Timestamp))
+                    UE_LOG(LogBanAuditLog, Warning,
+                        TEXT("BanAuditLog: entry id=%lld has malformed timestamp '%s' — using default"),
+                        Entry.Id, *TimestampStr);
+            }
 
             if (!Entry.Action.IsEmpty())
                 Entries.Add(Entry);
@@ -190,7 +195,7 @@ void UBanAuditLog::LoadFromFile()
         // Fallback: derive from loaded entries.
         NextId = 1;
         for (const FAuditEntry& E : Entries)
-            if (E.Id >= NextId) NextId = E.Id + 1;
+            if (E.Id >= NextId) NextId = (E.Id < INT64_MAX) ? E.Id + 1 : E.Id;
     }
 }
 

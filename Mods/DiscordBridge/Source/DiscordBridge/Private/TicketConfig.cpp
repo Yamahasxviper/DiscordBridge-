@@ -45,6 +45,16 @@ static float GetIniFloat(const FConfigFile& Cfg, const FString& Key, float Defau
 	return Default;
 }
 
+/** Read a config key as int32, clamping to [0, INT32_MAX] so callers never
+ *  receive a negative value from a mis-typed or pathologically large entry. */
+static int32 GetIniInt(const FConfigFile& Cfg, const FString& Key, int32 Default)
+{
+	const float Raw = GetIniFloat(Cfg, Key, static_cast<float>(Default));
+	if (Raw < 0.0f) return 0;
+	if (Raw > static_cast<float>(INT32_MAX)) return INT32_MAX;
+	return static_cast<int32>(Raw);
+}
+
 /** Strip a leading UTF-8 BOM (EF BB BF) from a file on disk. */
 static void CleanTicketConfigBOM(const FString& FilePath)
 {
@@ -162,18 +172,18 @@ FTicketConfig FTicketConfig::Load()
 		Config.MuteAppealCategoryId        = GetIniString(Cfg, TEXT("MuteAppealCategoryId"));
 		Config.bTicketFeedbackEnabled      = GetIniBool  (Cfg, TEXT("TicketFeedbackEnabled"),      false);
 		Config.TicketMacros                = ParseRawIniArray(RawContent, TEXT("TicketMacro"));
-		Config.TicketCooldownMinutes       = static_cast<int32>(GetIniFloat(Cfg, TEXT("TicketCooldownMinutes"), 0.0f));
-		Config.TicketReopenGracePeriodMinutes = static_cast<int32>(GetIniFloat(Cfg, TEXT("TicketReopenGracePeriodMinutes"), 0.0f));
+		Config.TicketCooldownMinutes       = GetIniInt(Cfg, TEXT("TicketCooldownMinutes"), 0);
+		Config.TicketReopenGracePeriodMinutes = GetIniInt(Cfg, TEXT("TicketReopenGracePeriodMinutes"), 0);
 		Config.bAllowMultipleTicketTypes   = GetIniBool  (Cfg, TEXT("AllowMultipleTicketTypes"),   false);
 		Config.bAutoRefreshPanel           = GetIniBool  (Cfg, TEXT("AutoRefreshPanel"),           false);
 		Config.bDmOpenerOnStaffReply       = GetIniBool  (Cfg, TEXT("DmOpenerOnStaffReply"),       false);
-		Config.TicketSlaWarningMinutes     = static_cast<int32>(GetIniFloat(Cfg, TEXT("TicketSlaWarningMinutes"), 0.0f));
+		Config.TicketSlaWarningMinutes     = GetIniInt(Cfg, TEXT("TicketSlaWarningMinutes"), 0);
 		Config.TicketEscalationRoleId      = GetIniString(Cfg, TEXT("TicketEscalationRoleId"));
 		Config.TicketEscalationCategoryId  = GetIniString(Cfg, TEXT("TicketEscalationCategoryId"));
 		Config.TicketTemplates             = ParseRawIniArray(RawContent, TEXT("TicketTemplate"));
 		Config.TicketAutoResponses         = ParseRawIniArray(RawContent, TEXT("TicketAutoResponse"));
-		Config.BanAppealCooldownDays       = static_cast<int32>(GetIniFloat(Cfg, TEXT("BanAppealCooldownDays"), 0.0f));
-		Config.MaxLifetimeAppeals          = static_cast<int32>(GetIniFloat(Cfg, TEXT("MaxLifetimeAppeals"), 0.0f));
+		Config.BanAppealCooldownDays       = GetIniInt(Cfg, TEXT("BanAppealCooldownDays"), 0);
+		Config.MaxLifetimeAppeals          = GetIniInt(Cfg, TEXT("MaxLifetimeAppeals"), 0);
 
 		UE_LOG(LogTicketSystem, Log,
 		       TEXT("TicketSystem: Loaded config from %s"), *PrimaryPath);
@@ -210,18 +220,18 @@ FTicketConfig FTicketConfig::Load()
 			Config.MuteAppealCategoryId        = GetIniString(BackupCfg, TEXT("MuteAppealCategoryId"));
 			Config.bTicketFeedbackEnabled      = GetIniBool  (BackupCfg, TEXT("TicketFeedbackEnabled"),      false);
 			Config.TicketMacros                = ParseRawIniArray(BackupRaw, TEXT("TicketMacro"));
-			Config.TicketCooldownMinutes       = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("TicketCooldownMinutes"), 0.0f));
-			Config.TicketReopenGracePeriodMinutes = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("TicketReopenGracePeriodMinutes"), 0.0f));
+			Config.TicketCooldownMinutes       = GetIniInt(BackupCfg, TEXT("TicketCooldownMinutes"), 0);
+			Config.TicketReopenGracePeriodMinutes = GetIniInt(BackupCfg, TEXT("TicketReopenGracePeriodMinutes"), 0);
 			Config.bAllowMultipleTicketTypes   = GetIniBool  (BackupCfg, TEXT("AllowMultipleTicketTypes"),   false);
 			Config.bAutoRefreshPanel           = GetIniBool  (BackupCfg, TEXT("AutoRefreshPanel"),           false);
 			Config.bDmOpenerOnStaffReply       = GetIniBool  (BackupCfg, TEXT("DmOpenerOnStaffReply"),       false);
-			Config.TicketSlaWarningMinutes     = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("TicketSlaWarningMinutes"), 0.0f));
+			Config.TicketSlaWarningMinutes     = GetIniInt(BackupCfg, TEXT("TicketSlaWarningMinutes"), 0);
 			Config.TicketEscalationRoleId      = GetIniString(BackupCfg, TEXT("TicketEscalationRoleId"));
 			Config.TicketEscalationCategoryId  = GetIniString(BackupCfg, TEXT("TicketEscalationCategoryId"));
 			Config.TicketTemplates             = ParseRawIniArray(BackupRaw, TEXT("TicketTemplate"));
 			Config.TicketAutoResponses         = ParseRawIniArray(BackupRaw, TEXT("TicketAutoResponse"));
-			Config.BanAppealCooldownDays       = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("BanAppealCooldownDays"), 0.0f));
-			Config.MaxLifetimeAppeals          = static_cast<int32>(GetIniFloat(BackupCfg, TEXT("MaxLifetimeAppeals"), 0.0f));
+			Config.BanAppealCooldownDays       = GetIniInt(BackupCfg, TEXT("BanAppealCooldownDays"), 0);
+			Config.MaxLifetimeAppeals          = GetIniInt(BackupCfg, TEXT("MaxLifetimeAppeals"), 0);
 
 			UE_LOG(LogTicketSystem, Log,
 			       TEXT("TicketSystem: Primary config not found at '%s' – restored from backup."),

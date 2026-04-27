@@ -206,7 +206,12 @@ void UBanAppealRegistry::LoadFromFile()
 
             FString DateStr;
             if ((*ObjPtr)->TryGetStringField(TEXT("submittedAt"), DateStr))
-                FDateTime::ParseIso8601(*DateStr, Entry.SubmittedAt);
+            {
+                if (!FDateTime::ParseIso8601(*DateStr, Entry.SubmittedAt))
+                    UE_LOG(LogBanAppealRegistry, Warning,
+                        TEXT("BanAppealRegistry: uid='%s' has malformed submittedAt '%s' — using default"),
+                        *Entry.Uid, *DateStr);
+            }
 
             // Status (default Pending for records written before this feature).
             FString StatusStr;
@@ -221,7 +226,12 @@ void UBanAppealRegistry::LoadFromFile()
             (*ObjPtr)->TryGetStringField(TEXT("reviewNote"),  Entry.ReviewNote);
             FString ReviewedAtStr;
             if ((*ObjPtr)->TryGetStringField(TEXT("reviewedAt"), ReviewedAtStr) && !ReviewedAtStr.IsEmpty())
-                FDateTime::ParseIso8601(*ReviewedAtStr, Entry.ReviewedAt);
+            {
+                if (!FDateTime::ParseIso8601(*ReviewedAtStr, Entry.ReviewedAt))
+                    UE_LOG(LogBanAppealRegistry, Warning,
+                        TEXT("BanAppealRegistry: uid='%s' has malformed reviewedAt '%s' — using default"),
+                        *Entry.Uid, *ReviewedAtStr);
+            }
 
             if (!Entry.Uid.IsEmpty())
                 Appeals.Add(Entry);

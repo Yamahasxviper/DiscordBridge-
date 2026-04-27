@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/CriticalSection.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "SMLWebSocketRegistry.generated.h"
 
@@ -66,4 +67,6 @@ public:
 private:
     UPROPERTY()
     TMap<FString, USMLWebSocketClient*> Clients;
+
+    mutable FCriticalSection ClientsMutex;
 };

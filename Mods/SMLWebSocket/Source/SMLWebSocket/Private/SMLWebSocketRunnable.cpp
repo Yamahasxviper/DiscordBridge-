@@ -820,7 +820,7 @@ bool FSMLWebSocketRunnable::FeedSslReadBio()
 		return false;
 	}
 	const int32 Written = static_cast<int32>(BIO_write(ReadBio, Tmp, BytesRead));
-	if (Written != BytesRead)
+	if (Written < 0 || Written != BytesRead)
 	{
 		UE_LOG(LogSMLWebSocket, Error,
 		       TEXT("SMLWebSocket: BIO_write underflow in FeedSslReadBio (%d of %d bytes written)"),
@@ -868,7 +868,7 @@ int32 FSMLWebSocketRunnable::SslRead(uint8* Buffer, int32 BufferSize)
 				return -1; // hard TCP error
 			}
 			const int32 BioWritten = static_cast<int32>(BIO_write(ReadBio, Tmp, BytesRead));
-			if (BioWritten != BytesRead)
+			if (BioWritten < 0 || BioWritten != BytesRead)
 			{
 				UE_LOG(LogSMLWebSocket, Error,
 				       TEXT("SMLWebSocket: BIO_write underflow in SslRead (%d of %d bytes written)"),
