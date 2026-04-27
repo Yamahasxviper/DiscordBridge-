@@ -149,8 +149,12 @@ namespace BanJson
     /**
      * Returns true when the request passes the API key check.
      * If RestApiKey is empty, always returns true (auth disabled).
-     * If RestApiKey is non-empty, the request must supply header X-Api-Key
-     * with the matching value (case-sensitive).
+     * If RestApiKey is non-empty, the request must supply either:
+     *   - Header X-Api-Key with the matching value (primary, used by API clients
+     *     and the dashboard's in-page JS fetch calls), OR
+     *   - Query parameter ?key= with the matching value (used when a browser
+     *     navigates directly to /dashboard?key=xxx, before the JS can store the
+     *     key in sessionStorage and strip it from the address bar).
      */
     static bool CheckApiKey(const FHttpServerRequest& Req)
     {
@@ -161,6 +165,11 @@ namespace BanJson
         const TArray<FString>* KeyHeaderValues = Req.Headers.Find(TEXT("X-Api-Key"));
         if (KeyHeaderValues && !KeyHeaderValues->IsEmpty() &&
             (*KeyHeaderValues)[0].Equals(Cfg->RestApiKey, ESearchCase::CaseSensitive))
+            return true;
+
+        // Query-param auth (for browser navigation to /dashboard?key=xxx).
+        const FString* QueryKey = Req.QueryParams.Find(TEXT("key"));
+        if (QueryKey && QueryKey->Equals(Cfg->RestApiKey, ESearchCase::CaseSensitive))
             return true;
 
         return false;
@@ -2238,6 +2247,7 @@ void UBanRestApi::RegisterRoutes()
     }
   })();
   const KEY = sessionStorage.getItem('banApiKey') || '';
+  const API = '';
 
   async function apiFetch(path){
     const hdrs = {};
@@ -2440,14 +2450,14 @@ void UBanRestApi::RegisterRoutes()
                     UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
                     if (DB)
                     {
-                        // Fetch the ban entry BEFORE removing it so the player name
-                        // is available for the Discord notification (the record no
-                        // longer exists once RemoveBanByUid returns true).
+                        // Use the atomic RemoveBanByUid overload to capture the ban
+                        // entry and delete it in a single mutex scope, eliminating the
+                        // TOCTOU window that exists when GetBanByUid and RemoveBanByUid
+                        // are called as two separate operations.
                         FBanEntry RemovedBan;
-                        const bool bHadBan = DB->GetBanByUid(Appeal.Uid, RemovedBan);
-                        if (DB->RemoveBanByUid(Appeal.Uid))
+                        if (DB->RemoveBanByUid(Appeal.Uid, RemovedBan))
                         {
-                            const FString PlayerName = bHadBan ? RemovedBan.PlayerName : Appeal.Uid;
+                            const FString PlayerName = RemovedBan.PlayerName.IsEmpty() ? Appeal.Uid : RemovedBan.PlayerName;
                             FBanDiscordNotifier::NotifyBanRemoved(Appeal.Uid, PlayerName, ReviewedBy);
                             if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
                                 AuditLog->LogAction(TEXT("unban"), Appeal.Uid, PlayerName, ReviewedBy, ReviewedBy,

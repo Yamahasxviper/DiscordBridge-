@@ -1048,8 +1048,9 @@ int32 UBanDiscordSubsystem::ParseDurationMinutes(const FString& DurationStr)
 		return 0;
 	}
 
-	// Multi-token compound string: e.g. "2h30m", "1d12h", "1w2d".
+	// Multi-token compound string: e.g. "2h30m", "1d12h", "1w2d", "2h 30m".
 	// Each token is <digits><unit> where unit ∈ {w, d, h, m}.
+	// Spaces between tokens are allowed and skipped.
 	// Use int64 for intermediate accumulation to avoid overflow for large values.
 	int64 Total = 0;
 	bool bHadToken = false;
@@ -1057,6 +1058,10 @@ int32 UBanDiscordSubsystem::ParseDurationMinutes(const FString& DurationStr)
 
 	while (*p)
 	{
+		// Skip any whitespace between tokens (e.g. "2h 30m").
+		while (*p == TEXT(' ') || *p == TEXT('\t')) ++p;
+		if (!*p) break;
+
 		if (!FChar::IsDigit(*p)) return 0;
 
 		int64 Num = 0;
@@ -1398,11 +1403,11 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 		return;
 	}
 
-	// Collect linked UIDs before removing the entry so we can clean up counterparts.
+	// Atomically capture the ban record and remove it in one mutex scope,
+	// eliminating the TOCTOU window that existed when GetBanByUid() and
+	// RemoveBanByUid() were called as two separate operations.
 	FBanEntry BanRecord;
-	const bool bHadRecord = DB->GetBanByUid(Uid, BanRecord);
-
-	if (!DB->RemoveBanByUid(Uid))
+	if (!DB->RemoveBanByUid(Uid, BanRecord))
 	{
 		// No ban record was found in the database for this UID.  That means the
 		// player is already not banned (the file may have been absent or the ban
@@ -1422,9 +1427,9 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 	}
 
 	// Remove counterpart bans (linked UIDs + session registry lookup).
-	int32 ExtraRemoved = 0;
-	if (bHadRecord)
-		ExtraRemoved = BanDiscordHelpers::RemoveCounterpartBans(this, DB, Uid, BanRecord.LinkedUids);
+	// RemoveBanByUid() returned true above, so BanRecord is fully populated.
+	const int32 ExtraRemoved =
+		BanDiscordHelpers::RemoveCounterpartBans(this, DB, Uid, BanRecord.LinkedUids);
 
 	FBanDiscordNotifier::NotifyBanRemoved(Uid, DisplayName, SenderName);
 
@@ -1612,10 +1617,12 @@ void UBanDiscordSubsystem::HandleBanListCommand(const TArray<FString>& Args,
 	FString Msg = Header + Body;
 
 	// Safety clamp: Discord messages are limited to 2000 characters.
-	// If the body is too long, truncate and note the overflow.
+	// If the body is too long, strip back to a safe point and close the code
+	// fence properly so Discord does not render a dangling/mismatched block.
 	if (Msg.Len() > 1990)
 	{
-		Msg = Msg.Left(1940) + TEXT("\n...(truncated)```");
+		// Reserve space for the truncation notice + closing fence (≈ 22 chars).
+		Msg = Msg.Left(1968) + TEXT("\n...(truncated)\n```");
 	}
 
 	Respond(ChannelId, Msg);
