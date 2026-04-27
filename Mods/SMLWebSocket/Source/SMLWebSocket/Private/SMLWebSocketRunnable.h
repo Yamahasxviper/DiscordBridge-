@@ -103,8 +103,11 @@ public:
 	/** Queue a text message to be sent. */
 	void EnqueueText(const FString& Text);
 
-	/** Queue a binary message to be sent. */
+	/** Queue a binary message to be sent (copy overload). */
 	void EnqueueBinary(const TArray<uint8>& Data);
+
+	/** Queue a binary message to be sent (move overload — avoids an allocation for owned buffers). */
+	void EnqueueBinary(TArray<uint8>&& Data);
 
 	/**
 	 * Request a graceful WebSocket close. Suppresses auto-reconnect so the

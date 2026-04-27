@@ -600,6 +600,23 @@ private:
 	FString PendingInteractionToken;
 
 	/**
+	 * Discord snowflake ID of the user whose interaction is currently being
+	 * processed.  Set alongside PendingInteractionToken and cleared with it.
+	 * Used to supply the canonical adminUid for audit-log entries so the
+	 * audit log contains a stable identifier (Discord:<snowflake>) rather
+	 * than a mutable display name.
+	 */
+	FString PendingAuthorId;
+
+	/**
+	 * Returns the canonical admin UID string to pass as the adminUid argument
+	 * of UBanAuditLog::LogAction.  When a Discord interaction is being handled
+	 * (PendingAuthorId is set), returns "Discord:<snowflake>".  Otherwise falls
+	 * back to @p FallbackName (typically the SenderName display string).
+	 */
+	FString GetCurrentAuditAdminUid(const FString& FallbackName) const;
+
+	/**
 	 * Send a command result to the Discord channel AND, if a slash command is
 	 * currently being handled (PendingInteractionToken is set), also send the
 	 * same message as an ephemeral follow-up to the interaction so the admin

@@ -781,9 +781,12 @@ namespace BanChat
      * Returns true if the sender is on cooldown for the given command.
      * Admin senders are never rate-limited.
      * Updates the cooldown timestamp when returning false (i.e. the command may proceed).
+     * When returning true (on cooldown), sets *OutRemainingSecs to the number of whole
+     * seconds the caller must still wait before the cooldown expires.
      */
     static bool IsOnCooldown(UCommandSender* Sender, const FString& CommandName,
-                             int32 CooldownSeconds, const FString& SenderUid)
+                             int32 CooldownSeconds, const FString& SenderUid,
+                             int32* OutRemainingSecs = nullptr)
     {
         if (CooldownSeconds <= 0) return false;
         if (!Sender->IsPlayerSender()) return false; // console is never throttled
@@ -806,8 +809,13 @@ namespace BanChat
 
         if (const FDateTime* Last = CommandCooldowns.Find(Key))
         {
-            if ((Now - *Last).GetTotalSeconds() < static_cast<double>(CooldownSeconds))
+            const double ElapsedSecs = (Now - *Last).GetTotalSeconds();
+            if (ElapsedSecs < static_cast<double>(CooldownSeconds))
+            {
+                if (OutRemainingSecs)
+                    *OutRemainingSecs = FMath::Max(1, FMath::CeilToInt(CooldownSeconds - ElapsedSecs));
                 return true;
+            }
         }
         CommandCooldowns.Add(Key, Now);
         return false;
@@ -859,6 +867,39 @@ namespace BanChat
 
         Timestamps.Add(Now);
         return false;
+    }
+
+    /**
+     * Send a chat message to a specific connected player identified by compound UID.
+     * No-op when no matching player is found online.
+     */
+    static void SendChatMessageToUid(UWorld* World, const FString& Uid, const FString& Message)
+    {
+        if (!World || Uid.IsEmpty() || Message.IsEmpty()) return;
+        for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+        {
+            APlayerController* PC = It->Get();
+            if (!PC || !PC->PlayerState) continue;
+
+            FString ConnectedUid;
+            const FUniqueNetIdRepl& UniqueId = PC->PlayerState->GetUniqueId();
+            if (UniqueId.IsValid() && UniqueId.GetType() != FName(TEXT("NONE")))
+            {
+                ConnectedUid = UBanDatabase::MakeUid(TEXT("EOS"), UniqueId.ToString().ToLower());
+            }
+            else
+            {
+                const FString Puid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+                if (!Puid.IsEmpty())
+                    ConnectedUid = UBanDatabase::MakeUid(TEXT("EOS"), Puid);
+            }
+
+            if (!ConnectedUid.IsEmpty() && ConnectedUid.Equals(Uid, ESearchCase::IgnoreCase))
+            {
+                PC->ClientMessage(Message);
+                return;
+            }
+        }
     }
 
     /** Escape a string for embedding in a JSON string literal.
@@ -1128,20 +1169,20 @@ EExecutionStatus AUnbanChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::UNCOMPLETED;
     }
 
-    // Collect linked UIDs before removing the primary entry so we can clean
-    // up counterpart bans (IP↔EOS) afterwards.
+    // Atomically look up and remove the ban in a single lock acquisition so
+    // that the BanEnforcer expiry thread cannot delete or modify the record
+    // between the lookup and the removal (TOCTOU fix).
     FBanEntry BanRecord;
-    const bool bHadRecord = DB->GetBanByUid(Uid, BanRecord);
+    const bool bHadRecord = DB->RemoveBanByUid(Uid, BanRecord);
 
-    if (DB->RemoveBanByUid(Uid))
+    if (bHadRecord)
     {
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Removed ban for %s."), *Uid),
             FLinearColor::Green);
 
         // Also remove every counterpart ban (linked UIDs + session registry lookup).
-        if (bHadRecord)
-            BanChat::RemoveCounterpartBans(this, Sender, DB, Uid, BanRecord.LinkedUids);
+        BanChat::RemoveCounterpartBans(this, Sender, DB, Uid, BanRecord.LinkedUids);
 
         // Write to the audit log.
         {
@@ -1149,7 +1190,7 @@ EExecutionStatus AUnbanChatCommand::ExecuteCommand_Implementation(
             UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
             if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
                 AuditLog->LogAction(TEXT("unban"), Uid,
-                    bHadRecord ? BanRecord.PlayerName : Uid,
+                    BanRecord.PlayerName,
                     AdminId, Sender->GetSenderName(), TEXT(""));
         }
 
@@ -1301,10 +1342,11 @@ EExecutionStatus ABanCheckChatCommand::ExecuteCommand_Implementation(
     {
         const UBanChatCommandsConfig* CoolCfg = UBanChatCommandsConfig::Get();
         const int32 CoolSecs = CoolCfg ? CoolCfg->WarningCheckCooldownSeconds : 0;
-        if (BanChat::IsOnCooldown(Sender, TEXT("bancheck"), CoolSecs, AdminId))
+        int32 RemainingCoolSecs = 0;
+        if (BanChat::IsOnCooldown(Sender, TEXT("bancheck"), CoolSecs, AdminId, &RemainingCoolSecs))
         {
             Sender->SendChatMessage(
-                FString::Printf(TEXT("[BanChatCommands] Please wait %d second(s) before using /bancheck again."), CoolSecs),
+                FString::Printf(TEXT("[BanChatCommands] Please wait %d second(s) before using /bancheck again."), RemainingCoolSecs),
                 FLinearColor::Yellow);
             return EExecutionStatus::UNCOMPLETED;
         }
@@ -1927,6 +1969,12 @@ EExecutionStatus AWarnChatCommand::ExecuteCommand_Implementation(
             *DisplayName, *Reason, WarnCount),
         FLinearColor::Yellow);
 
+    // Notify the warned player immediately so they are aware of the warning.
+    BanChat::SendChatMessageToUid(World, Uid,
+        FString::Printf(
+            TEXT("[BanChatCommands] You have received a warning. Reason: %s  (Total warnings: %d)"),
+            *Reason, WarnCount));
+
     FBanDiscordNotifier::NotifyWarningIssued(Uid, DisplayName, Reason, WarnedBy, WarnCount);
 
     if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
@@ -1938,6 +1986,7 @@ EExecutionStatus AWarnChatCommand::ExecuteCommand_Implementation(
     if (SysCfg)
     {
         int32 BanDurationMinutes = -1;
+        bool  bTriggeredByPoints = false;
 
         if (SysCfg->WarnEscalationTiers.Num() > 0)
         {
@@ -1946,15 +1995,17 @@ EExecutionStatus AWarnChatCommand::ExecuteCommand_Implementation(
             int32 BestThreshold = -1;
             for (const FWarnEscalationTier& Tier : SysCfg->WarnEscalationTiers)
             {
-                const bool bHit = (Tier.PointThreshold > 0)
+                const bool bByPoints  = (Tier.PointThreshold > 0);
+                const bool bHit = bByPoints
                     ? (WarnPoints >= Tier.PointThreshold)
                     : (WarnCount  >= Tier.WarnCount);
-                const int32 ThisThreshold = (Tier.PointThreshold > 0)
+                const int32 ThisThreshold = bByPoints
                     ? Tier.PointThreshold : Tier.WarnCount;
                 if (bHit && ThisThreshold > BestThreshold)
                 {
                     BestThreshold      = ThisThreshold;
                     BanDurationMinutes = Tier.DurationMinutes;
+                    bTriggeredByPoints = bByPoints;
                 }
             }
         }
@@ -1978,9 +2029,13 @@ EExecutionStatus AWarnChatCommand::ExecuteCommand_Implementation(
             }
             else
             {
+                // Show the threshold metric that actually triggered the ban.
+                const FString ThresholdDesc = bTriggeredByPoints
+                    ? FString::Printf(TEXT("%d points"), WarnPoints)
+                    : FString::Printf(TEXT("%d warnings"), WarnCount);
                 Sender->SendChatMessage(
-                    FString::Printf(TEXT("[BanChatCommands] '%s' reached the auto-ban threshold (%d warnings) — banning."),
-                        *DisplayName, WarnCount),
+                    FString::Printf(TEXT("[BanChatCommands] '%s' reached the auto-ban threshold (%s) — banning."),
+                        *DisplayName, *ThresholdDesc),
                     FLinearColor::Red);
                 const EExecutionStatus AutoBanResult = BanChat::DoBan(
                     this, Sender, Uid, DisplayName, BanDurationMinutes,
@@ -2038,10 +2093,11 @@ EExecutionStatus AWarningsChatCommand::ExecuteCommand_Implementation(
     {
         const UBanChatCommandsConfig* CoolCfg = UBanChatCommandsConfig::Get();
         const int32 CoolSecs = CoolCfg ? CoolCfg->WarningCheckCooldownSeconds : 0;
-        if (BanChat::IsOnCooldown(Sender, TEXT("warnings"), CoolSecs, AdminUid))
+        int32 RemainingCoolSecs = 0;
+        if (BanChat::IsOnCooldown(Sender, TEXT("warnings"), CoolSecs, AdminUid, &RemainingCoolSecs))
         {
             Sender->SendChatMessage(
-                FString::Printf(TEXT("[BanChatCommands] Please wait %d second(s) before using /warnings again."), CoolSecs),
+                FString::Printf(TEXT("[BanChatCommands] Please wait %d second(s) before using /warnings again."), RemainingCoolSecs),
                 FLinearColor::Yellow);
             return EExecutionStatus::UNCOMPLETED;
         }
