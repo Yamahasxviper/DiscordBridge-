@@ -984,10 +984,12 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 
 			FString OutStats;
 			TSharedRef<TJsonWriter<>> SW = TJsonWriterFactory<>::Create(&OutStats);
-			FJsonSerializer::Serialize(Stats.ToSharedRef(), SW);
-			FPlatformFileManager::Get().GetPlatformFile().CreateDirectoryTree(*FPaths::GetPath(StatsPath));
-			FFileHelper::SaveStringToFile(OutStats, *StatsPath,
-				FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+			if (FJsonSerializer::Serialize(Stats.ToSharedRef(), SW))
+			{
+				FPlatformFileManager::Get().GetPlatformFile().CreateDirectoryTree(*FPaths::GetPath(StatsPath));
+				FFileHelper::SaveStringToFile(OutStats, *StatsPath,
+					FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+			}
 		}
 
 		Bridge->RespondToInteraction(InteractionId, InteractionToken, 4,
@@ -4349,7 +4351,12 @@ void UTicketSubsystem::SaveTicketState() const
 
 	FString JsonContent;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonContent);
-	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
+	if (!FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
+	{
+		UE_LOG(LogTicketSystem, Error,
+		       TEXT("TicketSystem: Failed to serialize active ticket state — state file not updated."));
+		return;
+	}
 
 	// Write to a temporary file first, then atomically rename over the
 	// destination so a server crash mid-write cannot corrupt the state file.
@@ -5046,12 +5053,30 @@ Root->SetArrayField(TEXT("blacklist"), IdArray);
 
 FString JsonContent;
 TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonContent);
-FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
+if (!FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
+{
+UE_LOG(LogTicketSystem, Error,
+       TEXT("TicketSystem: Failed to serialize ticket blacklist — blacklist file not updated."));
+return;
+}
 
-if (!FFileHelper::SaveStringToFile(JsonContent, *Path,
+// Use the same atomic tmp→rename pattern as SaveTicketState so a server
+// crash mid-write cannot corrupt the blacklist file.
+const FString TmpPath = Path + TEXT(".tmp");
+if (FFileHelper::SaveStringToFile(JsonContent, *TmpPath,
 	FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 {
+PF.DeleteFile(*Path);
+if (!PF.MoveFile(*Path, *TmpPath))
+{
 UE_LOG(LogTicketSystem, Warning,
-       TEXT("TicketSystem: Failed to save blacklist to '%s'."), *Path);
+       TEXT("TicketSystem: Failed to atomically rename '%s' → '%s'."),
+       *TmpPath, *Path);
+}
+}
+else
+{
+UE_LOG(LogTicketSystem, Warning,
+       TEXT("TicketSystem: Failed to save blacklist to '%s'."), *TmpPath);
 }
 }

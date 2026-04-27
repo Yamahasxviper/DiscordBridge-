@@ -3277,6 +3277,18 @@ EExecutionStatus AClearWarnByIdChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::BAD_ARGUMENTS;
     }
 
+    // Guard against int64 overflow: Atoi64 is undefined for strings longer than
+    // 19 digits, and a 19-digit string can still exceed INT64_MAX.  Same check
+    // used by BanRestApi's ParseInt64Param helper.
+    {
+        const int32 IdLen = Arguments[0].Len();
+        if (IdLen > 19 || (IdLen == 19 && Arguments[0] > TEXT("9223372036854775807")))
+        {
+            Sender->SendChatMessage(TEXT("[BanChatCommands] Warning ID is out of range."), FLinearColor::Red);
+            return EExecutionStatus::BAD_ARGUMENTS;
+        }
+    }
+
     const int64 WarnId = FCString::Atoi64(*Arguments[0]);
     if (WarnId <= 0)
     {
