@@ -4623,6 +4623,12 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 	// registry entry so it doesn't pile up as "pending" indefinitely.
 	if (RemovedTypeInactive == TEXT("banappeal") && !RemovedOpener.IsEmpty())
 	{
+		// Always clean up the EOS-UID mapping for this opener, regardless of
+		// whether a matching pending appeal is found below.  Without this,
+		// the entry leaks whenever the appeal was already reviewed (status !=
+		// Pending) but the channel was closed due to inactivity.
+		OpenerToEosUid.Remove(RemovedOpener);
+
 		if (UGameInstance* GI = GetGameInstance())
 		{
 			if (UBanAppealRegistry* AppealReg = GI->GetSubsystem<UBanAppealRegistry>())
@@ -4634,7 +4640,6 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 					{
 						AppealReg->DeleteAppeal(E.Id);
 						OpenerToAppealId.Remove(RemovedOpener);
-						OpenerToEosUid.Remove(RemovedOpener);
 						UE_LOG(LogTicketSystem, Log,
 						       TEXT("TicketSystem: Auto-dismissed pending appeal id=%lld for Discord user %s on inactivity close."),
 						       E.Id, *RemovedOpener);

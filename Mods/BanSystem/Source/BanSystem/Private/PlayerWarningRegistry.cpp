@@ -57,7 +57,14 @@ void UPlayerWarningRegistry::AddWarning(const FString& Uid, const FString& Playe
     {
         FScopeLock Lock(&Mutex);
 
-        Entry.Id         = NextId++;
+        if (NextId == 0)
+        {
+            UE_LOG(LogPlayerWarningRegistry, Error,
+                TEXT("PlayerWarningRegistry: all 64-bit IDs have been used — cannot add more warnings"));
+            return;
+        }
+        Entry.Id         = NextId;
+        NextId           = (NextId < INT64_MAX) ? NextId + 1 : 0; // 0 = exhausted
         Entry.Uid        = Uid;
         Entry.PlayerName = PlayerName;
         Entry.Reason     = Reason;
@@ -87,7 +94,14 @@ FWarningEntry UPlayerWarningRegistry::AddWarning(const FWarningEntry& InEntry)
         FScopeLock Lock(&Mutex);
 
         Entry = InEntry;
-        Entry.Id       = NextId++;
+        if (NextId == 0)
+        {
+            UE_LOG(LogPlayerWarningRegistry, Error,
+                TEXT("PlayerWarningRegistry: all 64-bit IDs have been used — cannot add more warnings"));
+            return FWarningEntry();
+        }
+        Entry.Id       = NextId;
+        NextId         = (NextId < INT64_MAX) ? NextId + 1 : 0; // 0 = exhausted
         Entry.WarnDate = FDateTime::UtcNow();
 
         Warnings.Add(Entry);
@@ -185,7 +199,14 @@ void UPlayerWarningRegistry::AddWarning(const FString& Uid, const FString& Playe
     {
         FScopeLock Lock(&Mutex);
 
-        Entry.Id         = NextId++;
+        if (NextId == 0)
+        {
+            UE_LOG(LogPlayerWarningRegistry, Error,
+                TEXT("PlayerWarningRegistry: all 64-bit IDs have been used — cannot add more warnings"));
+            return;
+        }
+        Entry.Id         = NextId;
+        NextId           = (NextId < INT64_MAX) ? NextId + 1 : 0; // 0 = exhausted
         Entry.Uid        = Uid;
         Entry.PlayerName = PlayerName;
         Entry.Reason     = Reason;
@@ -353,9 +374,12 @@ void UPlayerWarningRegistry::LoadFromFile()
     }
 
     // Restore the O(1) counter from the loaded data so AddWarning never reuses an Id.
+    // When the highest stored Id is INT64_MAX the next Id would overflow, so we
+    // use 0 as the "exhausted" sentinel (AddWarning checks for 0, not INT64_MAX,
+    // allowing INT64_MAX itself to be the last valid allocatable Id).
     NextId = 1;
     for (const FWarningEntry& W : Warnings)
-        if (W.Id >= NextId) NextId = (W.Id < INT64_MAX) ? W.Id + 1 : W.Id;
+        if (W.Id >= NextId) NextId = (W.Id < INT64_MAX) ? W.Id + 1 : 0;
 }
 
 bool UPlayerWarningRegistry::SaveToFile() const

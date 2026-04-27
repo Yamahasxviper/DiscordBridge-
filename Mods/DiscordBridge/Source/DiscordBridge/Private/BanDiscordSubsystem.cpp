@@ -467,7 +467,10 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 						const FString DurStr = bIsTimed
 							? FString::Printf(TEXT(" for **%s**"),
 								  *BanDiscordHelpers::FormatDuration(
-								      static_cast<int32>((Entry.ExpireDate - Entry.MuteDate).GetTotalMinutes())))
+								      static_cast<int32>(FMath::Min(
+								          FMath::Max((int64)0,
+								              static_cast<int64>((Entry.ExpireDate - Entry.MuteDate).GetTotalMinutes())),
+								          static_cast<int64>(INT32_MAX)))))
 							: TEXT(" **indefinitely**");
 						const FString MuteMsg = FString::Printf(
 							TEXT("🔇 Muted **%s** (`%s`)%s.\nReason: %s\nBy: %s"),
@@ -2558,7 +2561,9 @@ void UBanDiscordSubsystem::HandleDurationCommand(const TArray<FString>& Args,
 		}
 		else
 		{
-			const int32 TotalMins = static_cast<int32>(Remaining.GetTotalMinutes());
+			const int32 TotalMins = static_cast<int32>(FMath::Min(
+				FMath::Max((int64)0, static_cast<int64>(Remaining.GetTotalMinutes())),
+				static_cast<int64>(INT32_MAX)));
 			DurStr = FString::Printf(TEXT("**%s** remaining (expires %s UTC)"),
 				*BanDiscordHelpers::FormatDuration(TotalMins),
 				*Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")));
@@ -6653,7 +6658,9 @@ FString UBanDiscordSubsystem::ExecutePanelMuteCheck(const FString& PlayerArg) co
 	else
 	{
 		const FTimespan Remaining = Entry.ExpireDate - FDateTime::UtcNow();
-		const int32 TotalMins = static_cast<int32>(FMath::Max(0.0, Remaining.GetTotalMinutes()));
+		const int32 TotalMins = static_cast<int32>(FMath::Min(
+			FMath::Max((int64)0, static_cast<int64>(Remaining.GetTotalMinutes())),
+			static_cast<int64>(INT32_MAX)));
 		ExpiryStr = FString::Printf(TEXT("for **%s** more (expires %s UTC)"),
 			*BanDiscordHelpers::FormatDuration(TotalMins),
 			*Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")));
