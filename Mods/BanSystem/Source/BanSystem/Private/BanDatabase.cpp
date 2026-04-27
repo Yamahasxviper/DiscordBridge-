@@ -80,9 +80,24 @@ namespace BanDbJson
         if (Obj->TryGetStringField(TEXT("banDate"), BanDateStr))
         {
             if (!FDateTime::ParseIso8601(*BanDateStr, OutEntry.BanDate))
+            {
+                // Malformed banDate — fall back to UtcNow() so duration displays and
+                // point-in-time audit queries do not produce wildly incorrect values.
                 UE_LOG(LogBanDatabase, Warning,
-                    TEXT("BanDatabase: record uid='%s' has malformed banDate '%s' — using epoch"),
+                    TEXT("BanDatabase: record uid='%s' has malformed banDate '%s' — using UtcNow() as fallback"),
                     *OutEntry.Uid, *BanDateStr);
+                OutEntry.BanDate = FDateTime::UtcNow();
+            }
+        }
+        else
+        {
+            // banDate field is absent — this should not happen for well-formed records.
+            // Use UtcNow() as a safe fallback so duration calculations don't produce
+            // absurdly large values from the epoch (FDateTime(0)).
+            UE_LOG(LogBanDatabase, Warning,
+                TEXT("BanDatabase: record uid='%s' is missing banDate field — using UtcNow() as fallback"),
+                *OutEntry.Uid);
+            OutEntry.BanDate = FDateTime::UtcNow();
         }
 
         bool bPerm = true;

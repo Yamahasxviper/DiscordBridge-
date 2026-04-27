@@ -1077,12 +1077,16 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 			{
 				if (UBanAppealRegistry* AppealReg = GI->GetSubsystem<UBanAppealRegistry>())
 				{
-					const FString AppealUid = FString::Printf(TEXT("Discord:%s"), *RemovedOpener);
-					for (const FBanAppealEntry& E : AppealReg->GetAllAppeals())
+					// Prefer the direct OpenerToAppealId lookup (O(1), works regardless of
+					// whether the appeal was filed under an EOS UID or "Discord:<id>").
+					// Fall back to scanning all appeals by Discord UID only when no cached
+					// ID is available (e.g. after loading an old-format state file).
+					const int64* DirectId = OpenerToAppealId.Find(RemovedOpener);
+					if (DirectId && *DirectId > 0)
 					{
-						if (E.Uid == AppealUid)
+						const FBanAppealEntry E = AppealReg->GetAppealById(*DirectId);
+						if (E.Id > 0)
 						{
-							// Capture review note for transcript regardless of status.
 							CloseAppealReviewNote = E.ReviewNote;
 							if (E.Status == EAppealStatus::Pending)
 							{
@@ -1093,7 +1097,28 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 								       TEXT("TicketSystem: Auto-dismissed pending appeal id=%lld for Discord user %s on ticket close."),
 								       E.Id, *RemovedOpener);
 							}
-							break;
+						}
+					}
+					else
+					{
+						// Legacy fallback: scan by Discord UID string.
+						const FString AppealUid = FString::Printf(TEXT("Discord:%s"), *RemovedOpener);
+						for (const FBanAppealEntry& E : AppealReg->GetAllAppeals())
+						{
+							if (E.Uid == AppealUid)
+							{
+								CloseAppealReviewNote = E.ReviewNote;
+								if (E.Status == EAppealStatus::Pending)
+								{
+									AppealReg->DeleteAppeal(E.Id);
+									OpenerToAppealId.Remove(RemovedOpener);
+									OpenerToEosUid.Remove(RemovedOpener);
+									UE_LOG(LogTicketSystem, Log,
+									       TEXT("TicketSystem: Auto-dismissed pending appeal id=%lld for Discord user %s on ticket close."),
+									       E.Id, *RemovedOpener);
+								}
+								break;
+							}
 						}
 					}
 				}
@@ -1138,7 +1163,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		}
 
 		// ── Transcript archiving ──────────────────────────────────────────────
-		// Fetch message history and post to TicketLogChannelId before deleting.
+		// Fetch message history (paginated) and post to TicketLogChannelId before deleting.
 		if (!Config.TicketLogChannelId.IsEmpty() && !Bridge->GetBotToken().IsEmpty())
 		{
 			const FString LogChannelId     = Config.TicketLogChannelId;
@@ -1150,109 +1175,174 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 
 			TWeakObjectPtr<UTicketSubsystem> WeakThis(this);
 
-			const FString FetchUrl = FString::Printf(
-				TEXT("https://discord.com/api/v10/channels/%s/messages?limit=100"),
-				*ClosedChannelId);
+			// Shared accumulator for paginated transcript lines.
+			// Each element is one page's lines in newest-to-oldest order;
+			// pages are stored newest-first (pages[0] = most recent page).
+			struct FTranscriptPages
+			{
+				TArray<TArray<FString>> Pages;
+				int32 PagesFetched{0};
+				static constexpr int32 MaxPages = 10; // cap at 1000 messages
+			};
+			auto PageAccum = MakeShared<FTranscriptPages>();
 
-			TSharedRef<IHttpRequest, ESPMode::ThreadSafe> FetchReq =
-				FHttpModule::Get().CreateRequest();
-			FetchReq->SetURL(FetchUrl);
-			FetchReq->SetVerb(TEXT("GET"));
-			FetchReq->SetHeader(TEXT("Authorization"),
-				FString::Printf(TEXT("Bot %s"), *BotToken));
+			// Declare a shared pointer to the fetch function so it can reference itself
+			// for recursive pagination (each response fires the next request if needed).
+			auto FetchFuncHolder = MakeShared<TFunction<void(const FString&)>>();
 
-			FetchReq->OnProcessRequestComplete().BindWeakLambda(
-				WeakThis.Get(),
-				[WeakThis, LogChannelId, BotToken, OpenerIdForLog, ClosedAt, ClosedChannelId, CloseNotesForLog, ReviewNoteCopy]
-				(FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bOk) mutable
+			// Finalise and post the transcript to the log channel.
+			auto FinalizeTranscript =
+				[WeakThis, LogChannelId, OpenerIdForLog, ClosedAt,
+				 CloseNotesForLog, ReviewNoteCopy, PageAccum]() mutable
+			{
+				UTicketSubsystem* Self = WeakThis.Get();
+				if (!Self) return;
+				IDiscordBridgeProvider* B = Self->GetBridge();
+				if (!B) return;
+
+				FString TranscriptText = FString::Printf(
+					TEXT(":scroll: **Ticket Closed**\n")
+					TEXT("Opener: <@%s>\n")
+					TEXT("Date closed: %s\n\n"),
+					*OpenerIdForLog, *ClosedAt);
+
+				// Pages are stored newest-first; within each page, messages are
+				// newest-first too.  Iterate pages in reverse (oldest page first) and
+				// within each page iterate in reverse to get chronological order.
+				for (int32 Pi = PageAccum->Pages.Num() - 1; Pi >= 0; --Pi)
 				{
-					UTicketSubsystem* Self = WeakThis.Get();
-					if (!Self) return;
-					IDiscordBridgeProvider* B = Self->GetBridge();
-					if (!B) return;
+					const TArray<FString>& PageLines = PageAccum->Pages[Pi];
+					for (int32 Li = PageLines.Num() - 1; Li >= 0; --Li)
+						TranscriptText += PageLines[Li];
+				}
 
-					FString TranscriptText =
-						FString::Printf(
-							TEXT(":scroll: **Ticket Closed**\n")
-							TEXT("Opener: <@%s>\n")
-							TEXT("Date closed: %s\n\n"),
-							*OpenerIdForLog, *ClosedAt);
+				if (TranscriptText.Len() <= static_cast<int32>(
+					FString(TEXT(":scroll: **Ticket Closed**\n")).Len() + 80))
+				{
+					// No lines were added — HTTP failed on all pages.
+					TranscriptText += TEXT("*(Could not fetch message history.)*\n");
+				}
 
-					if (bOk && Resp.IsValid() &&
-					    Resp->GetResponseCode() >= 200 && Resp->GetResponseCode() < 300)
+				// Append staff notes (internal) if any.
+				if (!CloseNotesForLog.IsEmpty())
+				{
+					TranscriptText += TEXT("\n**Staff Notes (internal):**\n");
+					for (const FString& N : CloseNotesForLog)
+						TranscriptText += FString::Printf(TEXT("- %s\n"), *N);
+				}
+
+				if (!ReviewNoteCopy.IsEmpty())
+					TranscriptText += FString::Printf(TEXT("\n**Appeal Review Note:** %s"), *ReviewNoteCopy);
+
+				// Discord messages are capped at 2000 characters.
+				if (TranscriptText.Len() > 1900)
+					TranscriptText = TranscriptText.Left(1900) + TEXT("\n*(transcript truncated)*");
+
+				B->SendDiscordChannelMessage(LogChannelId, TranscriptText);
+			};
+
+			*FetchFuncHolder =
+				[FetchFuncHolder, WeakThis, BotToken, ClosedChannelId,
+				 PageAccum, FinalizeTranscript]
+				(const FString& BeforeId) mutable
+			{
+				UTicketSubsystem* Self = WeakThis.Get();
+				if (!Self) { FinalizeTranscript(); return; }
+
+				FString FetchUrl = FString::Printf(
+					TEXT("https://discord.com/api/v10/channels/%s/messages?limit=100"),
+					*ClosedChannelId);
+				if (!BeforeId.IsEmpty())
+					FetchUrl += FString::Printf(TEXT("&before=%s"), *BeforeId);
+
+				TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req =
+					FHttpModule::Get().CreateRequest();
+				Req->SetURL(FetchUrl);
+				Req->SetVerb(TEXT("GET"));
+				Req->SetHeader(TEXT("Authorization"),
+					FString::Printf(TEXT("Bot %s"), *BotToken));
+
+				Req->OnProcessRequestComplete().BindWeakLambda(
+					Self,
+					[FetchFuncHolder, WeakThis, PageAccum, FinalizeTranscript]
+					(FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bOk) mutable
 					{
-						TSharedPtr<FJsonObject> Ignored;
-						TArray<TSharedPtr<FJsonValue>> Messages;
-						TSharedRef<TJsonReader<>> Reader =
-							TJsonReaderFactory<>::Create(Resp->GetContentAsString());
+						UTicketSubsystem* S = WeakThis.Get();
+						if (!S) { FinalizeTranscript(); return; }
 
-						// Messages come newest-first; reverse for chronological order.
-						TSharedPtr<FJsonValue> Root;
-						if (FJsonSerializer::Deserialize(Reader, Root) && Root.IsValid())
+						TArray<FString> PageLines;
+						FString OldestId;
+						bool bHasMore = false;
+
+						if (bOk && Resp.IsValid() &&
+						    Resp->GetResponseCode() >= 200 &&
+						    Resp->GetResponseCode() < 300)
 						{
-							const TArray<TSharedPtr<FJsonValue>>* MsgArr = nullptr;
-							if (Root->TryGetArray(MsgArr) && MsgArr)
+							TSharedPtr<FJsonValue> RootVal;
+							TSharedRef<TJsonReader<>> Rdr =
+								TJsonReaderFactory<>::Create(Resp->GetContentAsString());
+
+							if (FJsonSerializer::Deserialize(Rdr, RootVal) && RootVal.IsValid())
 							{
-								// Reverse to get chronological order (oldest first).
-								for (int32 Idx = MsgArr->Num() - 1; Idx >= 0; --Idx)
+								const TArray<TSharedPtr<FJsonValue>>* MsgArr = nullptr;
+								if (RootVal->TryGetArray(MsgArr) && MsgArr && MsgArr->Num() > 0)
 								{
-									const TSharedPtr<FJsonObject>* MsgObjPtr = nullptr;
-									if (!(*MsgArr)[Idx]->TryGetObject(MsgObjPtr) || !MsgObjPtr)
-										continue;
-
-									FString AuthorName;
-									const TSharedPtr<FJsonObject>* AuthorPtr = nullptr;
-									if ((*MsgObjPtr)->TryGetObjectField(TEXT("author"), AuthorPtr) && AuthorPtr)
+									// Messages are newest-first; store in that order per page.
+									// FinalizeTranscript reverses the order when posting.
+									for (const TSharedPtr<FJsonValue>& MsgVal : *MsgArr)
 									{
-										if (!(*AuthorPtr)->TryGetStringField(TEXT("global_name"), AuthorName) || AuthorName.IsEmpty())
-											(*AuthorPtr)->TryGetStringField(TEXT("username"), AuthorName);
-									}
-									FString MsgContent;
-									(*MsgObjPtr)->TryGetStringField(TEXT("content"), MsgContent);
+										const TSharedPtr<FJsonObject>* MsgObjPtr = nullptr;
+										if (!MsgVal->TryGetObject(MsgObjPtr) || !MsgObjPtr)
+											continue;
 
-									if (!AuthorName.IsEmpty() && !MsgContent.IsEmpty())
-									{
-										TranscriptText += FString::Printf(
-											TEXT("[%s]: %s\n"), *AuthorName, *MsgContent);
+										FString AuthorName;
+										const TSharedPtr<FJsonObject>* AuthorPtr = nullptr;
+										if ((*MsgObjPtr)->TryGetObjectField(TEXT("author"), AuthorPtr) && AuthorPtr)
+										{
+											if (!(*AuthorPtr)->TryGetStringField(TEXT("global_name"), AuthorName) || AuthorName.IsEmpty())
+												(*AuthorPtr)->TryGetStringField(TEXT("username"), AuthorName);
+										}
+										FString MsgContent;
+										(*MsgObjPtr)->TryGetStringField(TEXT("content"), MsgContent);
+
+										if (!AuthorName.IsEmpty() && !MsgContent.IsEmpty())
+											PageLines.Add(FString::Printf(TEXT("[%s]: %s\n"), *AuthorName, *MsgContent));
 									}
+
+									// The last entry in the array is the oldest message.
+									// Its ID is used as the `before` cursor for the next request.
+									const TSharedPtr<FJsonObject>* OldestObjPtr = nullptr;
+									if ((*MsgArr)[MsgArr->Num() - 1]->TryGetObject(OldestObjPtr) && OldestObjPtr)
+										(*OldestObjPtr)->TryGetStringField(TEXT("id"), OldestId);
+
+									bHasMore = (MsgArr->Num() == 100);
 								}
 							}
 						}
-					}
-					else
-					{
-						TranscriptText += TEXT("*(Could not fetch message history.)*\n");
-					}
 
-					// Append staff notes (internal) if any.
-					if (!CloseNotesForLog.IsEmpty())
-					{
-						TranscriptText += TEXT("\n**Staff Notes (internal):**\n");
-						for (const FString& N : CloseNotesForLog)
-							TranscriptText += FString::Printf(TEXT("- %s\n"), *N);
-					}
+						if (!PageLines.IsEmpty())
+							PageAccum->Pages.Add(MoveTemp(PageLines));
 
-					// Feature 8: append admin review note from appeal registry if present.
-					if (!ReviewNoteCopy.IsEmpty())
-					{
-						TranscriptText += FString::Printf(
-							TEXT("\n**Appeal Review Note:** %s"), *ReviewNoteCopy);
-					}
+						++PageAccum->PagesFetched;
 
-					// Discord messages have a 2000-char limit; truncate if necessary.
-					if (TranscriptText.Len() > 1900)
-					{
-						TranscriptText = TranscriptText.Left(1900) + TEXT("\n*(transcript truncated)*");
-					}
+						if (bHasMore && !OldestId.IsEmpty() &&
+						    PageAccum->PagesFetched < FTranscriptPages::MaxPages)
+						{
+							(*FetchFuncHolder)(OldestId);
+						}
+						else
+						{
+							FinalizeTranscript();
+						}
+					});
 
-					B->SendDiscordChannelMessage(LogChannelId, TranscriptText);
-				});
+				Req->ProcessRequest();
+			};
 
-			FetchReq->ProcessRequest();
+			// Kick off the first page fetch (no `before` cursor).
+			(*FetchFuncHolder)(FString());
 
-			// Delete the channel AFTER queuing the fetch; the HTTP response is
-			// async so we cannot wait for it here.  The fetch finishes quickly
-			// (typically < 1 s) and the log channel post follows independently.
+			// Delete the channel AFTER queuing the fetch; HTTP is async.
 			Bridge->DeleteDiscordChannel(SourceChannelId);
 		}
 		else
@@ -2283,14 +2373,14 @@ void UTicketSubsystem::CreateTicketChannel(
 			       TEXT("TicketSystem: Created ticket channel %s for user '%s' (%s)."),
 			       *NewChannelId, *OpenerUsernameCopy, *OpenerUserIdCopy);
 
-			// Track the channel.
+			// Track the channel — populate ALL state maps before persisting so a
+			// restart between SaveTicketState and the subsequent Add calls cannot
+			// leave the ticket in a partially-initialised state (TICK-1).
 			Self->TicketChannelToOpener.Add(NewChannelId, OpenerUserIdCopy);
 			Self->OpenerToTicketChannel.Add(OpenerUserIdCopy, NewChannelId);
 			// Initialise last-activity to now so the inactive-timeout
 			// does not immediately fire on freshly-opened tickets.
 			Self->TicketChannelToLastActivity.Add(NewChannelId, FDateTime::UtcNow());
-			// Persist the updated state so this ticket survives a server restart.
-			Self->SaveTicketState();
 			Self->TicketChannelToOpenerName.Add(NewChannelId, OpenerUsernameCopy);
 			Self->TicketChannelToOpenTime.Add(NewChannelId, FDateTime::UtcNow());
 			Self->TicketChannelToType.Add(NewChannelId, TicketTypeCopy);
@@ -2301,6 +2391,8 @@ void UTicketSubsystem::CreateTicketChannel(
 			{
 				Self->OpenerToTicketsByType.FindOrAdd(OpenerUserIdCopy).Add(TicketTypeCopy, NewChannelId);
 			}
+			// Persist the updated state so this ticket survives a server restart.
+			Self->SaveTicketState();
 
 			// ── Build the welcome message ─────────────────────────────────────
 			const FString MentionPrefix = NotifyRoleIdCopy.IsEmpty()
@@ -4223,12 +4315,31 @@ void UTicketSubsystem::SaveTicketState() const
 	for (const FString& SlaCh : SlaWarnedChannels)
 		SlaWarnedArr.Add(MakeShared<FJsonValueString>(SlaCh));
 
+	// Persist reopen grace-period entries so the Reopen button keeps working
+	// across server restarts (TICK-5).
+	TArray<TSharedPtr<FJsonValue>> ReopenExpiryArray;
+	for (const TPair<FString, FDateTime>& RE : PendingReopenExpiry)
+	{
+		if (RE.Value > UtcNow)
+		{
+			TSharedPtr<FJsonObject> REEntry = MakeShared<FJsonObject>();
+			REEntry->SetStringField(TEXT("channel_id"), RE.Key);
+			REEntry->SetStringField(TEXT("expiry"),     RE.Value.ToIso8601());
+			const FString* ROOpener = PendingReopenOpener.Find(RE.Key);
+			if (ROOpener && !ROOpener->IsEmpty())
+				REEntry->SetStringField(TEXT("opener_id"), *ROOpener);
+			ReopenExpiryArray.Add(MakeShared<FJsonValueObject>(REEntry));
+		}
+	}
+
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetArrayField(TEXT("tickets"),   TicketArray);
 	Root->SetArrayField(TEXT("cooldowns"), CooldownArray);
 	Root->SetArrayField(TEXT("multi_tickets"), MultiArray);
 	if (SlaWarnedArr.Num() > 0)
 		Root->SetArrayField(TEXT("sla_warned_channels"), SlaWarnedArr);
+	if (ReopenExpiryArray.Num() > 0)
+		Root->SetArrayField(TEXT("reopen_expiry"), ReopenExpiryArray);
 	if (!StoredPanelMessageId.IsEmpty()) Root->SetStringField(TEXT("panel_message_id"), StoredPanelMessageId);
 	if (!StoredPanelChannelId.IsEmpty()) Root->SetStringField(TEXT("panel_channel_id"), StoredPanelChannelId);
 
@@ -4236,12 +4347,26 @@ void UTicketSubsystem::SaveTicketState() const
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonContent);
 	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
 
-	if (!FFileHelper::SaveStringToFile(JsonContent, *StatePath,
+	// Write to a temporary file first, then atomically rename over the
+	// destination so a server crash mid-write cannot corrupt the state file.
+	const FString TmpPath = StatePath + TEXT(".tmp");
+	if (FFileHelper::SaveStringToFile(JsonContent, *TmpPath,
 		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	{
+		// Some platforms require the destination to be absent for MoveFile.
+		PlatformFile.DeleteFile(*StatePath);
+		if (!PlatformFile.MoveFile(*StatePath, *TmpPath))
+		{
+			UE_LOG(LogTicketSystem, Warning,
+			       TEXT("TicketSystem: Failed to atomically rename '%s' → '%s'."),
+			       *TmpPath, *StatePath);
+		}
+	}
+	else
 	{
 		UE_LOG(LogTicketSystem, Warning,
 		       TEXT("TicketSystem: Failed to save active ticket state to '%s'."),
-		       *StatePath);
+		       *TmpPath);
 	}
 }
 
@@ -4445,6 +4570,31 @@ void UTicketSubsystem::LoadTicketState()
 			FString SlaCh;
 			if (SlaV->TryGetString(SlaCh) && !SlaCh.IsEmpty())
 				SlaWarnedChannels.Add(SlaCh);
+		}
+	}
+
+	// Restore reopen grace-period entries so the Reopen button keeps working
+	// after a server restart (TICK-5).
+	const TArray<TSharedPtr<FJsonValue>>* ReopenExpiryLoad = nullptr;
+	if (Root->TryGetArrayField(TEXT("reopen_expiry"), ReopenExpiryLoad) && ReopenExpiryLoad)
+	{
+		const FDateTime Now = FDateTime::UtcNow();
+		for (const TSharedPtr<FJsonValue>& REVal : *ReopenExpiryLoad)
+		{
+			const TSharedPtr<FJsonObject>* REObj = nullptr;
+			if (!REVal->TryGetObject(REObj) || !REObj) continue;
+			FString REChannelId, ExpiryStr;
+			(*REObj)->TryGetStringField(TEXT("channel_id"), REChannelId);
+			(*REObj)->TryGetStringField(TEXT("expiry"),     ExpiryStr);
+			if (REChannelId.IsEmpty() || ExpiryStr.IsEmpty()) continue;
+			FDateTime Expiry;
+			if (FDateTime::ParseIso8601(*ExpiryStr, Expiry) && Expiry > Now)
+			{
+				PendingReopenExpiry.Add(REChannelId, Expiry);
+				FString OpenerId;
+				if ((*REObj)->TryGetStringField(TEXT("opener_id"), OpenerId) && !OpenerId.IsEmpty())
+					PendingReopenOpener.Add(REChannelId, OpenerId);
+			}
 		}
 	}
 

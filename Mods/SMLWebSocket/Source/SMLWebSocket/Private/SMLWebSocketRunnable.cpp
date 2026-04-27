@@ -484,6 +484,15 @@ void FSMLWebSocketRunnable::EnqueueBinary(const TArray<uint8>& Data)
 	OutboundMessages.Enqueue(MoveTemp(Msg));
 }
 
+void FSMLWebSocketRunnable::EnqueueBinary(TArray<uint8>&& Data)
+{
+	if (!bConnected) return;
+	FSMLWebSocketOutboundMessage Msg;
+	Msg.bIsBinary = true;
+	Msg.Payload   = MoveTemp(Data);
+	OutboundMessages.Enqueue(MoveTemp(Msg));
+}
+
 void FSMLWebSocketRunnable::EnqueueClose(int32 Code, const FString& Reason)
 {
 	// Mark as user-initiated so the reconnect loop does not restart after the close.

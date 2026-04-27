@@ -348,6 +348,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category="SML|WebSocket")
 	void SendBinary(const TArray<uint8>& Data);
 
+	/**
+	 * Send a binary message — move overload.
+	 *
+	 * Identical to SendBinary(const TArray<uint8>&) but moves the buffer rather
+	 * than copying it.  Use this when the caller owns the buffer and no longer
+	 * needs it after the call, to eliminate an unnecessary allocation/copy for
+	 * high-frequency binary traffic.
+	 *
+	 * @param Data  The binary payload to send; ownership is transferred.
+	 */
+	void SendBinary(TArray<uint8>&& Data);
+
 	// ── Lifecycle ─────────────────────────────────────────────────────────────
 
 	/**

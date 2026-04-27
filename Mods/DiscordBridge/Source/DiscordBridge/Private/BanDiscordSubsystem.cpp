@@ -892,6 +892,13 @@ void UBanDiscordSubsystem::Respond(const FString& ChannelId, const FString& Mess
 		CachedProvider->FollowUpInteraction(PendingInteractionToken, Message, /*bEphemeral=*/true);
 }
 
+FString UBanDiscordSubsystem::GetCurrentAuditAdminUid(const FString& FallbackName) const
+{
+	if (!PendingAuthorId.IsEmpty())
+		return FString::Printf(TEXT("Discord:%s"), *PendingAuthorId);
+	return FallbackName;
+}
+
 void UBanDiscordSubsystem::BroadcastInGameModerationNotice(const FString& Message) const
 {
 	if (Message.IsEmpty()) return;
@@ -1353,7 +1360,7 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
 		{
 			const FString ActionType = bTemporary ? TEXT("tempban") : TEXT("ban");
-			AuditLog->LogAction(ActionType, Uid, DisplayName, SenderName, SenderName, Entry.Reason);
+			AuditLog->LogAction(ActionType, Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName, Entry.Reason);
 		}
 	}
 
@@ -1448,7 +1455,7 @@ void UBanDiscordSubsystem::HandleUnbanCommand(const TArray<FString>& Args,
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-			AuditLog->LogAction(TEXT("unban"), Uid, DisplayName, SenderName, SenderName, TEXT(""));
+			AuditLog->LogAction(TEXT("unban"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName, TEXT(""));
 	}
 
 	Respond(ChannelId, Msg);
@@ -1771,7 +1778,7 @@ void UBanDiscordSubsystem::HandleKickCommand(const TArray<FString>& Args,
 		if (GI)
 		{
 			if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-				AuditLog->LogAction(TEXT("kick"), Uid, DisplayName, SenderName, SenderName, Reason);
+				AuditLog->LogAction(TEXT("kick"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName, Reason);
 		}
 
 		FString KickMsg = FString::Printf(
@@ -1843,7 +1850,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 		if (GI)
 		{
 			if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-				AuditLog->LogAction(TEXT("unmute"), Uid, DisplayName, SenderName, SenderName, TEXT(""));
+				AuditLog->LogAction(TEXT("unmute"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName, TEXT(""));
 		}
 
 		const FString UnmuteMsg = FString::Printf(
@@ -1887,9 +1894,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 
 	// Write to audit log so Discord-issued mutes appear alongside in-game mutes.
 	if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
-		AuditLog->LogAction(TEXT("mute"), Uid, DisplayName, SenderName, SenderName, Reason);
-
-	Respond(ChannelId, MuteMsg);
+		AuditLog->LogAction(TEXT("mute"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName, Reason);
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Muted @%s%s. Reason: %s. By: %s."),
 		*StaffPrefix, *DisplayName, *DurStr, *Reason, *SenderName));
@@ -1941,7 +1946,7 @@ void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
 	if (GI)
 	{
 		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-			AuditLog->LogAction(TEXT("warn"), Uid, DisplayName, SenderName, SenderName, Reason);
+			AuditLog->LogAction(TEXT("warn"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName, Reason);
 	}
 
 	// Auto-ban escalation — mirrors BanRestApi and BanChatCommands warn paths.
@@ -2486,6 +2491,20 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 
 	const FDateTime ExtendBase = FMath::Max(Entry.ExpireDate, FDateTime::UtcNow());
 	Entry.ExpireDate = ExtendBase + FTimespan::FromMinutes(Minutes);
+
+	// Re-check that the ban still exists in the database before writing.
+	// BanEnforcer may have pruned it between our initial lookup and now (BDS-2).
+	{
+		FBanEntry VerifyEntry;
+		if (!DB->IsCurrentlyBannedByAnyId(Uid, VerifyEntry))
+		{
+			Respond(ChannelId,
+				FString::Printf(TEXT("⚠️ **%s** (`%s`) is no longer banned — the ban may have expired. Cannot extend."),
+					*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
+			return;
+		}
+	}
+
 	if (!DB->AddBan(Entry))
 	{
 		Respond(ChannelId,
@@ -2498,7 +2517,7 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-			AuditLog->LogAction(TEXT("extend"), Uid, DisplayName, SenderName, SenderName,
+			AuditLog->LogAction(TEXT("extend"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName,
 				FString::Printf(TEXT("Extended by %s -> new expiry %s UTC"),
 					*BanDiscordHelpers::FormatDuration(Minutes),
 					*Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S"))));
@@ -3098,7 +3117,7 @@ void UBanDiscordSubsystem::HandleTempMuteCommand(const TArray<FString>& Args,
 
 	// Write to audit log so Discord-issued timed mutes appear alongside other mutes.
 	if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
-		AuditLog->LogAction(TEXT("mute"), Uid, DisplayName, SenderName, SenderName, Reason);
+		AuditLog->LogAction(TEXT("mute"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName, Reason);
 
 	const FString DurStr = BanDiscordHelpers::FormatDuration(Minutes);
 	const FString Msg = FString::Printf(
@@ -3283,7 +3302,7 @@ void UBanDiscordSubsystem::HandleTempUnmuteCommand(const TArray<FString>& Args,
 	MuteReg->UnmutePlayer(Uid);
 
 	if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
-		AuditLog->LogAction(TEXT("unmute"), Uid, DisplayName, SenderName, SenderName, TEXT("Timed mute lifted early"));
+		AuditLog->LogAction(TEXT("unmute"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName, TEXT("Timed mute lifted early"));
 
 	const FString UnmuteMsg = FString::Printf(
 		TEXT("🔊 Timed mute lifted from **%s** (`%s`) early.\nUnmuted by: %s"),
@@ -4515,13 +4534,14 @@ void UBanDiscordSubsystem::OnDiscordInteraction(const TSharedPtr<FJsonObject>& I
 	FString InteractionId;
 	InteractionObj->TryGetStringField(TEXT("id"), InteractionId);
 
-	// RAII guard: clears PendingInteractionToken on any return path.
+	// RAII guard: clears PendingInteractionToken and PendingAuthorId on any return path.
 	struct FInteractionTokenGuard
 	{
     FString& TokenRef;
-    explicit FInteractionTokenGuard(FString& T) : TokenRef(T) {}
-    ~FInteractionTokenGuard() { TokenRef = FString(); }
-	} TokenGuard(PendingInteractionToken);
+    FString& AuthorIdRef;
+    explicit FInteractionTokenGuard(FString& T, FString& A) : TokenRef(T), AuthorIdRef(A) {}
+    ~FInteractionTokenGuard() { TokenRef = FString(); AuthorIdRef = FString(); }
+	} TokenGuard(PendingInteractionToken, PendingAuthorId);
 
 	// Extract channel_id early so error messages can be posted.
 	FString ChannelId;
@@ -4626,6 +4646,10 @@ void UBanDiscordSubsystem::OnDiscordInteraction(const TSharedPtr<FJsonObject>& I
 		}
 	}
 	if (SenderName.IsEmpty()) SenderName = TEXT("Discord Admin");
+	// Set PendingAuthorId so all audit-log calls within this interaction handler
+	// can use GetCurrentAuditAdminUid() to produce "Discord:<snowflake>" instead
+	// of the mutable display name (BDS-1).
+	PendingAuthorId = AuthorId;
 	if (ChannelId.IsEmpty())
 	{
 		UE_LOG(LogBanDiscord, Warning,
@@ -5577,6 +5601,16 @@ void UBanDiscordSubsystem::HandlePanelModalSubmit(const TSharedPtr<FJsonObject>&
 	const FString SenderName          = ExtractSenderName(InteractionObj);
 	const FString StaffPrefix         = ResolveStaffPrefix(MemberRoles);
 
+	// Set PendingAuthorId so ExecutePanel* audit-log calls get the Discord
+	// snowflake as adminUid (matching the slash-command path).
+	PendingAuthorId = ExtractSenderId(InteractionObj);
+	struct FPanelAuthorIdGuard
+	{
+		FString& Ref;
+		explicit FPanelAuthorIdGuard(FString& R) : Ref(R) {}
+		~FPanelAuthorIdGuard() { Ref = FString(); }
+	} PanelAuthorGuard(PendingAuthorId);
+
 	// Helper: extract a named text-input field from the nested components array.
 	// Discord MODAL_SUBMIT structure:
 	//   data.components[]         = ACTION_ROWs
@@ -5947,7 +5981,7 @@ FString UBanDiscordSubsystem::ExecutePanelKick(const FString& PlayerArg,
 		if (UGameInstance* GI = GetGameInstance())
 		{
 			if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-				AuditLog->LogAction(TEXT("kick"), Uid, DisplayName, SenderName, SenderName, KickReason);
+				AuditLog->LogAction(TEXT("kick"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName, KickReason);
 		}
 
 		SendInGameModerationNoticeToUid(Uid, FString::Printf(
@@ -6008,7 +6042,7 @@ FString UBanDiscordSubsystem::ExecutePanelBan(const FString& PlayerArg,
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-			AuditLog->LogAction(TEXT("ban"), Uid, DisplayName, SenderName, SenderName, Entry.Reason);
+			AuditLog->LogAction(TEXT("ban"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName, Entry.Reason);
 	}
 
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
@@ -6078,7 +6112,7 @@ FString UBanDiscordSubsystem::ExecutePanelTempBan(const FString& PlayerArg,
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-			AuditLog->LogAction(TEXT("tempban"), Uid, DisplayName, SenderName, SenderName, Entry.Reason);
+			AuditLog->LogAction(TEXT("tempban"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName, Entry.Reason);
 	}
 
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
@@ -6115,7 +6149,7 @@ FString UBanDiscordSubsystem::ExecutePanelWarn(const FString& PlayerArg,
 
 	// Write to audit log so panel-issued warns appear alongside slash-command and REST warns.
 	if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
-		AuditLog->LogAction(TEXT("warn"), Uid, DisplayName, SenderName, SenderName, Reason);
+		AuditLog->LogAction(TEXT("warn"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName, Reason);
 
 	// Auto-ban escalation — mirrors BanRestApi, BanChatCommands, and HandleWarnCommand warn paths.
 	{
@@ -6234,7 +6268,7 @@ FString UBanDiscordSubsystem::ExecutePanelMute(const FString& PlayerArg,
 
 	// Write to audit log so panel-issued mutes appear alongside slash-command mutes.
 	if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
-		AuditLog->LogAction(TEXT("mute"), Uid, DisplayName, SenderName, SenderName, MuteReason);
+		AuditLog->LogAction(TEXT("mute"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName, MuteReason);
 
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Muted @%s for %s. Reason: %s. By: %s."),
@@ -6470,7 +6504,7 @@ FString UBanDiscordSubsystem::ExecutePanelUnban(const FString& PlayerArg,
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-			AuditLog->LogAction(TEXT("unban"), Uid, DisplayName, SenderName, SenderName, TEXT(""));
+			AuditLog->LogAction(TEXT("unban"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName, TEXT(""));
 	}
 
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
@@ -6506,7 +6540,7 @@ FString UBanDiscordSubsystem::ExecutePanelUnmute(const FString& PlayerArg,
 
 	// Write to audit log so panel-issued unmutes appear alongside slash-command unmutes.
 	if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
-		AuditLog->LogAction(TEXT("unmute"), Uid, DisplayName, SenderName, SenderName, TEXT(""));
+		AuditLog->LogAction(TEXT("unmute"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName, TEXT(""));
 
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Unmuted @%s. By: %s."),

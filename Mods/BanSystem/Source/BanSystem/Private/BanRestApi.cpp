@@ -1078,7 +1078,7 @@ void UBanRestApi::RegisterRoutes()
 
             FBanDiscordNotifier::NotifyWarningIssued(Uid, PlayerName, Reason, WarnedBy, WarnCount);
             if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-                AuditLog->LogAction(TEXT("warn"), Uid, PlayerName, WarnedBy, WarnedBy, Reason);
+                AuditLog->LogAction(TEXT("warn"), Uid, PlayerName, TEXT("api"), WarnedBy, Reason);
 
             // Auto-ban if the warning threshold has been reached.
             // First, check escalation tiers; fall back to AutoBanWarnCount if no tiers.

@@ -120,6 +120,30 @@ void USMLWebSocketClient::SendBinary(const TArray<uint8>& Data)
 	}
 }
 
+void USMLWebSocketClient::SendBinary(TArray<uint8>&& Data)
+{
+	const int32 NumBytes = Data.Num();
+	if (bIsConnected && Runnable.IsValid())
+	{
+		Runnable->EnqueueBinary(MoveTemp(Data));
+		StatBytesSent.fetch_add(NumBytes);
+		StatMessagesSent.fetch_add(1);
+		return;
+	}
+	if (bQueueMessagesWhileDisconnected)
+	{
+		FScopeLock Lock(&QueueMutex);
+		PendingSendBinaryQueue.Add(MoveTemp(Data));
+		if (MaxQueuedMessages > 0 && PendingSendBinaryQueue.Num() > MaxQueuedMessages)
+		{
+			UE_LOG(LogSMLWebSocket, VeryVerbose,
+				TEXT("SMLWebSocketClient: outbound binary queue full (%d) — oldest message dropped"),
+				MaxQueuedMessages);
+			PendingSendBinaryQueue.RemoveAt(0);
+		}
+	}
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 void USMLWebSocketClient::Close(int32 Code, const FString& Reason)
