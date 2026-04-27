@@ -114,22 +114,54 @@ FSMLWebSocketRunnable::FSMLWebSocketRunnable(USMLWebSocketClient* InOwner,
 		ParsedPath = TEXT("/");
 	}
 
-	// Extract optional port from host
-	int32 ColonIdx;
-	if (ParsedHost.FindChar(TEXT(':'), ColonIdx))
+	// Extract optional port from host.
+	// IPv6 literals are wrapped in brackets: "[::1]:port" — find the closing
+	// bracket first, then look for the port colon after it to avoid treating
+	// the internal colons of the IPv6 address as the port separator.
+	if (ParsedHost.StartsWith(TEXT("[")))
 	{
-		const int32 RawPort = FCString::Atoi(*ParsedHost.RightChop(ColonIdx + 1));
-		if (RawPort >= 1 && RawPort <= 65535)
+		int32 BracketEnd;
+		if (ParsedHost.FindChar(TEXT(']'), BracketEnd))
 		{
-			ParsedPort = RawPort;
+			// Check for ":port" immediately after the closing bracket.
+			const FString AfterBracket = ParsedHost.RightChop(BracketEnd + 1);
+			if (AfterBracket.StartsWith(TEXT(":")))
+			{
+				const int32 RawPort = FCString::Atoi(*AfterBracket.RightChop(1));
+				if (RawPort >= 1 && RawPort <= 65535)
+				{
+					ParsedPort = RawPort;
+				}
+				else
+				{
+					UE_LOG(LogSMLWebSocket, Warning,
+					       TEXT("SMLWebSocket: Invalid port number in URL '%s' — using default port %d"),
+					       *InUrl, ParsedPort);
+				}
+			}
+			// Strip brackets from the stored host: "[::1]" → "::1"
+			ParsedHost = ParsedHost.Mid(1, BracketEnd - 1);
 		}
-		else
+	}
+	else
+	{
+		// Plain host or IPv4 address — find the single colon that separates host:port.
+		int32 ColonIdx;
+		if (ParsedHost.FindChar(TEXT(':'), ColonIdx))
 		{
-			UE_LOG(LogSMLWebSocket, Warning,
-			       TEXT("SMLWebSocket: Invalid port number in URL '%s' — using default port %d"),
-			       *InUrl, ParsedPort);
+			const int32 RawPort = FCString::Atoi(*ParsedHost.RightChop(ColonIdx + 1));
+			if (RawPort >= 1 && RawPort <= 65535)
+			{
+				ParsedPort = RawPort;
+			}
+			else
+			{
+				UE_LOG(LogSMLWebSocket, Warning,
+				       TEXT("SMLWebSocket: Invalid port number in URL '%s' — using default port %d"),
+				       *InUrl, ParsedPort);
+			}
+			ParsedHost = ParsedHost.Left(ColonIdx);
 		}
-		ParsedHost = ParsedHost.Left(ColonIdx);
 	}
 }
 

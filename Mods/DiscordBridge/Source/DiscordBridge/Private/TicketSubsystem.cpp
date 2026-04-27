@@ -114,9 +114,13 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 					const FDateTime* LastActivity = TicketChannelToLastActivity.Find(ChanId);
 					if (!LastActivity)
 					{
-						// No activity tracked yet — use now as the baseline so a fresh
-						// ticket is not immediately closed after a restart.
-						TicketChannelToLastActivity.Add(ChanId, Now);
+						// No activity tracked — fall back to the channel open time so the
+						// inactivity clock is not reset to "now" on every server restart.
+						// This handles migration from state files written before last_activity
+						// was persisted (old tickets) and ensures a ticket that was already
+						// inactive before a restart is still auto-closed on the next tick.
+						const FDateTime* OpenTime = TicketChannelToOpenTime.Find(ChanId);
+						TicketChannelToLastActivity.Add(ChanId, OpenTime ? *OpenTime : Now);
 						continue;
 					}
 					if ((Now - *LastActivity) >= Threshold)

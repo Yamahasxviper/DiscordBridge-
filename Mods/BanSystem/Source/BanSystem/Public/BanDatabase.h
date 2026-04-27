@@ -34,7 +34,17 @@ public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
 
-    // ── Write ────────────────────────────────────────────────────────────────
+    /**
+     * Atomically read-modify-write a ban record identified by Uid.
+     * The Mutator is called with a mutable reference to the entry inside the
+     * database mutex so the read, modification, and write happen as a single
+     * atomic unit — eliminating the TOCTOU window present when callers use
+     * GetBanByUid() + AddBan() as two separate steps.
+     * OutUpdated is filled with the final state of the entry after the mutator
+     * has run.  Returns false when no record exists for Uid or when SaveToFile
+     * fails.  Fires OnBanAdded after a successful write.
+     */
+    bool UpdateBan(const FString& Uid, TFunction<void(FBanEntry&)> Mutator, FBanEntry& OutUpdated);
 
     /**
      * Insert or replace (upsert on uid) a ban record.
@@ -45,8 +55,12 @@ public:
     /**
      * Remove a ban by compound UID ("EOS:xxx").
      * Returns true if a row was found and deleted.
+     * When bSilent is true, OnBanRemoved is NOT broadcast after the removal
+     * (use this for internal bookkeeping operations that should not trigger
+     * external notifications, e.g. removing a stale record before re-inserting
+     * an updated one during peer synchronisation).
      */
-    bool RemoveBanByUid(const FString& Uid);
+    bool RemoveBanByUid(const FString& Uid, bool bSilent = false);
 
     /**
      * Atomically look up and remove a ban by its compound UID.
@@ -56,8 +70,9 @@ public:
      * details (e.g. player name) for notifications — it eliminates the TOCTOU
      * window that exists when GetBanByUid() + RemoveBanByUid() are called
      * separately.
+     * When bSilent is true, OnBanRemoved is NOT broadcast after the removal.
      */
-    bool RemoveBanByUid(const FString& Uid, FBanEntry& OutEntry);
+    bool RemoveBanByUid(const FString& Uid, FBanEntry& OutEntry, bool bSilent = false);
 
     /**
      * Remove a ban by its integer row ID.
