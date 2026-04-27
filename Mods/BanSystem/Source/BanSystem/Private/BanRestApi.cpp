@@ -716,6 +716,8 @@ void UBanRestApi::RegisterRoutes()
 
             auto R = FHttpServerResponse::Create(Csv, TEXT("text/csv"));
             R->Code = EHttpServerResponseCodes::Ok;
+            R->Headers.Add(TEXT("Content-Disposition"),
+                TArray<FString>{TEXT("attachment; filename=\"bans.csv\"")});
             Done(MoveTemp(R));
             return true;
         }

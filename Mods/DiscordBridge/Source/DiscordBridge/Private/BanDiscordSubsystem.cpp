@@ -216,6 +216,8 @@ namespace BanDiscordHelpers
 		FString Platform, RawId;
 		UBanDatabase::ParseUid(PrimaryUid, Platform, RawId);
 
+		// Capture the timestamp once so every counterpart ban shares the same BanDate.
+		const FDateTime CounterpartNow = FDateTime::UtcNow();
 		auto MakeEntry = [&](const FString& Uid, const FString& Plat,
 		                     const FString& RawUid, const FString& Name) -> FBanEntry
 		{
@@ -226,7 +228,7 @@ namespace BanDiscordHelpers
 			E.PlayerName = Name;
 			E.Reason     = Reason;
 			E.BannedBy   = BannedBy;
-			E.BanDate    = FDateTime::UtcNow();
+			E.BanDate    = CounterpartNow;
 			E.bIsPermanent = bIsPermanent;
 			E.ExpireDate   = ExpireDate;
 			E.LinkedUids.Add(PrimaryUid);

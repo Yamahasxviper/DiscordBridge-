@@ -373,6 +373,8 @@ namespace BanChat
         UBanDatabase::ParseUid(PrimaryUid, Platform, RawId);
 
         // Build a ban entry for a counterpart identifier, copying timing from the primary.
+        // Capture the timestamp once so every counterpart ban shares the same BanDate.
+        const FDateTime EntryNow = FDateTime::UtcNow();
         auto MakeEntry = [&](const FString& Uid, const FString& Plat,
                              const FString& RawUid, const FString& Name) -> FBanEntry
         {
@@ -383,7 +385,6 @@ namespace BanChat
             E.PlayerName = Name;
             E.Reason     = Reason;
             E.BannedBy   = BannedBy;
-            const FDateTime EntryNow = FDateTime::UtcNow();
             E.BanDate    = EntryNow;
             if (DurationMinutes <= 0)
             {
@@ -573,6 +574,13 @@ namespace BanChat
 
             // Also ban the counterpart identifier (IP↔EOS) so no identity escapes.
             AddCounterpartBans(Ctx, Sender, Uid, DisplayName, DurationMinutes, Reason, BannedBy);
+
+            // Write to the audit log so this action is visible alongside REST/Discord bans.
+            if (UGameInstance* GI = World ? World->GetGameInstance() : nullptr)
+                if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+                    AuditLog->LogAction(
+                        DurationMinutes > 0 ? TEXT("tempban") : TEXT("ban"),
+                        Uid, DisplayName, AdminUid, BannedBy, Reason);
 
             return EExecutionStatus::COMPLETED;
         }
@@ -1129,6 +1137,16 @@ EExecutionStatus AUnbanChatCommand::ExecuteCommand_Implementation(
         if (bHadRecord)
             BanChat::RemoveCounterpartBans(this, Sender, DB, Uid, BanRecord.LinkedUids);
 
+        // Write to the audit log.
+        {
+            UWorld* W = GetWorld();
+            UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
+            if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
+                AuditLog->LogAction(TEXT("unban"), Uid,
+                    bHadRecord ? BanRecord.PlayerName : Uid,
+                    AdminId, Sender->GetSenderName(), TEXT(""));
+        }
+
         return EExecutionStatus::COMPLETED;
     }
 
@@ -1214,6 +1232,9 @@ EExecutionStatus AUnbanNameChatCommand::ExecuteCommand_Implementation(
                 *Rec.DisplayName, *Rec.Uid),
             FLinearColor::Green);
         bAnyRemoved = true;
+        if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+            AuditLog->LogAction(TEXT("unban"), Rec.Uid, Rec.DisplayName,
+                AdminId, Sender->GetSenderName(), TEXT(""));
     }
     else
     {
@@ -1234,6 +1255,9 @@ EExecutionStatus AUnbanNameChatCommand::ExecuteCommand_Implementation(
                     *Rec.IpAddress),
                 FLinearColor::Green);
             bAnyRemoved = true;
+            if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+                AuditLog->LogAction(TEXT("unban"), IpUid, Rec.DisplayName,
+                    AdminId, Sender->GetSenderName(), TEXT(""));
         }
         else
         {
@@ -1770,36 +1794,46 @@ EExecutionStatus AKickChatCommand::ExecuteCommand_Implementation(
             FLinearColor::Green);
 
         FBanDiscordNotifier::NotifyPlayerKicked(DisplayName, Reason, KickedBy, Uid);
+
+        // Write to the audit log.
+        {
+            UWorld* W = GetWorld();
+            UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
+            if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
+                AuditLog->LogAction(TEXT("kick"), Uid, DisplayName, ModUid, KickedBy, Reason);
+        }
+
+        // Optionally create a warning so kick reasons are preserved in history.
+        // This block intentionally runs only when the player was actually kicked;
+        // an offline player should not receive a spurious warning record.
+        const UBanChatCommandsConfig* CmdCfg = UBanChatCommandsConfig::Get();
+        if (CmdCfg && CmdCfg->bCreateWarnOnKick)
+        {
+            UWorld* W = GetWorld();
+            UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
+            UPlayerWarningRegistry* WarnReg = GI ? GI->GetSubsystem<UPlayerWarningRegistry>() : nullptr;
+            if (WarnReg)
+            {
+                WarnReg->AddWarning(Uid, DisplayName,
+                    FString::Printf(TEXT("[Kick] %s"), *Reason), KickedBy);
+                const int32 WarnCount = WarnReg->GetWarningCount(Uid);
+                FBanDiscordNotifier::NotifyWarningIssued(Uid, DisplayName,
+                    FString::Printf(TEXT("[Kick] %s"), *Reason), KickedBy, WarnCount);
+            }
+            else
+            {
+                UE_LOG(LogBanChatCommands, Warning,
+                    TEXT("BanChatCommands: bCreateWarnOnKick is true but PlayerWarningRegistry "
+                         "is unavailable — kick warning not recorded for '%s' (%s)."),
+                    *DisplayName, *Uid);
+            }
+        }
     }
     else
     {
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] '%s' is not currently online — not kicked."), *DisplayName),
             FLinearColor::Yellow);
-    }
-
-    // Optionally create a warning so kick reasons are preserved in history.
-    const UBanChatCommandsConfig* CmdCfg = UBanChatCommandsConfig::Get();
-    if (CmdCfg && CmdCfg->bCreateWarnOnKick)
-    {
-        UWorld* W = GetWorld();
-        UGameInstance* GI = W ? W->GetGameInstance() : nullptr;
-        UPlayerWarningRegistry* WarnReg = GI ? GI->GetSubsystem<UPlayerWarningRegistry>() : nullptr;
-        if (WarnReg)
-        {
-            WarnReg->AddWarning(Uid, DisplayName,
-                FString::Printf(TEXT("[Kick] %s"), *Reason), KickedBy);
-            const int32 WarnCount = WarnReg->GetWarningCount(Uid);
-            FBanDiscordNotifier::NotifyWarningIssued(Uid, DisplayName,
-                FString::Printf(TEXT("[Kick] %s"), *Reason), KickedBy, WarnCount);
-        }
-        else
-        {
-            UE_LOG(LogBanChatCommands, Warning,
-                TEXT("BanChatCommands: bCreateWarnOnKick is true but PlayerWarningRegistry "
-                     "is unavailable — kick warning not recorded for '%s' (%s)."),
-                *DisplayName, *Uid);
-        }
     }
 
     return EExecutionStatus::COMPLETED;
@@ -1888,6 +1922,9 @@ EExecutionStatus AWarnChatCommand::ExecuteCommand_Implementation(
         FLinearColor::Yellow);
 
     FBanDiscordNotifier::NotifyWarningIssued(Uid, DisplayName, Reason, WarnedBy, WarnCount);
+
+    if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+        AuditLog->LogAction(TEXT("warn"), Uid, DisplayName, AdminUid, WarnedBy, Reason);
 
     // Auto-ban the player when they reach the configured warning threshold.
     // Check escalation tiers first; fall back to AutoBanWarnCount if no tiers are configured.
@@ -2105,6 +2142,11 @@ EExecutionStatus AClearWarnsChatCommand::ExecuteCommand_Implementation(
     }
 
     const int32 Cleared = WarnReg->ClearWarningsForUid(Uid);
+
+    if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+        AuditLog->LogAction(TEXT("clearwarns"), Uid, DisplayName, AdminUid, Sender->GetSenderName(),
+            FString::Printf(TEXT("cleared=%d"), Cleared));
+
     if (Cleared > 0)
     {
         Sender->SendChatMessage(
@@ -2488,6 +2530,9 @@ EExecutionStatus AMuteChatCommand::ExecuteCommand_Implementation(
             : FDateTime(0);
         FBanDiscordNotifier::NotifyPlayerMuted(Uid, DisplayName, MutedBy, Reason, bIsTimed, Expiry, MuteNow);
     }
+
+    if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+        AuditLog->LogAction(TEXT("mute"), Uid, DisplayName, AdminUid, MutedBy, Reason);
 
     const FString DurStr = Minutes > 0
         ? FString::Printf(TEXT(" %s"), *BanChat::FormatDuration(Minutes))
