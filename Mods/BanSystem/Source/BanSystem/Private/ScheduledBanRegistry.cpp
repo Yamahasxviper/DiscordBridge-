@@ -58,8 +58,18 @@ FScheduledBanEntry UScheduledBanRegistry::AddScheduled(
 {
     FScopeLock Lock(&Mutex);
 
+    // NextId == 0 is the exhausted sentinel (set when INT64_MAX has already
+    // been allocated).  Using 0 allows INT64_MAX to be the last valid Id.
+    if (NextId == 0)
+    {
+        UE_LOG(LogScheduledBanRegistry, Error,
+            TEXT("ScheduledBanRegistry: all 64-bit IDs have been used — cannot schedule more bans"));
+        return FScheduledBanEntry{};
+    }
+
     FScheduledBanEntry Entry;
-    Entry.Id              = NextId++;
+    Entry.Id              = NextId;
+    NextId                = (NextId < INT64_MAX) ? NextId + 1 : 0; // 0 = exhausted
     Entry.Uid             = Uid;
     Entry.PlayerName      = PlayerName;
     Entry.Reason          = Reason;
@@ -281,9 +291,12 @@ void UScheduledBanRegistry::LoadFromFile()
     }
 
     // Restore the O(1) counter from loaded data so AddScheduled never reuses an Id.
+    // When the highest stored Id is INT64_MAX the next Id would overflow, so we
+    // use 0 as the "exhausted" sentinel (AddScheduled checks for 0, not INT64_MAX,
+    // allowing INT64_MAX itself to be the last valid allocatable Id).
     NextId = 1;
     for (const FScheduledBanEntry& E : Pending)
-        if (E.Id >= NextId) NextId = (E.Id < INT64_MAX) ? E.Id + 1 : E.Id;
+        if (E.Id >= NextId) NextId = (E.Id < INT64_MAX) ? E.Id + 1 : 0;
 }
 
 bool UScheduledBanRegistry::SaveToFile() const
