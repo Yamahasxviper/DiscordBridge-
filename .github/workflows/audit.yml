@@ -1,0 +1,20 @@
+name: Bug Pattern Audit
+
+# Runs on every push and every pull request so that the audit script
+# catches known bug patterns across all 4 owner mods before any code
+# is merged.  Uses GitHub's free ubuntu-latest runner — no secrets or
+# self-hosted machine required.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: Run audit_bugs.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run exhaustive bug-pattern audit
+        run: bash Scripts/audit_bugs.sh
