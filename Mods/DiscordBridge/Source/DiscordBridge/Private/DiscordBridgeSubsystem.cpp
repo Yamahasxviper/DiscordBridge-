@@ -5194,7 +5194,11 @@ AnnouncementAccumulatedSeconds += DeltaTime;
 const float IntervalSeconds = Config.AnnouncementIntervalMinutes * 60.0f;
 if (AnnouncementAccumulatedSeconds < IntervalSeconds) return true;
 
-AnnouncementAccumulatedSeconds = 0.0f;
+// Subtract the interval rather than resetting to 0 so overshoot time is
+// preserved across ticks (same pattern as BackupAccumulatedSeconds etc. in
+// BanSystemModule.cpp).  Resetting to 0 would silently discard any extra
+// time beyond the interval boundary, causing cumulative drift.
+AnnouncementAccumulatedSeconds -= IntervalSeconds;
 
 const FString& Target = Config.AnnouncementChannelId.IsEmpty()
 ? Config.ChannelId : Config.AnnouncementChannelId;

@@ -47,6 +47,15 @@ error, and returns early.
 
 ---
 
+### ✅ Fixed — `/clearwarn` missing int64 overflow guard before `FCString::Atoi64`
+**File:** `Mods/BanChatCommands/Source/BanChatCommands/Private/Commands/BanChatCommands.cpp`
+
+**Fix applied:** Added the same length + INT64_MAX lexicographic guard that `BanRestApi`'s
+`ParseInt64Param` helper uses: rejects strings longer than 19 digits, and rejects 19-digit strings
+whose decimal value exceeds `"9223372036854775807"`.
+
+---
+
 ## BanSystem
 
 ### ✅ Fixed — 19-digit ID validation allows `int64` overflow in `FCString::Atoi64`
@@ -107,6 +116,43 @@ The matching comment already existed in the `.cpp` implementation.
 
 ---
 
+### ✅ Fixed — `AnnouncementTick` timer drift: accumulated seconds reset to `0.0f`
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/DiscordBridgeSubsystem.cpp`
+
+**Fix applied:** Changed `AnnouncementAccumulatedSeconds = 0.0f` to
+`AnnouncementAccumulatedSeconds -= IntervalSeconds`, matching the identical fix already applied
+to `BackupAccumulatedSeconds`, `PruneAccumulatedSeconds`, and `SessionPruneAccumulatedSeconds`
+in `BanSystemModule.cpp`.
+
+---
+
+### ✅ Fixed — `SaveTicketState`: `FJsonSerializer::Serialize` return value not checked
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/TicketSubsystem.cpp`
+
+**Fix applied:** Wrapped the `Serialize` call in `if (!...)` and added an early `return` with an
+`UE_LOG(Error, ...)`. Prevents a serialization failure from writing a corrupt/empty string to
+`ActiveTickets.json.tmp` and losing all open ticket state on the next atomic rename.
+
+---
+
+### ✅ Fixed — `SaveTicketBlacklist` writes directly (no atomic tmp→rename)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/TicketSubsystem.cpp`
+
+**Fix applied:** Added `FJsonSerializer::Serialize` return check (early return on failure) and
+converted the direct `SaveStringToFile(*Path)` to the same write-to-`.tmp`-then-`MoveFile`
+atomic pattern used by `SaveTicketState` and every other registry in the codebase.
+
+---
+
+### ✅ Fixed — Ticket-feedback stats written without `FJsonSerializer::Serialize` check
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/TicketSubsystem.cpp`
+
+**Fix applied:** The `FJsonSerializer::Serialize` call is now checked; the directory creation and
+file write are gated inside `if (Serialize(...))` so a serialization failure no longer writes
+empty content to the stats file.
+
+---
+
 ## SMLWebSocket
 
 ### ✅ Fixed — RFC 6455 violation: no Close frame sent on fragment-sequencing error
@@ -134,4 +180,4 @@ and directing callers to `bQueueMessagesWhileDisconnected` for guaranteed delive
 
 ---
 
-*Last updated: 2026-04-26. All bugs resolved.*
+*Last updated: 2026-04-27. All bugs resolved.*
