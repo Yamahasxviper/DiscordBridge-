@@ -1895,6 +1895,7 @@ void UBanDiscordSubsystem::HandleMuteCommand(const TArray<FString>& Args,
 	// Write to audit log so Discord-issued mutes appear alongside in-game mutes.
 	if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
 		AuditLog->LogAction(TEXT("mute"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName, Reason);
+	Respond(ChannelId, MuteMsg);
 	SendInGameModerationNoticeToUid(Uid, FString::Printf(
 		TEXT("%s Muted @%s%s. Reason: %s. By: %s."),
 		*StaffPrefix, *DisplayName, *DurStr, *Reason, *SenderName));
@@ -2158,7 +2159,7 @@ void UBanDiscordSubsystem::HandleUnbanNameCommand(const TArray<FString>& Args,
 	{
 		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
 			AuditLog->LogAction(TEXT("unban"), Record.Uid, Record.DisplayName,
-				SenderName, SenderName, TEXT(""));
+				GetCurrentAuditAdminUid(SenderName), SenderName, TEXT(""));
 	}
 
 	Respond(ChannelId, Msg);
@@ -2294,7 +2295,7 @@ void UBanDiscordSubsystem::HandleBanNameCommand(const TArray<FString>& Args,
 	{
 		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
 			AuditLog->LogAction(TEXT("ban"), Record.Uid, Record.DisplayName,
-				SenderName, SenderName, Reason);
+				GetCurrentAuditAdminUid(SenderName), SenderName, Reason);
 	}
 
 	Respond(ChannelId, Msg);
@@ -2355,7 +2356,7 @@ void UBanDiscordSubsystem::HandleBanReasonCommand(const TArray<FString>& Args,
 	{
 		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
 			AuditLog->LogAction(TEXT("banreason"), Uid, DisplayName,
-				SenderName, SenderName, Entry.Reason);
+				GetCurrentAuditAdminUid(SenderName), SenderName, Entry.Reason);
 	}
 
 	const FString Msg = FString::Printf(
