@@ -136,8 +136,15 @@ void UScheduledBanRegistry::Tick(float DeltaTime)
             if (!SaveToFile())
             {
                 UE_LOG(LogScheduledBanRegistry, Error,
-                    TEXT("ScheduledBanRegistry: failed to save after dequeuing %d due entry(ies)"),
+                    TEXT("ScheduledBanRegistry: failed to save after dequeuing %d due entry(ies) — re-queuing to prevent double-apply on restart"),
                     Due.Num());
+                // Re-insert the entries so they survive a server restart.  They
+                // will be re-tried on the very next tick once the disk issue is
+                // resolved.  Without this, a save failure would wipe the entries
+                // from memory while leaving them on disk, causing them to fire
+                // again after the next restart.
+                Pending.Append(Due);
+                Due.Empty();
             }
         }
     }

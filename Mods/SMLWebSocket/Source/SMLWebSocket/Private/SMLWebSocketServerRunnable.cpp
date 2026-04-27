@@ -202,6 +202,9 @@ uint32 FSMLWebSocketServerRunnable::Run()
                 int32 Read = 0;
                 if (!C.Socket->Recv(C.RecvBuffer.GetData() + OldLen, Pending32, Read))
                 {
+                    // Restore buffer to its original size so the oversized
+                    // allocation is not held until the client slot is removed.
+                    C.RecvBuffer.SetNum(OldLen);
                     ToRemove.Add(KV.Key);
                     continue;
                 }
@@ -210,6 +213,7 @@ uint32 FSMLWebSocketServerRunnable::Run()
                     UE_LOG(LogWSServer, Error,
                         TEXT("WSServer: socket returned invalid read size (%d, pending=%d) – dropping client"),
                         Read, Pending32);
+                    C.RecvBuffer.SetNum(OldLen);
                     ToRemove.Add(KV.Key);
                     continue;
                 }

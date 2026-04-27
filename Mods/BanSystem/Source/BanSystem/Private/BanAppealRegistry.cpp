@@ -58,7 +58,16 @@ FBanAppealEntry UBanAppealRegistry::AddAppeal(const FString& Uid,
     {
         FScopeLock Lock(&Mutex);
 
-        Entry.Id          = NextId++;
+        // NextId == 0 is the exhausted sentinel (set when INT64_MAX has already
+        // been allocated).  Using 0 allows INT64_MAX to be the last valid Id.
+        if (NextId == 0)
+        {
+            UE_LOG(LogBanAppealRegistry, Error,
+                TEXT("BanAppealRegistry: all 64-bit IDs have been used — cannot add more appeals"));
+            return FBanAppealEntry{};
+        }
+        Entry.Id = NextId;
+        NextId   = (NextId < INT64_MAX) ? NextId + 1 : 0; // 0 = exhausted
         Entry.Uid         = Uid;
         Entry.Reason      = Reason;
         Entry.ContactInfo = ContactInfo;
@@ -239,9 +248,12 @@ void UBanAppealRegistry::LoadFromFile()
     }
 
     // Restore the O(1) counter from loaded data so AddAppeal never reuses an Id.
+    // When the highest stored Id is INT64_MAX the next Id would overflow, so we
+    // use 0 as the "exhausted" sentinel (AddAppeal checks for 0, not INT64_MAX,
+    // allowing INT64_MAX itself to be the last valid allocatable Id).
     NextId = 1;
     for (const FBanAppealEntry& A : Appeals)
-        if (A.Id >= NextId) NextId = (A.Id < INT64_MAX) ? A.Id + 1 : A.Id;
+        if (A.Id >= NextId) NextId = (A.Id < INT64_MAX) ? A.Id + 1 : 0;
 }
 
 bool UBanAppealRegistry::SaveToFile() const

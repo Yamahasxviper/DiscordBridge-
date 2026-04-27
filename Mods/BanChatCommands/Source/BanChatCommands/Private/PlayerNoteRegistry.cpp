@@ -52,13 +52,18 @@ void UPlayerNoteRegistry::AddNote(const FString& Uid, const FString& PlayerName,
     FScopeLock Lock(&Mutex);
 
     FPlayerNoteEntry Entry;
-    if (NextId == INT64_MAX)
+    // NextId == 0 is the exhausted sentinel: it is set in LoadFromFile when the
+    // highest stored Id is INT64_MAX, meaning there is no valid next Id.  Using 0
+    // instead of INT64_MAX as the sentinel allows INT64_MAX itself to be legally
+    // allocated as the last ever Id before the counter is exhausted.
+    if (NextId == 0)
     {
         UE_LOG(LogPlayerNoteRegistry, Error,
-            TEXT("PlayerNoteRegistry: NextId has reached INT64_MAX — cannot add more notes"));
+            TEXT("PlayerNoteRegistry: all 64-bit IDs have been used — cannot add more notes"));
         return;
     }
-    Entry.Id         = NextId++;
+    Entry.Id = NextId;
+    NextId   = (NextId < INT64_MAX) ? NextId + 1 : 0; // 0 = exhausted
     Entry.Uid        = Uid;
     Entry.PlayerName = PlayerName;
     Entry.Note       = Note;
@@ -167,9 +172,12 @@ void UPlayerNoteRegistry::LoadFromFile()
     }
 
     // Restore the O(1) counter from loaded data so AddNote never reuses an Id.
+    // When the highest stored Id is INT64_MAX the next Id would overflow, so we
+    // use 0 as the "exhausted" sentinel (AddNote checks for 0, not INT64_MAX,
+    // allowing INT64_MAX itself to be the last valid allocatable Id).
     NextId = 1;
     for (const FPlayerNoteEntry& N : Notes)
-        if (N.Id >= NextId) NextId = (N.Id < INT64_MAX) ? N.Id + 1 : N.Id;
+        if (N.Id >= NextId) NextId = (N.Id < INT64_MAX) ? N.Id + 1 : 0;
 }
 
 bool UPlayerNoteRegistry::SaveToFile() const
