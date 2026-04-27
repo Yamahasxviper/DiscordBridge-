@@ -190,7 +190,7 @@ void UBanAuditLog::LoadFromFile()
         // Fallback: derive from loaded entries.
         NextId = 1;
         for (const FAuditEntry& E : Entries)
-            if (E.Id >= NextId) NextId = E.Id + 1;
+            if (E.Id >= NextId) NextId = (E.Id < INT64_MAX) ? E.Id + 1 : E.Id;
     }
 }
 

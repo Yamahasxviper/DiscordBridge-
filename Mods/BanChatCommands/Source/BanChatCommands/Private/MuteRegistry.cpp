@@ -351,6 +351,7 @@ bool UMuteRegistry::SaveToFile() const
     {
         UE_LOG(LogMuteRegistry, Error,
             TEXT("MuteRegistry: failed to replace %s with temp file"), *FilePath);
+        IFileManager::Get().Delete(*TmpPath);
         return false;
     }
 

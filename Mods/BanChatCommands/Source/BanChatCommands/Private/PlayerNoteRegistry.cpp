@@ -213,6 +213,7 @@ bool UPlayerNoteRegistry::SaveToFile() const
     {
         UE_LOG(LogPlayerNoteRegistry, Error,
             TEXT("PlayerNoteRegistry: failed to replace %s with temp file"), *FilePath);
+        IFileManager::Get().Delete(*TmpPath);
         return false;
     }
 
