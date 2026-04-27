@@ -582,6 +582,9 @@ namespace BanChat
                         DurationMinutes > 0 ? TEXT("tempban") : TEXT("ban"),
                         Uid, DisplayName, AdminUid, BannedBy, Reason);
 
+            // Notify the webhook feed so in-game bans appear in the Discord ban log.
+            FBanDiscordNotifier::NotifyBanCreated(Entry);
+
             return EExecutionStatus::COMPLETED;
         }
 
@@ -2039,7 +2042,7 @@ EExecutionStatus AWarnChatCommand::ExecuteCommand_Implementation(
                     FLinearColor::Red);
                 const EExecutionStatus AutoBanResult = BanChat::DoBan(
                     this, Sender, Uid, DisplayName, BanDurationMinutes,
-                    TEXT("Auto-banned: reached warning threshold"), TEXT("system"), TEXT("system"));
+                    TEXT("Auto-banned: reached warning threshold"), WarnedBy, AdminUid);
                 if (AutoBanResult != EExecutionStatus::COMPLETED)
                 {
                     UE_LOG(LogBanChatCommands, Warning,

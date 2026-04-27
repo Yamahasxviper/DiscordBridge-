@@ -394,6 +394,37 @@ bool UBanDatabase::SaveToFile() const
 //  Write
 // ─────────────────────────────────────────────────────────────────────────────
 
+bool UBanDatabase::UpdateBan(const FString& Uid, TFunction<void(FBanEntry&)> Mutator,
+                              FBanEntry& OutUpdated)
+{
+    bool bSaved = false;
+
+    {
+        FScopeLock Lock(&DbMutex);
+
+        FBanEntry* Found = nullptr;
+        for (FBanEntry& E : Bans)
+        {
+            if (E.Uid.Equals(Uid, ESearchCase::IgnoreCase))
+            {
+                Found = &E;
+                break;
+            }
+        }
+
+        if (!Found) return false;
+
+        Mutator(*Found);
+        OutUpdated = *Found;
+        bSaved = SaveToFile();
+    }
+
+    if (bSaved)
+        OnBanAdded.Broadcast(OutUpdated);
+
+    return bSaved;
+}
+
 bool UBanDatabase::AddBan(const FBanEntry& Entry)
 {
     FBanEntry NewEntry;
@@ -421,13 +452,13 @@ bool UBanDatabase::AddBan(const FBanEntry& Entry)
     return bSaved;
 }
 
-bool UBanDatabase::RemoveBanByUid(const FString& Uid)
+bool UBanDatabase::RemoveBanByUid(const FString& Uid, bool bSilent)
 {
     FBanEntry Ignored;
-    return RemoveBanByUid(Uid, Ignored);
+    return RemoveBanByUid(Uid, Ignored, bSilent);
 }
 
-bool UBanDatabase::RemoveBanByUid(const FString& Uid, FBanEntry& OutEntry)
+bool UBanDatabase::RemoveBanByUid(const FString& Uid, FBanEntry& OutEntry, bool bSilent)
 {
     bool bRemoved = false;
 
@@ -447,7 +478,7 @@ bool UBanDatabase::RemoveBanByUid(const FString& Uid, FBanEntry& OutEntry)
         if (bRemoved) SaveToFile();
     }
 
-    if (bRemoved)
+    if (bRemoved && !bSilent)
         OnBanRemoved.Broadcast(OutEntry.Uid, OutEntry.PlayerName);
 
     return bRemoved;

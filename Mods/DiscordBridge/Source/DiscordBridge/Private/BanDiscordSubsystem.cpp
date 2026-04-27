@@ -389,6 +389,9 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				// Skip when a bot interaction is in flight — the command handler
 				// already posts to the moderation log for that case.
 				if (!Self->PendingInteractionToken.IsEmpty()) return;
+				// Skip IP counterpart bans — they are implied by the primary EOS ban
+				// and posting them would produce duplicate moderation-log entries.
+				if (Entry.Platform == TEXT("IP")) return;
 
 				const FString DurationStr = Entry.bIsPermanent
 					? TEXT("permanent")
@@ -976,11 +979,20 @@ void UBanDiscordSubsystem::OnPostLoginModerationReminder(AGameModeBase* GameMode
 		const int32 WarnCount = WarnReg->GetWarningCount(Uid);
 		if (WarnCount > 0)
 		{
+			// Apply the same WarnDecayDays cutoff that GetWarningCount() uses so
+			// the "latest reason" reflects only active (non-decayed) warnings.
+			const UBanSystemConfig* WarnSysCfg = UBanSystemConfig::Get();
+			const int32 DecayDays = WarnSysCfg ? WarnSysCfg->WarnDecayDays : 0;
+			const FDateTime DecayCutoff = (DecayDays > 0)
+				? FDateTime::UtcNow() - FTimespan::FromDays(static_cast<double>(DecayDays))
+				: FDateTime::MinValue();
+
 			TArray<FWarningEntry> Warnings = WarnReg->GetWarningsForUid(Uid);
 			const FWarningEntry* Latest = nullptr;
 			for (const FWarningEntry& Entry : Warnings)
 			{
 				if (Entry.IsExpired()) continue;
+				if (DecayDays > 0 && Entry.WarnDate < DecayCutoff) continue;
 				if (!Latest || Entry.WarnDate > Latest->WarnDate)
 					Latest = &Entry;
 			}
@@ -1317,6 +1329,9 @@ void UBanDiscordSubsystem::HandleBanCommand(const TArray<FString>& Args,
 	// Kick if the player is currently connected.
 	if (UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr)
 		UBanEnforcer::KickConnectedPlayer(World, Uid, Entry.GetKickMessage());
+
+	// Notify the webhook feed so Discord-slash bans appear alongside panel/REST bans.
+	FBanDiscordNotifier::NotifyBanCreated(Entry);
 
 	// Also ban the counterpart identifier (IP↔EOS) so every identity is blocked.
 	const TArray<FString> ExtraUids = BanDiscordHelpers::AddCounterpartBans(
@@ -1990,7 +2005,7 @@ void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
 						UBanDatabase::ParseUid(Uid, AutoBan.Platform, AutoBan.PlayerUID);
 						AutoBan.PlayerName   = DisplayName;
 						AutoBan.Reason       = TEXT("Auto-banned: reached warning threshold");
-						AutoBan.BannedBy     = TEXT("system");
+						AutoBan.BannedBy     = SenderName;
 						const FDateTime AutoNow1 = FDateTime::UtcNow();
 						AutoBan.BanDate      = AutoNow1;
 						AutoBan.bIsPermanent = (BanDurationMinutes <= 0);
@@ -2005,7 +2020,7 @@ void UBanDiscordSubsystem::HandleWarnCommand(const TArray<FString>& Args,
 							FBanDiscordNotifier::NotifyAutoEscalationBan(AutoBan, WarnCount);
 							if (UBanAuditLog* AL = GI->GetSubsystem<UBanAuditLog>())
 								AL->LogAction(TEXT("ban"), Uid, DisplayName,
-									TEXT("system"), TEXT("system"), AutoBan.Reason);
+									GetCurrentAuditAdminUid(SenderName), SenderName, AutoBan.Reason);
 						}
 					}
 				}
@@ -6192,7 +6207,7 @@ FString UBanDiscordSubsystem::ExecutePanelWarn(const FString& PlayerArg,
 						UBanDatabase::ParseUid(Uid, AutoBan.Platform, AutoBan.PlayerUID);
 						AutoBan.PlayerName   = DisplayName;
 						AutoBan.Reason       = TEXT("Auto-banned: reached warning threshold");
-						AutoBan.BannedBy     = TEXT("system");
+						AutoBan.BannedBy     = SenderName;
 						const FDateTime AutoNow2 = FDateTime::UtcNow();
 						AutoBan.BanDate      = AutoNow2;
 						AutoBan.bIsPermanent = (BanDurationMinutes <= 0);
@@ -6207,7 +6222,7 @@ FString UBanDiscordSubsystem::ExecutePanelWarn(const FString& PlayerArg,
 							FBanDiscordNotifier::NotifyAutoEscalationBan(AutoBan, WarnCount);
 							if (UBanAuditLog* AL = GI->GetSubsystem<UBanAuditLog>())
 								AL->LogAction(TEXT("ban"), Uid, DisplayName,
-									TEXT("system"), TEXT("system"), AutoBan.Reason);
+									GetCurrentAuditAdminUid(SenderName), SenderName, AutoBan.Reason);
 						}
 					}
 				}

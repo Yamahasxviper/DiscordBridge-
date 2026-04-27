@@ -233,8 +233,11 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
             // Fields changed — remove the stale record and fall through to re-add.
             // Register the UID in PeerAppliedUnbanUids so OnLocalBanRemoved does
             // not re-broadcast this peer-sourced removal back to peers.
+            // Pass bSilent=true so BanDiscordSubsystem's BanRemovedHandle does NOT
+            // post a spurious "✅ unbanned" message; the subsequent AddBan will
+            // post the real update notification instead.
             PeerAppliedUnbanUids.Add(Uid);
-            DB->RemoveBanByUid(Uid);
+            DB->RemoveBanByUid(Uid, /*bSilent=*/true);
         }
 
         FBanEntry Ban;

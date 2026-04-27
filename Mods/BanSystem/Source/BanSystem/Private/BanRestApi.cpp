@@ -717,8 +717,8 @@ void UBanRestApi::RegisterRoutes()
                 Csv += CsvQuote(E.PlayerName) + TEXT(",");
                 Csv += CsvQuote(E.Reason)     + TEXT(",");
                 Csv += CsvQuote(E.BannedBy)   + TEXT(",");
-                Csv += E.BanDate.ToIso8601()  + TEXT(",");
-                Csv += (E.bIsPermanent ? FString() : E.ExpireDate.ToIso8601()) + TEXT(",");
+                Csv += CsvQuote(E.BanDate.ToIso8601())                                    + TEXT(",");
+                Csv += CsvQuote(E.bIsPermanent ? FString() : E.ExpireDate.ToIso8601()) + TEXT(",");
                 Csv += FString(E.bIsPermanent ? TEXT("true") : TEXT("false")) + TEXT(",");
                 Csv += CsvQuote(LinkedStr)    + TEXT("\n");
             }
@@ -750,15 +750,6 @@ void UBanRestApi::RegisterRoutes()
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
             if (!DB) { Done(BanJson::Error(TEXT("Database unavailable"), EHttpServerResponseCodes::ServerError)); return true; }
 
-            FBanEntry Entry;
-            if (!DB->GetBanByUid(Uid, Entry))
-            {
-                Done(BanJson::Error(
-                    FString::Printf(TEXT("No ban found for uid '%s'"), *Uid),
-                    EHttpServerResponseCodes::NotFound));
-                return true;
-            }
-
             const FString BodyStr = BanJson::BodyToString(Req);
             TSharedPtr<FJsonObject> Body;
             TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(BodyStr);
@@ -768,41 +759,48 @@ void UBanRestApi::RegisterRoutes()
                 return true;
             }
 
-            FString NewReason;
-            if (Body->TryGetStringField(TEXT("reason"), NewReason) && !NewReason.IsEmpty())
-                Entry.Reason = NewReason;
-
-            FString NewBannedBy;
-            if (Body->TryGetStringField(TEXT("bannedBy"), NewBannedBy) && !NewBannedBy.IsEmpty())
-                Entry.BannedBy = NewBannedBy;
-
+            // Capture all patch values before entering the database lock.
+            FString NewReason, NewBannedBy;
+            Body->TryGetStringField(TEXT("reason"),    NewReason);
+            Body->TryGetStringField(TEXT("bannedBy"),  NewBannedBy);
             double DurationMinutesDbl = -1.0;
-            if (Body->TryGetNumberField(TEXT("durationMinutes"), DurationMinutesDbl))
-            {
-                if (DurationMinutesDbl == 0.0)
-                {
-                    Entry.bIsPermanent = true;
-                    Entry.ExpireDate   = FDateTime(0);
-                }
-                else if (DurationMinutesDbl > 0.0)
-                {
-                    const int32 Mins = (DurationMinutesDbl > static_cast<double>(INT_MAX))
-                        ? INT_MAX
-                        : static_cast<int32>(DurationMinutesDbl);
-                    Entry.bIsPermanent = false;
-                    Entry.ExpireDate   = FDateTime::UtcNow() + FTimespan::FromMinutes(Mins);
-                }
-                // negative (other than -1 sentinel) = don't change
-            }
+            Body->TryGetNumberField(TEXT("durationMinutes"), DurationMinutesDbl);
 
-            if (!DB->AddBan(Entry))
+            // Atomically read-modify-write the ban record inside a single mutex
+            // acquisition, eliminating the TOCTOU window that existed when
+            // GetBanByUid() + AddBan() were called as two separate steps.
+            FBanEntry Updated;
+            const bool bUpdated = DB->UpdateBan(Uid,
+                [&NewReason, &NewBannedBy, DurationMinutesDbl](FBanEntry& E)
+                {
+                    if (!NewReason.IsEmpty())
+                        E.Reason = NewReason;
+                    if (!NewBannedBy.IsEmpty())
+                        E.BannedBy = NewBannedBy;
+                    if (DurationMinutesDbl == 0.0)
+                    {
+                        E.bIsPermanent = true;
+                        E.ExpireDate   = FDateTime(0);
+                    }
+                    else if (DurationMinutesDbl > 0.0)
+                    {
+                        const int32 Mins = (DurationMinutesDbl > static_cast<double>(INT_MAX))
+                            ? INT_MAX
+                            : static_cast<int32>(DurationMinutesDbl);
+                        E.bIsPermanent = false;
+                        E.ExpireDate   = FDateTime::UtcNow() + FTimespan::FromMinutes(Mins);
+                    }
+                    // negative DurationMinutesDbl (other than -1 sentinel) = don't change
+                },
+                Updated);
+
+            if (!bUpdated)
             {
-                Done(BanJson::Error(TEXT("Failed to update ban"), EHttpServerResponseCodes::ServerError));
+                Done(BanJson::Error(
+                    FString::Printf(TEXT("No ban found for uid '%s'"), *Uid),
+                    EHttpServerResponseCodes::NotFound));
                 return true;
             }
-
-            FBanEntry Updated;
-            if (!DB->GetBanByUid(Uid, Updated)) Updated = Entry;
 
             if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
                 AuditLog->LogAction(TEXT("updateban"), Updated.Uid, Updated.PlayerName,
