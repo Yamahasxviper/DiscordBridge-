@@ -694,9 +694,14 @@ namespace BanChat
     {
         if (DurationStr.IsEmpty()) return -1;
 
+        // Named constants for unit-to-minute conversions.
+        static constexpr int64 MinutesPerHour = 60;
+        static constexpr int64 MinutesPerDay  = 1440;  // 24 * 60
+        static constexpr int64 MinutesPerWeek = 10080; // 7 * 24 * 60
+
         // Bare integer — legacy format, treat as minutes.
         // Use Atoi64 so values above INT32_MAX are caught rather than silently
-        // wrapping; cap at INT32_MAX to match the suffix-based path below.
+        // wrapping; reject values outside the representable int32 range.
         if (DurationStr.IsNumeric())
         {
             const int64 Raw = FCString::Atoi64(*DurationStr);
@@ -729,23 +734,23 @@ namespace BanChat
 
             if      (Unit == TEXT('w'))
             {
-                // Guard: Num * 10080 must not overflow int64, and adding to Total must not overflow.
-                if (Num > INT64_MAX / 10080) return -1;
-                const int64 Product = Num * 10080;
+                // Guard: Num * MinutesPerWeek must not overflow int64, and adding to Total must not overflow.
+                if (Num > INT64_MAX / MinutesPerWeek) return -1;
+                const int64 Product = Num * MinutesPerWeek;
                 if (Total > INT64_MAX - Product) return -1;
                 Total += Product;
             }
             else if (Unit == TEXT('d'))
             {
-                if (Num > INT64_MAX / 1440) return -1;
-                const int64 Product = Num * 1440;
+                if (Num > INT64_MAX / MinutesPerDay) return -1;
+                const int64 Product = Num * MinutesPerDay;
                 if (Total > INT64_MAX - Product) return -1;
                 Total += Product;
             }
             else if (Unit == TEXT('h'))
             {
-                if (Num > INT64_MAX / 60) return -1;
-                const int64 Product = Num * 60;
+                if (Num > INT64_MAX / MinutesPerHour) return -1;
+                const int64 Product = Num * MinutesPerHour;
                 if (Total > INT64_MAX - Product) return -1;
                 Total += Product;
             }
@@ -760,8 +765,9 @@ namespace BanChat
         }
 
         if (!bHadToken || Total <= 0) return -1;
-        // Cap at INT32_MAX to avoid truncation when converting back to int32.
-        return static_cast<int32>(FMath::Min(Total, static_cast<int64>(INT32_MAX)));
+        // Reject durations that exceed the int32 range rather than silently truncating.
+        if (Total > static_cast<int64>(INT32_MAX)) return -1;
+        return static_cast<int32>(Total);
     }
 
     /**
@@ -3779,7 +3785,7 @@ EExecutionStatus AScheduleBanChatCommand::ExecuteCommand_Implementation(
         Sender->SendChatMessage(
             TEXT("[BanChatCommands] Usage: /scheduleban <player|PUID> <delay> [banDuration] [reason...]"),
             FLinearColor::Yellow);
-        return EExecutionStatus::COMPLETED;
+        return EExecutionStatus::BAD_ARGUMENTS;
     }
 
     const FString TargetArg = Arguments[0];
@@ -3791,7 +3797,7 @@ EExecutionStatus AScheduleBanChatCommand::ExecuteCommand_Implementation(
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Invalid delay '%s'. Use format like 30m, 2h, 1d."), *DelayStr),
             FLinearColor::Yellow);
-        return EExecutionStatus::COMPLETED;
+        return EExecutionStatus::BAD_ARGUMENTS;
     }
 
     // Optional ban duration (3rd argument).
@@ -3801,7 +3807,9 @@ EExecutionStatus AScheduleBanChatCommand::ExecuteCommand_Implementation(
     {
         // Explicit "permanent" markers — check before ParseDurationMinutes so that
         // "0" is not silently clamped to 1 minute by FMath::Max(1, Atoi("0")).
-        if (Arguments[2] == TEXT("perm") || Arguments[2] == TEXT("permanent") || Arguments[2] == TEXT("0"))
+        if (Arguments[2].Equals(TEXT("perm"), ESearchCase::IgnoreCase)
+            || Arguments[2].Equals(TEXT("permanent"), ESearchCase::IgnoreCase)
+            || Arguments[2] == TEXT("0"))
         {
             BanDurationMinutes = 0;
             ReasonStartIdx = 3;
@@ -3838,7 +3846,7 @@ EExecutionStatus AScheduleBanChatCommand::ExecuteCommand_Implementation(
     if (!SchReg)
     {
         Sender->SendChatMessage(TEXT("[BanChatCommands] ScheduledBanRegistry unavailable."), FLinearColor::Red);
-        return EExecutionStatus::COMPLETED;
+        return EExecutionStatus::UNCOMPLETED;
     }
 
     FScheduledBanEntry Entry = SchReg->AddScheduled(

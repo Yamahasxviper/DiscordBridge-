@@ -118,7 +118,6 @@ void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
                 const uint8 HiN = (Hi >= TEXT('a')) ? (uint8)(Hi - TEXT('a') + 10) : (uint8)(Hi - TEXT('0'));
                 const uint8 LoN = (Lo >= TEXT('a')) ? (uint8)(Lo - TEXT('a') + 10) : (uint8)(Lo - TEXT('0'));
                 const TCHAR Ch = static_cast<TCHAR>((HiN << 4) | LoN);
-                if (!FChar::IsHexDigit(Ch)) return;
                 Puid.AppendChar(Ch);
             }
             if (Puid.Len() != 32) return;

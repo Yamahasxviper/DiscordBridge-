@@ -723,7 +723,7 @@ FString UBanDatabase::Backup(const FString& BackupDir, int32 MaxKeep) const
     Files.Sort();
     // Files is sorted oldest-first by timestamp-stamped filename.
     // Delete the surplus oldest entries in a single forward pass (O(n)).
-    const int32 ToDelete = Files.Num() - MaxKeep;
+    const int32 ToDelete = FMath::Max(0, Files.Num() - MaxKeep);
     for (int32 i = 0; i < ToDelete; ++i)
     {
         PF.DeleteFile(*(BackupDir / Files[i]));
