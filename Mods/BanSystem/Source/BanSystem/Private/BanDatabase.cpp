@@ -438,9 +438,30 @@ bool UBanDatabase::AddBan(const FBanEntry& Entry)
 
         NewEntry = Entry;
         if (NewEntry.Id <= 0)
-            NewEntry.Id = NextId++;
+        {
+            // Guard against ID exhaustion — 0 is the "exhausted" sentinel.
+            if (NextId == 0)
+            {
+                UE_LOG(LogBanDatabase, Error,
+                    TEXT("BanDatabase: all 64-bit IDs have been used — cannot add more bans"));
+                return false;
+            }
+            NewEntry.Id = NextId;
+            NextId = (NextId < INT64_MAX) ? NextId + 1 : 0; // 0 = exhausted
+        }
         else
-            NextId = FMath::Max(NextId, NewEntry.Id + 1);
+        {
+            // External ID supplied (e.g. from peer sync or file reload).
+            // Advance NextId past it to prevent future auto-assign collisions.
+            // Guard: if the supplied ID is INT64_MAX there is no higher valid Id,
+            // so mark the counter exhausted rather than letting it overflow.
+            if (NextId != 0)
+            {
+                const int64 MinNext = (NewEntry.Id < INT64_MAX) ? NewEntry.Id + 1 : 0;
+                if (MinNext == 0 || MinNext > NextId)
+                    NextId = MinNext;
+            }
+        }
 
         Bans.Add(NewEntry);
         bSaved = SaveToFile();
@@ -475,7 +496,16 @@ bool UBanDatabase::RemoveBanByUid(const FString& Uid, FBanEntry& OutEntry, bool 
 
         const int32 Removed = Bans.RemoveAll([&Uid](const FBanEntry& E){ return E.Uid.Equals(Uid, ESearchCase::IgnoreCase); });
         bRemoved = (Removed > 0);
-        if (bRemoved) SaveToFile();
+        if (bRemoved)
+        {
+            if (!SaveToFile())
+            {
+                UE_LOG(LogBanDatabase, Error,
+                    TEXT("BanDatabase: failed to persist ban removal for uid='%s' — "
+                         "the record will reappear after a server restart if the disk issue persists"),
+                    *Uid);
+            }
+        }
     }
 
     if (bRemoved && !bSilent)
@@ -506,7 +536,16 @@ bool UBanDatabase::RemoveBanById(int64 Id, FBanEntry& OutEntry)
 
         const int32 Removed = Bans.RemoveAll([Id](const FBanEntry& E){ return E.Id == Id; });
         bRemoved = (Removed > 0);
-        if (bRemoved) SaveToFile();
+        if (bRemoved)
+        {
+            if (!SaveToFile())
+            {
+                UE_LOG(LogBanDatabase, Error,
+                    TEXT("BanDatabase: failed to persist ban removal for id=%lld — "
+                         "the record will reappear after a server restart if the disk issue persists"),
+                    Id);
+            }
+        }
     }
 
     if (bRemoved)
@@ -538,7 +577,13 @@ int32 UBanDatabase::PruneExpiredBans(bool bSilent)
             {
                 return !E.bIsPermanent && E.ExpireDate < Now;
             });
-            SaveToFile();
+            if (!SaveToFile())
+            {
+                UE_LOG(LogBanDatabase, Error,
+                    TEXT("BanDatabase: failed to persist pruning of %d expired ban(s) — "
+                         "they will reappear after a server restart if the disk issue persists"),
+                    Expired.Num());
+            }
         }
     }
 
