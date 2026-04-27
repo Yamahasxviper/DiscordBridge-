@@ -472,6 +472,13 @@ bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClient
             PayloadLen = 0;
             for (int32 i = 0; i < 8; ++i)
                 PayloadLen = (PayloadLen << 8) | Buf[2 + i];
+            // RFC 6455 §5.2: the most significant bit of the 8-byte length MUST be 0.
+            if (PayloadLen & (static_cast<uint64>(1) << 63))
+            {
+                UE_LOG(LogWSServer, Error,
+                    TEXT("WSServer: Frame has invalid 8-byte payload length (MSB set) – dropping client"));
+                return false;
+            }
             HeaderSize = 10;
         }
 

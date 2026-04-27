@@ -67,8 +67,18 @@ void UBanAuditLog::LogAction(const FString& Action,
 {
     FScopeLock Lock(&Mutex);
 
+    // Guard: if all 64-bit IDs have been exhausted NextId is set to 0 (the
+    // exhausted sentinel) and no new entries should be allocated.
+    if (NextId == 0)
+    {
+        UE_LOG(LogBanAuditLog, Error,
+            TEXT("BanAuditLog: all 64-bit IDs have been used — cannot log action '%s'"), *Action);
+        return;
+    }
+
     FAuditEntry Entry;
-    Entry.Id         = NextId++;
+    Entry.Id         = NextId;
+    NextId           = (NextId < INT64_MAX) ? NextId + 1 : 0; // 0 = exhausted
     Entry.Action     = Action;
     Entry.TargetUid  = TargetUid;
     Entry.TargetName = TargetName;
@@ -82,7 +92,10 @@ void UBanAuditLog::LogAction(const FString& Action,
 
     // Trim oldest entries when the cap is exceeded.
     if (Entries.Num() > MaxEntries)
-        Entries.RemoveAt(0, Entries.Num() - MaxEntries);
+    {
+        const int32 ToRemove = Entries.Num() - MaxEntries;
+        Entries.RemoveAt(0, ToRemove);
+    }
 
     SaveToFile();
 }
@@ -155,7 +168,8 @@ void UBanAuditLog::LoadFromFile()
 
             FAuditEntry Entry;
             double IdDbl = 0.0;
-            if ((*ObjPtr)->TryGetNumberField(TEXT("id"), IdDbl))
+            if ((*ObjPtr)->TryGetNumberField(TEXT("id"), IdDbl)
+                && IdDbl >= 1.0 && IdDbl < static_cast<double>(INT64_MAX))
                 Entry.Id = static_cast<int64>(IdDbl);
             (*ObjPtr)->TryGetStringField(TEXT("action"),     Entry.Action);
             (*ObjPtr)->TryGetStringField(TEXT("targetUid"),  Entry.TargetUid);
@@ -181,12 +195,16 @@ void UBanAuditLog::LoadFromFile()
 
     // Trim on load in case the file was edited externally and exceeds the cap.
     if (Entries.Num() > MaxEntries)
-        Entries.RemoveAt(0, Entries.Num() - MaxEntries);
+    {
+        const int32 ToRemove = Entries.Num() - MaxEntries;
+        Entries.RemoveAt(0, ToRemove);
+    }
 
     // Restore counter: prefer the persisted nextId (avoids O(n) scan on large
     // logs and also handles the case where all entries were externally removed).
     double StoredNextId = 0.0;
-    if (Root->TryGetNumberField(TEXT("nextId"), StoredNextId) && StoredNextId >= 1.0)
+    if (Root->TryGetNumberField(TEXT("nextId"), StoredNextId)
+        && StoredNextId >= 1.0 && StoredNextId < static_cast<double>(INT64_MAX))
     {
         NextId = static_cast<int64>(StoredNextId);
     }
@@ -195,7 +213,7 @@ void UBanAuditLog::LoadFromFile()
         // Fallback: derive from loaded entries.
         NextId = 1;
         for (const FAuditEntry& E : Entries)
-            if (E.Id >= NextId) NextId = (E.Id < INT64_MAX) ? E.Id + 1 : E.Id;
+            if (E.Id >= NextId) NextId = (E.Id < INT64_MAX) ? E.Id + 1 : 0; // 0 = exhausted
     }
 }
 

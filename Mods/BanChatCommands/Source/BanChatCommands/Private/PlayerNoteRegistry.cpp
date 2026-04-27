@@ -147,7 +147,8 @@ void UPlayerNoteRegistry::LoadFromFile()
 
             FPlayerNoteEntry Entry;
             double IdDbl = 0.0;
-            if ((*ObjPtr)->TryGetNumberField(TEXT("id"), IdDbl))
+            if ((*ObjPtr)->TryGetNumberField(TEXT("id"), IdDbl)
+                && IdDbl >= 1.0 && IdDbl < static_cast<double>(INT64_MAX))
                 Entry.Id = static_cast<int64>(IdDbl);
             (*ObjPtr)->TryGetStringField(TEXT("uid"),        Entry.Uid);
             (*ObjPtr)->TryGetStringField(TEXT("playerName"), Entry.PlayerName);

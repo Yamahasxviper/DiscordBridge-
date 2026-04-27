@@ -353,8 +353,17 @@ void FBanChatCommandsModule::RestoreDefaultConfigIfNeeded()
     {
         FString Existing;
         FFileHelper::LoadFileToString(Existing, *DefaultIniPath);
-        if (Existing.Contains(TEXT("#")) || Existing.Contains(TEXT(";")))
-            return; // comment lines present — leave as-is
+        // Check whether any line starts with a comment character.  Using
+        // Contains() on the whole string would incorrectly match '#' or ';'
+        // appearing inside a value (e.g. in a URL or player message).
+        TArray<FString> Lines;
+        Existing.ParseIntoArrayLines(Lines);
+        for (const FString& Line : Lines)
+        {
+            const FString Trimmed = Line.TrimStart();
+            if (Trimmed.StartsWith(TEXT("#")) || Trimmed.StartsWith(TEXT(";")))
+                return; // comment lines present — leave as-is
+        }
     }
 
     const FString Content =
