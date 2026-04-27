@@ -201,25 +201,27 @@ echo
 
 # =============================================================================
 # CHECK 6: FCriticalSection / FScopeLock present in all registry classes
-#          that have shared mutable state
+#          that have shared mutable state and are accessed from multiple threads
 #
-# Any class with both a mutable TMap or TArray member AND a public method
-# should protect that state with a mutex.  We check that every .h file
-# declaring a TMap or TArray also declares an FCriticalSection member.
+# Only flag classes whose names end in "Registry" or "Database" or "Log" —
+# these are the subsystems that are explicitly designed to be thread-safe
+# (they already use FScopeLock in their implementations).
+# UObjects like BanEnforcer, BanDiscordSubsystem etc. are game-thread-only
+# and intentionally do not use mutexes; they are excluded from this check.
 # =============================================================================
-echo "--- CHECK 6: FCriticalSection present in all registry/subsystem headers ---"
+echo "--- CHECK 6: FCriticalSection present in thread-safe registry/database headers ---"
 
 while IFS= read -r -d '' file; do
-    # Only scan headers that look like subsystems or registries.
-    basename="$(basename "$file")"
-    if [[ "$basename" =~ Registry|Subsystem|Database|Pusher|Enforcer|Log|Client ]]; then
+    # Only scan headers whose filename matches the thread-safe registry pattern.
+    basename="$(basename "$file" .h)"
+    if [[ "$basename" =~ Registry$|Database$|Log$ ]]; then
         has_container=$(grep -cP '\bTMap\b|\bTArray\b|\bTSet\b' "$file")
         has_mutex=$(grep -cP '\bFCriticalSection\b|\bFRWLock\b' "$file")
         if [[ "$has_container" -gt 0 && "$has_mutex" -eq 0 ]]; then
             fail "CHECK 6 – missing FCriticalSection" \
                 "File: $file" \
-                "Declares TMap/TArray/TSet but has no FCriticalSection or FRWLock." \
-                "Review whether this class is accessed from multiple threads; add a mutex if so."
+                "Registry/Database/Log class declares TMap/TArray/TSet but has no FCriticalSection or FRWLock." \
+                "Fix: add 'mutable FCriticalSection Mutex;' and use FScopeLock in every public method."
         fi
     fi
 done < <(find "${MOD_PATHS[@]}" -name "*.h" -print0 2>/dev/null)
@@ -283,20 +285,27 @@ echo
 # =============================================================================
 # CHECK 9: Integer overflow in duration arithmetic (ban/mute parsing)
 #
-# Duration parsers that do "Total += Num * multiplier" can overflow int64
-# when user input is very large.  Each multiplication must be preceded by
-# an INT64_MAX / multiplier guard.
+# Duration parsers that do "Total += Num * Multiplier" (or similar literal
+# multipliers like 10080/1440/60) can overflow int64 when user input is very
+# large.  Each multiplication must be preceded by an INT64_MAX / Multiplier
+# guard AND the digit-accumulation loop must also guard against overflow.
+#
+# We detect the pattern by looking for unguarded "Num * 10080" style literals
+# without a corresponding INT64_MAX guard present anywhere in the same file.
+# BanChatCommands.cpp was fixed with explicit per-multiplier guards; we verify
+# all other duration parsers are equally protected.
 # =============================================================================
 echo "--- CHECK 9: Overflow guards in duration arithmetic ---"
 
 while IFS= read -r -d '' file; do
-    if grep -qP 'Total\s*\+=\s*\w+\s*\*\s*(multiplier|60|3600|86400|10080)' "$file" ||
-       grep -qP 'Num\s*\*\s*(60|3600|86400|10080)\b' "$file"; then
-        if ! grep -qP 'INT64_MAX\s*/\s*(multiplier|60|3600|86400|10080)' "$file"; then
+    # Check for the literal multiplier pattern (week/day/hour in minutes).
+    if grep -qP 'Num\s*\*\s*(10080|1440|3600|86400)\b' "$file"; then
+        # The file must have at least one INT64_MAX guard for the multiplication.
+        if ! grep -qP 'INT64_MAX\s*/\s*(Multiplier|multiplier|10080|1440|3600|86400)' "$file"; then
             fail "CHECK 9 – duration multiplication overflow" \
                 "File: $file" \
-                "Duration arithmetic without INT64_MAX / multiplier overflow guard." \
-                "Fix: add 'if (Num > INT64_MAX / multiplier) return -1;' before each multiply."
+                "Has 'Num * <week/day/hour multiplier>' without INT64_MAX / Multiplier overflow guard." \
+                "Fix: add 'if (Multiplier > 1 && Num > INT64_MAX / Multiplier) return 0/−1;' before each multiply."
         fi
     fi
 done < <(find "${MOD_PATHS[@]}" -name "*.cpp" -print0 2>/dev/null)

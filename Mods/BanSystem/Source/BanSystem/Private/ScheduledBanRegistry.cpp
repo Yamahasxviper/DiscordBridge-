@@ -261,7 +261,12 @@ void UScheduledBanRegistry::LoadFromFile()
                         *Entry.Uid, *EffStr);
             }
             if ((*ObjPtr)->TryGetStringField(TEXT("createdAt"), CreatedStr))
-                FDateTime::ParseIso8601(*CreatedStr, Entry.CreatedAt);
+            {
+                if (!FDateTime::ParseIso8601(*CreatedStr, Entry.CreatedAt))
+                    UE_LOG(LogScheduledBanRegistry, Warning,
+                        TEXT("ScheduledBanRegistry: uid='%s' has malformed createdAt '%s' — using default"),
+                        *Entry.Uid, *CreatedStr);
+            }
 
             if (!Entry.Uid.IsEmpty() && bEffectiveAtValid)
                 Pending.Add(Entry);

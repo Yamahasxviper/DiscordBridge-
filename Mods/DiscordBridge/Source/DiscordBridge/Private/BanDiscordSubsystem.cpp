@@ -1057,6 +1057,8 @@ int32 UBanDiscordSubsystem::ParseDurationMinutes(const FString& DurationStr)
 		int64 Num = 0;
 		while (*p && FChar::IsDigit(*p))
 		{
+			// Guard against int64 overflow during digit accumulation.
+			if (Num > INT64_MAX / 10) return 0;
 			Num = Num * 10 + (*p - TEXT('0'));
 			++p;
 		}
@@ -1066,11 +1068,20 @@ int32 UBanDiscordSubsystem::ParseDurationMinutes(const FString& DurationStr)
 		const TCHAR Unit = *p;
 		++p;
 
-		if      (Unit == TEXT('w')) Total += Num * 10080;
-		else if (Unit == TEXT('d')) Total += Num * 1440;
-		else if (Unit == TEXT('h')) Total += Num * 60;
-		else if (Unit == TEXT('m')) Total += Num;
+		int64 Multiplier = 1;
+		if      (Unit == TEXT('w')) Multiplier = 10080;
+		else if (Unit == TEXT('d')) Multiplier = 1440;
+		else if (Unit == TEXT('h')) Multiplier = 60;
+		else if (Unit == TEXT('m')) Multiplier = 1;
 		else return 0;
+
+		// Guard against int64 overflow in Num * Multiplier.
+		if (Multiplier > 1 && Num > INT64_MAX / Multiplier) return 0;
+		const int64 Product = Num * Multiplier;
+
+		// Guard against int64 overflow in Total + Product.
+		if (Total > INT64_MAX - Product) return 0;
+		Total += Product;
 
 		bHadToken = true;
 	}
