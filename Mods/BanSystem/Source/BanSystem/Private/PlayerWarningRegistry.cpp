@@ -140,6 +140,8 @@ int32 UPlayerWarningRegistry::ClearWarningsForUid(const FString& Uid)
 
     return Removed;
 }
+
+TArray<FWarningEntry> UPlayerWarningRegistry::GetAllWarnings() const
 {
     FScopeLock Lock(&Mutex);
     return Warnings;
@@ -273,6 +275,7 @@ bool UPlayerWarningRegistry::DeleteWarningById(int64 Id)
     }
 
     return bRemoved;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  File I/O
