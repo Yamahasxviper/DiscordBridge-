@@ -3524,10 +3524,18 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 			int32 Added = 0, Skipped = 0;
 			TSharedPtr<FJsonValue> JsonVal;
 			TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Arg);
-			if (FJsonSerializer::Deserialize(Reader, JsonVal) && JsonVal.IsValid())
+			if (!FJsonSerializer::Deserialize(Reader, JsonVal) || !JsonVal.IsValid())
+			{
+				Response = TEXT(":x: Import failed — could not parse JSON. Ensure the input is valid JSON.");
+			}
+			else
 			{
 				const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-				if (JsonVal->TryGetArray(Arr) && Arr)
+				if (!JsonVal->TryGetArray(Arr) || !Arr)
+				{
+					Response = TEXT(":x: Import failed — JSON root must be an array (`[...]`), not an object or other type.");
+				}
+				else
 				{
 					for (const TSharedPtr<FJsonValue>& Item : *Arr)
 					{
@@ -3553,9 +3561,9 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 							}
 						}
 					}
+					Response = FString::Printf(TEXT(":inbox_tray: Import complete. Added %d, skipped %d."), Added, Skipped);
 				}
 			}
-			Response = FString::Printf(TEXT(":inbox_tray: Import complete. Added %d, skipped %d."), Added, Skipped);
 		}
 	}
 	else if (Verb == TEXT("log"))

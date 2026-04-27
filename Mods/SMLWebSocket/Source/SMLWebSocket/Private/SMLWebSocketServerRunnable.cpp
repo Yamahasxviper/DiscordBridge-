@@ -554,17 +554,17 @@ bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClient
                 else
                 {
                     // First fragment of a multi-frame message — begin accumulation.
-                    Client.bInFragment    = true;
-                    Client.FragmentOpcode = Opcode;
-                    Client.FragmentBuffer = MoveTemp(Payload);
-
-                    if (Client.FragmentBuffer.Num() > MaxMessageBytes)
+                    if (Payload.Num() > MaxMessageBytes)
                     {
                         UE_LOG(LogWSServer, Error,
                             TEXT("WSServer: Fragmented message exceeds %d byte limit – dropping client"),
                             MaxMessageBytes);
                         return false;
                     }
+
+                    Client.bInFragment    = true;
+                    Client.FragmentOpcode = Opcode;
+                    Client.FragmentBuffer = MoveTemp(Payload);
                 }
             }
             else // Opcode == 0x0: Continuation frame
