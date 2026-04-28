@@ -3180,18 +3180,21 @@ EExecutionStatus AStaffChatCommand::ExecuteCommand_Implementation(
         }
     }
 
-    if (!bSentToAnyone)
-    {
-        Sender->SendChatMessage(
-            TEXT("[BanChatCommands] No staff members are currently online."),
-            FLinearColor::Yellow);
-    }
-
     // Echo back to the sender only when they are a console/non-player sender.
     // Player senders already received the message via PC->ClientMessage() above,
     // so echoing again would produce a duplicate entry in their chat window.
     if (!Sender->IsPlayerSender())
         Sender->SendChatMessage(Formatted, StaffColor);
+
+    // Notify the sender when no staff saw the message.  For a console sender
+    // the echo above already delivered the text, so the warning is only useful
+    // to player senders who would otherwise receive no feedback at all.
+    if (!bSentToAnyone && Sender->IsPlayerSender())
+    {
+        Sender->SendChatMessage(
+            TEXT("[BanChatCommands] No staff members are currently online."),
+            FLinearColor::Yellow);
+    }
 
     // Notify external systems (e.g. DiscordBridge) so the message can be
     // mirrored to a Discord staff-chat channel.
@@ -3811,12 +3814,16 @@ EExecutionStatus AReportChatCommand::ExecuteCommand_Implementation(
 
     // 30-second per-sender cooldown to prevent spam.
     const FString CooldownKey = SenderUid.IsEmpty() ? Sender->GetSenderName() : SenderUid;
-    if (BanChat::IsOnCooldown(Sender, TEXT("report"), 30, CooldownKey))
     {
-        Sender->SendChatMessage(
-            TEXT("[BanChatCommands] Please wait 30 seconds before submitting another report."),
-            FLinearColor::Yellow);
-        return EExecutionStatus::UNCOMPLETED;
+        int32 RemainingCoolSecs = 0;
+        if (BanChat::IsOnCooldown(Sender, TEXT("report"), 30, CooldownKey, &RemainingCoolSecs))
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] Please wait %d second(s) before submitting another report."),
+                    RemainingCoolSecs),
+                FLinearColor::Yellow);
+            return EExecutionStatus::UNCOMPLETED;
+        }
     }
 
     const FString TargetName = Arguments[0];

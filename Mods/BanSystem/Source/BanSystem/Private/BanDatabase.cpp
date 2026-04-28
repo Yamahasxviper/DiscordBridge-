@@ -277,8 +277,7 @@ void UBanDatabase::ReloadIfChanged()
 
 void UBanDatabase::LoadFromFile()
 {
-    // Caller must hold DbMutex — but Initialize() calls this before subsystems
-    // are shared, so we take the lock here for safety.
+    // This function acquires DbMutex internally. Call without holding the lock.
     FScopeLock Lock(&DbMutex);
 
     FString RawJson;
