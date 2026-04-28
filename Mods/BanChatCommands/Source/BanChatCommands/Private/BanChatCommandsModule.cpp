@@ -79,13 +79,12 @@ void FBanChatCommandsModule::StartupModule()
                 NewPlayer->SetIgnoreMoveInput(true);
         });
 
-    // Hook AGameModeBase::Logout to clean up FrozenPlayerUids when a player
-    // disconnects.  Without this the UID stays in the set indefinitely:
-    //   - On reconnect the PostLogin hook above re-freezes the player (correct,
-    //     intentional behaviour).
-    //   - If the player never reconnects the stale entry wastes memory, but
-    //     worse: the very next /freeze call for that UID hits the "was frozen"
-    //     branch and unfreezes (no-op on a gone player), confusing the admin.
+    // Hook AGameModeBase::Logout so that a frozen player who reconnects is
+    // automatically re-frozen by the PostLogin hook above.  We intentionally
+    // do NOT remove the UID from FrozenPlayerUids on disconnect so the
+    // PostLogin hook can find it.  The /freeze command itself handles the
+    // "toggle while offline" case by checking whether the player is currently
+    // online before deciding which branch (freeze vs. unfreeze) to enter.
     LogoutHookHandle = SUBSCRIBE_METHOD_VIRTUAL_AFTER(
         AGameModeBase::Logout,
         GetMutableDefault<AGameModeBase>(),
@@ -94,23 +93,11 @@ void FBanChatCommandsModule::StartupModule()
             APlayerController* PC = Cast<APlayerController>(Exiting);
             if (!PC) return;
 
-            FString Uid;
-            if (APlayerState* PS = PC->PlayerState)
-            {
-                const FUniqueNetIdRepl& UniqueId = PS->GetUniqueId();
-                if (UniqueId.IsValid() && UniqueId.GetType() != FName(TEXT("NONE")))
-                {
-                    Uid = UBanDatabase::MakeUid(TEXT("EOS"), UniqueId.ToString().ToLower());
-                }
-                else
-                {
-                    const FString EosPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
-                    if (!EosPuid.IsEmpty())
-                        Uid = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
-                }
-            }
-            if (!Uid.IsEmpty())
-                AFreezeChatCommand::FrozenPlayerUids.Remove(Uid);
+            // Re-apply frozen movement state immediately on reconnect by keeping
+            // the UID in FrozenPlayerUids across the disconnect.  The PostLogin
+            // hook will call SetIgnoreMoveInput(true) when the player comes back.
+            // Nothing to do here — the entry is intentionally left in the set.
+            (void)PC;
         });
 
     WorldInitHandle = FWorldDelegates::OnWorldInitializedActors.AddLambda(

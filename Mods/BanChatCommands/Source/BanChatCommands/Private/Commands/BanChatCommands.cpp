@@ -3607,34 +3607,48 @@ EExecutionStatus AFreezeChatCommand::ExecuteCommand_Implementation(
     UWorld* World = GetWorld();
     if (!World) return EExecutionStatus::UNCOMPLETED;
 
+    // Determine the intended action based on whether the UID is currently
+    // frozen.  We check whether the player is online so that admins can
+    // issue /freeze against an offline player without the toggle appearing
+    // to do the wrong thing: if the player is offline AND already in the
+    // frozen set, pressing /freeze again still toggles them to unfrozen
+    // (their freeze will not be re-applied when they reconnect), which is
+    // the most intuitive behaviour.
     const bool bWasFrozen = FrozenPlayerUids.Contains(Uid);
+
+    // Check whether the target player is currently online.
+    bool bFoundOnline = false;
+    APlayerController* TargetPC = nullptr;
+    for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+    {
+        APlayerController* PC = It->Get();
+        if (!PC || !PC->PlayerState) continue;
+        const FUniqueNetIdRepl& PcId = PC->PlayerState->GetUniqueId();
+        FString PcUid;
+        if (PcId.IsValid() && PcId.GetType() != FName(TEXT("NONE")))
+        {
+            PcUid = UBanDatabase::MakeUid(TEXT("EOS"), PcId.ToString().ToLower());
+        }
+        else
+        {
+            const FString EosPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+            if (!EosPuid.IsEmpty())
+                PcUid = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
+        }
+        if (PcUid == Uid)
+        {
+            bFoundOnline = true;
+            TargetPC = PC;
+            break;
+        }
+    }
 
     if (bWasFrozen)
     {
         FrozenPlayerUids.Remove(Uid);
 
-        for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-        {
-            APlayerController* PC = It->Get();
-            if (!PC || !PC->PlayerState) continue;
-            const FUniqueNetIdRepl& PcId = PC->PlayerState->GetUniqueId();
-            FString PcUid;
-            if (PcId.IsValid() && PcId.GetType() != FName(TEXT("NONE")))
-            {
-                PcUid = UBanDatabase::MakeUid(TEXT("EOS"), PcId.ToString().ToLower());
-            }
-            else
-            {
-                const FString EosPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
-                if (!EosPuid.IsEmpty())
-                    PcUid = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
-            }
-            if (PcUid == Uid)
-            {
-                PC->SetIgnoreMoveInput(false);
-                break;
-            }
-        }
+        if (bFoundOnline && TargetPC)
+            TargetPC->SetIgnoreMoveInput(false);
 
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] %s has been unfrozen."), *DisplayName),
@@ -3644,32 +3658,29 @@ EExecutionStatus AFreezeChatCommand::ExecuteCommand_Implementation(
     {
         FrozenPlayerUids.Add(Uid);
 
-        for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+        if (bFoundOnline && TargetPC)
         {
-            APlayerController* PC = It->Get();
-            if (!PC || !PC->PlayerState) continue;
-            const FUniqueNetIdRepl& PcId = PC->PlayerState->GetUniqueId();
-            FString PcUid;
-            if (PcId.IsValid() && PcId.GetType() != FName(TEXT("NONE")))
-            {
-                PcUid = UBanDatabase::MakeUid(TEXT("EOS"), PcId.ToString().ToLower());
-            }
-            else
-            {
-                const FString EosPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
-                if (!EosPuid.IsEmpty())
-                    PcUid = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
-            }
-            if (PcUid == Uid)
-            {
-                PC->SetIgnoreMoveInput(true);
-                break;
-            }
+            TargetPC->SetIgnoreMoveInput(true);
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] %s has been frozen. Run /freeze again to unfreeze."), *DisplayName),
+                FLinearColor::Yellow);
         }
+        else
+        {
+            // Player is offline — the freeze will be applied automatically when
+            // they reconnect via the PostLogin hook in BanChatCommandsModule.
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("[BanChatCommands] %s is not online — they will be frozen automatically when they reconnect."), *DisplayName),
+                FLinearColor::Yellow);
+        }
+    }
 
-        Sender->SendChatMessage(
-            FString::Printf(TEXT("[BanChatCommands] %s has been frozen. Run /freeze again to unfreeze."), *DisplayName),
-            FLinearColor::Yellow);
+    // Write to the audit log so freeze/unfreeze actions appear in the trail.
+    {
+        UGameInstance* GI = World->GetGameInstance();
+        if (UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr)
+            AuditLog->LogAction(bWasFrozen ? TEXT("unfreeze") : TEXT("freeze"),
+                Uid, DisplayName, AdminId, Sender->GetSenderName(), TEXT(""));
     }
 
     return EExecutionStatus::COMPLETED;
