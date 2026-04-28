@@ -343,3 +343,52 @@ When `bMasked` is false (server-to-server or unmasked client) the raw byte is us
 
 *Last updated: 2026-04-28. All 11 round-2 bugs resolved.*
 
+---
+
+## Round 3 — Additional Scan (2026-04-28)
+
+### ✅ Fixed — `SaveTicketState()` missing closing `}` — compile error (BUG-01)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/TicketSubsystem.cpp`
+
+**Fix applied:** Added the missing closing `}` for `SaveTicketState()` between the
+`IFileManager::Get().Delete(*TmpPath)` statement and the start of `LoadTicketState()`.
+Without this brace every function definition that followed (`LoadTicketState`, `GetStatsFilePath`,
+etc.) was syntactically nested inside `SaveTicketState`, making the entire DiscordBridge module
+a compile error.
+
+---
+
+### ✅ Fixed — `BanAppealRegistry::SaveToFile()` does not persist `NextId` (BUG-02)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanAppealRegistry.cpp`
+
+**Fix applied:** `SaveToFile()` now writes `nextId` as a decimal string via
+`SetStringField(TEXT("nextId"), FString::Printf(TEXT("%lld"), NextId))`.
+`LoadFromFile()` now uses the string-first / number-fallback pattern (same as
+`PlayerWarningRegistry` BUG-08 fix) to prefer the persisted counter over the
+scan-based `max(id)+1` reconstruction. This prevents ID reuse after all appeals are
+deleted and the server restarts.
+
+---
+
+### ✅ Fixed — `ScheduledBanRegistry::SaveToFile()` does not persist `NextId` (BUG-03)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/ScheduledBanRegistry.cpp`
+
+**Fix applied:** Same pattern as BUG-02. `SaveToFile()` now writes a `"nextId"` string field
+alongside the `"scheduled"` array. `LoadFromFile()` prefers the stored counter (string-first /
+number-fallback) over the scan-based reconstruction. This prevents ID reuse once all pending
+scheduled bans have fired and the list is empty on the next server restart.
+
+---
+
+### ✅ Fixed — `SaveStringToFile` return value ignored in ticket feedback stats write (BUG-04)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/TicketSubsystem.cpp`
+
+**Fix applied:** The `FFileHelper::SaveStringToFile(...)` call for ticket feedback stats is now
+checked with `if (!...)` and emits `UE_LOG(LogTicketSystem, Error, ...)` on failure, matching
+the error-handling pattern used by every other file-write in the codebase. Previously a disk-full
+or permission-denied error would silently lose rating data with no diagnostics.
+
+---
+
+*Last updated: 2026-04-28. All 4 round-3 bugs resolved.*
+

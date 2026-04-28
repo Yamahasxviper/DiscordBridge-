@@ -1005,8 +1005,12 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 			if (FJsonSerializer::Serialize(Stats.ToSharedRef(), SW))
 			{
 				FPlatformFileManager::Get().GetPlatformFile().CreateDirectoryTree(*FPaths::GetPath(StatsPath));
-				FFileHelper::SaveStringToFile(OutStats, *StatsPath,
-					FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+				if (!FFileHelper::SaveStringToFile(OutStats, *StatsPath,
+					FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+				{
+					UE_LOG(LogTicketSystem, Error,
+					       TEXT("TicketSystem: Failed to write feedback stats to '%s'."), *StatsPath);
+				}
 			}
 		}
 
@@ -4408,6 +4412,7 @@ void UTicketSubsystem::SaveTicketState() const
 		       *TmpPath, *StatePath);
 		IFileManager::Get().Delete(*TmpPath);
 	}
+}
 
 void UTicketSubsystem::LoadTicketState()
 {
