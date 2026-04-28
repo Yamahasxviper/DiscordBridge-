@@ -88,6 +88,8 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 						B->DeleteDiscordChannel(ChanId);
 					}
 				}
+				if (!Expired.IsEmpty())
+					SaveTicketState();
 				return true;
 			}),
 			60.0f);
@@ -830,12 +832,28 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 					if (BanDb->RemoveBanByUid(BanRecord.Uid))
 					{
 						bUnbanned = true;
+
+						// Also remove any linked counterpart bans (e.g. the matching
+						// IP ban that AddCounterpartBans created when the player was
+						// originally banned).  Without this the player remains
+						// effectively blocked via their IP ban even after approval.
+						int32 ExtraRemoved = 0;
+						for (const FString& LinkedUid : BanRecord.LinkedUids)
+						{
+							if (BanDb->RemoveBanByUid(LinkedUid))
+								++ExtraRemoved;
+						}
+
 						ApproveResponse = FString::Printf(
 							TEXT(":white_check_mark: Ban appeal **approved** by <@%s>.\n"
 							     "**%s** has been unbanned.\nOriginal reason: %s"),
 							*DiscordUserId,
 							OpenerName.IsEmpty() ? *AppealOpenerId : *OpenerName,
 							*BanRecord.Reason);
+
+						if (ExtraRemoved > 0)
+							ApproveResponse += FString::Printf(
+								TEXT("\nAlso removed %d linked ban(s)."), ExtraRemoved);
 					}
 					else
 					{
@@ -1165,6 +1183,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 				TArray<TSharedPtr<FJsonValue>>{MakeShared<FJsonValueObject>(ReopenRow)});
 
 			Bridge->SendMessageBodyToChannel(SourceChannelId, GraceBody);
+			SaveTicketState();
 			return; // don't delete yet
 		}
 
@@ -1198,7 +1217,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 
 			// Finalise and post the transcript to the log channel.
 			auto FinalizeTranscript =
-				[WeakThis, LogChannelId, OpenerIdForLog, ClosedAt,
+				[WeakThis, LogChannelId, ClosedChannelId, OpenerIdForLog, ClosedAt,
 				 CloseNotesForLog, ReviewNoteCopy, PageAccum]() mutable
 			{
 				UTicketSubsystem* Self = WeakThis.Get();
@@ -1245,6 +1264,9 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 					TranscriptText = TranscriptText.Left(1900) + TEXT("\n*(transcript truncated)*");
 
 				B->SendDiscordChannelMessage(LogChannelId, TranscriptText);
+				// Delete the channel only after the transcript has been posted so
+				// none of the paginated HTTP fetches hit an already-gone channel.
+				B->DeleteDiscordChannel(ClosedChannelId);
 			};
 
 			*FetchFuncHolder =
@@ -1346,10 +1368,10 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 			};
 
 			// Kick off the first page fetch (no `before` cursor).
+			// The channel is deleted inside FinalizeTranscript, after all pages have
+			// been fetched and the transcript posted, so Discord never receives
+			// requests for messages from an already-deleted channel.
 			(*FetchFuncHolder)(FString());
-
-			// Delete the channel AFTER queuing the fetch; HTTP is async.
-			Bridge->DeleteDiscordChannel(SourceChannelId);
 		}
 		else
 		{
@@ -4982,10 +5004,12 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 					TranscriptText = TranscriptText.Left(1900) + TEXT("\n*(transcript truncated)*");
 
 				B->SendDiscordChannelMessage(LogChannelId, TranscriptText);
+				// Delete the channel only after the transcript has been posted so the
+				// HTTP fetch for message history does not hit an already-gone channel.
+				B->DeleteDiscordChannel(ClosedChannelId);
 			});
 
 		FetchReq->ProcessRequest();
-		Bridge->DeleteDiscordChannel(ChannelId);
 	}
 	else
 	{
