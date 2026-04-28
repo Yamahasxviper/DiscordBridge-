@@ -330,9 +330,14 @@ void UPlayerWarningRegistry::LoadFromFile()
             if (!Val->TryGetObject(ObjPtr) || !ObjPtr) continue;
 
             FWarningEntry Entry;
-            double IdDbl = 0.0;
-            if ((*ObjPtr)->TryGetNumberField(TEXT("id"), IdDbl))
-                Entry.Id = static_cast<int64>(IdDbl);
+            {
+                FString IdStr;
+                double IdDbl = 0.0;
+                if ((*ObjPtr)->TryGetStringField(TEXT("id"), IdStr))
+                    Entry.Id = FCString::Atoi64(*IdStr);
+                else if ((*ObjPtr)->TryGetNumberField(TEXT("id"), IdDbl))
+                    Entry.Id = static_cast<int64>(IdDbl);
+            }
             (*ObjPtr)->TryGetStringField(TEXT("uid"),        Entry.Uid);
             (*ObjPtr)->TryGetStringField(TEXT("playerName"), Entry.PlayerName);
             (*ObjPtr)->TryGetStringField(TEXT("reason"),     Entry.Reason);
@@ -390,7 +395,7 @@ bool UPlayerWarningRegistry::SaveToFile() const
     for (const FWarningEntry& W : Warnings)
     {
         TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-        Obj->SetNumberField(TEXT("id"),         static_cast<double>(W.Id));
+        Obj->SetStringField(TEXT("id"),         FString::Printf(TEXT("%lld"), W.Id));
         Obj->SetStringField(TEXT("uid"),        W.Uid);
         Obj->SetStringField(TEXT("playerName"), W.PlayerName);
         Obj->SetStringField(TEXT("reason"),     W.Reason);

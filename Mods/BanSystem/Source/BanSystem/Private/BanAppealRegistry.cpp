@@ -206,9 +206,14 @@ void UBanAppealRegistry::LoadFromFile()
             if (!Val->TryGetObject(ObjPtr) || !ObjPtr) continue;
 
             FBanAppealEntry Entry;
-            double IdDbl = 0.0;
-            if ((*ObjPtr)->TryGetNumberField(TEXT("id"), IdDbl))
-                Entry.Id = static_cast<int64>(IdDbl);
+            {
+                FString IdStr;
+                double IdDbl = 0.0;
+                if ((*ObjPtr)->TryGetStringField(TEXT("id"), IdStr))
+                    Entry.Id = FCString::Atoi64(*IdStr);
+                else if ((*ObjPtr)->TryGetNumberField(TEXT("id"), IdDbl))
+                    Entry.Id = static_cast<int64>(IdDbl);
+            }
             (*ObjPtr)->TryGetStringField(TEXT("uid"),         Entry.Uid);
             (*ObjPtr)->TryGetStringField(TEXT("reason"),      Entry.Reason);
             (*ObjPtr)->TryGetStringField(TEXT("contactInfo"), Entry.ContactInfo);
@@ -217,9 +222,12 @@ void UBanAppealRegistry::LoadFromFile()
             if ((*ObjPtr)->TryGetStringField(TEXT("submittedAt"), DateStr))
             {
                 if (!FDateTime::ParseIso8601(*DateStr, Entry.SubmittedAt))
+                {
                     UE_LOG(LogBanAppealRegistry, Warning,
-                        TEXT("BanAppealRegistry: uid='%s' has malformed submittedAt '%s' — using default"),
+                        TEXT("BanAppealRegistry: uid='%s' has malformed submittedAt '%s' — skipping"),
                         *Entry.Uid, *DateStr);
+                    continue;
+                }
             }
 
             // Status (default Pending for records written before this feature).
@@ -264,7 +272,7 @@ bool UBanAppealRegistry::SaveToFile() const
     for (const FBanAppealEntry& A : Appeals)
     {
         TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-        Obj->SetNumberField(TEXT("id"),          static_cast<double>(A.Id));
+        Obj->SetStringField(TEXT("id"),          FString::Printf(TEXT("%lld"), A.Id));
         Obj->SetStringField(TEXT("uid"),         A.Uid);
         Obj->SetStringField(TEXT("reason"),      A.Reason);
         Obj->SetStringField(TEXT("contactInfo"), A.ContactInfo);

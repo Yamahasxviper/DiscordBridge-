@@ -192,4 +192,35 @@ server shutdown).  This is now consistent with every other HTTP callback in the 
 
 ---
 
+## BanSystem (round 2)
+
+### ✅ Fixed — `BanAuditLog::LogAction()` — `SaveToFile()` return silently ignored
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanAuditLog.cpp`
+
+**Fix applied:** Added `if (!SaveToFile())` check with `UE_LOG(Error, ...)` in `LogAction()`, matching
+the pattern already used by every other registry in the codebase.
+
+---
+
+### ✅ Fixed — `BanAppealRegistry::LoadFromFile()` — malformed `submittedAt` falls through with epoch date
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanAppealRegistry.cpp`
+
+**Fix applied:** Added `continue;` after the warning log when `FDateTime::ParseIso8601` fails for
+`submittedAt`, matching the identical pattern in `MuteRegistry`, `PlayerNoteRegistry`,
+`PlayerWarningRegistry`, and `ScheduledBanRegistry`.
+
+---
+
+### ✅ Fixed — `int64` IDs serialized as `double` (precision lost above 2⁵³)
+**Files:** `BanAuditLog.cpp` (id + nextId), `BanDatabase.cpp`, `BanAppealRegistry.cpp`,
+`ScheduledBanRegistry.cpp`, `PlayerWarningRegistry.cpp`
+
+**Fix applied:** All `SetNumberField(TEXT("id"), static_cast<double>(Id))` calls converted to
+`SetStringField(TEXT("id"), FString::Printf(TEXT("%lld"), Id))`. Load paths updated to try
+`TryGetStringField` first (new format) and fall back to `TryGetNumberField` (old format) for
+backward compatibility with existing data files. `BanAuditLog`'s `nextId` counter follows the
+same string-first / number-fallback pattern.
+
+---
+
 *Last updated: 2026-04-28. All bugs resolved.*
