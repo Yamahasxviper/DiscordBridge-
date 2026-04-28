@@ -410,6 +410,8 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	// Mirror non-bot unbans (REST API / BanEnforcer expiry) to the moderation log.
 	// The lambda is guarded by PendingInteractionToken so Discord slash unban
 	// commands (which post their own message via Respond) don't double-post.
+	// IP counterpart bans are skipped (matching BanAddedHandle) to prevent two
+	// "unbanned" posts whenever an EOS+IP ban pair is removed together.
 	{
 		TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
 		BanRemovedHandle = UBanDatabase::OnBanRemoved.AddLambda(
@@ -418,6 +420,9 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				UBanDiscordSubsystem* Self = WeakThis.Get();
 				if (!Self || !Self->CachedProvider) return;
 				if (!Self->PendingInteractionToken.IsEmpty()) return;
+				// Skip IP counterpart bans — they are implied by the primary EOS
+				// unban and posting them would produce duplicate moderation-log entries.
+				if (Uid.StartsWith(TEXT("IP:"))) return;
 
 				const FString DisplayName = PlayerName.IsEmpty() ? Uid : PlayerName;
 				const FString Msg = FString::Printf(

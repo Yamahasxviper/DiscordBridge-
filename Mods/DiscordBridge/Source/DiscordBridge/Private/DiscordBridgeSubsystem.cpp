@@ -400,6 +400,11 @@ void UDiscordBridgeSubsystem::Deinitialize()
 		FTSTicker::GetCoreTicker().RemoveTicker(H);
 	InGameMessageTickerHandles.Empty();
 
+	// Cancel any pending vote-kick window timers.
+	for (FTSTicker::FDelegateHandle& H : VoteKickTimerHandles)
+		FTSTicker::GetCoreTicker().RemoveTicker(H);
+	VoteKickTimerHandles.Empty();
+
 	Disconnect();
 	Super::Deinitialize();
 }
@@ -4785,13 +4790,14 @@ void UDiscordBridgeSubsystem::AddJoinReactions(const FString& MessageId,
 
 		// Schedule a check when the vote window expires.
 		const float DelaySeconds = static_cast<float>(Config.VoteWindowMinutes * 60);
-		FTSTicker::GetCoreTicker().AddTicker(
+		FTSTicker::FDelegateHandle VoteHandle = FTSTicker::GetCoreTicker().AddTicker(
 			FTickerDelegate::CreateWeakLambda(this, [this, MessageId](float) -> bool
 			{
 				CheckVoteResult(MessageId);
 				return false; // one-shot
 			}),
 			DelaySeconds);
+		VoteKickTimerHandles.Add(VoteHandle);
 	}
 }
 
@@ -5203,17 +5209,17 @@ SendMessageBodyToChannel(TargetChannel, Body);
 
 void UDiscordBridgeSubsystem::StartAnnouncementTicker()
 {
-if (Config.AnnouncementIntervalMinutes <= 0) return;
-if (AnnouncementTickerHandle.IsValid()) return;
+	if (Config.AnnouncementIntervalMinutes <= 0) return;
+	if (AnnouncementTickerHandle.IsValid()) return;
 
-AnnouncementAccumulatedSeconds = 0.0f;
-AnnouncementTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
-FTickerDelegate::CreateUObject(this, &UDiscordBridgeSubsystem::AnnouncementTick),
-1.0f);
+	AnnouncementAccumulatedSeconds = 0.0f;
+	AnnouncementTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateUObject(this, &UDiscordBridgeSubsystem::AnnouncementTick),
+		1.0f);
 
-UE_LOG(LogDiscordBridge, Log,
-TEXT("DiscordBridge: Scheduled announcements enabled — every %d minute(s)."),
-Config.AnnouncementIntervalMinutes);
+	UE_LOG(LogDiscordBridge, Log,
+		TEXT("DiscordBridge: Scheduled announcements enabled — every %d minute(s)."),
+		Config.AnnouncementIntervalMinutes);
 }
 
 void UDiscordBridgeSubsystem::StartScheduledAnnouncementTickers()
@@ -5244,31 +5250,31 @@ void UDiscordBridgeSubsystem::StartScheduledAnnouncementTickers()
 
 bool UDiscordBridgeSubsystem::AnnouncementTick(float DeltaTime)
 {
-if (Config.AnnouncementIntervalMinutes <= 0) return true;
-if (!bGatewayReady) return true;
-if (Config.AnnouncementMessage.IsEmpty()) return true;
+	if (Config.AnnouncementIntervalMinutes <= 0) return true;
+	if (!bGatewayReady) return true;
+	if (Config.AnnouncementMessage.IsEmpty()) return true;
 
-AnnouncementAccumulatedSeconds += DeltaTime;
-const float IntervalSeconds = Config.AnnouncementIntervalMinutes * 60.0f;
-if (AnnouncementAccumulatedSeconds < IntervalSeconds) return true;
+	AnnouncementAccumulatedSeconds += DeltaTime;
+	const float IntervalSeconds = Config.AnnouncementIntervalMinutes * 60.0f;
+	if (AnnouncementAccumulatedSeconds < IntervalSeconds) return true;
 
-// Subtract the interval rather than resetting to 0 so overshoot time is
-// preserved across ticks (same pattern as BackupAccumulatedSeconds etc. in
-// BanSystemModule.cpp).  Resetting to 0 would silently discard any extra
-// time beyond the interval boundary, causing cumulative drift.
-AnnouncementAccumulatedSeconds -= IntervalSeconds;
+	// Subtract the interval rather than resetting to 0 so overshoot time is
+	// preserved across ticks (same pattern as BackupAccumulatedSeconds etc. in
+	// BanSystemModule.cpp).  Resetting to 0 would silently discard any extra
+	// time beyond the interval boundary, causing cumulative drift.
+	AnnouncementAccumulatedSeconds -= IntervalSeconds;
 
-const FString& Target = Config.AnnouncementChannelId.IsEmpty()
-? Config.ChannelId : Config.AnnouncementChannelId;
+	const FString& Target = Config.AnnouncementChannelId.IsEmpty()
+		? Config.ChannelId : Config.AnnouncementChannelId;
 
-if (!Target.IsEmpty())
-{
-TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
-Body->SetStringField(TEXT("content"), Config.AnnouncementMessage);
-SendMessageBodyToChannel(Target, Body);
-}
+	if (!Target.IsEmpty())
+	{
+		TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+		Body->SetStringField(TEXT("content"), Config.AnnouncementMessage);
+		SendMessageBodyToChannel(Target, Body);
+	}
 
-return true;
+	return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
