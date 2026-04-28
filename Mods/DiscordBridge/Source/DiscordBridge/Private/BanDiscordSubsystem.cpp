@@ -774,10 +774,10 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 					if (const FUniqueNetIdRepl& Id = PS->GetUniqueId();
 					    Id.IsValid() && Id.GetType() != FName(TEXT("NONE")))
 					{
+						// On CSS DS the EOS identity's ToString() returns the raw
+						// 32-char PUID directly (no "EOS:" prefix). No ParseUid
+						// stripping is needed here.
 						PUIDStr = Id.ToString();
-						FString Platform, RawId;
-						UBanDatabase::ParseUid(PUIDStr, Platform, RawId);
-						if (Platform == TEXT("EOS")) PUIDStr = RawId;
 					}
 					else
 					{

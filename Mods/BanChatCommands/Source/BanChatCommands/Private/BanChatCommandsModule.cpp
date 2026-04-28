@@ -18,6 +18,7 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/OnlineReplStructs.h"
+#include "Patching/NativeHookManager.h"
 
 #define LOCTEXT_NAMESPACE "FBanChatCommandsModule"
 
@@ -76,6 +77,40 @@ void FBanChatCommandsModule::StartupModule()
             if (Uid.IsEmpty()) return;
             if (AFreezeChatCommand::FrozenPlayerUids.Contains(Uid))
                 NewPlayer->SetIgnoreMoveInput(true);
+        });
+
+    // Hook AGameModeBase::Logout to clean up FrozenPlayerUids when a player
+    // disconnects.  Without this the UID stays in the set indefinitely:
+    //   - On reconnect the PostLogin hook above re-freezes the player (correct,
+    //     intentional behaviour).
+    //   - If the player never reconnects the stale entry wastes memory, but
+    //     worse: the very next /freeze call for that UID hits the "was frozen"
+    //     branch and unfreezes (no-op on a gone player), confusing the admin.
+    LogoutHookHandle = SUBSCRIBE_METHOD_VIRTUAL_AFTER(
+        AGameModeBase::Logout,
+        GetMutableDefault<AGameModeBase>(),
+        [](AGameModeBase* /*GameMode*/, AController* Exiting)
+        {
+            APlayerController* PC = Cast<APlayerController>(Exiting);
+            if (!PC) return;
+
+            FString Uid;
+            if (APlayerState* PS = PC->PlayerState)
+            {
+                const FUniqueNetIdRepl& UniqueId = PS->GetUniqueId();
+                if (UniqueId.IsValid() && UniqueId.GetType() != FName(TEXT("NONE")))
+                {
+                    Uid = UBanDatabase::MakeUid(TEXT("EOS"), UniqueId.ToString().ToLower());
+                }
+                else
+                {
+                    const FString EosPuid = UBanEnforcer::ExtractEosPuidFromConnectionUrl(PC);
+                    if (!EosPuid.IsEmpty())
+                        Uid = UBanDatabase::MakeUid(TEXT("EOS"), EosPuid);
+                }
+            }
+            if (!Uid.IsEmpty())
+                AFreezeChatCommand::FrozenPlayerUids.Remove(Uid);
         });
 
     WorldInitHandle = FWorldDelegates::OnWorldInitializedActors.AddLambda(
@@ -460,6 +495,9 @@ void FBanChatCommandsModule::ShutdownModule()
 
     FGameModeEvents::GameModePostLoginEvent.Remove(PostLoginHandle);
     PostLoginHandle.Reset();
+
+    UNSUBSCRIBE_METHOD(AGameModeBase::Logout, LogoutHookHandle);
+    LogoutHookHandle.Reset();
 
     FWorldDelegates::OnWorldInitializedActors.Remove(WorldInitHandle);
     WorldInitHandle.Reset();

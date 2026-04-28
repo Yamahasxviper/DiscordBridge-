@@ -3043,6 +3043,10 @@ EExecutionStatus ABanReasonChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::UNCOMPLETED;
     }
 
+    // Initial "is banned?" check — used only to obtain the primary UID and to
+    // produce a friendly "not banned" message.  The actual mutation is performed
+    // inside UpdateBan() which holds the database lock for the full read-modify-
+    // write cycle, closing the TOCTOU window that existed with AddBan().
     FBanEntry Entry;
     if (!DB->IsCurrentlyBannedByAnyId(Uid, Entry))
     {
@@ -3052,9 +3056,21 @@ EExecutionStatus ABanReasonChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::COMPLETED;
     }
 
-    const FString NewReason = BanChat::JoinArgs(Arguments, 1);
-    Entry.Reason = NewReason;
-    DB->AddBan(Entry); // AddBan upserts by UID
+    const FString NewReason   = BanChat::JoinArgs(Arguments, 1);
+    const FString PrimaryUid  = Entry.Uid; // UpdateBan looks up by primary UID
+
+    FBanEntry Updated;
+    if (!DB->UpdateBan(PrimaryUid, [&NewReason](FBanEntry& E) { E.Reason = NewReason; }, Updated))
+    {
+        // The ban was removed between the check above and the atomic update
+        // (concurrent unban or expiry).  Treat as "not found".
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Ban for '%s' was removed concurrently — reason not updated."), *DisplayName),
+            FLinearColor::Yellow);
+        return EExecutionStatus::COMPLETED;
+    }
+    // UpdateBan fires OnBanAdded, which BanDiscordSubsystem's BanAddedHandle
+    // picks up and posts to the moderation log automatically.
 
     // Write audit log.
     UWorld* World = GetWorld();
@@ -3066,7 +3082,7 @@ EExecutionStatus ABanReasonChatCommand::ExecuteCommand_Implementation(
             UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>();
             if (AuditLog)
             {
-                AuditLog->LogAction(TEXT("banreason"), Entry.Uid, DisplayName,
+                AuditLog->LogAction(TEXT("banreason"), Updated.Uid, DisplayName,
                     AdminId, Sender->GetSenderName(), NewReason);
             }
         }
@@ -3160,8 +3176,11 @@ EExecutionStatus AStaffChatCommand::ExecuteCommand_Implementation(
             FLinearColor::Yellow);
     }
 
-    // Also echo back to the sender (in case they're console and not in world).
-    Sender->SendChatMessage(Formatted, StaffColor);
+    // Echo back to the sender only when they are a console/non-player sender.
+    // Player senders already received the message via PC->ClientMessage() above,
+    // so echoing again would produce a duplicate entry in their chat window.
+    if (!Sender->IsPlayerSender())
+        Sender->SendChatMessage(Formatted, StaffColor);
 
     // Notify external systems (e.g. DiscordBridge) so the message can be
     // mirrored to a Discord staff-chat channel.
@@ -3362,6 +3381,9 @@ EExecutionStatus AExtendBanChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::UNCOMPLETED;
     }
 
+    // Initial check — get primary UID and verify the ban exists and is not permanent.
+    // The actual mutation is done inside UpdateBan() which holds the database lock
+    // for the full read-modify-write, eliminating the TOCTOU window of AddBan().
     FBanEntry Entry;
     if (!DB->IsCurrentlyBannedByAnyId(Uid, Entry))
     {
@@ -3379,9 +3401,29 @@ EExecutionStatus AExtendBanChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::COMPLETED;
     }
 
-    const FDateTime BaseTime = FMath::Max(Entry.ExpireDate, FDateTime::UtcNow());
-    Entry.ExpireDate = BaseTime + FTimespan::FromMinutes(ExtraMinutes);
-    DB->AddBan(Entry);
+    const FString PrimaryUid   = Entry.Uid;
+    const int32   MinutesToAdd = ExtraMinutes;
+
+    FBanEntry Updated;
+    if (!DB->UpdateBan(PrimaryUid,
+        [MinutesToAdd](FBanEntry& E)
+        {
+            // Re-read ExpireDate inside the lock so the extension is always
+            // relative to the freshest known expiry, not a stale snapshot.
+            const FDateTime BaseTime = FMath::Max(E.ExpireDate, FDateTime::UtcNow());
+            E.ExpireDate  = BaseTime + FTimespan::FromMinutes(MinutesToAdd);
+            E.bIsPermanent = false;
+        },
+        Updated))
+    {
+        // Concurrent unban raced the update.
+        Sender->SendChatMessage(
+            FString::Printf(TEXT("[BanChatCommands] Ban for '%s' was removed concurrently — not extended."), *DisplayName),
+            FLinearColor::Yellow);
+        return EExecutionStatus::COMPLETED;
+    }
+    // UpdateBan fires OnBanAdded, which BanDiscordSubsystem's BanAddedHandle
+    // picks up and posts the updated ban to the moderation log automatically.
 
     UWorld* World = GetWorld();
     if (World)
@@ -3389,15 +3431,15 @@ EExecutionStatus AExtendBanChatCommand::ExecuteCommand_Implementation(
         UGameInstance* GI = World->GetGameInstance();
         UBanAuditLog* AuditLog = GI ? GI->GetSubsystem<UBanAuditLog>() : nullptr;
         if (AuditLog)
-            AuditLog->LogAction(TEXT("extend"), Entry.Uid, DisplayName, AdminUid, Sender->GetSenderName(),
+            AuditLog->LogAction(TEXT("extend"), Updated.Uid, DisplayName, AdminUid, Sender->GetSenderName(),
                 FString::Printf(TEXT("Extended by %d min -> new expiry %s UTC"),
-                    ExtraMinutes, *Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S"))));
+                    ExtraMinutes, *Updated.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S"))));
     }
 
     Sender->SendChatMessage(
         FString::Printf(TEXT("[BanChatCommands] Ban for '%s' extended by %s. New expiry: %s UTC."),
             *DisplayName, *BanChat::FormatDuration(ExtraMinutes),
-            *Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S"))),
+            *Updated.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S"))),
         FLinearColor::Green);
     return EExecutionStatus::COMPLETED;
 }
