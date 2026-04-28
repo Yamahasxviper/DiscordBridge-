@@ -200,34 +200,26 @@ void FBanChatCommandsModule::StartupModule()
                     MuteReg->OnPlayerUnmuted.Remove(UnmutedDelegateHandle);
 
                     MutedDelegateHandle = MuteReg->OnPlayerMuted.AddLambda(
-                        [WeakGI](const FMuteEntry& Entry, bool bIsTimed)
+                        [](const FMuteEntry& Entry, bool bIsTimed)
                         {
+                            // Push the WebSocket event only.  Audit logging is handled by
+                            // every caller of MutePlayer() (AMuteChatCommand, BanDiscordSubsystem,
+                            // etc.) to avoid double-entries with the correct adminUid.
                             UBanWebSocketPusher::PushMuteEvent(
                                 TEXT("mute"), Entry.Uid, Entry.PlayerName,
                                 Entry.MutedBy, Entry.Reason,
                                 bIsTimed,
                                 bIsTimed ? Entry.ExpireDate.ToIso8601() : FString());
-
-                            if (UGameInstance* LiveGI = WeakGI.Get())
-                            {
-                                if (UBanAuditLog* AuditLog = LiveGI->GetSubsystem<UBanAuditLog>())
-                                    AuditLog->LogAction(TEXT("mute"), Entry.Uid, Entry.PlayerName,
-                                        Entry.MutedBy, Entry.MutedBy, Entry.Reason);
-                            }
                         });
 
                     UnmutedDelegateHandle = MuteReg->OnPlayerUnmuted.AddLambda(
-                        [WeakGI](const FString& Uid)
+                        [](const FString& Uid)
                         {
+                            // Push the WebSocket event only.  Audit logging is handled by
+                            // every caller of UnmutePlayer() (AUnmuteChatCommand, BanDiscordSubsystem,
+                            // etc.) to avoid double-entries with the correct adminUid.
                             UBanWebSocketPusher::PushMuteEvent(
                                 TEXT("unmute"), Uid, TEXT(""), TEXT(""), TEXT(""), false, FString());
-
-                            if (UGameInstance* LiveGI = WeakGI.Get())
-                            {
-                                if (UBanAuditLog* AuditLog = LiveGI->GetSubsystem<UBanAuditLog>())
-                                    AuditLog->LogAction(TEXT("unmute"), Uid, TEXT(""),
-                                        TEXT("system"), TEXT(""), TEXT(""));
-                            }
                         });
                 }
             }
