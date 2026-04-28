@@ -97,7 +97,12 @@ void UBanAuditLog::LogAction(const FString& Action,
         Entries.RemoveAt(0, ToRemove);
     }
 
-    SaveToFile();
+    if (!SaveToFile())
+    {
+        UE_LOG(LogBanAuditLog, Error,
+            TEXT("BanAuditLog: failed to save after logging '%s' for '%s'"),
+            *Action, *TargetUid);
+    }
 }
 
 TArray<FAuditEntry> UBanAuditLog::GetRecentEntries(int32 Limit) const
@@ -167,10 +172,15 @@ void UBanAuditLog::LoadFromFile()
             if (!Val->TryGetObject(ObjPtr) || !ObjPtr) continue;
 
             FAuditEntry Entry;
-            double IdDbl = 0.0;
-            if ((*ObjPtr)->TryGetNumberField(TEXT("id"), IdDbl)
-                && IdDbl >= 1.0 && IdDbl < static_cast<double>(INT64_MAX))
-                Entry.Id = static_cast<int64>(IdDbl);
+            {
+                FString IdStr;
+                double IdDbl = 0.0;
+                if ((*ObjPtr)->TryGetStringField(TEXT("id"), IdStr))
+                    Entry.Id = FCString::Atoi64(*IdStr);
+                else if ((*ObjPtr)->TryGetNumberField(TEXT("id"), IdDbl)
+                    && IdDbl >= 1.0 && IdDbl < static_cast<double>(INT64_MAX))
+                    Entry.Id = static_cast<int64>(IdDbl);
+            }
             (*ObjPtr)->TryGetStringField(TEXT("action"),     Entry.Action);
             (*ObjPtr)->TryGetStringField(TEXT("targetUid"),  Entry.TargetUid);
             (*ObjPtr)->TryGetStringField(TEXT("targetName"), Entry.TargetName);
@@ -202,18 +212,25 @@ void UBanAuditLog::LoadFromFile()
 
     // Restore counter: prefer the persisted nextId (avoids O(n) scan on large
     // logs and also handles the case where all entries were externally removed).
-    double StoredNextId = 0.0;
-    if (Root->TryGetNumberField(TEXT("nextId"), StoredNextId)
-        && StoredNextId >= 1.0 && StoredNextId < static_cast<double>(INT64_MAX))
     {
-        NextId = static_cast<int64>(StoredNextId);
-    }
-    else
-    {
-        // Fallback: derive from loaded entries.
-        NextId = 1;
-        for (const FAuditEntry& E : Entries)
-            if (E.Id >= NextId) NextId = (E.Id < INT64_MAX) ? E.Id + 1 : 0; // 0 = exhausted
+        int64 ParsedNextId = 0;
+        FString NextIdStr;
+        double StoredNextId = 0.0;
+        if (Root->TryGetStringField(TEXT("nextId"), NextIdStr) && !NextIdStr.IsEmpty())
+            ParsedNextId = FCString::Atoi64(*NextIdStr);
+        else if (Root->TryGetNumberField(TEXT("nextId"), StoredNextId)
+            && StoredNextId >= 1.0 && StoredNextId < static_cast<double>(INT64_MAX))
+            ParsedNextId = static_cast<int64>(StoredNextId);
+
+        if (ParsedNextId >= 1)
+            NextId = ParsedNextId;
+        else
+        {
+            // Fallback: derive from loaded entries.
+            NextId = 1;
+            for (const FAuditEntry& E : Entries)
+                if (E.Id >= NextId) NextId = (E.Id < INT64_MAX) ? E.Id + 1 : 0; // 0 = exhausted
+        }
     }
 }
 
@@ -225,7 +242,7 @@ bool UBanAuditLog::SaveToFile() const
     for (const FAuditEntry& E : Entries)
     {
         TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-        Obj->SetNumberField(TEXT("id"),         static_cast<double>(E.Id));
+        Obj->SetStringField(TEXT("id"),         FString::Printf(TEXT("%lld"), E.Id));
         Obj->SetStringField(TEXT("action"),     E.Action);
         Obj->SetStringField(TEXT("targetUid"),  E.TargetUid);
         Obj->SetStringField(TEXT("targetName"), E.TargetName);
@@ -239,7 +256,7 @@ bool UBanAuditLog::SaveToFile() const
     }
 
     TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
-    Root->SetNumberField(TEXT("nextId"),  static_cast<double>(NextId));
+    Root->SetStringField(TEXT("nextId"),  FString::Printf(TEXT("%lld"), NextId));
     Root->SetArrayField(TEXT("entries"), EntryArr);
 
     FString JsonStr;

@@ -23,7 +23,7 @@ namespace BanDbJson
     static TSharedPtr<FJsonObject> EntryToJson(const FBanEntry& E)
     {
         TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-        Obj->SetNumberField(TEXT("id"),          static_cast<double>(E.Id));
+        Obj->SetStringField(TEXT("id"),          FString::Printf(TEXT("%lld"), E.Id));
         Obj->SetStringField(TEXT("uid"),         E.Uid);
         Obj->SetStringField(TEXT("playerUID"),   E.PlayerUID);
         Obj->SetStringField(TEXT("platform"),    E.Platform);
@@ -65,9 +65,12 @@ namespace BanDbJson
     {
         if (!Obj.IsValid()) return false;
 
+        FString IdStr;
         double IdDbl = 0.0;
-        Obj->TryGetNumberField(TEXT("id"), IdDbl);
-        OutEntry.Id = static_cast<int64>(IdDbl);
+        if (Obj->TryGetStringField(TEXT("id"), IdStr))
+            OutEntry.Id = FCString::Atoi64(*IdStr);
+        else if (Obj->TryGetNumberField(TEXT("id"), IdDbl))
+            OutEntry.Id = static_cast<int64>(IdDbl);
 
         Obj->TryGetStringField(TEXT("uid"),        OutEntry.Uid);
         Obj->TryGetStringField(TEXT("playerUID"),  OutEntry.PlayerUID);
