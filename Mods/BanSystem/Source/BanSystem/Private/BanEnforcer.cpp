@@ -605,6 +605,9 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
                 {
                     PC->ClientWasKicked(FText::FromString(KickMsg));
                     TWeakObjectPtr<APlayerController> WeakPC(PC);
+                    // KickTimerHandle is intentionally transient: one-shot 20-second
+                    // timer so the player can read the ban message before disconnect.
+                    // WeakPC prevents a crash if the player leaves during the window.
                     FTimerHandle KickTimerHandle;
                     World->GetTimerManager().SetTimer(KickTimerHandle,
                         FTimerDelegate::CreateLambda([WeakPC]()
@@ -731,6 +734,8 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
     {
         PC->ClientWasKicked(FText::FromString(KickMsg));
         TWeakObjectPtr<APlayerController> WeakPC(PC);
+        // KickTimerHandle is intentionally transient: one-shot 20-second timer.
+        // WeakPC prevents a crash if the player disconnects during the window.
         FTimerHandle KickTimerHandle;
         World->GetTimerManager().SetTimer(KickTimerHandle,
             FTimerDelegate::CreateLambda([WeakPC]()
@@ -819,6 +824,8 @@ bool UBanEnforcer::KickConnectedPlayer(UWorld* World, const FString& Uid, const 
         {
             PC->ClientWasKicked(FText::FromString(Reason));
             TWeakObjectPtr<APlayerController> WeakPC(PC);
+            // KickTimerHandle is intentionally transient: one-shot 20-second timer.
+            // WeakPC prevents a crash if the player disconnects during the window.
             FTimerHandle KickTimerHandle;
             World->GetTimerManager().SetTimer(KickTimerHandle,
                 FTimerDelegate::CreateLambda([WeakPC]()
@@ -899,6 +906,8 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
                 {
                     PC->ClientWasKicked(FText::FromString(KickMsg));
                     TWeakObjectPtr<APlayerController> WeakPC(PC);
+                    // KickTimerHandle is intentionally transient: one-shot 20-second timer.
+                    // WeakPC prevents a crash if the player disconnects during the window.
                     FTimerHandle KickTimerHandle;
                     World->GetTimerManager().SetTimer(KickTimerHandle,
                         FTimerDelegate::CreateLambda([WeakPC]()
@@ -1012,6 +1021,8 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
     {
         PC->ClientWasKicked(FText::FromString(KickMsg));
         TWeakObjectPtr<APlayerController> WeakPC(PC);
+        // KickTimerHandle is intentionally transient: one-shot 20-second timer.
+        // WeakPC prevents a crash if the player disconnects during the window.
         FTimerHandle KickTimerHandle;
         World->GetTimerManager().SetTimer(KickTimerHandle,
             FTimerDelegate::CreateLambda([WeakPC]()

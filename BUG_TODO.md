@@ -223,4 +223,123 @@ same string-first / number-fallback pattern.
 
 ---
 
-*Last updated: 2026-04-28. All bugs resolved.*
+*Last updated: 2026-04-28 (initial scan). All bugs resolved.*
+
+---
+
+## Round 2 — Additional Scan (2026-04-28)
+
+### ✅ Fixed — Static `CommandCooldowns` / `AdminBanTimestamps` TMap — no mutex (BUG-01)
+**File:** `Mods/BanChatCommands/Source/BanChatCommands/Private/Commands/BanChatCommands.cpp`
+
+**Fix applied:** Added `check(IsInGameThread())` at the start of `IsOnCooldown()` and
+`IsBanRateLimited()`. Added documentation comment on both maps explicitly declaring them
+game-thread-only. SML dispatches `ExecuteCommand_Implementation` on the game thread so no
+mutex is needed; the check will surface any future violation immediately.
+
+---
+
+### ✅ Fixed — Static `AFreezeChatCommand::FrozenPlayerUids` TSet — no mutex (BUG-02)
+**File:** `Mods/BanChatCommands/Source/BanChatCommands/Private/Commands/BanChatCommands.cpp`
+
+**Fix applied:** Added `check(IsInGameThread())` at the start of
+`AFreezeChatCommand::ExecuteCommand_Implementation()`. Added a comment above the
+`FrozenPlayerUids` definition stating it is game-thread-only
+(command execute, `PostLoginHandle`, and `LogoutHookHandle` all run on game thread).
+
+---
+
+### ✅ Fixed (documentation) — Local `KickTimerHandle` cannot be cancelled on disconnect (BUG-03)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanEnforcer.cpp` (5 sites)
+
+**Fix applied:** Added comments at all five `FTimerHandle KickTimerHandle;` declarations
+explaining that the handle is intentionally transient (one-shot 20-second timer) and that
+`TWeakObjectPtr<APlayerController>` prevents any crash or access violation when the player
+disconnects during the window. The timer fires and self-cleans via the UE TimerManager.
+
+---
+
+### ✅ Fixed (documentation) — HTTP route handlers and game-thread dispatch guarantee (BUG-04)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanRestApi.cpp`
+
+**Fix applied:** Replaced the original "potentially called on the HTTP thread" comment at the
+top of `RegisterRoutes()` with an accurate note: UE's `FHttpServerModule` enqueues requests
+and dispatches route callbacks on the game thread via its own `FTSTicker`. All subsystem
+lookups, delegate broadcasts, timer operations, and PlayerController iterations in route
+lambdas are therefore safe without additional locking.
+
+---
+
+### ✅ Fixed — `BanDatabase` root `nextId` serialised as `double` (precision loss > 2^53) (BUG-05)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanDatabase.cpp`
+
+**Fix applied:** `SaveToFile()` now writes `nextId` as a decimal string via
+`SetStringField(TEXT("nextId"), FString::Printf(TEXT("%lld"), NextId))`.
+`LoadFromFile()` uses a string-first / number-fallback pattern (same as the existing
+per-entry `id` fix) for backward compatibility with older database files.
+
+---
+
+### ✅ Fixed — `PlayerNoteRegistry` ID load off-by-one + save as double (BUG-06)
+**File:** `Mods/BanChatCommands/Source/BanChatCommands/Private/PlayerNoteRegistry.cpp`
+
+**Fix applied:** `LoadFromFile()` now uses the string-first / number-fallback pattern
+(matching `PlayerWarningRegistry`) instead of the `IdDbl < static_cast<double>(INT64_MAX)`
+guard that had an off-by-one at INT64_MAX. `SaveToFile()` changed from `SetNumberField`
+to `SetStringField(TEXT("id"), FString::Printf(TEXT("%lld"), N.Id))`.
+
+---
+
+### ✅ Fixed — `appealId` in `BanDiscordNotifier` serialised as `double` (precision loss > 2^53) (BUG-07)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanDiscordNotifier.cpp`
+
+**Fix applied:** Both `NotifyAppealSubmitted` and `NotifyAppealReviewed` now emit `appealId`
+as a string: `SetStringField(TEXT("appealId"), FString::Printf(TEXT("%lld"), Appeal.Id))`.
+(`totalWarnings` / `warnCount` are `int32` and remain as `SetNumberField` — int32 fits
+exactly in a double.)
+
+---
+
+### ✅ Fixed — `PlayerWarningRegistry` does not persist `nextId` (BUG-08)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/PlayerWarningRegistry.cpp`
+
+**Fix applied:** `SaveToFile()` now writes a `"nextId"` string field alongside the
+`"warnings"` array. `LoadFromFile()` prefers the stored `nextId` (string-first /
+number-fallback for legacy files) over the scan-based max+1 reconstruction, so deleting
+the entry with the highest Id no longer regresses the counter and causes duplicate Ids.
+
+---
+
+### ✅ Fixed — `SaveTicketState` / `SaveTicketBlacklist` use non-atomic Delete + MoveFile (BUG-09)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/TicketSubsystem.cpp`
+
+**Fix applied:** Both save paths now use `IFileManager::Get().Move(*Dest, *Tmp, /*bReplace=*/true)`
+instead of the previous `PlatformFile.DeleteFile(*Dest)` + `PlatformFile.MoveFile(...)` two-step.
+The single `IFileManager::Move(bReplace=true)` call is an atomic OS-level rename/replace —
+there is no window where the live state file is absent. If the move fails the `.tmp` file is
+deleted and a warning is logged; the live file is never touched.
+
+---
+
+### ✅ Fixed — `appeal_id` persisted as `double` in ticket state JSON (precision loss > 2^53) (BUG-10)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/TicketSubsystem.cpp`
+
+**Fix applied:** `SaveTicketState()` now writes `appeal_id` as a string:
+`SetStringField(TEXT("appeal_id"), FString::Printf(TEXT("%lld"), *AppealIdSave))`.
+`LoadTicketState()` uses string-first / number-fallback for backward compatibility with
+existing state files.
+
+---
+
+### ✅ Fixed — Pong echoes masked Ping payload without unmasking — RFC 6455 §5.3 violation (BUG-11)
+**File:** `Mods/SMLWebSocket/Source/SMLWebSocket/Private/SMLWebSocketServerRunnable.cpp`
+
+**Fix applied:** The Ping handler now XOR-unmasks each payload byte against the 4-byte mask
+key (`Buf[HeaderSize + (i & 3)]`) before adding it to the Pong frame, matching the same
+pattern used for regular text/binary frames. A comment explains the RFC 6455 §5.3 requirement.
+When `bMasked` is false (server-to-server or unmasked client) the raw byte is used directly.
+
+---
+
+*Last updated: 2026-04-28. All 11 round-2 bugs resolved.*
+

@@ -506,12 +506,22 @@ bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClient
         if (Opcode == 0x9) // Ping — respond with Pong
         {
             // Echo the payload back as a Pong (opcode 0xA, FIN=1).
+            // Per RFC 6455 §5.3, client frames are masked; the mask key occupies
+            // the 4 bytes at Buf[HeaderSize..HeaderSize+3] when bMasked is true.
+            // We must XOR each payload byte with the mask key before echoing it —
+            // sending back the raw (still-masked) bytes is a §5.3 violation.
             const int32 PongPayloadLen = FMath::Min(PayloadLen32, 125); // Pong payload ≤ 125 bytes
             TArray<uint8> PongFrame;
             PongFrame.Add(0x8A); // FIN=1, opcode=0xA
             PongFrame.Add(static_cast<uint8>(PongPayloadLen));
             for (int32 i = 0; i < PongPayloadLen; ++i)
-                PongFrame.Add(Buf[HeaderSize + MaskSize + i]);
+            {
+                const uint8 Raw = Buf[HeaderSize + MaskSize + i];
+                const uint8 Unmasked = bMasked
+                    ? (Raw ^ Buf[HeaderSize + (i & 3)])
+                    : Raw;
+                PongFrame.Add(Unmasked);
+            }
             SendFrame(Client.Socket, PongFrame);
             Buf.RemoveAt(0, TotalSize);
             continue;

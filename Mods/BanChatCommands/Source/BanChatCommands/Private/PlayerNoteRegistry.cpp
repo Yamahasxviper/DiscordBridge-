@@ -146,10 +146,16 @@ void UPlayerNoteRegistry::LoadFromFile()
             if (!Val->TryGetObject(ObjPtr) || !ObjPtr) continue;
 
             FPlayerNoteEntry Entry;
-            double IdDbl = 0.0;
-            if ((*ObjPtr)->TryGetNumberField(TEXT("id"), IdDbl)
-                && IdDbl >= 1.0 && IdDbl < static_cast<double>(INT64_MAX))
-                Entry.Id = static_cast<int64>(IdDbl);
+            // Prefer string format (written since precision-loss fix); fall back
+            // to legacy double for files written by older builds.
+            {
+                FString IdStr;
+                double  IdDbl = 0.0;
+                if ((*ObjPtr)->TryGetStringField(TEXT("id"), IdStr))
+                    Entry.Id = FCString::Atoi64(*IdStr);
+                else if ((*ObjPtr)->TryGetNumberField(TEXT("id"), IdDbl) && IdDbl >= 1.0)
+                    Entry.Id = static_cast<int64>(IdDbl);
+            }
             (*ObjPtr)->TryGetStringField(TEXT("uid"),        Entry.Uid);
             (*ObjPtr)->TryGetStringField(TEXT("playerName"), Entry.PlayerName);
             (*ObjPtr)->TryGetStringField(TEXT("note"),       Entry.Note);
@@ -189,7 +195,7 @@ bool UPlayerNoteRegistry::SaveToFile() const
     for (const FPlayerNoteEntry& N : Notes)
     {
         TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-        Obj->SetNumberField(TEXT("id"),         static_cast<double>(N.Id));
+        Obj->SetStringField(TEXT("id"),         FString::Printf(TEXT("%lld"), N.Id));
         Obj->SetStringField(TEXT("uid"),        N.Uid);
         Obj->SetStringField(TEXT("playerName"), N.PlayerName);
         Obj->SetStringField(TEXT("note"),       N.Note);
