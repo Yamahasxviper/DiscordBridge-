@@ -1962,7 +1962,8 @@ void UDiscordBridgeSubsystem::SendMessageBodyToChannel(const FString& TargetChan
 	                   FString::Printf(TEXT("Bot %s"), *Config.BotToken));
 	Request->SetContentAsString(BodyString);
 
-	Request->OnProcessRequestComplete().BindLambda(
+	Request->OnProcessRequestComplete().BindWeakLambda(
+		this,
 		[this, TargetChannelId, BodyString](FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bConnected)
 		{
 			if (!bConnected || !Resp.IsValid() ||

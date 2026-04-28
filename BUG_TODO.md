@@ -101,10 +101,11 @@ return value directly, eliminating the separate `GetWarningsForUid` call.
 ## DiscordBridge
 
 ### ✅ Fixed — `DiscordBridgeConfig.cpp` — `Mid()` called without verifying end indices
-**File:** `DiscordBridgeConfig.cpp` (ScheduledAnnouncement Message and ChannelId blocks)
+**File:** `DiscordBridgeConfig.cpp` (ScheduledAnnouncement Message and ChannelId blocks; `ChatRelayBlocklistReplacements` and `BotCommandAliases` `ExtractQuoted` lambdas)
 
 **Fix applied:** Added `End > Start` guard alongside the existing `End != INDEX_NONE` check.
-When the condition fails, a `UE_LOG(Warning, ...)` is emitted to flag the malformed config line.
+When the condition fails, a `UE_LOG(Warning, ...)` is emitted to flag the malformed config line (ScheduledAnnouncements).
+The two `ExtractQuoted` lambdas now also use `End == INDEX_NONE || End <= Start` so an empty-value entry (`Pattern=""`) is rejected instead of silently producing an empty-pattern replacement.
 
 ---
 
@@ -180,4 +181,15 @@ and directing callers to `bQueueMessagesWhileDisconnected` for guaranteed delive
 
 ---
 
-*Last updated: 2026-04-27. All bugs resolved.*
+### ✅ Fixed — `SendMessageBodyToChannel` uses `BindLambda([this])` instead of `BindWeakLambda`
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/DiscordBridgeSubsystem.cpp`
+
+**Fix applied:** Changed `BindLambda([this, TargetChannelId, BodyString]...)` to
+`BindWeakLambda(this, [this, TargetChannelId, BodyString]...)`.  The lambda accesses
+`Config.FallbackWebhookUrl` (a member of `this`); without the weak binding a use-after-free
+would occur if the subsystem is destroyed while an HTTP request is still in-flight (e.g. during
+server shutdown).  This is now consistent with every other HTTP callback in the file.
+
+---
+
+*Last updated: 2026-04-28. All bugs resolved.*
