@@ -413,7 +413,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 					if (Idx == INDEX_NONE) return false;
 					const int32 Start = Idx + Search.Len();
 					const int32 End   = Cleaned.Find(TEXT("\""), ESearchCase::IgnoreCase, ESearchDir::FromStart, Start);
-					if (End == INDEX_NONE) return false;
+					if (End == INDEX_NONE || End <= Start) return false;
 					Out = Cleaned.Mid(Start, End - Start);
 					return true;
 				};
@@ -1072,7 +1072,7 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 					if (Idx == INDEX_NONE) return false;
 					const int32 Start = Idx + Search.Len();
 					const int32 End   = Cleaned.Find(TEXT("\""), ESearchCase::IgnoreCase, ESearchDir::FromStart, Start);
-					if (End == INDEX_NONE) return false;
+					if (End == INDEX_NONE || End <= Start) return false;
 					Out = Cleaned.Mid(Start, End - Start);
 					return true;
 				};
