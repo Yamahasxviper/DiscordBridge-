@@ -3402,7 +3402,12 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 						Msg->SetStringField(TEXT("content"), DmText);
 						FString MsgBody;
 						TSharedRef<TJsonWriter<>> MW = TJsonWriterFactory<>::Create(&MsgBody);
-						FJsonSerializer::Serialize(Msg.ToSharedRef(), MW);
+						if (!FJsonSerializer::Serialize(Msg.ToSharedRef(), MW))
+						{
+							UE_LOG(LogTicketSystem, Warning,
+								TEXT("TicketSystem: JSON serialization failed for DM send — message not sent."));
+							return;
+						}
 						TSharedRef<IHttpRequest, ESPMode::ThreadSafe> SendReq =
 							FHttpModule::Get().CreateRequest();
 						SendReq->SetURL(FString::Printf(

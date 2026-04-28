@@ -1666,7 +1666,11 @@ void UDiscordBridgeSubsystem::SendMessageToChannel(const FString& TargetChannelI
 
 	FString BodyString;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
-	FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+	if (!FJsonSerializer::Serialize(Body.ToSharedRef(), Writer))
+	{
+		UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: JSON serialization failed in SendMessageToChannel."));
+		return;
+	}
 
 	const FString Url = FString::Printf(
 		TEXT("%s/channels/%s/messages"), *DiscordApiBase, *TargetChannelId);
@@ -1761,7 +1765,11 @@ void UDiscordBridgeSubsystem::RespondToInteraction(const FString& InteractionId,
 
 	FString BodyString;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
-	FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+	if (!FJsonSerializer::Serialize(Body.ToSharedRef(), Writer))
+	{
+		UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: JSON serialization failed in RespondToInteraction."));
+		return;
+	}
 
 	const FString Url = FString::Printf(
 		TEXT("%s/interactions/%s/%s/callback"),
@@ -1812,7 +1820,11 @@ void UDiscordBridgeSubsystem::FollowUpInteraction(const FString& InteractionToke
 
 	FString BodyString;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
-	FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+	if (!FJsonSerializer::Serialize(Body.ToSharedRef(), Writer))
+	{
+		UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: JSON serialization failed in FollowUpInteraction."));
+		return;
+	}
 
 	// POST /webhooks/{application_id}/{token} — creates a follow-up message.
 	const FString Url = FString::Printf(
@@ -1880,7 +1892,11 @@ void UDiscordBridgeSubsystem::RespondWithModal(const FString& InteractionId,
 
 	FString BodyString;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
-	FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+	if (!FJsonSerializer::Serialize(Body.ToSharedRef(), Writer))
+	{
+		UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: JSON serialization failed in RespondWithModal."));
+		return;
+	}
 
 	const FString Url = FString::Printf(
 		TEXT("%s/interactions/%s/%s/callback"),
@@ -1927,7 +1943,11 @@ void UDiscordBridgeSubsystem::SendMessageBodyToChannel(const FString& TargetChan
 
 	FString BodyString;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
-	FJsonSerializer::Serialize(MessageBody.ToSharedRef(), Writer);
+	if (!FJsonSerializer::Serialize(MessageBody.ToSharedRef(), Writer))
+	{
+		UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: JSON serialization failed in SendMessageBodyToChannel."));
+		return;
+	}
 
 	const FString Url = FString::Printf(
 		TEXT("%s/channels/%s/messages"), *DiscordApiBase, *TargetChannelId);
@@ -1991,7 +2011,11 @@ void UDiscordBridgeSubsystem::RespondToInteractionWithBody(const FString& Intera
 
 	FString BodyString;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
-	FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+	if (!FJsonSerializer::Serialize(Body.ToSharedRef(), Writer))
+	{
+		UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: JSON serialization failed in RespondToInteractionWithBody."));
+		return;
+	}
 
 	const FString Url = FString::Printf(
 		TEXT("%s/interactions/%s/%s/callback"),
@@ -2071,7 +2095,11 @@ void UDiscordBridgeSubsystem::RespondWithMultiFieldModal(const FString& Interact
 
 	FString BodyString;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
-	FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+	if (!FJsonSerializer::Serialize(Body.ToSharedRef(), Writer))
+	{
+		UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: JSON serialization failed in RespondWithMultiFieldModal."));
+		return;
+	}
 
 	const FString Url = FString::Printf(
 		TEXT("%s/interactions/%s/%s/callback"),
@@ -2234,7 +2262,13 @@ void UDiscordBridgeSubsystem::CreateDiscordGuildTextChannel(
 
 	FString BodyString;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
-	FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+	if (!FJsonSerializer::Serialize(Body.ToSharedRef(), Writer))
+	{
+		UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: JSON serialization failed in CreateDiscordGuildTextChannel."));
+		if (OnCreated)
+			OnCreated(TEXT(""));
+		return;
+	}
 
 	const FString Url = FString::Printf(
 		TEXT("%s/guilds/%s/channels"), *DiscordApiBase, *GuildId);
@@ -2293,9 +2327,20 @@ void UDiscordBridgeSubsystem::SendGatewayPayload(const TSharedPtr<FJsonObject>& 
 		return;
 	}
 
+	// Guard: ToSharedRef() asserts-crashes when the pointer is null.
+	if (!Payload.IsValid())
+	{
+		UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: SendGatewayPayload called with null Payload — skipped."));
+		return;
+	}
+
 	FString JsonString;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonString);
-	FJsonSerializer::Serialize(Payload.ToSharedRef(), Writer);
+	if (!FJsonSerializer::Serialize(Payload.ToSharedRef(), Writer))
+	{
+		UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: JSON serialization failed in SendGatewayPayload."));
+		return;
+	}
 
 	WebSocketClient->SendText(JsonString);
 }
@@ -2696,7 +2741,11 @@ void UDiscordBridgeSubsystem::SendGameMessageToDiscord(const FString& PlayerName
 
 	FString BodyString;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
-	FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+	if (!FJsonSerializer::Serialize(Body.ToSharedRef(), Writer))
+	{
+		UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: JSON serialization failed in SendGameMessageToDiscord."));
+		return;
+	}
 
 	// Helper lambda to POST the formatted content to a given Discord channel.
 	auto PostToChannel = [this, BodyString, FormattedContent, EffectivePlayerName](const FString& TargetChannelId)
@@ -3070,7 +3119,11 @@ void UDiscordBridgeSubsystem::SendPlayerJoinNotification(const FString& PlayerNa
 
 				FString BodyStr;
 				TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyStr);
-				FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+				if (!FJsonSerializer::Serialize(Body.ToSharedRef(), Writer))
+				{
+					UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: JSON serialization failed in join notification embed."));
+					return;
+				}
 
 				const FString Url = FString::Printf(
 					TEXT("%s/channels/%s/messages"), *DiscordApiBase, *EffectiveChannelId);
@@ -3156,7 +3209,11 @@ void UDiscordBridgeSubsystem::SendPlayerJoinNotification(const FString& PlayerNa
 
 			FString DmBodyStr;
 			TSharedRef<TJsonWriter<>> DmWriter = TJsonWriterFactory<>::Create(&DmBodyStr);
-			FJsonSerializer::Serialize(DmBody.ToSharedRef(), DmWriter);
+			if (!FJsonSerializer::Serialize(DmBody.ToSharedRef(), DmWriter))
+			{
+				UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: JSON serialization failed in SendPlayerJoinNotification DM."));
+				return;
+			}
 
 			TSharedRef<IHttpRequest, ESPMode::ThreadSafe> DmReq =
 				FHttpModule::Get().CreateRequest();
@@ -5816,7 +5873,11 @@ const int32 NumCommands = Commands.Num();
 FString BodyStr;
 {
 	TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&BodyStr);
-	FJsonSerializer::Serialize(Commands, W);
+	if (!FJsonSerializer::Serialize(Commands, W))
+	{
+		UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: JSON serialization failed in RegisterSlashCommands."));
+		return;
+	}
 }
 
 TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
@@ -6094,7 +6155,11 @@ void UDiscordBridgeSubsystem::HandleAutocompleteInteraction(
 	FString BodyString;
 	{
 		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
-		FJsonSerializer::Serialize(Body.ToSharedRef(), Writer);
+		if (!FJsonSerializer::Serialize(Body.ToSharedRef(), Writer))
+		{
+			UE_LOG(LogDiscordBridge, Warning, TEXT("DiscordBridge: JSON serialization failed in autocomplete response."));
+			return;
+		}
 	}
 
 	const FString Url = FString::Printf(
@@ -6440,13 +6505,30 @@ void UDiscordBridgeSubsystem::SaveWarnedExpiryNames() const
 
 	FString JsonStr;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonStr);
-	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
+	if (!FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
+	{
+		UE_LOG(LogDiscordBridge, Warning,
+			TEXT("DiscordBridge: JSON serialization failed in SaveWarnedExpiryNames — file not updated."));
+		return;
+	}
 
-	if (!FFileHelper::SaveStringToFile(JsonStr, *Path,
+	// Write to a temporary file first, then atomically rename over the destination
+	// so a server crash mid-write cannot corrupt the saved data.
+	const FString TmpPath = Path + TEXT(".tmp");
+	if (!FFileHelper::SaveStringToFile(JsonStr, *TmpPath,
 		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 	{
 		UE_LOG(LogDiscordBridge, Warning,
-			TEXT("DiscordBridge: failed to save WarnedExpiryNames to %s"), *Path);
+			TEXT("DiscordBridge: failed to write temp file %s for WarnedExpiryNames"), *TmpPath);
+		return;
+	}
+
+	PF.DeleteFile(*Path);
+	if (!PF.MoveFile(*Path, *TmpPath))
+	{
+		UE_LOG(LogDiscordBridge, Warning,
+			TEXT("DiscordBridge: failed to atomically rename '%s' → '%s' for WarnedExpiryNames"),
+			*TmpPath, *Path);
 	}
 }
 
