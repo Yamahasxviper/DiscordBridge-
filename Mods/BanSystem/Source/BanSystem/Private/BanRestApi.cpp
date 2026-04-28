@@ -46,7 +46,7 @@ namespace BanJson
     static TSharedPtr<FJsonObject> EntryToJson(const FBanEntry& E)
     {
         TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-        Obj->SetNumberField(TEXT("id"),          static_cast<double>(E.Id));
+        Obj->SetStringField(TEXT("id"),          FString::Printf(TEXT("%lld"), E.Id));
         Obj->SetStringField(TEXT("uid"),         E.Uid);
         Obj->SetStringField(TEXT("playerUID"),   E.PlayerUID);
         Obj->SetStringField(TEXT("platform"),    E.Platform);
@@ -198,7 +198,7 @@ namespace BanJson
     static TSharedPtr<FJsonObject> WarningToJson(const FWarningEntry& W)
     {
         TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-        Obj->SetNumberField(TEXT("id"),         static_cast<double>(W.Id));
+        Obj->SetStringField(TEXT("id"),         FString::Printf(TEXT("%lld"), W.Id));
         Obj->SetStringField(TEXT("uid"),        W.Uid);
         Obj->SetStringField(TEXT("playerName"), W.PlayerName);
         Obj->SetStringField(TEXT("reason"),     W.Reason);
@@ -211,7 +211,7 @@ namespace BanJson
     static TSharedPtr<FJsonObject> AppealToJson(const FBanAppealEntry& A)
     {
         TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-        Obj->SetNumberField(TEXT("id"),          static_cast<double>(A.Id));
+        Obj->SetStringField(TEXT("id"),          FString::Printf(TEXT("%lld"), A.Id));
         Obj->SetStringField(TEXT("uid"),         A.Uid);
         Obj->SetStringField(TEXT("reason"),      A.Reason);
         Obj->SetStringField(TEXT("contactInfo"), A.ContactInfo);
@@ -235,7 +235,7 @@ namespace BanJson
     static TSharedPtr<FJsonObject> ScheduledToJson(const FScheduledBanEntry& S)
     {
         TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-        Obj->SetNumberField(TEXT("id"),              static_cast<double>(S.Id));
+        Obj->SetStringField(TEXT("id"),              FString::Printf(TEXT("%lld"), S.Id));
         Obj->SetStringField(TEXT("uid"),             S.Uid);
         Obj->SetStringField(TEXT("playerName"),      S.PlayerName);
         Obj->SetStringField(TEXT("reason"),          S.Reason);
@@ -250,7 +250,7 @@ namespace BanJson
     static TSharedPtr<FJsonObject> AuditToJson(const FAuditEntry& E)
     {
         TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-        Obj->SetNumberField(TEXT("id"),         static_cast<double>(E.Id));
+        Obj->SetStringField(TEXT("id"),         FString::Printf(TEXT("%lld"), E.Id));
         Obj->SetStringField(TEXT("action"),     E.Action);
         Obj->SetStringField(TEXT("targetUid"),  E.TargetUid);
         Obj->SetStringField(TEXT("targetName"), E.TargetName);
@@ -1230,7 +1230,7 @@ void UBanRestApi::RegisterRoutes()
 
             TSharedPtr<FJsonObject> Ok = MakeShared<FJsonObject>();
             Ok->SetBoolField(TEXT("success"), true);
-            Ok->SetNumberField(TEXT("id"), static_cast<double>(Id));
+            Ok->SetStringField(TEXT("id"), FString::Printf(TEXT("%lld"), Id));
             OnComplete(BanJson::Json(BanJson::ObjectToString(Ok)));
             return true;
         }));
@@ -1492,11 +1492,22 @@ void UBanRestApi::RegisterRoutes()
                 return true;
             }
 
-            FBanDiscordNotifier::NotifyBanCreated(Entry);
-            if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-                AuditLog->LogAction(TEXT("ban"), Entry.Uid, IpAddress, BannedBy, BannedBy, Reason);
+            // Fetch the row back so the response includes the assigned ID.
+            // (AddBan assigns the ID inside its own local copy; Entry.Id is still 0 here.)
+            FBanEntry Saved;
+            if (!DB->GetBanByUid(Entry.Uid, Saved))
+            {
+                UE_LOG(LogBanRestApi, Warning,
+                    TEXT("BanRestApi: POST /bans/ip — GetBanByUid failed for '%s' immediately after AddBan; returning in-memory entry"),
+                    *Entry.Uid);
+                Saved = Entry;
+            }
 
-            auto Resp = BanJson::Json(BanJson::ObjectToString(BanJson::EntryToJson(Entry)));
+            FBanDiscordNotifier::NotifyBanCreated(Saved);
+            if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+                AuditLog->LogAction(TEXT("ban"), Saved.Uid, IpAddress, TEXT(""), BannedBy, Reason);
+
+            auto Resp = BanJson::Json(BanJson::ObjectToString(BanJson::EntryToJson(Saved)));
             Resp->Code = EHttpServerResponseCodes::Created;
             Done(MoveTemp(Resp));
             return true;
@@ -1860,7 +1871,7 @@ void UBanRestApi::RegisterRoutes()
             }
 
             TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-            Obj->SetNumberField(TEXT("id"),          static_cast<double>(NewEntry.Id));
+            Obj->SetStringField(TEXT("id"),          FString::Printf(TEXT("%lld"), NewEntry.Id));
             Obj->SetStringField(TEXT("uid"),         NewEntry.Uid);
             Obj->SetStringField(TEXT("reason"),      NewEntry.Reason);
             Obj->SetStringField(TEXT("contactInfo"), NewEntry.ContactInfo);
