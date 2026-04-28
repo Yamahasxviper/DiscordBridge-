@@ -374,9 +374,13 @@ void UBanRestApi::StopServer()
 
 void UBanRestApi::RegisterRoutes()
 {
-    // Use a weak pointer so that route lambdas (stored in the HTTP router and
-    // potentially called on the HTTP thread) can safely detect when the game
-    // instance has been destroyed and bail out rather than crash.
+    // THREADING NOTE: UE's FHttpServerModule enqueues incoming HTTP requests and
+    // dispatches route handler callbacks on the game thread via its own FTSTicker.
+    // All lambdas registered below therefore run on the game thread — subsystem
+    // lookups, delegate broadcasts (OnBanAdded / OnBanRemoved), timer operations,
+    // and PlayerController iteration are all safe without additional locking.
+    // The WeakGI capture below handles the case where the game instance is
+    // destroyed before a pending request is dispatched.
     TWeakObjectPtr<UGameInstance> WeakGI(GetGameInstance());
 
     // ── GET /health ──────────────────────────────────────────────────────────

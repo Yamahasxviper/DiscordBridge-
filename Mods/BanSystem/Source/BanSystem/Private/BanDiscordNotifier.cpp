@@ -246,7 +246,7 @@ void FBanDiscordNotifier::NotifyAppealSubmitted(const FBanAppealEntry& Appeal)
     // WebSocket push
     {
         TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-        Obj->SetNumberField(TEXT("appealId"),    static_cast<double>(Appeal.Id));
+        Obj->SetStringField(TEXT("appealId"),    FString::Printf(TEXT("%lld"), Appeal.Id));
         Obj->SetStringField(TEXT("uid"),         Appeal.Uid);
         Obj->SetStringField(TEXT("contactInfo"), Appeal.ContactInfo);
         Obj->SetStringField(TEXT("reason"),      Appeal.Reason);
@@ -348,7 +348,7 @@ void FBanDiscordNotifier::NotifyAppealReviewed(const FBanAppealEntry& Appeal)
         }
 
         TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-        Obj->SetNumberField(TEXT("appealId"),   static_cast<double>(Appeal.Id));
+        Obj->SetStringField(TEXT("appealId"),   FString::Printf(TEXT("%lld"), Appeal.Id));
         Obj->SetStringField(TEXT("uid"),        Appeal.Uid);
         Obj->SetStringField(TEXT("status"),     StatusStr);
         Obj->SetStringField(TEXT("reviewedBy"), Appeal.ReviewedBy);

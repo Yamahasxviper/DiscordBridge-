@@ -312,9 +312,17 @@ void UBanDatabase::LoadFromFile()
         return;
     }
 
-    double NextIdDbl = 1.0;
-    Root->TryGetNumberField(TEXT("nextId"), NextIdDbl);
-    const int64 NewNextId = FMath::Max((int64)1, static_cast<int64>(NextIdDbl));
+    // Prefer string format (written since this fix); fall back to legacy double
+    // format for databases written by older builds.  int64 values above 2^53
+    // lose precision when stored as double, so the canonical format is now a
+    // decimal string ("nextId": "12345").
+    int64 NewNextId = 1;
+    FString NextIdStr;
+    double  NextIdDbl = 1.0;
+    if (Root->TryGetStringField(TEXT("nextId"), NextIdStr))
+        NewNextId = FMath::Max((int64)1, FCString::Atoi64(*NextIdStr));
+    else if (Root->TryGetNumberField(TEXT("nextId"), NextIdDbl))
+        NewNextId = FMath::Max((int64)1, static_cast<int64>(NextIdDbl));
 
     // Build the new ban list into a local array first so that concurrent readers
     // never observe an empty list during the parse phase.  The live Bans field is
@@ -359,7 +367,10 @@ bool UBanDatabase::SaveToFile() const
         BanArray.Add(MakeShared<FJsonValueObject>(BanDbJson::EntryToJson(E)));
 
     TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
-    Root->SetNumberField(TEXT("nextId"), static_cast<double>(NextId));
+    // Store nextId as a decimal string so int64 values above 2^53 round-trip
+    // without precision loss.  Old builds that wrote a double are handled in
+    // LoadFromFile() by the string-first / number-fallback pattern.
+    Root->SetStringField(TEXT("nextId"), FString::Printf(TEXT("%lld"), NextId));
     Root->SetArrayField(TEXT("bans"), BanArray);
 
     FString JsonStr;

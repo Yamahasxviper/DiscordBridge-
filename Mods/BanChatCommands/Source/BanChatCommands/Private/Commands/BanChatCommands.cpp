@@ -777,6 +777,10 @@ namespace BanChat
      * Per-player command cooldown tracker.
      * Maps "commandName:uid" → last-used FDateTime.
      * Cleaned up lazily; not persisted across restarts (intentional).
+     *
+     * THREADING: Accessed exclusively from the game thread (SML dispatches
+     * ExecuteCommand_Implementation on the game thread).  Do NOT touch this
+     * map from any other thread.
      */
     static TMap<FString, FDateTime> CommandCooldowns;
 
@@ -791,6 +795,8 @@ namespace BanChat
                              int32 CooldownSeconds, const FString& SenderUid,
                              int32* OutRemainingSecs = nullptr)
     {
+        // CommandCooldowns is game-thread-only; catch any future SML change early.
+        check(IsInGameThread());
         if (CooldownSeconds <= 0) return false;
         if (!Sender->IsPlayerSender()) return false; // console is never throttled
 
@@ -827,6 +833,9 @@ namespace BanChat
     /**
      * Admin ban rate-limit tracker.
      * Maps AdminUid → array of timestamps of recent bans.
+     *
+     * THREADING: Accessed exclusively from the game thread.
+     * Do NOT touch this map from any other thread.
      */
     static TMap<FString, TArray<FDateTime>> AdminBanTimestamps;
 
@@ -836,6 +845,8 @@ namespace BanChat
      */
     static bool IsBanRateLimited(UCommandSender* Sender, const FString& AdminUid)
     {
+        // AdminBanTimestamps is game-thread-only; catch any future SML change early.
+        check(IsInGameThread());
         const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
         if (!Cfg || Cfg->AdminBanRateLimitCount <= 0) return false;
 
@@ -3582,6 +3593,9 @@ EExecutionStatus AMuteReasonChatCommand::ExecuteCommand_Implementation(
 //  AFreezeChatCommand  — /freeze / /spectator
 // ─────────────────────────────────────────────────────────────────────────────
 
+// THREADING: FrozenPlayerUids is accessed exclusively from the game thread
+// (ExecuteCommand_Implementation, PostLoginHandle, and LogoutHookHandle all run
+// on the game thread).  Do NOT read or write this set from any other thread.
 TSet<FString> AFreezeChatCommand::FrozenPlayerUids;
 
 AFreezeChatCommand::AFreezeChatCommand()
@@ -3596,6 +3610,9 @@ AFreezeChatCommand::AFreezeChatCommand()
 EExecutionStatus AFreezeChatCommand::ExecuteCommand_Implementation(
     UCommandSender* Sender, const TArray<FString>& Arguments, const FString& Label)
 {
+    // FrozenPlayerUids is game-thread-only; catch any future SML change early.
+    check(IsInGameThread());
+
     FString AdminId;
     if (!BanChat::IsAdminSender(Sender, AdminId))
         return EExecutionStatus::INSUFFICIENT_PERMISSIONS;

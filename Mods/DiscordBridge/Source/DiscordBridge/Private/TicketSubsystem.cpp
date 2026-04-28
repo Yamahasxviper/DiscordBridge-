@@ -4277,7 +4277,7 @@ void UTicketSubsystem::SaveTicketState() const
 		// Persist the appeal registry ID so approve/deny buttons survive restart.
 		const int64* AppealIdSave = OpenerToAppealId.Find(Pair.Value);
 		if (AppealIdSave && *AppealIdSave > 0)
-			Entry->SetNumberField(TEXT("appeal_id"), static_cast<double>(*AppealIdSave));
+			Entry->SetStringField(TEXT("appeal_id"), FString::Printf(TEXT("%lld"), *AppealIdSave));
 
 		// Persist tags.
 		const TArray<FString>* SaveTags = TicketChannelToTags.Find(Pair.Key);
@@ -4388,25 +4388,26 @@ void UTicketSubsystem::SaveTicketState() const
 	// Write to a temporary file first, then atomically rename over the
 	// destination so a server crash mid-write cannot corrupt the state file.
 	const FString TmpPath = StatePath + TEXT(".tmp");
-	if (FFileHelper::SaveStringToFile(JsonContent, *TmpPath,
+	if (!FFileHelper::SaveStringToFile(JsonContent, *TmpPath,
 		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
-	{
-		// Some platforms require the destination to be absent for MoveFile.
-		PlatformFile.DeleteFile(*StatePath);
-		if (!PlatformFile.MoveFile(*StatePath, *TmpPath))
-		{
-			UE_LOG(LogTicketSystem, Warning,
-			       TEXT("TicketSystem: Failed to atomically rename '%s' → '%s'."),
-			       *TmpPath, *StatePath);
-		}
-	}
-	else
 	{
 		UE_LOG(LogTicketSystem, Warning,
 		       TEXT("TicketSystem: Failed to save active ticket state to '%s'."),
 		       *TmpPath);
+		return;
 	}
-}
+	// Atomically replace the live state file with the newly written temp file.
+	// IFileManager::Move with bReplace=true is a single OS-level rename/replace
+	// call — no separate DeleteFile step is needed, which means there is no
+	// window where the state file is absent and a subsequent MoveFile failure
+	// would leave it permanently missing.
+	if (!IFileManager::Get().Move(*StatePath, *TmpPath, /*bReplace=*/true))
+	{
+		UE_LOG(LogTicketSystem, Warning,
+		       TEXT("TicketSystem: Failed to atomically rename '%s' → '%s'."),
+		       *TmpPath, *StatePath);
+		IFileManager::Get().Delete(*TmpPath);
+	}
 
 void UTicketSubsystem::LoadTicketState()
 {
@@ -4483,9 +4484,16 @@ void UTicketSubsystem::LoadTicketState()
 		if ((*EntryObj)->TryGetStringField(TEXT("appeal_eos_uid"), AppealEosLoad) && !AppealEosLoad.IsEmpty())
 			OpenerToEosUid.Add(OpenerId, AppealEosLoad);
 		// Restore the appeal registry ID so approve/deny buttons work after restart.
-		double AppealIdLoad = 0.0;
-		if ((*EntryObj)->TryGetNumberField(TEXT("appeal_id"), AppealIdLoad) && AppealIdLoad > 0.0)
-			OpenerToAppealId.Add(OpenerId, static_cast<int64>(AppealIdLoad));
+		// Prefer string format (written since precision-loss fix); fall back to
+		// legacy double for state files written by older builds.
+		{
+			FString AppealIdStr;
+			double  AppealIdLoad = 0.0;
+			if ((*EntryObj)->TryGetStringField(TEXT("appeal_id"), AppealIdStr) && !AppealIdStr.IsEmpty())
+				OpenerToAppealId.Add(OpenerId, FCString::Atoi64(*AppealIdStr));
+			else if ((*EntryObj)->TryGetNumberField(TEXT("appeal_id"), AppealIdLoad) && AppealIdLoad > 0.0)
+				OpenerToAppealId.Add(OpenerId, static_cast<int64>(AppealIdLoad));
+		}
 		if ((*EntryObj)->TryGetStringField(TEXT("open_time"), OpenTimeStr) && !OpenTimeStr.IsEmpty())
 		{
 			FDateTime OT;
@@ -5092,20 +5100,21 @@ return;
 // Use the same atomic tmp→rename pattern as SaveTicketState so a server
 // crash mid-write cannot corrupt the blacklist file.
 const FString TmpPath = Path + TEXT(".tmp");
-if (FFileHelper::SaveStringToFile(JsonContent, *TmpPath,
+if (!FFileHelper::SaveStringToFile(JsonContent, *TmpPath,
 	FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 {
-PF.DeleteFile(*Path);
-if (!PF.MoveFile(*Path, *TmpPath))
+UE_LOG(LogTicketSystem, Warning,
+       TEXT("TicketSystem: Failed to save blacklist to '%s'."), *TmpPath);
+return;
+}
+// IFileManager::Move with bReplace=true atomically replaces the destination
+// without a prior DeleteFile, eliminating the data-loss window where the live
+// file has been deleted but the rename has not yet succeeded.
+if (!IFileManager::Get().Move(*Path, *TmpPath, /*bReplace=*/true))
 {
 UE_LOG(LogTicketSystem, Warning,
        TEXT("TicketSystem: Failed to atomically rename '%s' → '%s'."),
        *TmpPath, *Path);
-}
-}
-else
-{
-UE_LOG(LogTicketSystem, Warning,
-       TEXT("TicketSystem: Failed to save blacklist to '%s'."), *TmpPath);
+IFileManager::Get().Delete(*TmpPath);
 }
 }
