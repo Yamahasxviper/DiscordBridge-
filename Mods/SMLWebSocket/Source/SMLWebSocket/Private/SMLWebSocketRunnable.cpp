@@ -589,6 +589,7 @@ bool FSMLWebSocketRunnable::ResolveAndConnect(const FString& Host, int32 Port)
 	if (!Socket->Connect(*Addr))
 	{
 		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: Connect() failed to %s:%d"), *ActualHost, ActualPort);
+		CleanupConnection();
 		return false;
 	}
 
@@ -597,6 +598,7 @@ bool FSMLWebSocketRunnable::ResolveAndConnect(const FString& Host, int32 Port)
 	{
 		if (!ConnectThroughProxy())
 		{
+			CleanupConnection();
 			return false;
 		}
 	}

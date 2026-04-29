@@ -593,6 +593,11 @@ void UDiscordBridgeSubsystem::OnWebSocketClosed(int32 StatusCode, const FString&
 
 	if (bTerminal && WebSocketClient)
 	{
+		// Clear bAutoReconnect before Close() so that the subsequent
+		// Internal_OnClosed callback sets the connection state to Disconnected
+		// rather than Connecting (which would leave it stuck forever since the
+		// reconnect loop exits via bUserInitiatedClose).
+		WebSocketClient->bAutoReconnect = false;
 		// Calling Close() sets bUserInitiatedClose on the background thread,
 		// which causes the reconnect loop to exit without retrying.
 		WebSocketClient->Close(1000, FString::Printf(TEXT("Terminal Discord close code %d"), StatusCode));
