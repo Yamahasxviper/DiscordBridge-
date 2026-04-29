@@ -440,3 +440,20 @@ highest Id is deleted and the server restarts.
 
 *Last updated: 2026-04-29. All 1 round-5 bugs resolved.*
 
+---
+
+## Round 6 — Additional Scan (2026-04-29)
+
+### ✅ Fixed — Ticket feedback stats write is non-atomic (BUG-01)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/TicketSubsystem.cpp`
+
+**Fix applied:** The ticket feedback stats write (the only remaining direct `SaveStringToFile`
+in the entire codebase) now uses the same atomic write-to-`.tmp`-then-`IFileManager::Move(bReplace=true)`
+pattern already used by `SaveTicketState`, `SaveTicketBlacklist`, and every other registry.
+If the process dies mid-write the `.tmp` file is left behind (and cleaned up on the next
+successful write); the live `feedback_stats.json` is never left in a partial/truncated state.
+
+---
+
+*Last updated: 2026-04-29. All 1 round-6 bugs resolved.*
+
