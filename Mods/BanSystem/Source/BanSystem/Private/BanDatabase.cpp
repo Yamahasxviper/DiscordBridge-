@@ -261,11 +261,33 @@ void UBanDatabase::ReloadIfChanged()
 
     LoadFromFile();
 
+    // Guard: if another external edit (T2) arrived while LoadFromFile was running,
+    // the file mtime will have advanced past NewModTime (T1).  Without this check,
+    // PruneExpiredBans's SaveToFile (T3 > T2) would overwrite the T2 content and
+    // update LastKnownFileModTime to T3, making the T2 edit permanently invisible
+    // to every subsequent ReloadIfChanged call (T3 == T3 → early-return forever).
+    bool bConcurrentEditDuringLoad = false;
+    {
+        FScopeLock Lock(&DbMutex);
+        const FDateTime PostLoadMtime = IFileManager::Get().GetTimeStamp(*DbPath);
+        bConcurrentEditDuringLoad = (PostLoadMtime != NewModTime && PostLoadMtime != FDateTime(0));
+    }
+
     // Prune any bans that expired while the file was externally edited and
     // immediately write the cleaned list back so the file stays consistent.
     // PruneExpiredBans() calls SaveToFile() when bans are removed, which in
     // turn updates LastKnownFileModTime to the post-prune file mtime.
     const int32 Pruned = PruneExpiredBans();
+
+    if (bConcurrentEditDuringLoad)
+    {
+        // SaveToFile (called by PruneExpiredBans) may have set LastKnownFileModTime
+        // to T3 > T2, permanently hiding the T2 edit.  Reset to FDateTime(0) so
+        // the next ReloadIfChanged tick sees T_current != FDateTime(0) and triggers
+        // another load, picking up any content that the prune write clobbered.
+        FScopeLock Lock(&DbMutex);
+        LastKnownFileModTime = FDateTime(0);
+    }
 
     UE_LOG(LogBanDatabase, Log,
         TEXT("BanDatabase: reload complete (pruned %d expired)"), Pruned);
