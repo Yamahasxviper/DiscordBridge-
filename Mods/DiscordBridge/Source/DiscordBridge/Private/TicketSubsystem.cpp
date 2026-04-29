@@ -1005,11 +1005,19 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 			if (FJsonSerializer::Serialize(Stats.ToSharedRef(), SW))
 			{
 				FPlatformFileManager::Get().GetPlatformFile().CreateDirectoryTree(*FPaths::GetPath(StatsPath));
-				if (!FFileHelper::SaveStringToFile(OutStats, *StatsPath,
+				const FString StatsTmpPath = StatsPath + TEXT(".tmp");
+				if (!FFileHelper::SaveStringToFile(OutStats, *StatsTmpPath,
 					FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 				{
 					UE_LOG(LogTicketSystem, Error,
-					       TEXT("TicketSystem: Failed to write feedback stats to '%s'."), *StatsPath);
+					       TEXT("TicketSystem: Failed to write temp file '%s' for feedback stats."), *StatsTmpPath);
+				}
+				else if (!IFileManager::Get().Move(*StatsPath, *StatsTmpPath, /*bReplace=*/true))
+				{
+					IFileManager::Get().Delete(*StatsTmpPath);
+					UE_LOG(LogTicketSystem, Error,
+					       TEXT("TicketSystem: Failed to atomically rename '%s' to '%s' for feedback stats."),
+					       *StatsTmpPath, *StatsPath);
 				}
 			}
 		}
