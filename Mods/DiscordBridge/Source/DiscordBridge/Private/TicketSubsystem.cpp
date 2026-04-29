@@ -1401,17 +1401,69 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 	}
 
 	// ── Prevent duplicate tickets ─────────────────────────────────────────────
-	if (OpenerToTicketChannel.Contains(DiscordUserId))
+	// When bAllowMultipleTicketTypes is enabled, a user may open one ticket per
+	// type.  In that mode we check OpenerToTicketsByType for the specific ticket
+	// type the user is about to open instead of using the single-channel map.
 	{
-		const FString ExistingChanId = OpenerToTicketChannel.FindRef(DiscordUserId);
-		Bridge->RespondToInteraction(InteractionId, InteractionToken,
-			/*type=*/4,
-			FString::Printf(
-				TEXT(":warning: You already have an open ticket (<#%s>). "
-				     "Please continue there, or close it before opening a new one."),
-				*ExistingChanId),
-			/*bEphemeral=*/true);
-		return;
+		FString ExistChanId;
+		bool    bDuplicate = false;
+
+		if (Config.bAllowMultipleTicketTypes)
+		{
+			// Derive the intended ticket type from the button CustomId so we
+			// can check for a same-type duplicate in OpenerToTicketsByType.
+			FString IntendedType;
+			if      (CustomId == TEXT("ticket_wl"))          IntendedType = TEXT("whitelist");
+			else if (CustomId == TEXT("ticket_help"))         IntendedType = TEXT("help");
+			else if (CustomId == TEXT("ticket_report"))       IntendedType = TEXT("report");
+			else if (CustomId == TEXT("ticket_appeal"))       IntendedType = TEXT("banappeal");
+			else if (CustomId == TEXT("ticket_muteappeal"))   IntendedType = TEXT("muteappeal");
+			else if (CustomId.StartsWith(TEXT("ticket_cr_")))
+			{
+				const int32 CrIdx =
+					FCString::Atoi(*CustomId.Mid(FCString::Strlen(TEXT("ticket_cr_"))));
+				if (Config.CustomTicketReasons.IsValidIndex(CrIdx))
+				{
+					FString CrLabel, CrDesc;
+					Config.CustomTicketReasons[CrIdx].Split(TEXT("|"), &CrLabel, &CrDesc);
+					CrLabel.TrimStartAndEndInline();
+					if (!CrLabel.IsEmpty())
+						IntendedType = SanitizeUsernameForChannel(CrLabel);
+				}
+			}
+
+			if (!IntendedType.IsEmpty())
+			{
+				if (const TMap<FString, FString>* TypeMap = OpenerToTicketsByType.Find(DiscordUserId))
+				{
+					if (const FString* ExistCh = TypeMap->Find(IntendedType))
+					{
+						ExistChanId = *ExistCh;
+						bDuplicate  = true;
+					}
+				}
+			}
+		}
+		else
+		{
+			if (OpenerToTicketChannel.Contains(DiscordUserId))
+			{
+				ExistChanId = OpenerToTicketChannel.FindRef(DiscordUserId);
+				bDuplicate  = true;
+			}
+		}
+
+		if (bDuplicate)
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken,
+				/*type=*/4,
+				FString::Printf(
+					TEXT(":warning: You already have an open ticket (<#%s>). "
+					     "Please continue there, or close it before opening a new one."),
+					*ExistChanId),
+				/*bEphemeral=*/true);
+			return;
+		}
 	}
 
 	// ── Open-ticket buttons ───────────────────────────────────────────────────
@@ -1849,18 +1901,66 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 	// Backward-compatible single-field reason.
 	FString Reason = ModalFields.FindRef(TEXT("ticket_reason"));
 
-	// Prevent duplicate tickets.
-	if (OpenerToTicketChannel.Contains(DiscordUserId))
+	// Prevent duplicate tickets.  When bAllowMultipleTicketTypes is enabled,
+	// only block if the user already has an open ticket of the same type.
 	{
-		const FString ExistingChanId = OpenerToTicketChannel.FindRef(DiscordUserId);
-		Bridge->RespondToInteraction(InteractionId, InteractionToken,
-			/*type=*/4,
-			FString::Printf(
-				TEXT(":warning: You already have an open ticket (<#%s>). "
-				     "Please continue there, or close it before opening a new one."),
-				*ExistingChanId),
-			/*bEphemeral=*/true);
-		return;
+		FString ExistChanId;
+		bool    bDuplicate = false;
+
+		if (Config.bAllowMultipleTicketTypes)
+		{
+			FString IntendedType;
+			if      (ModalCustomId == TEXT("ticket_modal:wl"))          IntendedType = TEXT("whitelist");
+			else if (ModalCustomId == TEXT("ticket_modal:help"))         IntendedType = TEXT("help");
+			else if (ModalCustomId == TEXT("ticket_modal:report"))       IntendedType = TEXT("report");
+			else if (ModalCustomId == TEXT("ticket_modal:appeal"))       IntendedType = TEXT("banappeal");
+			else if (ModalCustomId == TEXT("ticket_modal:muteappeal"))   IntendedType = TEXT("muteappeal");
+			else if (ModalCustomId.StartsWith(TEXT("ticket_modal:cr_")))
+			{
+				const int32 CrIdx =
+					FCString::Atoi(*ModalCustomId.Mid(FCString::Strlen(TEXT("ticket_modal:cr_"))));
+				if (Config.CustomTicketReasons.IsValidIndex(CrIdx))
+				{
+					FString CrLabel, CrDesc;
+					Config.CustomTicketReasons[CrIdx].Split(TEXT("|"), &CrLabel, &CrDesc);
+					CrLabel.TrimStartAndEndInline();
+					if (!CrLabel.IsEmpty())
+						IntendedType = SanitizeUsernameForChannel(CrLabel);
+				}
+			}
+
+			if (!IntendedType.IsEmpty())
+			{
+				if (const TMap<FString, FString>* TypeMap = OpenerToTicketsByType.Find(DiscordUserId))
+				{
+					if (const FString* ExistCh = TypeMap->Find(IntendedType))
+					{
+						ExistChanId = *ExistCh;
+						bDuplicate  = true;
+					}
+				}
+			}
+		}
+		else
+		{
+			if (OpenerToTicketChannel.Contains(DiscordUserId))
+			{
+				ExistChanId = OpenerToTicketChannel.FindRef(DiscordUserId);
+				bDuplicate  = true;
+			}
+		}
+
+		if (bDuplicate)
+		{
+			Bridge->RespondToInteraction(InteractionId, InteractionToken,
+				/*type=*/4,
+				FString::Printf(
+					TEXT(":warning: You already have an open ticket (<#%s>). "
+					     "Please continue there, or close it before opening a new one."),
+					*ExistChanId),
+				/*bEphemeral=*/true);
+			return;
+		}
 	}
 
 	if (ModalCustomId == TEXT("ticket_modal:wl"))
@@ -4697,7 +4797,24 @@ void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
 	IDiscordBridgeProvider* Bridge = GetBridge();
 	if (!Bridge) return;
 
-	const FString ChannelId = GetTicketChannelForOpener(DiscordUserId);
+	// When bAllowMultipleTicketTypes is enabled OpenerToTicketChannel holds only
+	// the most recently opened ticket, which may not be the appeal ticket.
+	// Prefer looking up the channel directly from OpenerToTicketsByType so the
+	// correct appeal channel is always closed even when the user has several
+	// tickets open simultaneously.
+	FString ChannelId;
+	if (Config.bAllowMultipleTicketTypes)
+	{
+		if (const TMap<FString, FString>* TypeMap = OpenerToTicketsByType.Find(DiscordUserId))
+		{
+			if (const FString* Ch = TypeMap->Find(TEXT("banappeal")))
+				ChannelId = *Ch;
+			else if (const FString* Ch2 = TypeMap->Find(TEXT("muteappeal")))
+				ChannelId = *Ch2;
+		}
+	}
+	if (ChannelId.IsEmpty())
+		ChannelId = GetTicketChannelForOpener(DiscordUserId);
 	if (ChannelId.IsEmpty()) return;
 
 	// Remove from all tracking maps before deleting.
