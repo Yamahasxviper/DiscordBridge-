@@ -231,12 +231,12 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
             if (bPermanentMatch && bReasonMatch && bCategoryMatch && bExpiryMatch)
                 return; // Identical — nothing to update.
             // Fields changed — remove the stale record and fall through to re-add.
-            // Register the UID in PeerAppliedUnbanUids so OnLocalBanRemoved does
-            // not re-broadcast this peer-sourced removal back to peers.
-            // Pass bSilent=true so BanDiscordSubsystem's BanRemovedHandle does NOT
-            // post a spurious "✅ unbanned" message; the subsequent AddBan will
-            // post the real update notification instead.
-            PeerAppliedUnbanUids.Add(Uid);
+            // bSilent=true suppresses OnBanRemoved so BanDiscordSubsystem does NOT
+            // post a spurious "✅ unbanned" message; the subsequent AddBan posts the
+            // real update notification.  Do NOT add Uid to PeerAppliedUnbanUids here:
+            // because bSilent=true means OnBanRemoved never fires, the guard entry
+            // would never be consumed and would silently suppress the next legitimate
+            // local unban broadcast for this UID.
             DB->RemoveBanByUid(Uid, /*bSilent=*/true);
         }
 
