@@ -6510,6 +6510,7 @@ return;
 RespondToInteraction(InteractionId, InteractionToken, 5, FString(), true);
 OnDiscordInteractionReceived.Broadcast(DataObj);
 }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WarnedExpiryNames persistence
