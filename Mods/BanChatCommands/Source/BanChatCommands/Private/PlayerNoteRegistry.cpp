@@ -178,13 +178,29 @@ void UPlayerNoteRegistry::LoadFromFile()
         }
     }
 
-    // Restore the O(1) counter from loaded data so AddNote never reuses an Id.
-    // When the highest stored Id is INT64_MAX the next Id would overflow, so we
-    // use 0 as the "exhausted" sentinel (AddNote checks for 0, not INT64_MAX,
-    // allowing INT64_MAX itself to be the last valid allocatable Id).
-    NextId = 1;
-    for (const FPlayerNoteEntry& N : Notes)
-        if (N.Id >= NextId) NextId = (N.Id < INT64_MAX) ? N.Id + 1 : 0;
+    // Restore the NextId counter.  Prefer the persisted "nextId" field (written
+    // since BUG-09 fix) over the scan-based reconstruction so that deleting the
+    // entry that happened to hold the highest Id does not regress the counter and
+    // cause duplicate-Id allocation.  Fall back to the scan for files written by
+    // older builds that did not persist nextId.
+    FString StoredNextIdStr;
+    double  StoredNextIdDbl = 0.0;
+    if (Root->TryGetStringField(TEXT("nextId"), StoredNextIdStr) && !StoredNextIdStr.IsEmpty())
+    {
+        const int64 Parsed = FCString::Atoi64(*StoredNextIdStr);
+        NextId = (Parsed > 0) ? Parsed : 1;
+    }
+    else if (Root->TryGetNumberField(TEXT("nextId"), StoredNextIdDbl) && StoredNextIdDbl >= 1.0)
+    {
+        NextId = static_cast<int64>(StoredNextIdDbl);
+    }
+    else
+    {
+        // Legacy files without a nextId field: reconstruct from the max stored Id.
+        NextId = 1;
+        for (const FPlayerNoteEntry& N : Notes)
+            if (N.Id >= NextId) NextId = (N.Id < INT64_MAX) ? N.Id + 1 : 0;
+    }
 }
 
 bool UPlayerNoteRegistry::SaveToFile() const
@@ -205,6 +221,7 @@ bool UPlayerNoteRegistry::SaveToFile() const
     }
 
     TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetStringField(TEXT("nextId"), FString::Printf(TEXT("%lld"), NextId));
     Root->SetArrayField(TEXT("notes"), NoteArr);
 
     FString JsonStr;

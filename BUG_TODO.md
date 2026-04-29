@@ -421,3 +421,22 @@ the codebase.
 
 *Last updated: 2026-04-29. All 2 round-4 bugs resolved.*
 
+---
+
+## Round 5 — Additional Scan (2026-04-29)
+
+### ✅ Fixed — `PlayerNoteRegistry::SaveToFile()` does not persist `NextId` (BUG-01)
+**File:** `Mods/BanChatCommands/Source/BanChatCommands/Private/PlayerNoteRegistry.cpp`
+
+**Fix applied:** `SaveToFile()` now writes `nextId` as a decimal string via
+`SetStringField(TEXT("nextId"), FString::Printf(TEXT("%lld"), NextId))`.
+`LoadFromFile()` now uses the string-first / number-fallback pattern (same as
+`PlayerWarningRegistry` BUG-08 fix, `BanAppealRegistry` Round-3 BUG-02 fix, and
+`ScheduledBanRegistry` Round-3 BUG-03 fix) to prefer the persisted counter over the
+scan-based `max(id)+1` reconstruction. This prevents ID reuse after the note with the
+highest Id is deleted and the server restarts.
+
+---
+
+*Last updated: 2026-04-29. All 1 round-5 bugs resolved.*
+
