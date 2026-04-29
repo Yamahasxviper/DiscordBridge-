@@ -392,3 +392,32 @@ or permission-denied error would silently lose rating data with no diagnostics.
 
 *Last updated: 2026-04-28. All 4 round-3 bugs resolved.*
 
+---
+
+## Round 4 — Additional Scan (2026-04-29)
+
+### ✅ Fixed — `BanAuditLog::LoadFromFile()`: malformed timestamp falls through with epoch date (BUG-01)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanAuditLog.cpp`
+
+**Fix applied:** Added `continue;` (and changed the log message from "using default" to "skipping")
+after the `FDateTime::ParseIso8601` failure path in `LoadFromFile()`, matching the identical
+pattern already used in `BanAppealRegistry`, `PlayerWarningRegistry`, `ScheduledBanRegistry`,
+and `MuteRegistry`. Previously a malformed timestamp caused the entry to be loaded with
+`FDateTime(0)` ("0001-01-01"), making it permanently invisible at the bottom of every
+newest-first audit listing.
+
+---
+
+### ✅ Fixed — `PlayerSessionRegistry`: `SaveToFile()` return value not checked at call sites (BUG-02)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/PlayerSessionRegistry.cpp`
+
+**Fix applied:** All three `SaveToFile()` call sites (update-existing path in `RecordSession`,
+insert-new-record path in `RecordSession`, and `PruneOldRecords`) now check the return value
+and emit a `UE_LOG(Warning, ...)` on failure, matching the pattern established in
+`BanAuditLog::LogAction`, `MuteRegistry`, `PlayerNoteRegistry`, and every other registry in
+the codebase.
+
+---
+
+*Last updated: 2026-04-29. All 2 round-4 bugs resolved.*
+

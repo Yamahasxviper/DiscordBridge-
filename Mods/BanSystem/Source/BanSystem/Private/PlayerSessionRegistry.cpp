@@ -67,7 +67,9 @@ void UPlayerSessionRegistry::RecordSession(const FString& Uid, const FString& Di
                     R.IpAddress = IpAddress;
                 if (!ClientVersion.IsEmpty())
                     R.ClientVersion = ClientVersion;
-                SaveToFile();
+                if (!SaveToFile())
+                    UE_LOG(LogPlayerSessionRegistry, Warning,
+                        TEXT("PlayerSessionRegistry: failed to save updated session for uid='%s'"), *Uid);
                 bUpdated = true;
                 break;
             }
@@ -82,7 +84,9 @@ void UPlayerSessionRegistry::RecordSession(const FString& Uid, const FString& Di
             NewRec.IpAddress     = IpAddress;
             NewRec.ClientVersion = ClientVersion;
             Records.Add(NewRec);
-            SaveToFile();
+            if (!SaveToFile())
+                UE_LOG(LogPlayerSessionRegistry, Warning,
+                    TEXT("PlayerSessionRegistry: failed to save new session for uid='%s'"), *Uid);
         }
     }
 
@@ -172,7 +176,9 @@ int32 UPlayerSessionRegistry::PruneOldRecords(int32 DaysToKeep)
     const int32 Pruned = Before - Records.Num();
     if (Pruned > 0)
     {
-        SaveToFile();
+        if (!SaveToFile())
+            UE_LOG(LogPlayerSessionRegistry, Warning,
+                TEXT("PlayerSessionRegistry: failed to save after pruning %d record(s)"), Pruned);
         UE_LOG(LogPlayerSessionRegistry, Log,
             TEXT("PlayerSessionRegistry: pruned %d record(s) older than %d day(s)"),
             Pruned, DaysToKeep);
