@@ -78,9 +78,11 @@ void USMLWebSocketClient::SendText(const FString& Message)
 {
 	if (bIsConnected && Runnable.IsValid())
 	{
-		Runnable->EnqueueText(Message);
-		StatBytesSent.fetch_add(FTCHARToUTF8(Message.GetCharArray().GetData()).Length());
-		StatMessagesSent.fetch_add(1);
+		if (Runnable->EnqueueText(Message))
+		{
+			StatBytesSent.fetch_add(FTCHARToUTF8(Message.GetCharArray().GetData()).Length());
+			StatMessagesSent.fetch_add(1);
+		}
 		return;
 	}
 	if (bQueueMessagesWhileDisconnected)
@@ -101,9 +103,11 @@ void USMLWebSocketClient::SendBinary(const TArray<uint8>& Data)
 {
 	if (bIsConnected && Runnable.IsValid())
 	{
-		Runnable->EnqueueBinary(Data);
-		StatBytesSent.fetch_add(Data.Num());
-		StatMessagesSent.fetch_add(1);
+		if (Runnable->EnqueueBinary(Data))
+		{
+			StatBytesSent.fetch_add(Data.Num());
+			StatMessagesSent.fetch_add(1);
+		}
 		return;
 	}
 	if (bQueueMessagesWhileDisconnected)
@@ -125,9 +129,11 @@ void USMLWebSocketClient::SendBinary(TArray<uint8>&& Data)
 	const int32 NumBytes = Data.Num();
 	if (bIsConnected && Runnable.IsValid())
 	{
-		Runnable->EnqueueBinary(MoveTemp(Data));
-		StatBytesSent.fetch_add(NumBytes);
-		StatMessagesSent.fetch_add(1);
+		if (Runnable->EnqueueBinary(MoveTemp(Data)))
+		{
+			StatBytesSent.fetch_add(NumBytes);
+			StatMessagesSent.fetch_add(1);
+		}
 		return;
 	}
 	if (bQueueMessagesWhileDisconnected)
@@ -313,17 +319,21 @@ void USMLWebSocketClient::FlushQueue()
 	FScopeLock Lock(&QueueMutex);
 	for (const FString& Msg : PendingSendQueue)
 	{
-		StatBytesSent.fetch_add(FTCHARToUTF8(Msg.GetCharArray().GetData()).Length());
-		StatMessagesSent.fetch_add(1);
-		Runnable->EnqueueText(Msg);
+		if (Runnable->EnqueueText(Msg))
+		{
+			StatBytesSent.fetch_add(FTCHARToUTF8(Msg.GetCharArray().GetData()).Length());
+			StatMessagesSent.fetch_add(1);
+		}
 	}
 	PendingSendQueue.Empty();
 
 	for (const TArray<uint8>& Payload : PendingSendBinaryQueue)
 	{
-		StatBytesSent.fetch_add(Payload.Num());
-		StatMessagesSent.fetch_add(1);
-		Runnable->EnqueueBinary(Payload);
+		if (Runnable->EnqueueBinary(Payload))
+		{
+			StatBytesSent.fetch_add(Payload.Num());
+			StatMessagesSent.fetch_add(1);
+		}
 	}
 	PendingSendBinaryQueue.Empty();
 }

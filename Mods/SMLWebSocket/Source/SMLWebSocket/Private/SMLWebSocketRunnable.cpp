@@ -491,7 +491,7 @@ void FSMLWebSocketRunnable::CleanupConnection()
 // Thread-safe API
 // ─────────────────────────────────────────────────────────────────────────────
 
-void FSMLWebSocketRunnable::EnqueueText(const FString& Text)
+bool FSMLWebSocketRunnable::EnqueueText(const FString& Text)
 {
 	// NOTE: The bConnected check and the Enqueue call below are not atomic.
 	// A disconnect that occurs between these two operations will cause the
@@ -499,30 +499,33 @@ void FSMLWebSocketRunnable::EnqueueText(const FString& Text)
 	// Callers that require guaranteed delivery should use the
 	// bQueueMessagesWhileDisconnected option on USMLWebSocketClient, which
 	// buffers messages at the client layer and re-sends them on reconnect.
-	if (!bConnected) return;
+	if (!bConnected) return false;
 	FSMLWebSocketOutboundMessage Msg;
 	Msg.bIsBinary = false;
 	const FTCHARToUTF8 Utf8(*Text);
 	Msg.Payload = TArray<uint8>(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length());
 	OutboundMessages.Enqueue(MoveTemp(Msg));
+	return true;
 }
 
-void FSMLWebSocketRunnable::EnqueueBinary(const TArray<uint8>& Data)
+bool FSMLWebSocketRunnable::EnqueueBinary(const TArray<uint8>& Data)
 {
-	if (!bConnected) return;
+	if (!bConnected) return false;
 	FSMLWebSocketOutboundMessage Msg;
 	Msg.bIsBinary = true;
 	Msg.Payload   = Data;
 	OutboundMessages.Enqueue(MoveTemp(Msg));
+	return true;
 }
 
-void FSMLWebSocketRunnable::EnqueueBinary(TArray<uint8>&& Data)
+bool FSMLWebSocketRunnable::EnqueueBinary(TArray<uint8>&& Data)
 {
-	if (!bConnected) return;
+	if (!bConnected) return false;
 	FSMLWebSocketOutboundMessage Msg;
 	Msg.bIsBinary = true;
 	Msg.Payload   = MoveTemp(Data);
 	OutboundMessages.Enqueue(MoveTemp(Msg));
+	return true;
 }
 
 void FSMLWebSocketRunnable::EnqueueClose(int32 Code, const FString& Reason)
