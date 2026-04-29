@@ -9,6 +9,23 @@
 
 class USMLWebSocketClient;
 
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Connection state of a single peer server reported by GetPeerStates().
+ */
+struct BANSYSTEM_API FBanSyncPeerState
+{
+    /** The ws:// URL this client is connecting to. */
+    FString Url;
+
+    /**
+     * Human-readable connection state.
+     * One of "connected", "connecting", "closing", or "disconnected".
+     */
+    FString State;
+};
+
 DECLARE_LOG_CATEGORY_EXTERN(LogBanSyncClient, Log, All);
 
 /**
@@ -54,6 +71,13 @@ public:
      */
     void BroadcastUnban(const FString& Uid, const FString& PlayerName = TEXT(""));
 
+    /**
+     * Returns one entry per configured peer URL with its current connection state.
+     * Called from the REST API /diagnostics endpoint to report ban-sync health.
+     * Must be called from the game thread.
+     */
+    TArray<FBanSyncPeerState> GetPeerStates() const;
+
 private:
     /** Handles an incoming JSON message from a peer. */
     UFUNCTION()
@@ -68,6 +92,9 @@ private:
     /** Active WebSocket client connections to each peer URL. */
     UPROPERTY()
     TArray<USMLWebSocketClient*> PeerClients;
+
+    /** URLs of configured peer servers; parallel to PeerClients. */
+    TArray<FString> PeerUrls;
 
     /**
      * Consume-once set of UIDs whose OnBanAdded delegate should be suppressed.

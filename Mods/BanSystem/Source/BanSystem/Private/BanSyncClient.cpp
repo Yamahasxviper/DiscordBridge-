@@ -45,6 +45,7 @@ void UBanSyncClient::Initialize(FSubsystemCollectionBase& Collection)
         Client->Connect(Url, TArray<FString>(), TMap<FString, FString>());
 
         PeerClients.Add(Client);
+        PeerUrls.Add(Url);
 
         UE_LOG(LogBanSyncClient, Log,
             TEXT("BanSyncClient: connecting to peer %s"), *Url);
@@ -66,6 +67,7 @@ void UBanSyncClient::Deinitialize()
             Client->Close();
     }
     PeerClients.Empty();
+    PeerUrls.Empty();
     Super::Deinitialize();
 }
 
@@ -123,6 +125,36 @@ void UBanSyncClient::BroadcastUnban(const FString& Uid, const FString& PlayerNam
         if (Client && Client->IsConnected())
             Client->SendText(JsonStr);
     }
+}
+
+TArray<FBanSyncPeerState> UBanSyncClient::GetPeerStates() const
+{
+    TArray<FBanSyncPeerState> Result;
+    Result.Reserve(PeerClients.Num());
+
+    for (int32 i = 0; i < PeerClients.Num(); ++i)
+    {
+        FBanSyncPeerState S;
+        S.Url = PeerUrls.IsValidIndex(i) ? PeerUrls[i] : TEXT("unknown");
+
+        const USMLWebSocketClient* Peer = PeerClients[i];
+        if (!Peer)
+        {
+            S.State = TEXT("disconnected");
+        }
+        else
+        {
+            switch (Peer->GetConnectionState())
+            {
+            case EWebSocketState::Connected:   S.State = TEXT("connected");   break;
+            case EWebSocketState::Connecting:  S.State = TEXT("connecting");  break;
+            case EWebSocketState::Closing:     S.State = TEXT("closing");     break;
+            default:                           S.State = TEXT("disconnected"); break;
+            }
+        }
+        Result.Add(S);
+    }
+    return Result;
 }
 
 void UBanSyncClient::OnLocalBanAdded(const FBanEntry& Entry)

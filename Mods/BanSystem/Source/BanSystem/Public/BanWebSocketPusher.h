@@ -72,6 +72,19 @@ public:
                                bool           bIsTimed,
                                const FString& ExpiresAt);
 
+    /**
+     * Returns the current connection state of the push WebSocket client as a
+     * human-readable string.  Safe to call from any thread.
+     *
+     * Possible values:
+     *   "disabled"     – bPushEventsToWebSocket=false or WebSocketPushUrl empty.
+     *   "connected"    – WebSocket handshake complete; messages can be sent.
+     *   "connecting"   – TCP/TLS handshake and HTTP upgrade in progress.
+     *   "closing"      – Close frame sent; waiting for the server's response.
+     *   "disconnected" – Not connected (e.g. reconnect back-off, initial state).
+     */
+    FString GetPusherStateString() const;
+
 private:
     /** The WebSocket client connected to WebSocketPushUrl. */
     UPROPERTY()

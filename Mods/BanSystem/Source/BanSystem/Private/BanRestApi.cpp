@@ -11,6 +11,7 @@
 #include "BanDiscordNotifier.h"
 #include "BanAppealRegistry.h"
 #include "BanWebSocketPusher.h"
+#include "BanSyncClient.h"
 #include "ScheduledBanRegistry.h"
 
 #include "HttpServerModule.h"
@@ -2845,6 +2846,116 @@ void UBanRestApi::RegisterRoutes()
             TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
             Root->SetNumberField(TEXT("unbanned"), static_cast<double>(Removed));
             Done(BanJson::Json(BanJson::ObjectToString(Root)));
+            return true;
+        }
+    ));
+
+    // ── GET /diagnostics ─────────────────────────────────────────────────────
+    // Returns the current health and configuration state of all BanSystem
+    // subsystems in a single JSON response.  Inspired by SmartFoundations'
+    // centralized category registry — gives operators one endpoint to verify
+    // WebSocket pusher connectivity, ban-sync peer health, and key config
+    // settings without tailing server logs.
+    Routes->Handles.Add(Router->BindRoute(
+        FHttpPath(TEXT("/diagnostics")),
+        EHttpServerRequestVerbs::VERB_GET,
+        [WeakGI](const FHttpServerRequest& Req, const FHttpResultCallback& Done) -> bool
+        {
+            if (!BanJson::CheckApiKey(Req)) { Done(BanJson::Error(TEXT("Unauthorized"), EHttpServerResponseCodes::Denied)); return true; }
+            UGameInstance* GI = WeakGI.Get();
+            if (!GI) { Done(BanJson::Error(TEXT("Server shutting down"), EHttpServerResponseCodes::ServiceUnavail)); return true; }
+
+            const UBanSystemConfig* Cfg        = UBanSystemConfig::Get();
+            UBanDatabase*           DB         = GI->GetSubsystem<UBanDatabase>();
+            UBanWebSocketPusher*    WsPusher   = GI->GetSubsystem<UBanWebSocketPusher>();
+            UBanSyncClient*         SyncClient = GI->GetSubsystem<UBanSyncClient>();
+            UScheduledBanRegistry*  SchedReg   = GI->GetSubsystem<UScheduledBanRegistry>();
+            UBanAppealRegistry*     AppealReg  = GI->GetSubsystem<UBanAppealRegistry>();
+
+            // ── Config summary ───────────────────────────────────────────────
+            TSharedPtr<FJsonObject> ConfigObj = MakeShared<FJsonObject>();
+            if (Cfg)
+            {
+                ConfigObj->SetNumberField(TEXT("restApiPort"),                  static_cast<double>(Cfg->RestApiPort));
+                ConfigObj->SetBoolField  (TEXT("apiKeyConfigured"),             !Cfg->RestApiKey.IsEmpty());
+                ConfigObj->SetBoolField  (TEXT("discordWebhookConfigured"),     !Cfg->DiscordWebhookUrl.IsEmpty());
+                ConfigObj->SetBoolField  (TEXT("geoIpEnabled"),                 Cfg->bGeoIpEnabled);
+                ConfigObj->SetBoolField  (TEXT("pushEventsEnabled"),            Cfg->bPushEventsToWebSocket);
+                ConfigObj->SetNumberField(TEXT("banSyncPeerCount"),             static_cast<double>(Cfg->PeerWebSocketUrls.Num()));
+                ConfigObj->SetNumberField(TEXT("scheduledBackupIntervalHours"), static_cast<double>(Cfg->BackupIntervalHours));
+                ConfigObj->SetNumberField(TEXT("pruneIntervalHours"),           static_cast<double>(Cfg->PruneIntervalHours));
+                ConfigObj->SetNumberField(TEXT("sessionRetentionDays"),         static_cast<double>(Cfg->SessionRetentionDays));
+                ConfigObj->SetNumberField(TEXT("warnDecayDays"),                static_cast<double>(Cfg->WarnDecayDays));
+                ConfigObj->SetNumberField(TEXT("autoWarnEscalationTiers"),      static_cast<double>(Cfg->WarnEscalationTiers.Num()));
+            }
+
+            // ── Ban database ─────────────────────────────────────────────────
+            TSharedPtr<FJsonObject> DbObj = MakeShared<FJsonObject>();
+            if (DB)
+            {
+                DbObj->SetStringField(TEXT("filePath"),       DB->GetDatabasePath());
+                DbObj->SetNumberField(TEXT("activeBanCount"), static_cast<double>(DB->GetActiveBans().Num()));
+                DbObj->SetNumberField(TEXT("totalBanCount"),  static_cast<double>(DB->GetAllBans().Num()));
+            }
+
+            // ── Scheduled bans ───────────────────────────────────────────────
+            TSharedPtr<FJsonObject> SchedObj = MakeShared<FJsonObject>();
+            SchedObj->SetNumberField(TEXT("pendingCount"),
+                SchedReg ? static_cast<double>(SchedReg->GetAllPending().Num()) : 0.0);
+
+            // ── Appeals ──────────────────────────────────────────────────────
+            TSharedPtr<FJsonObject> AppealsObj = MakeShared<FJsonObject>();
+            if (AppealReg)
+            {
+                const TArray<FBanAppealEntry>& All = AppealReg->GetAllAppeals();
+                int32 Pending = 0;
+                for (const FBanAppealEntry& A : All)
+                    if (A.Status == EAppealStatus::Pending) ++Pending;
+                AppealsObj->SetNumberField(TEXT("pendingCount"), static_cast<double>(Pending));
+                AppealsObj->SetNumberField(TEXT("totalCount"),   static_cast<double>(All.Num()));
+            }
+
+            // ── WebSocket event pusher ────────────────────────────────────────
+            TSharedPtr<FJsonObject> PusherObj = MakeShared<FJsonObject>();
+            {
+                const bool bEnabled = Cfg && Cfg->bPushEventsToWebSocket && !Cfg->WebSocketPushUrl.IsEmpty();
+                PusherObj->SetBoolField  (TEXT("enabled"), bEnabled);
+                if (bEnabled)
+                    PusherObj->SetStringField(TEXT("url"), Cfg->WebSocketPushUrl);
+                PusherObj->SetStringField(TEXT("state"),
+                    WsPusher ? WsPusher->GetPusherStateString() : TEXT("disabled"));
+            }
+
+            // ── Ban-sync peers ────────────────────────────────────────────────
+            TSharedPtr<FJsonObject> SyncObj = MakeShared<FJsonObject>();
+            {
+                TArray<FBanSyncPeerState> PeerStates =
+                    SyncClient ? SyncClient->GetPeerStates() : TArray<FBanSyncPeerState>();
+
+                SyncObj->SetNumberField(TEXT("peerCount"), static_cast<double>(PeerStates.Num()));
+
+                TArray<TSharedPtr<FJsonValue>> PeersArr;
+                PeersArr.Reserve(PeerStates.Num());
+                for (const FBanSyncPeerState& P : PeerStates)
+                {
+                    TSharedPtr<FJsonObject> PeerObj = MakeShared<FJsonObject>();
+                    PeerObj->SetStringField(TEXT("url"),   P.Url);
+                    PeerObj->SetStringField(TEXT("state"), P.State);
+                    PeersArr.Add(MakeShared<FJsonValueObject>(PeerObj));
+                }
+                SyncObj->SetArrayField(TEXT("peers"), PeersArr);
+            }
+
+            // ── Assemble root ─────────────────────────────────────────────────
+            TSharedPtr<FJsonObject> DiagRoot = MakeShared<FJsonObject>();
+            DiagRoot->SetStringField(TEXT("timestamp"),      FDateTime::UtcNow().ToIso8601());
+            DiagRoot->SetObjectField(TEXT("config"),         ConfigObj);
+            DiagRoot->SetObjectField(TEXT("banDatabase"),    DbObj);
+            DiagRoot->SetObjectField(TEXT("scheduledBans"),  SchedObj);
+            DiagRoot->SetObjectField(TEXT("appeals"),        AppealsObj);
+            DiagRoot->SetObjectField(TEXT("webSocketPusher"),PusherObj);
+            DiagRoot->SetObjectField(TEXT("banSync"),        SyncObj);
+            Done(BanJson::Json(BanJson::ObjectToString(DiagRoot)));
             return true;
         }
     ));

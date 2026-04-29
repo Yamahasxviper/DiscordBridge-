@@ -99,6 +99,20 @@ void UBanWebSocketPusher::PushEvent(const FString& EventType,
     Self->Client->SendJson(JsonStr);
 }
 
+FString UBanWebSocketPusher::GetPusherStateString() const
+{
+    if (!Client)
+        return TEXT("disabled");
+
+    switch (Client->GetConnectionState())
+    {
+    case EWebSocketState::Connected:   return TEXT("connected");
+    case EWebSocketState::Connecting:  return TEXT("connecting");
+    case EWebSocketState::Closing:     return TEXT("closing");
+    default:                           return TEXT("disconnected");
+    }
+}
+
 void UBanWebSocketPusher::PushMuteEvent(const FString& EventType,
                                          const FString& Uid,
                                          const FString& PlayerName,

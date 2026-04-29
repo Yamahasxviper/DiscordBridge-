@@ -676,10 +676,15 @@ bool UBanDatabase::IsCurrentlyBannedByAnyId(const FString& Uid, FBanEntry& OutEn
         if (E.bIsPermanent || Now < E.ExpireDate)
         {
             OutEntry = E;
+            UE_LOG(LogBanDatabase, Verbose,
+                TEXT("BanDatabase: ban-check HIT for '%s' — matched record '%s' (%s)."),
+                *Uid, *E.Uid, E.bIsPermanent ? TEXT("permanent") : TEXT("temporary"));
             return true;
         }
         // Expired — keep scanning in case a different linked record is still active.
     }
+    UE_LOG(LogBanDatabase, Verbose,
+        TEXT("BanDatabase: ban-check MISS for '%s' — no active ban found."), *Uid);
     return false;
 }
 
