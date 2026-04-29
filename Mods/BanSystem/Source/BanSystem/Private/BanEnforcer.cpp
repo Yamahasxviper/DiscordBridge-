@@ -118,6 +118,11 @@ void UBanEnforcer::Initialize(FSubsystemCollectionBase& Collection)
                 const uint8 HiN = (Hi >= TEXT('a')) ? (uint8)(Hi - TEXT('a') + 10) : (uint8)(Hi - TEXT('0'));
                 const uint8 LoN = (Lo >= TEXT('a')) ? (uint8)(Lo - TEXT('a') + 10) : (uint8)(Lo - TEXT('0'));
                 const TCHAR Ch = static_cast<TCHAR>((HiN << 4) | LoN);
+                // Each decoded byte must itself be a hex-digit ASCII character
+                // (0x30–0x39 or 0x61–0x66 after ToLower).  If it is not, the
+                // blob is malformed — discard it rather than caching a garbage
+                // PUID that would silently fail every ban lookup.
+                if (!FChar::IsHexDigit(Ch)) return;
                 Puid.AppendChar(Ch);
             }
             if (Puid.Len() != 32) return;
