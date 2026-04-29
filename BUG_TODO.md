@@ -457,3 +457,38 @@ successful write); the live `feedback_stats.json` is never left in a partial/tru
 
 *Last updated: 2026-04-29. All 1 round-6 bugs resolved.*
 
+---
+
+## Round 7 — Additional Scan (2026-04-29)
+
+### ✅ Fixed — `JsonEscapeStr()` emits lone surrogates as `\uD800`–`\uDFFF` — invalid JSON (BUG-01)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/DiscordBridgeSubsystem.cpp`
+
+**Fix applied:** Separated the surrogate-range guard from the control-character guard.
+Lone surrogates (U+D800–U+DFFF) are now replaced with U+FFFD (the Unicode replacement
+character) instead of being emitted as `\uD800`–`\uDFFF` escape sequences, which are
+explicitly prohibited by RFC 8259 §7 and rejected by strict-mode JSON parsers (Python's
+`json.loads`, `nlohmann::json`, and Discord's own REST API). The sister function
+`BanDiscordNotifier::JsonEscape()` already used U+FFFD replacement; this fix brings the
+two implementations into alignment.
+
+---
+
+### ✅ Fixed — `BanDatabase::ReloadIfChanged()` TOCTOU: concurrent external edit during `LoadFromFile` permanently clobbered by `PruneExpiredBans`'s `SaveToFile` (BUG-02)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanDatabase.cpp`
+
+**Fix applied:** Added a mtime check immediately after `LoadFromFile()`. If the file
+mtime advanced past `NewModTime` (i.e. a second external edit T2 arrived while we were
+loading T1's content), `bConcurrentEditDuringLoad` is set. After `PruneExpiredBans()`
+(which calls `SaveToFile`, writing T3 > T2 and setting `LastKnownFileModTime = T3`),
+the flag is checked: if set, `LastKnownFileModTime` is reset to `FDateTime(0)`, forcing
+the next `ReloadIfChanged` tick to see `T_current != FDateTime(0)` and trigger another
+load. Without this guard the inline comment "a concurrent edit will produce T2 > T1 and
+be detected on the next call" was only correct when no prune-write followed; the
+`SaveToFile` at T3 > T2 caused `LastKnownFileModTime = T3`, making the next tick see
+`T3 == T3` and return early — permanently silencing the T2 edit.
+
+---
+
+*Last updated: 2026-04-29. All 2 round-7 bugs resolved.*
+
