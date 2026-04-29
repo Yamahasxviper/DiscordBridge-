@@ -2354,6 +2354,10 @@ void UBanDiscordSubsystem::HandleBanReasonCommand(const TArray<FString>& Args,
 		return;
 	}
 
+	// Initial read — used only to obtain the primary UID and old reason for the
+	// response message.  The actual mutation is performed inside UpdateBan() which
+	// holds the database lock for the full read-modify-write, closing the TOCTOU
+	// window that existed with AddBan().
 	FBanEntry Entry;
 	if (!DB->GetBanByUid(Uid, Entry))
 	{
@@ -2363,11 +2367,18 @@ void UBanDiscordSubsystem::HandleBanReasonCommand(const TArray<FString>& Args,
 		return;
 	}
 
-	const FString OldReason = Entry.Reason;
-	Entry.Reason = BanDiscordHelpers::JoinArgs(Args, 1);
-	if (!DB->AddBan(Entry))
+	const FString OldReason  = Entry.Reason;
+	const FString NewReason  = BanDiscordHelpers::JoinArgs(Args, 1);
+	const FString PrimaryUid = Entry.Uid;
+
+	FBanEntry Updated;
+	if (!DB->UpdateBan(PrimaryUid, [&NewReason](FBanEntry& E) { E.Reason = NewReason; }, Updated))
 	{
-		Respond(ChannelId, TEXT("❌ Failed to update ban record. Check server logs."));
+		// The ban was removed between the check above and the atomic update
+		// (concurrent unban or expiry).
+		Respond(ChannelId,
+			FString::Printf(TEXT("⚠️ **%s** (`%s`) — ban was removed before the reason could be updated."),
+				*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
 		return;
 	}
 
@@ -2376,13 +2387,13 @@ void UBanDiscordSubsystem::HandleBanReasonCommand(const TArray<FString>& Args,
 	{
 		if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
 			AuditLog->LogAction(TEXT("banreason"), Uid, DisplayName,
-				GetCurrentAuditAdminUid(SenderName), SenderName, Entry.Reason);
+				GetCurrentAuditAdminUid(SenderName), SenderName, Updated.Reason);
 	}
 
 	const FString Msg = FString::Printf(
 		TEXT("✅ Ban reason updated for **%s** (`%s`).\nOld reason: %s\nNew reason: %s\nUpdated by: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid,
-		*OldReason, *Entry.Reason, *SenderName);
+		*OldReason, *Updated.Reason, *SenderName);
 	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
 }
@@ -2510,27 +2521,28 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 		return;
 	}
 
-	const FDateTime ExtendBase = FMath::Max(Entry.ExpireDate, FDateTime::UtcNow());
-	Entry.ExpireDate = ExtendBase + FTimespan::FromMinutes(Minutes);
+	// Perform the extend atomically inside UpdateBan() so that:
+	// 1. The new expiry is computed relative to the freshest known expiry (not
+	//    a stale snapshot), and
+	// 2. If the ban is removed between the check above and the write (concurrent
+	//    unban or expiry), UpdateBan() returns false instead of re-creating the ban.
+	const FString PrimaryUid   = Entry.Uid;
+	const int32   MinutesToAdd = Minutes;
 
-	// Re-check that the ban still exists in the database before writing.
-	// BanEnforcer may have pruned it between our initial lookup and now (BDS-2).
-	{
-		FBanEntry VerifyEntry;
-		if (!DB->IsCurrentlyBannedByAnyId(Uid, VerifyEntry))
+	FBanEntry Updated;
+	if (!DB->UpdateBan(PrimaryUid,
+		[MinutesToAdd](FBanEntry& E)
 		{
-			Respond(ChannelId,
-				FString::Printf(TEXT("⚠️ **%s** (`%s`) is no longer banned — the ban may have expired. Cannot extend."),
-					*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
-			return;
-		}
-	}
-
-	if (!DB->AddBan(Entry))
+			const FDateTime BaseTime = FMath::Max(E.ExpireDate, FDateTime::UtcNow());
+			E.ExpireDate   = BaseTime + FTimespan::FromMinutes(MinutesToAdd);
+			E.bIsPermanent = false;
+		},
+		Updated))
 	{
+		// Ban was removed concurrently (unban, prune, or expiry).
 		Respond(ChannelId,
-			FString::Printf(TEXT("❌ Failed to save extended ban for **%s** — database write error."),
-				*BanDiscordHelpers::EscapeMarkdown(DisplayName)));
+			FString::Printf(TEXT("⚠️ **%s** (`%s`) is no longer banned — the ban may have expired. Cannot extend."),
+				*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid));
 		return;
 	}
 
@@ -2541,14 +2553,14 @@ void UBanDiscordSubsystem::HandleExtendBanCommand(const TArray<FString>& Args,
 			AuditLog->LogAction(TEXT("extend"), Uid, DisplayName, GetCurrentAuditAdminUid(SenderName), SenderName,
 				FString::Printf(TEXT("Extended by %s -> new expiry %s UTC"),
 					*BanDiscordHelpers::FormatDuration(Minutes),
-					*Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S"))));
+					*Updated.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S"))));
 	}
 
 	const FString Msg = FString::Printf(
 		TEXT("✅ Extended ban for **%s** (`%s`) by **%s**.\nNew expiry: %s UTC\nBy: %s"),
 		*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid,
 		*BanDiscordHelpers::FormatDuration(Minutes),
-		*Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")),
+		*Updated.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")),
 		*SenderName);
 	Respond(ChannelId, Msg);
 	PostModerationLog(Msg);
