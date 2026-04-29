@@ -44,6 +44,33 @@ static const FString DiscordGatewayUrl = TEXT("wss://gateway.discord.gg/?v=10&en
 // Discord REST API base URL
 static const FString DiscordApiBase    = TEXT("https://discord.com/api/v10");
 
+// Escapes a string for safe embedding in a JSON string literal.
+// Handles \, ", \n, \r, \t, control characters U+0000-U+001F, and lone surrogates.
+static FString JsonEscapeStr(const FString& S)
+{
+	FString Out;
+	Out.Reserve(S.Len() + 8);
+	for (int32 i = 0; i < S.Len(); ++i)
+	{
+		const TCHAR C = S[i];
+		switch (C)
+		{
+		case TEXT('"'):  Out += TEXT("\\\""); break;
+		case TEXT('\\'): Out += TEXT("\\\\"); break;
+		case TEXT('\n'): Out += TEXT("\\n");  break;
+		case TEXT('\r'): Out += TEXT("\\r");  break;
+		case TEXT('\t'): Out += TEXT("\\t");  break;
+		default:
+			if ((C >= 0xD800 && C <= 0xDFFF) || C < 0x20)
+				Out += FString::Printf(TEXT("\\u%04x"), static_cast<uint32>(C));
+			else
+				Out += C;
+			break;
+		}
+	}
+	return Out;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // USubsystem lifetime
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2146,10 +2173,8 @@ void UDiscordBridgeSubsystem::CreateDiscordThread(
 		return;
 	}
 
-	// Escape the thread name for embedding in JSON.
-	FString SafeName = ThreadName;
-	SafeName.ReplaceInline(TEXT("\\"), TEXT("\\\\"));
-	SafeName.ReplaceInline(TEXT("\""), TEXT("\\\""));
+	// Escape the thread name for safe embedding in a JSON string literal.
+	const FString SafeName = JsonEscapeStr(ThreadName);
 
 	const FString BodyStr = FString::Printf(
 		TEXT("{\"name\":\"%s\",\"type\":11,\"auto_archive_duration\":10080}"),
@@ -3562,7 +3587,7 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 			if (E.ExpiresAt.GetTicks() > 0)
 				ExpiresStr = E.ExpiresAt.ToIso8601();
 			JsonOut += FString::Printf(TEXT("{\"name\":\"%s\",\"puid\":\"%s\",\"expires_at\":\"%s\"}"),
-				*E.Name, *E.EosPUID, *ExpiresStr);
+				*JsonEscapeStr(E.Name), *JsonEscapeStr(E.EosPUID), *ExpiresStr);
 			if (i < AllEntries.Num() - 1) JsonOut += TEXT(",");
 		}
 		JsonOut += TEXT("]");

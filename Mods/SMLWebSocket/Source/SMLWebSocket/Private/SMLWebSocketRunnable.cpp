@@ -1422,6 +1422,18 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 	}
 	case WsOpcode::Continuation:
 	{
+		// RFC 6455 §5.4: a Continuation frame MUST follow a non-final Text or
+		// Binary frame.  Receiving one when no fragmented message is in progress
+		// is a protocol error — close the connection with status 1002.
+		if (FragmentBuffer.IsEmpty())
+		{
+			UE_LOG(LogSMLWebSocket, Warning,
+			       TEXT("SMLWebSocket: Continuation frame received with no open fragmented message – closing connection (1002)"));
+			const uint8 ClosePayload[2] = { 0x03, 0xEA }; // status 1002 protocol error
+			SendWsFrame(WsOpcode::Close, ClosePayload, 2);
+			return false;
+		}
+
 		// Guard against the accumulated fragmented message exceeding TArray's int32
 		// size limit.  Each individual fragment is already bounded by EffectiveMax,
 		// but nothing previously prevented many fragments from summing to 2^31 bytes

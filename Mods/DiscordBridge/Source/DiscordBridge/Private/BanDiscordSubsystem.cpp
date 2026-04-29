@@ -4400,8 +4400,8 @@ void UBanDiscordSubsystem::HandleReputationCommand(const TArray<FString>& Args,
 
 	const FString EmbedJson = FString::Printf(
 	TEXT("{\"embeds\":[{\"title\":\"🔍 Reputation: %s\",\"description\":\"`%s`\",\"color\":%d,\"fields\":[%s],\"timestamp\":\"%s\"}]}"),
-	*BanDiscordHelpers::EscapeMarkdown(DisplayName),
-	*BanDiscordHelpers::EscapeMarkdown(Uid),
+	*BanDiscordHelpers::JsonEscape(DisplayName),
+	*BanDiscordHelpers::JsonEscape(Uid),
 	Color,
 	*Fields,
 	*FDateTime::UtcNow().ToIso8601());
