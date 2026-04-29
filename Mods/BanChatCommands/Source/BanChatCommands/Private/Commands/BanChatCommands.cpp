@@ -800,6 +800,10 @@ namespace BanChat
         if (CooldownSeconds <= 0) return false;
         if (!Sender->IsPlayerSender()) return false; // console is never throttled
 
+        // Honour the documented contract: admin player-senders bypass this cooldown.
+        const UBanChatCommandsConfig* Cfg = UBanChatCommandsConfig::Get();
+        if (Cfg && Cfg->IsAdminUid(SenderUid)) return false;
+
         const FString Key = CommandName + TEXT(":") + SenderUid;
         const FDateTime Now = FDateTime::UtcNow();
 
