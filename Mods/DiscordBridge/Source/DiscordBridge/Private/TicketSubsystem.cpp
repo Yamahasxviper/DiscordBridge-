@@ -1056,6 +1056,10 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 		if (const TArray<FString>* CloseNotesPtr = TicketChannelToNotes.Find(SourceChannelId))
 			CloseNotesForLog = *CloseNotesPtr;
 
+		// Capture the reopened-once flag BEFORE the cleanup block removes it so
+		// the grace-period check below sees the correct value.
+		const bool bWasReopenedOnce = ReopenedOnceChannels.Contains(SourceChannelId);
+
 		// Remove from tracking and delete.
 		FString RemovedOpener;
 		if (TicketChannelToOpener.RemoveAndCopyValue(SourceChannelId, RemovedOpener))
@@ -1155,7 +1159,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 
 		// Reopen grace period: if configured, and this ticket has not already been
 		// reopened once before, show the Reopen button and delay deletion.
-		if (Config.TicketReopenGracePeriodMinutes > 0 && !ReopenedOnceChannels.Contains(SourceChannelId))
+		if (Config.TicketReopenGracePeriodMinutes > 0 && !bWasReopenedOnce)
 		{
 			PendingReopenExpiry.Add(SourceChannelId,
 				FDateTime::UtcNow() + FTimespan::FromMinutes(Config.TicketReopenGracePeriodMinutes));
