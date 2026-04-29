@@ -3033,7 +3033,7 @@ void UDiscordBridgeSubsystem::OnPostLogin(AGameModeBase* GameMode, APlayerContro
 		return;
 	}
 
-	if (FWhitelistManager::IsWhitelisted(PlayerName))
+	if (FWhitelistManager::IsWhitelisted(PlayerName, ResolvedEOSProductUserId))
 	{
 		SendPlayerJoinNotification(PlayerName, ResolvedEOSProductUserId, ResolvedIpAddress);
 		SendJoinHintToPlayer(Controller, PlayerName);
