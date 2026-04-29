@@ -657,7 +657,6 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
                         ? TEXT("You are not permitted to join this server from your region.")
                         : Cfg->GeoIpKickMessage;
 
-                    TWeakObjectPtr<UBanEnforcer> WeakThis(this);
                     TWeakObjectPtr<APlayerController> WeakPC(PC);
                     const FString CapturedUid = Uid;
 
@@ -666,7 +665,7 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
                     GeoReq->SetURL(ApiUrl);
                     GeoReq->SetVerb(TEXT("GET"));
                     GeoReq->OnProcessRequestComplete().BindLambda(
-                        [WeakThis, WeakPC, PlayerName, IpAddress, CapturedUid,
+                        [WeakPC, PlayerName, IpAddress, CapturedUid,
                          Allowed, Blocked, KickMsg]
                         (FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bSuccess)
                         {
@@ -691,12 +690,13 @@ void UBanEnforcer::PerformBanCheckForPlayer(UWorld* World, APlayerController* PC
 
                             if (!bBlock) return;
 
-                            UBanEnforcer* Enforcer = WeakThis.Get();
                             APlayerController* PCKick = WeakPC.Get();
                             if (!IsValid(PCKick)) return;
 
-                            UGameInstance* GI2 = Enforcer ? Enforcer->GetGameInstance() : nullptr;
-                            UWorld* W2 = GI2 ? GI2->GetWorld() : nullptr;
+                            // Use the already-validated PlayerController to obtain the World
+                            // so the kick succeeds even if the BanEnforcer subsystem has been
+                            // garbage-collected during a map transition or server shutdown.
+                            UWorld* W2 = PCKick->GetWorld();
 
                             const FString FinalMsg = KickMsg.Replace(TEXT("{country}"), *CountryCode);
                             UE_LOG(LogBanEnforcer, Log,
@@ -953,7 +953,6 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
                         ? TEXT("You are not permitted to join this server from your region.")
                         : Cfg->GeoIpKickMessage;
 
-                    TWeakObjectPtr<UBanEnforcer> WeakThis(this);
                     TWeakObjectPtr<APlayerController> WeakPC(PC);
                     const FString CapturedUid  = Uid;
                     const FString CapturedName = PlayerName;
@@ -963,7 +962,7 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
                     GeoReq->SetURL(ApiUrl);
                     GeoReq->SetVerb(TEXT("GET"));
                     GeoReq->OnProcessRequestComplete().BindLambda(
-                        [WeakThis, WeakPC, CapturedName, IpAddress, CapturedUid,
+                        [WeakPC, CapturedName, IpAddress, CapturedUid,
                          Allowed, Blocked, KickMsg]
                         (FHttpRequestPtr /*Req*/, FHttpResponsePtr Resp, bool bSuccess)
                         {
@@ -987,12 +986,13 @@ void UBanEnforcer::PerformBanCheckForUid(UWorld* World, APlayerController* PC, U
 
                             if (!bBlock) return;
 
-                            UBanEnforcer* Enforcer = WeakThis.Get();
                             APlayerController* PCKick = WeakPC.Get();
                             if (!IsValid(PCKick)) return;
 
-                            UGameInstance* GI2 = (Enforcer && IsValid(Enforcer)) ? Enforcer->GetGameInstance() : nullptr;
-                            UWorld* W2 = GI2 ? GI2->GetWorld() : nullptr;
+                            // Use the already-validated PlayerController to obtain the World
+                            // so the kick succeeds even if the BanEnforcer subsystem has been
+                            // garbage-collected during a map transition or server shutdown.
+                            UWorld* W2 = PCKick->GetWorld();
 
                             const FString FinalMsg = KickMsg.Replace(TEXT("{country}"), *CountryCode);
                             if (W2 && IsValid(W2))
