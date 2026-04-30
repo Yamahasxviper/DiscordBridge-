@@ -173,17 +173,13 @@ FSMLWebSocketRunnable::~FSMLWebSocketRunnable()
 
 	if (Socket)
 	{
-		ISocketSubsystem* SocketSS = ISocketSubsystem::Get(NAME_None);
+		ISocketSubsystem* SocketSS = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
 		if (SocketSS)
 		{
 			SocketSS->DestroySocket(Socket);
 		}
 		else
 		{
-			// SocketSubsystem is unavailable (e.g. very late engine shutdown).
-			// delete the FSocket directly so the OS file descriptor is closed and
-			// not leaked.  This is safe because FSocket subclass destructors call
-			// Close() which releases the underlying socket handle.
 			UE_LOG(LogSMLWebSocket, Warning,
 			       TEXT("SMLWebSocket: ISocketSubsystem unavailable in destructor — deleting socket directly"));
 			delete Socket;
@@ -469,16 +465,13 @@ void FSMLWebSocketRunnable::CleanupConnection()
 
 	if (Socket)
 	{
-		ISocketSubsystem* SocketSS = ISocketSubsystem::Get(NAME_None);
+		ISocketSubsystem* SocketSS = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
 		if (SocketSS)
 		{
 			SocketSS->DestroySocket(Socket);
 		}
 		else
 		{
-			// SocketSubsystem is unavailable (e.g. late shutdown).  Delete directly
-			// so the OS handle is released; FSocket subclasses call Close() in their
-			// destructor which closes the underlying file descriptor.
 			UE_LOG(LogSMLWebSocket, Warning,
 			       TEXT("SMLWebSocket: ISocketSubsystem unavailable in CleanupConnection — deleting socket directly"));
 			delete Socket;
@@ -553,7 +546,7 @@ bool FSMLWebSocketRunnable::ResolveAndConnect(const FString& Host, int32 Port)
 	const FString& ActualHost = ReconnectCfg.ProxyHost.IsEmpty() ? Host : ReconnectCfg.ProxyHost;
 	const int32    ActualPort = ReconnectCfg.ProxyHost.IsEmpty() ? Port : ReconnectCfg.ProxyPort;
 
-	ISocketSubsystem* SocketSS = ISocketSubsystem::Get(NAME_None);
+	ISocketSubsystem* SocketSS = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
 	if (!SocketSS)
 	{
 		UE_LOG(LogSMLWebSocket, Error, TEXT("SMLWebSocket: No socket subsystem"));

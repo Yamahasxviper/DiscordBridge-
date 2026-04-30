@@ -103,5 +103,19 @@ private:
     };
     TQueue<FOutboundMsg, EQueueMode::Mpsc> OutboundQueue;
 
+    /**
+     * Sockets that have been removed from Clients by DisconnectClient() and are
+     * waiting to be destroyed by the I/O thread.  DisconnectClient() must NOT
+     * destroy the socket directly because the I/O thread may already hold a raw
+     * FSocket* snapshot taken from Clients during the broadcast-drain loop.
+     * Destroying the socket on the game thread while the I/O thread is mid-
+     * SendFrame() on that same pointer is a use-after-free.
+     *
+     * Ownership: game thread enqueues the pointer; I/O thread (Run) dequeues
+     * and destroys it at the start of each loop iteration and once more after
+     * the shutdown cleanup, ensuring all in-flight sends have completed first.
+     */
+    TQueue<FSocket*, EQueueMode::Mpsc> SocketsToDestroy;
+
     static std::atomic<uint64> NextClientId;
 };
