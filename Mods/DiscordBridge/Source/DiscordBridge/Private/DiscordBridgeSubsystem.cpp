@@ -853,18 +853,29 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 		{
 			if (GuildId.IsEmpty())
 			{
-				// Only update when GuildId has not been set yet.  For bots in
-				// multiple guilds the first GUILD_CREATE wins (same policy as
-				// the READY handler which picks the first entry in the array).
+				// First GUILD_CREATE seen — set both GuildId and GuildOwnerId.
+				// For bots in multiple guilds the first GUILD_CREATE wins (same
+				// policy as the READY handler which picks the first entry in the array).
 				GuildId = IncomingGuildId;
+				DataObj->TryGetStringField(TEXT("owner_id"), GuildOwnerId);
 				UE_LOG(LogDiscordBridge, Log,
 				       TEXT("DiscordBridge: Guild ID set from GUILD_CREATE: %s"), *GuildId);
 			}
+			else if (GuildId == IncomingGuildId)
+			{
+				// GUILD_CREATE for our already-accepted guild.  This is the normal
+				// path on initial connect (READY sets GuildId before GUILD_CREATE
+				// fires) and after a resume/reconnect (GuildId is replayed).
+				// Refresh GuildOwnerId in case ownership transferred; no warning needed.
+				DataObj->TryGetStringField(TEXT("owner_id"), GuildOwnerId);
+			}
 			else
 			{
-				// The bot has been added to a second guild.  All moderation commands,
-				// role lookups, and channel operations target the first guild only.
-				// Log a prominent warning so the server operator can investigate.
+				// The bot has been added to a second, different guild.  All moderation
+				// commands, role lookups, and channel operations target the first guild
+				// only.  Log a prominent warning so the server operator can investigate.
+				// Do NOT update GuildOwnerId — that would give the wrong guild's owner
+				// staff-level permissions in the ticket system and ban panel.
 				UE_LOG(LogDiscordBridge, Warning,
 				       TEXT("DiscordBridge: Ignoring GUILD_CREATE for guild %s — bot is already ")
 				       TEXT("operating in guild %s. Remove the bot from the extra guild to avoid ")
@@ -872,7 +883,6 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 				       *IncomingGuildId, *GuildId);
 			}
 		}
-		DataObj->TryGetStringField(TEXT("owner_id"), GuildOwnerId);
 	}
 	else if (EventType == TEXT("INTERACTION_CREATE"))
 	{
