@@ -91,6 +91,26 @@ uint32 FSMLWebSocketServerRunnable::Run()
 {
     while (!bStopping.load())
     {
+        // Destroy sockets that DisconnectClient() deferred to us.  This drain
+        // must happen at the top of the loop, before the OutboundQueue drain
+        // below collects new raw socket snapshots.  Any socket enqueued by
+        // DisconnectClient() was already removed from Clients (under
+        // ClientMutex) before being enqueued here, so no new snapshot of it
+        // will be taken after this point; all outstanding snapshots were taken
+        // in the *previous* iteration and their SendFrame() calls have already
+        // completed, making it safe to destroy the socket now.
+        {
+            FSocket* S;
+            ISocketSubsystem* SocketSS = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+            while (SocketsToDestroy.Dequeue(S))
+            {
+                if (SocketSS)
+                    SocketSS->DestroySocket(S);
+                else
+                    delete S;
+            }
+        }
+
         // Accept any pending connections (non-blocking poll).
         bool bHasPending = false;
         if (ListenSocket && ListenSocket->HasPendingConnection(bHasPending) && bHasPending)
@@ -288,6 +308,21 @@ uint32 FSMLWebSocketServerRunnable::Run()
             if (USMLWebSocketServer* O = WeakOwner.Get())
                 O->Internal_OnClientDisconnected(Id, TEXT("server stopped"));
         });
+    }
+
+    // Final drain of SocketsToDestroy: a DisconnectClient() call may have
+    // raced with the shutdown cleanup above, removing a client from Clients
+    // (so it was not destroyed in the loop) and enqueueing its socket here.
+    {
+        FSocket* S;
+        ISocketSubsystem* SocketSS = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+        while (SocketsToDestroy.Dequeue(S))
+        {
+            if (SocketSS)
+                SocketSS->DestroySocket(S);
+            else
+                delete S;
+        }
     }
 
     return 0;
@@ -730,17 +765,14 @@ void FSMLWebSocketServerRunnable::DisconnectClient(const FString& ClientId)
         if (!Clients.RemoveAndCopyValue(ClientId, Removed))
             return;
     }
-    ISocketSubsystem* SocketSS = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
-    if (SocketSS)
-    {
-        SocketSS->DestroySocket(Removed.Socket);
-    }
-    else
-    {
-        UE_LOG(LogWSServer, Warning,
-            TEXT("WSServer: ISocketSubsystem unavailable in DisconnectClient — deleting socket directly"));
-        delete Removed.Socket;
-    }
+    // Do NOT destroy Removed.Socket here.  The I/O thread (Run) may already
+    // hold a raw pointer snapshot of this socket taken from Clients during the
+    // broadcast-drain loop.  Destroying the socket on this thread while Run()
+    // is mid-SendFrame() on the same pointer is a use-after-free.  Instead,
+    // hand ownership to SocketsToDestroy so that Run() destroys it at the
+    // start of the next iteration, by which time all in-flight sends from the
+    // current iteration have completed.
+    SocketsToDestroy.Enqueue(Removed.Socket);
 
     TWeakObjectPtr<USMLWebSocketServer> WeakOwner = Owner;
     AsyncTask(ENamedThreads::GameThread, [WeakOwner, ClientId]()
