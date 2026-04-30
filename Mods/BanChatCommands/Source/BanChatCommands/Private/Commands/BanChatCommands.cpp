@@ -938,8 +938,14 @@ namespace BanChat
             case TEXT('\r'): Out += TEXT("\\r");  break;
             case TEXT('\t'): Out += TEXT("\\t");  break;
             default:
-                if ((C >= 0xD800 && C <= 0xDFFF) || C < 0x20)
+                // RFC 8259 §7: control characters U+0000–U+001F must be escaped.
+                if (C < 0x20)
                     Out += FString::Printf(TEXT("\\u%04x"), static_cast<uint32>(C));
+                // RFC 8259 §7: lone surrogate code-points U+D800–U+DFFF produce
+                // invalid JSON.  Replace with U+FFFD (replacement character) so the
+                // output is always valid JSON regardless of the player name content.
+                else if (C >= 0xD800 && C <= 0xDFFF)
+                    Out += TEXT("\uFFFD");
                 else
                     Out += C;
                 break;
