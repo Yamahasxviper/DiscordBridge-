@@ -1140,7 +1140,12 @@ void UDiscordBridgeSubsystem::HandleReconnect()
 	PendingReidentifyHandle.Reset();
 	bPendingHeartbeatAck = false;
 	bGatewayReady        = false;
-	BotUserId.Empty();
+	// BotUserId intentionally NOT cleared: the bot identity is stable across
+	// reconnects.  Discord only sends READY (which sets BotUserId) on a fresh
+	// Identify, not after a RESUMED.  Clearing it here causes self-message
+	// echo, dropped interaction responses, and wrong vote counts if Resume
+	// succeeds.  GuildId/GuildOwnerId are refilled by the post-resume
+	// GUILD_CREATE events that Discord always sends.
 	GuildId.Empty();
 	GuildOwnerId.Empty();
 
@@ -1180,8 +1185,10 @@ void UDiscordBridgeSubsystem::HandleInvalidSession(bool bResumable)
 	PendingReidentifyHandle.Reset();
 
 	// Clear all per-session gateway state so stale IDs are never used.
+	// BotUserId intentionally NOT cleared: the bot identity is stable across
+	// reconnects.  Discord only sends READY (which sets BotUserId) on a fresh
+	// Identify, not after a RESUMED.  See HandleReconnect() for details.
 	bGatewayReady      = false;
-	BotUserId.Empty();
 	GuildId.Empty();
 	GuildOwnerId.Empty();
 
@@ -1622,8 +1629,8 @@ void UDiscordBridgeSubsystem::SendHeartbeat()
 
 		// Reset Gateway state but keep SessionId/ResumeGatewayUrl so HandleHello
 		// can attempt a Resume instead of a full Identify.
+		// BotUserId intentionally NOT cleared: see HandleReconnect() for details.
 		bGatewayReady = false;
-		BotUserId.Empty();
 		GuildId.Empty();
 		GuildOwnerId.Empty();
 
