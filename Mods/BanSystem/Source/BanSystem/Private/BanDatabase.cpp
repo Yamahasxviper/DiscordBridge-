@@ -487,14 +487,14 @@ bool UBanDatabase::AddBan(const FBanEntry& Entry)
         else
         {
             // External ID supplied (e.g. from peer sync or file reload).
-            // Advance NextId past it to prevent future auto-assign collisions.
+            // Advance NextId past it only when it would collide with or fall
+            // behind the external ID.  If the external ID is below NextId, the
+            // counter is already safe and must not be disturbed.
             // Guard: if the supplied ID is INT64_MAX there is no higher valid Id,
             // so mark the counter exhausted rather than letting it overflow.
-            if (NextId != 0)
+            if (NextId != 0 && NewEntry.Id >= NextId)
             {
-                const int64 MinNext = (NewEntry.Id < INT64_MAX) ? NewEntry.Id + 1 : 0;
-                if (MinNext == 0 || MinNext > NextId)
-                    NextId = MinNext;
+                NextId = (NewEntry.Id < INT64_MAX) ? NewEntry.Id + 1 : 0;
             }
         }
 

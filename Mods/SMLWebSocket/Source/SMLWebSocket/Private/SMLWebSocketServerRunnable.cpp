@@ -138,21 +138,31 @@ uint32 FSMLWebSocketServerRunnable::Run()
         }
 
         // Drain outbound queue.
+        // Collect target sockets while holding ClientMutex, then release the
+        // lock before calling SendFrame().  SendFrame() performs a blocking
+        // socket write; holding ClientMutex across it would stall the read
+        // loop (which also locks ClientMutex) for every slow or full-buffer
+        // client.
         FOutboundMsg Msg;
         while (OutboundQueue.Dequeue(Msg))
         {
-            FScopeLock L(&ClientMutex);
-            if (Msg.ClientId.IsEmpty())
+            TArray<FSocket*> Targets;
             {
-                // Broadcast.
-                for (auto& KV : Clients)
-                    SendFrame(KV.Value.Socket, Msg.Frame);
-            }
-            else
-            {
-                FClientState* C = Clients.Find(Msg.ClientId);
-                if (C) SendFrame(C->Socket, Msg.Frame);
-            }
+                FScopeLock L(&ClientMutex);
+                if (Msg.ClientId.IsEmpty())
+                {
+                    // Broadcast: collect all connected sockets.
+                    for (auto& KV : Clients)
+                        Targets.Add(KV.Value.Socket);
+                }
+                else
+                {
+                    FClientState* C = Clients.Find(Msg.ClientId);
+                    if (C) Targets.Add(C->Socket);
+                }
+            } // ClientMutex released before any blocking I/O
+            for (FSocket* Sock : Targets)
+                SendFrame(Sock, Msg.Frame);
         }
 
         // Read from connected clients.
