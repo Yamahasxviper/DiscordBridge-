@@ -492,3 +492,35 @@ be detected on the next call" was only correct when no prune-write followed; the
 
 *Last updated: 2026-04-29. All 2 round-7 bugs resolved.*
 
+---
+
+## Round 8 — Additional Scan (2026-04-30)
+
+### ✅ Fixed — `BanChat::JsonEscape()` emits lone surrogates as `\uD800`–`\uDFFF` — invalid JSON (BUG-01)
+**File:** `Mods/BanChatCommands/Source/BanChatCommands/Private/Commands/BanChatCommands.cpp`
+
+**Fix applied:** Separated the surrogate-range guard from the control-character guard.
+Lone surrogates (U+D800–U+DFFF) are now replaced with U+FFFD (the Unicode replacement
+character) instead of being emitted as `\uD800`–`\uDFFF` escape sequences, which are
+explicitly prohibited by RFC 8259 §7. This is the same fix applied to
+`DiscordBridgeSubsystem::JsonEscapeStr()` in Round 7 (BUG-01) and already present in
+`BanDiscordNotifier::JsonEscape()`. `BanChat::JsonEscape()` is called at lines 1799–1800,
+3765, and 3854–3855 to build Discord webhook JSON payloads — any player name or reason
+containing a lone surrogate would have produced malformed JSON rejected by Discord's API.
+
+---
+
+### ✅ Fixed — `BanDiscordSubsystem` anonymous `JsonEscape()` emits lone surrogates as `\uD800`–`\uDFFF` — invalid JSON (BUG-02)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/BanDiscordSubsystem.cpp`
+
+**Fix applied:** Same fix as BUG-01 above. The anonymous-namespace `JsonEscape()` in
+`BanDiscordSubsystem.cpp` combined the surrogate check with the control-character check
+under one arm, causing lone surrogates to be emitted as `\uD800`–`\uDFFF`. Separated into
+two distinct branches: control characters (C < 0x20) still emit `\uXXXX`, while lone
+surrogates (U+D800–U+DFFF) now emit U+FFFD. This brings all four `JsonEscape`
+implementations in the codebase into alignment.
+
+---
+
+*Last updated: 2026-04-30. All 2 round-8 bugs resolved.*
+
