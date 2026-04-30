@@ -42,7 +42,8 @@ public:
      * GetBanByUid() + AddBan() as two separate steps.
      * OutUpdated is filled with the final state of the entry after the mutator
      * has run.  Returns false when no record exists for Uid or when SaveToFile
-     * fails.  Fires OnBanAdded after a successful write.
+     * fails.  Fires OnBanUpdated (NOT OnBanAdded) after a successful write so
+     * that subscribers can distinguish ban edits from new bans.
      */
     bool UpdateBan(const FString& Uid, TFunction<void(FBanEntry&)> Mutator, FBanEntry& OutUpdated);
 
@@ -190,6 +191,16 @@ public:
     /** Fired after a ban is successfully added (from any code path). */
     DECLARE_MULTICAST_DELEGATE_OneParam(FOnBanAdded, const FBanEntry&);
     static FOnBanAdded OnBanAdded;
+
+    /**
+     * Fired after an existing ban record is successfully modified in-place via
+     * UpdateBan() (e.g. reason change, duration extension, bannedBy update).
+     * Distinct from OnBanAdded so that subscribers such as BanDiscordSubsystem
+     * can post an "✏️ ban record updated" message instead of a misleading
+     * "🔨 banned" message for edit operations.
+     */
+    DECLARE_MULTICAST_DELEGATE_OneParam(FOnBanUpdated, const FBanEntry&);
+    static FOnBanUpdated OnBanUpdated;
 
     /**
      * Fired after a ban is successfully removed.
