@@ -3020,7 +3020,7 @@ EExecutionStatus AMuteCheckChatCommand::ExecuteCommand_Implementation(
     else
     {
         const FTimespan Remaining = Entry.ExpireDate - FDateTime::UtcNow();
-        const int32 RemainingMin  = FMath::Max(0, static_cast<int32>(Remaining.GetTotalMinutes()));
+        const int32 RemainingMin  = FMath::Max(1, static_cast<int32>(Remaining.GetTotalMinutes()));
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] '%s' is muted until %s UTC (%s remaining). Reason: %s."),
                 *DisplayName,
@@ -3990,10 +3990,7 @@ EExecutionStatus AScheduleBanChatCommand::ExecuteCommand_Implementation(
     // Resolve target UID.
     FString Uid, PlayerName;
     if (!BanChat::ResolveTarget(this, Sender, TargetArg, Uid, PlayerName))
-    {
-        Uid        = UBanDatabase::MakeUid(TEXT("EOS"), TargetArg.ToLower());
-        PlayerName = TargetArg;
-    }
+        return EExecutionStatus::BAD_ARGUMENTS;
 
     const FString AdminName = Sender->GetSenderName();
     const FDateTime EffectiveAt = FDateTime::UtcNow() + FTimespan::FromMinutes(DelayMinutes);
@@ -4097,10 +4094,7 @@ EExecutionStatus AQBanChatCommand::ExecuteCommand_Implementation(
     // Resolve target.
     FString Uid, PlayerName;
     if (!BanChat::ResolveTarget(this, Sender, TargetArg, Uid, PlayerName))
-    {
-        Uid        = UBanDatabase::MakeUid(TEXT("EOS"), TargetArg.ToLower());
-        PlayerName = TargetArg;
-    }
+        return EExecutionStatus::BAD_ARGUMENTS;
 
     UBanDatabase* DB = BanChat::GetDB(this);
     if (!DB) { Sender->SendChatMessage(TEXT("[BanChatCommands] Database unavailable."), FLinearColor::Red); return EExecutionStatus::UNCOMPLETED; }
