@@ -514,6 +514,16 @@ private:
 	FDelegateHandle BanAddedHandle;
 
 	/**
+	 * Handle for UBanDatabase::OnBanUpdated.
+	 * Mirrors ban edits (reason changes, duration extensions, bannedBy updates) that
+	 * originate from in-game chat commands or the REST API to the moderation log
+	 * channel with an "✏️ ban record updated" message.  Discord slash commands that
+	 * call UpdateBan() already post their own message and suppress this handler via
+	 * PendingInteractionToken, so no duplicate posting occurs.
+	 */
+	FDelegateHandle BanUpdatedHandle;
+
+	/**
 	 * Handle for UBanDatabase::OnBanRemoved.
 	 * Mirrors REST API / BanEnforcer expiry unbans to the moderation log channel
 	 * so that staff see all unban events, not just those triggered by Discord

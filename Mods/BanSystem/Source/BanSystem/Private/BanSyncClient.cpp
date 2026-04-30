@@ -52,12 +52,14 @@ void UBanSyncClient::Initialize(FSubsystemCollectionBase& Collection)
 
     // Subscribe to local ban/unban events so we can forward them to peers.
     UBanDatabase::OnBanAdded.AddUObject(this, &UBanSyncClient::OnLocalBanAdded);
+    UBanDatabase::OnBanUpdated.AddUObject(this, &UBanSyncClient::OnLocalBanAdded);
     UBanDatabase::OnBanRemoved.AddUObject(this, &UBanSyncClient::OnLocalBanRemoved);
 }
 
 void UBanSyncClient::Deinitialize()
 {
     UBanDatabase::OnBanAdded.RemoveAll(this);
+    UBanDatabase::OnBanUpdated.RemoveAll(this);
     UBanDatabase::OnBanRemoved.RemoveAll(this);
 
     for (USMLWebSocketClient* Client : PeerClients)

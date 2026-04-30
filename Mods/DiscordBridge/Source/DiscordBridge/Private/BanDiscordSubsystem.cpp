@@ -413,6 +413,39 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 			});
 	}
 
+	// Mirror ban record edits (reason changes, duration extensions, bannedBy updates)
+	// that originate from in-game chat commands or the REST API to the moderation log.
+	// Discord slash commands that call UpdateBan() set PendingInteractionToken and
+	// post their own specific message, so this handler skips while a bot interaction
+	// is in flight to avoid a duplicate generic "ban record updated" post.
+	// IP counterpart bans are skipped (matching BanAddedHandle) to avoid duplicate posts.
+	{
+		TWeakObjectPtr<UBanDiscordSubsystem> WeakThis(this);
+		BanUpdatedHandle = UBanDatabase::OnBanUpdated.AddLambda(
+			[WeakThis](const FBanEntry& Entry)
+			{
+				UBanDiscordSubsystem* Self = WeakThis.Get();
+				if (!Self || !Self->CachedProvider) return;
+				// Skip when a bot interaction is in flight — the command handler
+				// already posts a specific "reason updated" or "ban extended" message.
+				if (!Self->PendingInteractionToken.IsEmpty()) return;
+				// Skip IP counterpart bans — they are implied by the primary EOS edit.
+				if (Entry.Platform == TEXT("IP")) return;
+
+				const FString DurationStr = Entry.bIsPermanent
+					? TEXT("permanent")
+					: BanDiscordHelpers::FormatDuration(static_cast<int32>(FMath::Min(
+					    FMath::Max((int64)0,
+					        static_cast<int64>((Entry.ExpireDate - Entry.BanDate).GetTotalMinutes())),
+					    static_cast<int64>(INT32_MAX))));
+				const FString Msg = FString::Printf(
+					TEXT("✏️ **%s** (`%s`) ban record updated.\nReason: %s\nBy: %s | Duration: %s"),
+					*Entry.PlayerName, *Entry.Uid,
+					*Entry.Reason, *Entry.BannedBy, *DurationStr);
+				Self->PostModerationLog(Msg);
+			});
+	}
+
 	// Mirror non-bot unbans (REST API / BanEnforcer expiry) to the moderation log.
 	// The lambda is guarded by PendingInteractionToken so Discord slash unban
 	// commands (which post their own message via Respond) don't double-post.
@@ -558,6 +591,11 @@ void UBanDiscordSubsystem::Deinitialize()
 	{
 		UBanDatabase::OnBanAdded.Remove(BanAddedHandle);
 		BanAddedHandle.Reset();
+	}
+	if (BanUpdatedHandle.IsValid())
+	{
+		UBanDatabase::OnBanUpdated.Remove(BanUpdatedHandle);
+		BanUpdatedHandle.Reset();
 	}
 	if (BanRemovedHandle.IsValid())
 	{

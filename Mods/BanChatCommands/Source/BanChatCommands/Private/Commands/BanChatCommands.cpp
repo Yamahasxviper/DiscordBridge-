@@ -3090,7 +3090,7 @@ EExecutionStatus ABanReasonChatCommand::ExecuteCommand_Implementation(
             FLinearColor::Yellow);
         return EExecutionStatus::COMPLETED;
     }
-    // UpdateBan fires OnBanAdded, which BanDiscordSubsystem's BanAddedHandle
+    // UpdateBan fires OnBanUpdated, which BanDiscordSubsystem's BanUpdatedHandle
     // picks up and posts to the moderation log automatically.
 
     // Write audit log.
@@ -3446,7 +3446,7 @@ EExecutionStatus AExtendBanChatCommand::ExecuteCommand_Implementation(
             FLinearColor::Yellow);
         return EExecutionStatus::COMPLETED;
     }
-    // UpdateBan fires OnBanAdded, which BanDiscordSubsystem's BanAddedHandle
+    // UpdateBan fires OnBanUpdated, which BanDiscordSubsystem's BanUpdatedHandle
     // picks up and posts the updated ban to the moderation log automatically.
 
     UWorld* World = GetWorld();

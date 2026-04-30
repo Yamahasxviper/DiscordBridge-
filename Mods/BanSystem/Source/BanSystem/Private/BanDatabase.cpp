@@ -175,6 +175,7 @@ namespace BanDbJson
 // Static delegate definitions.
 UBanDatabase::FOnBanAdded   UBanDatabase::OnBanAdded;
 UBanDatabase::FOnBanRemoved UBanDatabase::OnBanRemoved;
+UBanDatabase::FOnBanUpdated UBanDatabase::OnBanUpdated;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  USubsystem lifecycle
@@ -455,7 +456,7 @@ bool UBanDatabase::UpdateBan(const FString& Uid, TFunction<void(FBanEntry&)> Mut
     }
 
     if (bSaved)
-        OnBanAdded.Broadcast(OutUpdated);
+        OnBanUpdated.Broadcast(OutUpdated);
 
     return bSaved;
 }
