@@ -732,84 +732,104 @@ bool UBanDatabase::LinkBans(const FString& UidA, const FString& UidB)
     if (UidA.IsEmpty() || UidB.IsEmpty() || UidA.Equals(UidB, ESearchCase::IgnoreCase))
         return false;
 
-    FScopeLock Lock(&DbMutex);
+    bool bSaved = false;
+    TArray<FBanEntry> Modified;
 
-    bool bDirty = false;
-    bool bFoundA = false;
-    bool bFoundB = false;
-
-    auto AddLinkIfMissing = [&](FBanEntry& Entry, const FString& LinkUid) -> bool
     {
-        for (const FString& L : Entry.LinkedUids)
-            if (L.Equals(LinkUid, ESearchCase::IgnoreCase)) return false;
-        Entry.LinkedUids.Add(LinkUid);
-        return true;
-    };
+        FScopeLock Lock(&DbMutex);
 
-    for (FBanEntry& E : Bans)
-    {
-        if (E.Uid.Equals(UidA, ESearchCase::IgnoreCase))
+        bool bDirty = false;
+        bool bFoundA = false;
+        bool bFoundB = false;
+
+        auto AddLinkIfMissing = [&](FBanEntry& Entry, const FString& LinkUid) -> bool
         {
-            bFoundA = true;
-            bDirty |= AddLinkIfMissing(E, UidB);
-        }
-        if (E.Uid.Equals(UidB, ESearchCase::IgnoreCase))
-        {
-            bFoundB = true;
-            bDirty |= AddLinkIfMissing(E, UidA);
-        }
-    }
+            for (const FString& L : Entry.LinkedUids)
+                if (L.Equals(LinkUid, ESearchCase::IgnoreCase)) return false;
+            Entry.LinkedUids.Add(LinkUid);
+            return true;
+        };
 
-    if (bDirty)
-    {
-        if (!bFoundA)
-            UE_LOG(LogBanDatabase, Warning,
-                TEXT("BanDatabase: LinkBans — no ban found for '%s'; link added to '%s' only"),
+        for (FBanEntry& E : Bans)
+        {
+            if (E.Uid.Equals(UidA, ESearchCase::IgnoreCase))
+            {
+                bFoundA = true;
+                if (AddLinkIfMissing(E, UidB)) { bDirty = true; Modified.Add(E); }
+            }
+            if (E.Uid.Equals(UidB, ESearchCase::IgnoreCase))
+            {
+                bFoundB = true;
+                if (AddLinkIfMissing(E, UidA)) { bDirty = true; Modified.Add(E); }
+            }
+        }
+
+        if (bDirty)
+        {
+            if (!bFoundA)
+                UE_LOG(LogBanDatabase, Warning,
+                    TEXT("BanDatabase: LinkBans — no ban found for '%s'; link added to '%s' only"),
+                    *UidA, *UidB);
+            else if (!bFoundB)
+                UE_LOG(LogBanDatabase, Warning,
+                    TEXT("BanDatabase: LinkBans — no ban found for '%s'; link added to '%s' only"),
+                    *UidB, *UidA);
+            bSaved = SaveToFile();
+        }
+        else if (bFoundA && bFoundB)
+        {
+            // Both ban records exist but were already cross-linked — no-op, not an error.
+            UE_LOG(LogBanDatabase, Verbose,
+                TEXT("BanDatabase: LinkBans — '%s' and '%s' are already linked; no change"),
                 *UidA, *UidB);
-        else if (!bFoundB)
+        }
+        else
+        {
             UE_LOG(LogBanDatabase, Warning,
-                TEXT("BanDatabase: LinkBans — no ban found for '%s'; link added to '%s' only"),
-                *UidB, *UidA);
-        return SaveToFile();
+                TEXT("BanDatabase: LinkBans — no ban found for '%s' or '%s'"), *UidA, *UidB);
+        }
     }
 
-    if (bFoundA && bFoundB)
-    {
-        // Both ban records exist but were already cross-linked — no-op, not an error.
-        UE_LOG(LogBanDatabase, Verbose,
-            TEXT("BanDatabase: LinkBans — '%s' and '%s' are already linked; no change"),
-            *UidA, *UidB);
-    }
-    else
-    {
-        UE_LOG(LogBanDatabase, Warning,
-            TEXT("BanDatabase: LinkBans — no ban found for '%s' or '%s'"), *UidA, *UidB);
-    }
-    return false;
+    if (bSaved)
+        for (const FBanEntry& E : Modified)
+            OnBanUpdated.Broadcast(E);
+
+    return bSaved;
 }
 
 bool UBanDatabase::UnlinkBans(const FString& UidA, const FString& UidB)
 {
     if (UidA.IsEmpty() || UidB.IsEmpty()) return false;
 
-    FScopeLock Lock(&DbMutex);
+    bool bSaved = false;
+    TArray<FBanEntry> Modified;
 
-    bool bDirty = false;
-
-    for (FBanEntry& E : Bans)
     {
-        if (E.Uid.Equals(UidA, ESearchCase::IgnoreCase) || E.Uid.Equals(UidB, ESearchCase::IgnoreCase))
+        FScopeLock Lock(&DbMutex);
+
+        bool bDirty = false;
+
+        for (FBanEntry& E : Bans)
         {
-            const FString& ToRemove = E.Uid.Equals(UidA, ESearchCase::IgnoreCase) ? UidB : UidA;
-            const int32 Removed = E.LinkedUids.RemoveAll([&ToRemove](const FString& L)
+            if (E.Uid.Equals(UidA, ESearchCase::IgnoreCase) || E.Uid.Equals(UidB, ESearchCase::IgnoreCase))
             {
-                return L.Equals(ToRemove, ESearchCase::IgnoreCase);
-            });
-            if (Removed > 0) bDirty = true;
+                const FString& ToRemove = E.Uid.Equals(UidA, ESearchCase::IgnoreCase) ? UidB : UidA;
+                const int32 Removed = E.LinkedUids.RemoveAll([&ToRemove](const FString& L)
+                {
+                    return L.Equals(ToRemove, ESearchCase::IgnoreCase);
+                });
+                if (Removed > 0) { bDirty = true; Modified.Add(E); }
+            }
         }
+
+        if (bDirty) bSaved = SaveToFile();
     }
 
-    return bDirty ? SaveToFile() : false;
+    if (bSaved)
+        for (const FBanEntry& E : Modified)
+            OnBanUpdated.Broadcast(E);
+
+    return bSaved;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

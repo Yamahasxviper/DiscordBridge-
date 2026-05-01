@@ -786,21 +786,17 @@ void UDiscordBridgeSubsystem::HandleHello(const TSharedPtr<FJsonObject>& DataObj
 	HeartbeatTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
 		FTickerDelegate::CreateWeakLambda(this, [this](float) -> bool
 		{
-			// Reset the one-shot handle BEFORE calling SendHeartbeat() so the
-			// IsValid() guard below correctly distinguishes two states:
-			//   a) SendHeartbeat() resets HeartbeatTickerHandle for reconnect
-			//      → IsValid()==false → we skip installing the repeating ticker
-			//        and let the next Hello do so.
-			//   b) SendHeartbeat() does not touch the handle
-			//      → IsValid()==false (we just reset it) → we install the
-			//        repeating ticker and assign a fresh valid handle.
-			// Without this reset, FTSTicker still considers the handle valid
-			// while the lambda is executing (it removes the ticker only after the
-			// callback returns), so the IsValid() guard was always true and could
-			// never protect against the reconnect path.
+			// Reset the one-shot handle BEFORE calling SendHeartbeat() so it is
+			// not double-removed when FTSTicker cleans up the one-shot after this
+			// callback returns.
 			HeartbeatTickerHandle.Reset();
 			SendHeartbeat();
-			if (!HeartbeatTickerHandle.IsValid())
+			// Install the repeating ticker only if the heartbeat was actually sent
+			// (SendHeartbeat sets bPendingHeartbeatAck=true on the normal path).
+			// In the zombie path SendHeartbeat clears bPendingHeartbeatAck, calls
+			// Connect(), and returns early — the new connection's Hello will
+			// install the repeating ticker instead.
+			if (bPendingHeartbeatAck)
 			{
 				HeartbeatTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
 					FTickerDelegate::CreateUObject(this, &UDiscordBridgeSubsystem::HeartbeatTick),
