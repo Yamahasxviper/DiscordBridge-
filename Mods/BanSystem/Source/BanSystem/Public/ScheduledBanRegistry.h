@@ -64,8 +64,10 @@ private:
     bool    SaveToFile() const;
     FString GetRegistryPath() const;
 
-    /** Apply a single scheduled ban (called from Tick when EffectiveAt has passed). */
-    void ApplyScheduledBan(const FScheduledBanEntry& Entry);
+    /** Apply a single scheduled ban (called from Tick when EffectiveAt has passed).
+     *  Returns true when the entry was handled (applied or intentionally skipped),
+     *  false when a transient failure occurred and the entry should be re-queued. */
+    bool ApplyScheduledBan(const FScheduledBanEntry& Entry);
 
     TArray<FScheduledBanEntry> Pending;
     int64                      NextId = 1;

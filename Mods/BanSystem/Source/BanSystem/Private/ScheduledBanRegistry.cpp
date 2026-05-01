@@ -159,17 +159,36 @@ void UScheduledBanRegistry::Tick(float DeltaTime)
         }
     }
 
+    TArray<FScheduledBanEntry> Failed;
     for (const FScheduledBanEntry& S : Due)
-        ApplyScheduledBan(S);
+    {
+        if (!ApplyScheduledBan(S))
+            Failed.Add(S);
+    }
+
+    // Re-queue any entries that could not be applied due to a transient failure
+    // (e.g. UBanDatabase unavailable) so they are retried on the next tick and
+    // survive a server restart.
+    if (!Failed.IsEmpty())
+    {
+        FScopeLock Lock(&Mutex);
+        Pending.Append(Failed);
+        if (!SaveToFile())
+        {
+            UE_LOG(LogScheduledBanRegistry, Error,
+                TEXT("ScheduledBanRegistry: failed to re-save %d re-queued entry(ies) after apply failure"),
+                Failed.Num());
+        }
+    }
 }
 
-void UScheduledBanRegistry::ApplyScheduledBan(const FScheduledBanEntry& Entry)
+bool UScheduledBanRegistry::ApplyScheduledBan(const FScheduledBanEntry& Entry)
 {
     UGameInstance* GI = GetGameInstance();
-    if (!GI) return;
+    if (!GI) return false;
 
     UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
-    if (!DB) return;
+    if (!DB) return false;
 
     FBanEntry Ban;
     Ban.Uid        = Entry.Uid;
@@ -194,7 +213,7 @@ void UScheduledBanRegistry::ApplyScheduledBan(const FScheduledBanEntry& Entry)
             UE_LOG(LogScheduledBanRegistry, Log,
                 TEXT("ScheduledBanRegistry: skipping scheduled ban #%lld for %s — permanent ban already active"),
                 Entry.Id, *Entry.Uid);
-            return;
+            return true; // intentional skip — do not re-queue
         }
     }
 
@@ -203,7 +222,7 @@ void UScheduledBanRegistry::ApplyScheduledBan(const FScheduledBanEntry& Entry)
         UE_LOG(LogScheduledBanRegistry, Warning,
             TEXT("ScheduledBanRegistry: failed to apply scheduled ban #%lld for %s"),
             Entry.Id, *Entry.Uid);
-        return;
+        return false; // transient failure — re-queue for retry
     }
     if (UWorld* World = GI->GetWorld())
         UBanEnforcer::KickConnectedPlayer(World, Entry.Uid, Ban.GetKickMessage());
@@ -217,6 +236,7 @@ void UScheduledBanRegistry::ApplyScheduledBan(const FScheduledBanEntry& Entry)
     UE_LOG(LogScheduledBanRegistry, Log,
         TEXT("ScheduledBanRegistry: applied scheduled ban #%lld for %s"),
         Entry.Id, *Entry.Uid);
+    return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
