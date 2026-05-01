@@ -2114,15 +2114,31 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 
 		// Save to BanAppealRegistry if BanSystem is installed.
 		// Use "Discord:<userId>" as the appeal UID so the registry can persist
-		// and retrieve the entry.  Admins can resolve the EOS UID from the
-		// in-game name the player provides in the ticket channel.
+		// and retrieve the entry.  Store the player-submitted EOS UID in BanUid
+		// so that the REST API PATCH /appeals/:id endpoint can auto-unban via the
+		// correct EOS key (bans are never stored as "Discord:<id>").
+		FString NormalizedEos;
+		if (!AppealEosUid.IsEmpty())
+		{
+			NormalizedEos = AppealEosUid.TrimStartAndEnd();
+			if (NormalizedEos.StartsWith(TEXT("EOS:"), ESearchCase::IgnoreCase))
+			{
+				// Already has the prefix — keep the prefix but lowercase the PUID portion.
+				NormalizedEos = TEXT("EOS:") + NormalizedEos.Mid(4).ToLower();
+			}
+			else
+			{
+				NormalizedEos = UBanDatabase::MakeUid(TEXT("EOS"), NormalizedEos.ToLower());
+			}
+		}
+
 		if (UGameInstance* GI = GetGameInstance())
 		{
 			if (UBanAppealRegistry* AppealReg = GI->GetSubsystem<UBanAppealRegistry>())
 			{
 				const FString AppealUid     = FString::Printf(TEXT("Discord:%s"), *DiscordUserId);
 				const FString ContactInfo   = FString::Printf(TEXT("Discord: %s (%s)"), *DiscordUsername, *DiscordUserId);
-				const FBanAppealEntry NewEntry = AppealReg->AddAppeal(AppealUid, AppealReasonForRegistry, ContactInfo);
+				const FBanAppealEntry NewEntry = AppealReg->AddAppeal(AppealUid, AppealReasonForRegistry, ContactInfo, NormalizedEos);
 				if (NewEntry.Id > 0)
 				{
 					// Keep the appeal ID mapped to this opener so approve/deny can
@@ -2139,18 +2155,8 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 		// Store the player-submitted EOS UID so the approve/deny buttons and the
 		// expired-ban ticker can look up the actual ban in BanDatabase (which
 		// stores EOS UIDs, never "Discord:<id>" UIDs).
-		if (!AppealEosUid.IsEmpty())
+		if (!NormalizedEos.IsEmpty())
 		{
-			FString NormalizedEos = AppealEosUid.TrimStartAndEnd();
-			if (NormalizedEos.StartsWith(TEXT("EOS:"), ESearchCase::IgnoreCase))
-			{
-				// Already has the prefix — keep the prefix but lowercase the PUID portion.
-				NormalizedEos = TEXT("EOS:") + NormalizedEos.Mid(4).ToLower();
-			}
-			else
-			{
-				NormalizedEos = UBanDatabase::MakeUid(TEXT("EOS"), NormalizedEos.ToLower());
-			}
 			OpenerToEosUid.Add(DiscordUserId, NormalizedEos);
 		}
 

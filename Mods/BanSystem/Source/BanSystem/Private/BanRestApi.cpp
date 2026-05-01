@@ -205,6 +205,8 @@ namespace BanJson
         Obj->SetStringField(TEXT("warnedBy"),   W.WarnedBy);
         Obj->SetStringField(TEXT("warnDate"),   W.WarnDate.ToIso8601());
         Obj->SetNumberField(TEXT("points"),     static_cast<double>(W.Points > 0 ? W.Points : 1));
+        Obj->SetBoolField  (TEXT("hasExpiry"),  W.bHasExpiry);
+        Obj->SetStringField(TEXT("expireDate"), W.bHasExpiry ? W.ExpireDate.ToIso8601() : TEXT(""));
         return Obj;
     }
 
@@ -229,6 +231,8 @@ namespace BanJson
         Obj->SetStringField(TEXT("reviewNote"), A.ReviewNote);
         if (A.ReviewedAt != FDateTime(0))
             Obj->SetStringField(TEXT("reviewedAt"), A.ReviewedAt.ToIso8601());
+        if (!A.BanUid.IsEmpty())
+            Obj->SetStringField(TEXT("banUid"), A.BanUid);
         return Obj;
     }
 
@@ -2467,13 +2471,19 @@ void UBanRestApi::RegisterRoutes()
                         // entry and delete it in a single mutex scope, eliminating the
                         // TOCTOU window that exists when GetBanByUid and RemoveBanByUid
                         // are called as two separate operations.
+                        //
+                        // For Discord-originated appeals the submission Uid is
+                        // "Discord:<id>"; bans are indexed under EOS UIDs.  Use BanUid
+                        // (the EOS UID stored at appeal-creation time) when available,
+                        // falling back to Uid for REST-API-originated appeals.
+                        const FString UnbanUid = Appeal.BanUid.IsEmpty() ? Appeal.Uid : Appeal.BanUid;
                         FBanEntry RemovedBan;
-                        if (DB->RemoveBanByUid(Appeal.Uid, RemovedBan))
+                        if (DB->RemoveBanByUid(UnbanUid, RemovedBan))
                         {
-                            const FString PlayerName = RemovedBan.PlayerName.IsEmpty() ? Appeal.Uid : RemovedBan.PlayerName;
-                            FBanDiscordNotifier::NotifyBanRemoved(Appeal.Uid, PlayerName, ReviewedBy);
+                            const FString PlayerName = RemovedBan.PlayerName.IsEmpty() ? UnbanUid : RemovedBan.PlayerName;
+                            FBanDiscordNotifier::NotifyBanRemoved(RemovedBan.Uid, PlayerName, ReviewedBy);
                             if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-                                AuditLog->LogAction(TEXT("unban"), Appeal.Uid, PlayerName, ReviewedBy, ReviewedBy,
+                                AuditLog->LogAction(TEXT("unban"), RemovedBan.Uid, PlayerName, ReviewedBy, ReviewedBy,
                                     FString::Printf(TEXT("Appeal #%lld approved: %s"), Id, *ReviewNote));
                         }
                     }

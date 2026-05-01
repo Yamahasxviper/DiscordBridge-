@@ -35,8 +35,15 @@ public:
      * Saves to disk immediately.
      * Thread-safe.
      */
+    /**
+     * @param BanUid  Optional — the actual ban UID (e.g. "EOS:<puid>") to use
+     *                when auto-unbanning on approval.  Should be set when the
+     *                submission Uid differs from the ban-database key (e.g.
+     *                Discord-originated appeals where Uid = "Discord:<id>").
+     */
     FBanAppealEntry AddAppeal(const FString& Uid, const FString& Reason,
-                              const FString& ContactInfo);
+                              const FString& ContactInfo,
+                              const FString& BanUid = FString());
 
     /**
      * Returns all stored appeals.

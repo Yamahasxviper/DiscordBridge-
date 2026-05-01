@@ -337,6 +337,14 @@ struct BANSYSTEM_API FBanAppealEntry
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     FDateTime ReviewedAt;
 
+    /**
+     * Actual ban UID (e.g. "EOS:<puid>") used for auto-unban on approval.
+     * Empty when the same as Uid.  Set for Discord-originated appeals where
+     * Uid is "Discord:<id>" but the ban is indexed under an EOS UID.
+     */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    FString BanUid;
+
     FBanAppealEntry()
         : Id(0)
         , SubmittedAt(FDateTime::UtcNow())

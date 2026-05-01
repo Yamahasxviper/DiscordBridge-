@@ -51,7 +51,8 @@ void UBanAppealRegistry::Deinitialize()
 
 FBanAppealEntry UBanAppealRegistry::AddAppeal(const FString& Uid,
                                                const FString& Reason,
-                                               const FString& ContactInfo)
+                                               const FString& ContactInfo,
+                                               const FString& BanUid)
 {
     FBanAppealEntry Entry;
 
@@ -71,6 +72,7 @@ FBanAppealEntry UBanAppealRegistry::AddAppeal(const FString& Uid,
         Entry.Uid         = Uid;
         Entry.Reason      = Reason;
         Entry.ContactInfo = ContactInfo;
+        Entry.BanUid      = BanUid;
         Entry.SubmittedAt = FDateTime::UtcNow();
 
         Appeals.Add(Entry);
@@ -217,6 +219,7 @@ void UBanAppealRegistry::LoadFromFile()
             (*ObjPtr)->TryGetStringField(TEXT("uid"),         Entry.Uid);
             (*ObjPtr)->TryGetStringField(TEXT("reason"),      Entry.Reason);
             (*ObjPtr)->TryGetStringField(TEXT("contactInfo"), Entry.ContactInfo);
+            (*ObjPtr)->TryGetStringField(TEXT("banUid"),      Entry.BanUid);
 
             FString DateStr;
             if ((*ObjPtr)->TryGetStringField(TEXT("submittedAt"), DateStr))
@@ -292,6 +295,8 @@ bool UBanAppealRegistry::SaveToFile() const
         Obj->SetStringField(TEXT("uid"),         A.Uid);
         Obj->SetStringField(TEXT("reason"),      A.Reason);
         Obj->SetStringField(TEXT("contactInfo"), A.ContactInfo);
+        if (!A.BanUid.IsEmpty())
+            Obj->SetStringField(TEXT("banUid"),  A.BanUid);
         Obj->SetStringField(TEXT("submittedAt"), A.SubmittedAt.ToIso8601());
 
         // Status

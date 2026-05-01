@@ -524,3 +524,51 @@ implementations in the codebase into alignment.
 
 *Last updated: 2026-04-30. All 2 round-8 bugs resolved.*
 
+---
+
+## Round 9 — Additional Scan (2026-05-01)
+
+### ✅ Fixed — `WarningToJson` omits `hasExpiry` / `expireDate` fields (BUG-01)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanRestApi.cpp`
+
+**Fix applied:** Added `SetBoolField("hasExpiry", W.bHasExpiry)` and
+`SetStringField("expireDate", W.bHasExpiry ? W.ExpireDate.ToIso8601() : "")` to
+`BanJson::WarningToJson()`, matching the identical serialization already used in
+`PlayerWarningRegistry::SaveToFile()`. Previously both `GET /warnings` and the `201`
+response from `POST /warnings` returned warning objects with no expiry information,
+making every timed warning appear permanent to API consumers (dashboards, DiscordBridge,
+external tooling).
+
+---
+
+### ✅ Fixed — `PATCH /appeals/:id` auto-unban silently fails for Discord-originated appeals (BUG-02)
+**Files:** `Mods/BanSystem/Source/BanSystem/Public/BanTypes.h`,
+`Mods/BanSystem/Source/BanSystem/Public/BanAppealRegistry.h`,
+`Mods/BanSystem/Source/BanSystem/Private/BanAppealRegistry.cpp`,
+`Mods/BanSystem/Source/BanSystem/Private/BanRestApi.cpp`,
+`Mods/DiscordBridge/Source/DiscordBridge/Private/TicketSubsystem.cpp`
+
+**Root cause:** Discord-originated appeals are stored with `Uid = "Discord:<userId>"`, but
+bans are indexed under EOS UIDs (`"EOS:<puid>"`). The `PATCH /appeals/:id` auto-unban path
+called `RemoveBanByUid(Appeal.Uid)`, which never matched any ban and silently returned
+`false` — the player remained banned even after the appeal was approved via the REST API.
+(The Discord ticket "Approve" button correctly resolved the EOS UID via `OpenerToEosUid`
+and was unaffected.)
+
+**Fix applied:**
+1. Added `BanUid` field to `FBanAppealEntry` — the actual ban-database UID (e.g.
+   `"EOS:<puid>"`) to use for auto-unban, distinct from the submission `Uid`.
+2. Added optional `BanUid` parameter to `UBanAppealRegistry::AddAppeal()`.
+3. `BanAppealRegistry` now serializes/deserializes `"banUid"` (omitted when empty,
+   backward-compatible with existing files).
+4. `BanJson::AppealToJson()` now includes `"banUid"` in API responses when non-empty.
+5. `PATCH /appeals/:id` now uses `BanUid` (falling back to `Uid`) for `RemoveBanByUid`,
+   and passes `RemovedBan.Uid` (the authoritative EOS UID) to `NotifyBanRemoved` and the
+   audit log.
+6. `TicketSubsystem` now normalizes the EOS UID before calling `AddAppeal` and passes it
+   as the new `BanUid` argument, so every Discord-originated appeal entry persists the
+   correct ban-database key through server restarts.
+
+---
+
+*Last updated: 2026-05-01. All 2 round-9 bugs resolved.*
