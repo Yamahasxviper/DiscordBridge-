@@ -147,6 +147,23 @@ namespace BanJson
     }
 
     /**
+     * Constant-time string equality — prevents timing side-channel attacks on
+     * the API key.  FString::Equals short-circuits on the first mismatching
+     * byte, leaking information via response latency.  This function always
+     * inspects every byte of the shorter string before returning.
+     */
+    static bool ConstantTimeEquals(const FString& A, const FString& B)
+    {
+        const FTCHARToUTF8 Au(*A), Bu(*B);
+        // Use uint32 so no bits are lost when lengths differ by a multiple of 256.
+        uint32 Diff = static_cast<uint32>(Au.Length() ^ Bu.Length());
+        const int32 N = FMath::Min(Au.Length(), Bu.Length());
+        for (int32 i = 0; i < N; ++i)
+            Diff |= static_cast<uint8>(Au.Get()[i]) ^ static_cast<uint8>(Bu.Get()[i]);
+        return Diff == 0;
+    }
+
+    /**
      * Returns true when the request passes the API key check.
      * If RestApiKey is empty, always returns true (auth disabled).
      * If RestApiKey is non-empty, the request must supply either:
@@ -164,12 +181,12 @@ namespace BanJson
         // Header-based auth (primary, used by API clients and the dashboard JS).
         const TArray<FString>* KeyHeaderValues = Req.Headers.Find(TEXT("X-Api-Key"));
         if (KeyHeaderValues && !KeyHeaderValues->IsEmpty() &&
-            (*KeyHeaderValues)[0].Equals(Cfg->RestApiKey, ESearchCase::CaseSensitive))
+            ConstantTimeEquals((*KeyHeaderValues)[0], Cfg->RestApiKey))
             return true;
 
         // Query-param auth (for browser navigation to /dashboard?key=xxx).
         const FString* QueryKey = Req.QueryParams.Find(TEXT("key"));
-        if (QueryKey && QueryKey->Equals(Cfg->RestApiKey, ESearchCase::CaseSensitive))
+        if (QueryKey && ConstantTimeEquals(*QueryKey, Cfg->RestApiKey))
             return true;
 
         return false;
