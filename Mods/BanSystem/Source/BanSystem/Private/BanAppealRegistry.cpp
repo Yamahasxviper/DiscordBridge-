@@ -214,6 +214,12 @@ void UBanAppealRegistry::LoadFromFile()
                 else if ((*ObjPtr)->TryGetNumberField(TEXT("id"), IdDbl))
                     Entry.Id = static_cast<int64>(IdDbl);
             }
+            if (Entry.Id <= 0)
+            {
+                UE_LOG(LogBanAppealRegistry, Warning,
+                    TEXT("BanAppealRegistry: skipping appeal with invalid id (uid=%s)"), *Entry.Uid);
+                continue;
+            }
             (*ObjPtr)->TryGetStringField(TEXT("uid"),         Entry.Uid);
             (*ObjPtr)->TryGetStringField(TEXT("reason"),      Entry.Reason);
             (*ObjPtr)->TryGetStringField(TEXT("contactInfo"), Entry.ContactInfo);

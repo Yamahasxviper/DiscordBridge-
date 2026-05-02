@@ -3,6 +3,7 @@
 #include "BanBridgeConfig.h"
 
 #include "Misc/ConfigCacheIni.h"
+#include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -205,8 +206,16 @@ void FBanBridgeConfig::RestoreDefaultConfigIfNeeded()
 	if (PF.FileExists(*PrimaryPath))
 	{
 		FString Existing;
-		FFileHelper::LoadFileToString(Existing, *PrimaryPath);
-		if (Existing.Contains(TEXT("# ")))
+		const bool bReadOk = FFileHelper::LoadFileToString(Existing, *PrimaryPath);
+		if (!bReadOk)
+		{
+			// File absent or unreadable — write template only if file truly doesn't exist
+			if (!IFileManager::Get().FileExists(*PrimaryPath))
+				FFileHelper::SaveStringToFile(Template, *PrimaryPath,
+					FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+			return;
+		}
+		if (Existing.Contains(TEXT("#")))
 			return;
 	}
 

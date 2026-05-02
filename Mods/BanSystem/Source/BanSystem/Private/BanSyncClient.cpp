@@ -245,6 +245,7 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
             {
                 for (const TSharedPtr<FJsonValue>& EvidVal : *EvidArr)
                 {
+                    if (!EvidVal.IsValid()) continue;
                     FString Ev;
                     if (EvidVal->TryGetString(Ev) && !Ev.IsEmpty())
                         IncomingEvidence.Add(Ev);

@@ -148,13 +148,19 @@ void UPlayerNoteRegistry::LoadFromFile()
             FPlayerNoteEntry Entry;
             // Prefer string format (written since precision-loss fix); fall back
             // to legacy double for files written by older builds.
+            FString IdStr;
             {
-                FString IdStr;
                 double  IdDbl = 0.0;
                 if ((*ObjPtr)->TryGetStringField(TEXT("id"), IdStr))
                     Entry.Id = FCString::Atoi64(*IdStr);
                 else if ((*ObjPtr)->TryGetNumberField(TEXT("id"), IdDbl) && IdDbl >= 1.0)
                     Entry.Id = static_cast<int64>(IdDbl);
+            }
+            if (Entry.Id <= 0)
+            {
+                UE_LOG(LogPlayerNoteRegistry, Warning,
+                    TEXT("PlayerNoteRegistry: skipping note with invalid id='%s'"), *IdStr);
+                continue;
             }
             (*ObjPtr)->TryGetStringField(TEXT("uid"),        Entry.Uid);
             (*ObjPtr)->TryGetStringField(TEXT("playerName"), Entry.PlayerName);
