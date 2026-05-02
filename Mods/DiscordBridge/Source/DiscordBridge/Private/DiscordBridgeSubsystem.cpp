@@ -801,7 +801,10 @@ void UDiscordBridgeSubsystem::HandleHello(const TSharedPtr<FJsonObject>& DataObj
 			if (bPendingHeartbeatAck)
 			{
 				HeartbeatTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
-					FTickerDelegate::CreateUObject(this, &UDiscordBridgeSubsystem::HeartbeatTick),
+					FTickerDelegate::CreateWeakLambda(this, [this](float DeltaTime) -> bool
+					{
+						return HeartbeatTick(DeltaTime);
+					}),
 					HeartbeatIntervalSeconds);
 			}
 			return false; // one-shot – do not repeat
@@ -1274,7 +1277,10 @@ void UDiscordBridgeSubsystem::HandleReady(const TSharedPtr<FJsonObject>& DataObj
 
 		const float Interval = FMath::Max(Config.PlayerCountUpdateIntervalSeconds, 15.0f);
 		PlayerCountTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
-			FTickerDelegate::CreateUObject(this, &UDiscordBridgeSubsystem::PlayerCountTick),
+			FTickerDelegate::CreateWeakLambda(this, [this](float DeltaTime) -> bool
+			{
+				return PlayerCountTick(DeltaTime);
+			}),
 			Interval);
 	}
 	else
@@ -1335,7 +1341,10 @@ void UDiscordBridgeSubsystem::HandleResumed()
 
 		const float Interval = FMath::Max(Config.PlayerCountUpdateIntervalSeconds, 15.0f);
 		PlayerCountTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
-			FTickerDelegate::CreateUObject(this, &UDiscordBridgeSubsystem::PlayerCountTick),
+			FTickerDelegate::CreateWeakLambda(this, [this](float DeltaTime) -> bool
+			{
+				return PlayerCountTick(DeltaTime);
+			}),
 			Interval);
 	}
 	else
@@ -4989,7 +4998,10 @@ void UDiscordBridgeSubsystem::StartAfkKickTicker()
 
 	const float Interval = 30.0f; // check every 30 seconds
 	AfkKickTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
-		FTickerDelegate::CreateUObject(this, &UDiscordBridgeSubsystem::AfkKickTick),
+		FTickerDelegate::CreateWeakLambda(this, [this](float DeltaTime) -> bool
+		{
+			return AfkKickTick(DeltaTime);
+		}),
 		Interval);
 	UE_LOG(LogDiscordBridge, Log, TEXT("DiscordBridge: AFK kick enabled — threshold %d minutes."), Config.AfkKickMinutes);
 }
@@ -5320,7 +5332,10 @@ void UDiscordBridgeSubsystem::StartAnnouncementTicker()
 
 	AnnouncementAccumulatedSeconds = 0.0f;
 	AnnouncementTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
-		FTickerDelegate::CreateUObject(this, &UDiscordBridgeSubsystem::AnnouncementTick),
+		FTickerDelegate::CreateWeakLambda(this, [this](float DeltaTime) -> bool
+		{
+			return AnnouncementTick(DeltaTime);
+		}),
 		1.0f);
 
 	UE_LOG(LogDiscordBridge, Log,
