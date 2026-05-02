@@ -27,6 +27,10 @@
 
 DEFINE_LOG_CATEGORY(LogTicketSystem);
 
+// Canonical Discord REST API base URL.  Defined here (rather than shared via a
+// header) so TicketSubsystem has no compile-time dependency on DiscordBridgeSubsystem.
+static const FString DiscordApiBase = TEXT("https://discord.com/api/v10");
+
 namespace
 {
 	FString GetTicketSystemDataDir()
@@ -1301,8 +1305,8 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 				if (!Self) { FinalizeTranscript(); return; }
 
 				FString FetchUrl = FString::Printf(
-					TEXT("https://discord.com/api/v10/channels/%s/messages?limit=100"),
-					*ClosedChannelId);
+					TEXT("%s/channels/%s/messages?limit=100"),
+					*DiscordApiBase, *ClosedChannelId);
 				if (!BeforeId.IsEmpty())
 					FetchUrl += FString::Printf(TEXT("&before=%s"), *BeforeId);
 
@@ -3523,7 +3527,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 				TWeakObjectPtr<UTicketSubsystem> WeakDm(this);
 				TSharedRef<IHttpRequest, ESPMode::ThreadSafe> DmReq =
 					FHttpModule::Get().CreateRequest();
-				DmReq->SetURL(TEXT("https://discord.com/api/v10/users/@me/channels"));
+				DmReq->SetURL(DiscordApiBase + TEXT("/users/@me/channels"));
 				DmReq->SetVerb(TEXT("POST"));
 				DmReq->SetHeader(TEXT("Authorization"),
 					FString::Printf(TEXT("Bot %s"), *BotToken));
@@ -3556,8 +3560,8 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 						TSharedRef<IHttpRequest, ESPMode::ThreadSafe> SendReq =
 							FHttpModule::Get().CreateRequest();
 						SendReq->SetURL(FString::Printf(
-							TEXT("https://discord.com/api/v10/channels/%s/messages"),
-							*DmChanId));
+							TEXT("%s/channels/%s/messages"),
+							*DiscordApiBase, *DmChanId));
 						SendReq->SetVerb(TEXT("POST"));
 						SendReq->SetHeader(TEXT("Authorization"),
 							FString::Printf(TEXT("Bot %s"), *BotToken));
@@ -3694,7 +3698,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 			TSharedRef<IHttpRequest, ESPMode::ThreadSafe> TopicReq =
 				FHttpModule::Get().CreateRequest();
 			TopicReq->SetURL(FString::Printf(
-				TEXT("https://discord.com/api/v10/channels/%s"), *SourceChannelId));
+				TEXT("%s/channels/%s"), *DiscordApiBase, *SourceChannelId));
 			TopicReq->SetVerb(TEXT("PATCH"));
 			TopicReq->SetHeader(TEXT("Authorization"),
 				FString::Printf(TEXT("Bot %s"), *BotToken));
@@ -4055,7 +4059,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 			TSharedRef<IHttpRequest, ESPMode::ThreadSafe> EscReq =
 				FHttpModule::Get().CreateRequest();
 			EscReq->SetURL(FString::Printf(
-				TEXT("https://discord.com/api/v10/channels/%s"), *SourceChannelId));
+				TEXT("%s/channels/%s"), *DiscordApiBase, *SourceChannelId));
 			EscReq->SetVerb(TEXT("PATCH"));
 			EscReq->SetHeader(TEXT("Authorization"),
 				FString::Printf(TEXT("Bot %s"), *Bridge->GetBotToken()));
@@ -4896,8 +4900,8 @@ void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
 		TWeakObjectPtr<UTicketSubsystem> WeakThis(this);
 
 		const FString FetchUrl = FString::Printf(
-			TEXT("https://discord.com/api/v10/channels/%s/messages?limit=100"),
-			*ClosedChannelId);
+			TEXT("%s/channels/%s/messages?limit=100"),
+			*DiscordApiBase, *ClosedChannelId);
 
 		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> FetchReq =
 			FHttpModule::Get().CreateRequest();
@@ -5077,8 +5081,8 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 		TWeakObjectPtr<UTicketSubsystem> WeakThis(this);
 
 		const FString FetchUrl = FString::Printf(
-			TEXT("https://discord.com/api/v10/channels/%s/messages?limit=100"),
-			*ClosedChannelId);
+			TEXT("%s/channels/%s/messages?limit=100"),
+			*DiscordApiBase, *ClosedChannelId);
 
 		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> FetchReq =
 			FHttpModule::Get().CreateRequest();
