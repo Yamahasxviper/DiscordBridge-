@@ -820,10 +820,11 @@ private:
 	/** Active join votes awaiting expiry check, keyed by Discord message snowflake. */
 	TMap<FString, FPendingVote> PendingVotes;
 
-	/** Ticker handles for per-vote expiry timers — stored so they can be
-	 *  cancelled in Deinitialize() if the subsystem is torn down while a vote
-	 *  window is still open. */
-	TArray<FTSTicker::FDelegateHandle> VoteKickTimerHandles;
+	/** Ticker handles for per-vote expiry timers, keyed by message snowflake so
+	 *  fired handles are self-pruned and cancelled handles can be removed by ID.
+	 *  Remaining handles are cancelled in Deinitialize() if the subsystem is torn
+	 *  down while a vote window is still open. */
+	TMap<FString, FTSTicker::FDelegateHandle> VoteKickTimerHandles;
 
 	/** Add 👍/👎 reactions to a join message and optionally track the vote. */
 	void AddJoinReactions(const FString& MessageId, const FString& ChannelId,
