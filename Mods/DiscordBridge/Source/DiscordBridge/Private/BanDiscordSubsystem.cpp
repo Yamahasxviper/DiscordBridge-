@@ -7082,12 +7082,12 @@ void UBanDiscordSubsystem::HandleClearChatCommand(const TArray<FString>& Args,
 	}
 
 	// Broadcast blank lines to visually scroll chat off screen.
-	for (int32 i = 0; i < 30; ++i)
-	{
-		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-			if (APlayerController* PC = It->Get())
-				PC->ClientMessage(TEXT(" "));
-	}
+	// D-1: build one 30-line blank string and send once per player, not 30 RPCs each.
+	FString Blanks;
+	for (int32 i = 0; i < 30; ++i) Blanks += TEXT("\n");
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		if (APlayerController* PC = It->Get())
+			PC->ClientMessage(Blanks);
 
 	// Notify all connected players.
 	const FString Notice = FString::Printf(
@@ -7128,7 +7128,8 @@ FString UBanDiscordSubsystem::ExecutePanelFreeze(const FString& PlayerArg,
 
 	if (bWasFrozen)
 	{
-		AFreezeChatCommand::FrozenPlayerUids.Remove(Uid);
+		// D-2: only remove from FrozenPlayerUids when a matching controller was found
+		bool bMatchedUnfreeze = false;
 		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 		{
 			APlayerController* PC = It->Get();
@@ -7138,9 +7139,12 @@ FString UBanDiscordSubsystem::ExecutePanelFreeze(const FString& PlayerArg,
 			if (UBanDatabase::MakeUid(TEXT("EOS"), NetId.ToString().ToLower()) == Uid)
 			{
 				PC->SetIgnoreMoveInput(false);
+				bMatchedUnfreeze = true;
 				break;
 			}
 		}
+		if (bMatchedUnfreeze)
+			AFreezeChatCommand::FrozenPlayerUids.Remove(Uid);
 		UE_LOG(LogBanDiscord, Log,
 		       TEXT("BanDiscordSubsystem: [Panel] %s unfroze %s (%s)."),
 		       *SenderName, *DisplayName, *Uid);
@@ -7150,7 +7154,8 @@ FString UBanDiscordSubsystem::ExecutePanelFreeze(const FString& PlayerArg,
 	}
 	else
 	{
-		AFreezeChatCommand::FrozenPlayerUids.Add(Uid);
+		// D-2: only add to FrozenPlayerUids when a matching controller was found
+		bool bMatchedFreeze = false;
 		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 		{
 			APlayerController* PC = It->Get();
@@ -7160,9 +7165,12 @@ FString UBanDiscordSubsystem::ExecutePanelFreeze(const FString& PlayerArg,
 			if (UBanDatabase::MakeUid(TEXT("EOS"), NetId.ToString().ToLower()) == Uid)
 			{
 				PC->SetIgnoreMoveInput(true);
+				bMatchedFreeze = true;
 				break;
 			}
 		}
+		if (bMatchedFreeze)
+			AFreezeChatCommand::FrozenPlayerUids.Add(Uid);
 		UE_LOG(LogBanDiscord, Log,
 		       TEXT("BanDiscordSubsystem: [Panel] %s froze %s (%s)."),
 		       *SenderName, *DisplayName, *Uid);
@@ -7186,12 +7194,12 @@ FString UBanDiscordSubsystem::ExecutePanelClearChat(const FString& Reason,
 		: Reason;
 
 	// Broadcast blank lines to visually scroll chat off screen.
-	for (int32 i = 0; i < 30; ++i)
-	{
-		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-			if (APlayerController* PC = It->Get())
-				PC->ClientMessage(TEXT(" "));
-	}
+	// D-1: build one 30-line blank string and send once per player, not 30 RPCs each.
+	FString Blanks;
+	for (int32 i = 0; i < 30; ++i) Blanks += TEXT("\n");
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		if (APlayerController* PC = It->Get())
+			PC->ClientMessage(Blanks);
 
 	// Notify all connected players.
 	const FString Notice = FString::Printf(
