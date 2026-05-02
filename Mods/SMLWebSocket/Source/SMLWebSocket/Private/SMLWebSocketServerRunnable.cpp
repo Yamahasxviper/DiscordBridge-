@@ -567,7 +567,14 @@ bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClient
                     : Raw;
                 PongFrame.Add(Unmasked);
             }
-            SendFrame(Client.Socket, PongFrame);
+            // Enqueue the pong for the outbound-drain phase which runs outside
+            // the ClientMutex lock.  SendFrame() is a blocking socket write; calling
+            // it here under ClientMutex would stall any game-thread call to
+            // GetClientCount/GetClientIds/DisconnectClient that also takes the lock.
+            FOutboundMsg Pong;
+            Pong.ClientId = ClientId;
+            Pong.Frame    = MoveTemp(PongFrame);
+            OutboundQueue.Enqueue(MoveTemp(Pong));
             Buf.RemoveAt(0, TotalSize);
             continue;
         }

@@ -544,3 +544,52 @@ and the live file is never touched. This matches the identical pattern used by `
 
 *Last updated: 2026-05-02. All 1 round-9 bugs resolved.*
 
+---
+
+## Round 10 — Additional Scan (2026-05-02)
+
+### ✅ Fixed — `FetchFuncHolder` `TSharedPtr` reference cycle — memory leak per ticket close (BUG-01)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/TicketSubsystem.cpp`
+
+**Root cause:** The paginated transcript-fetch lambda assigned to `*FetchFuncHolder` captured
+`FetchFuncHolder` itself by value (a `TSharedPtr`). This formed a reference cycle:
+the `TFunction` object owned by `FetchFuncHolder` held a copy of `FetchFuncHolder`, so
+after the outer function returned and the local variable was destroyed, the ref-count
+dropped to 1 (held only by the lambda it contained). No external pointer could ever
+reach the object again — it leaked permanently, including `PageAccum`, `BotToken`,
+`ClosedChannelId`, `FinalizeTranscript`, and all their captures (~several KB per ticket close
+whenever a `TicketLogChannelId` is configured).
+
+**Fix applied:** Introduced `WeakFetchHolder` (`TWeakPtr`) immediately after the
+`MakeShared<>` call. The outer lambda (stored inside `*FetchFuncHolder`) now captures
+`WeakFetchHolder` instead of `FetchFuncHolder`, breaking the cycle. The inner
+HTTP-completion lambda still captures `FetchFuncHolder` strongly — this keeps the shared
+object alive for exactly as long as there is an HTTP request in flight. When the final
+response is processed and `FinalizeTranscript()` is called, the completion-handler
+closure is destroyed, the ref-count drops to 0, and all resources are freed.
+
+---
+
+### ✅ Fixed — `SendFrame()` called under `ClientMutex` for Pong responses — lock stall (BUG-02)
+**File:** `Mods/SMLWebSocket/Source/SMLWebSocket/Private/SMLWebSocketServerRunnable.cpp`
+
+**Root cause:** `ProcessFrames()` is called inside the `FScopeLock L(&ClientMutex)` block
+in `Run()`. When a WebSocket Ping frame was received, the Pong was sent synchronously via
+`SendFrame(Client.Socket, PongFrame)` while that lock was still held. `SendFrame()` is an
+unbounded blocking loop; if the client's kernel send-buffer was full, it would block
+indefinitely with `ClientMutex` held — stalling any game-thread call to
+`GetClientCount()`, `GetClientIds()`, or `DisconnectClient()` that also takes the lock.
+The outbound-drain phase at the top of `Run()` was already written to avoid this pattern
+(its comment reads "ClientMutex released before any blocking I/O"), but the Pong path
+was missed.
+
+**Fix applied:** Replaced `SendFrame(Client.Socket, PongFrame)` with an enqueue into
+`OutboundQueue` (the same `EQueueMode::Mpsc` queue used by `BroadcastText` and
+`SendTextToClient`). The Pong is now delivered during the next iteration's outbound-drain
+phase, after `ClientMutex` has been released — a sub-millisecond delay that is
+acceptable per RFC 6455.
+
+---
+
+*Last updated: 2026-05-02. All 2 round-10 bugs resolved.*
+

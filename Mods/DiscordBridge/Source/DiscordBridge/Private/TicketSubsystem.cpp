@@ -1230,6 +1230,13 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 			// Declare a shared pointer to the fetch function so it can reference itself
 			// for recursive pagination (each response fires the next request if needed).
 			auto FetchFuncHolder = MakeShared<TFunction<void(const FString&)>>();
+			// Weak handle used by the outer lambda so it does not capture a strong
+			// reference to itself — that would form a TSharedPtr cycle and leak the
+			// entire fetch chain (PageAccum, BotToken, FinalizeTranscript, …) for the
+			// lifetime of the server.  The inner HTTP-completion lambda captures
+			// FetchFuncHolder strongly, so the shared object stays alive for exactly
+			// as long as there is an HTTP request in flight.
+			TWeakPtr<TFunction<void(const FString&)>> WeakFetchHolder = FetchFuncHolder;
 
 			// Finalise and post the transcript to the log channel.
 			auto FinalizeTranscript =
@@ -1286,7 +1293,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 			};
 
 			*FetchFuncHolder =
-				[FetchFuncHolder, WeakThis, BotToken, ClosedChannelId,
+				[WeakFetchHolder, WeakThis, BotToken, ClosedChannelId,
 				 PageAccum, FinalizeTranscript]
 				(const FString& BeforeId) mutable
 			{
