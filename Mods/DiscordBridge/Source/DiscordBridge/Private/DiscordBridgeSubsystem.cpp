@@ -595,15 +595,6 @@ void UDiscordBridgeSubsystem::OnWebSocketClosed(int32 StatusCode, const FString&
 
 	if (bTerminal && WebSocketClient)
 	{
-		// Clear bAutoReconnect before Close() so that the subsequent
-		// Internal_OnClosed callback sets the connection state to Disconnected
-		// rather than Connecting (which would leave it stuck forever since the
-		// reconnect loop exits via bUserInitiatedClose).
-		WebSocketClient->bAutoReconnect = false;
-		// Calling Close() sets bUserInitiatedClose on the background thread,
-		// which causes the reconnect loop to exit without retrying.
-		WebSocketClient->Close(1000, FString::Printf(TEXT("Terminal Discord close code %d"), StatusCode));
-
 		// Cancel any deferred Resume/Identify ticker so it does not fire
 		// after the connection has been permanently abandoned.
 		FTSTicker::GetCoreTicker().RemoveTicker(PendingReidentifyHandle);
@@ -613,6 +604,24 @@ void UDiscordBridgeSubsystem::OnWebSocketClosed(int32 StatusCode, const FString&
 		// we are not going to reconnect, and bGatewayReady is already false.
 		FTSTicker::GetCoreTicker().RemoveTicker(PlayerCountTickerHandle);
 		PlayerCountTickerHandle.Reset();
+
+		// Unbind all dynamic delegates BEFORE calling Close() and nulling the
+		// pointer.  Close() can fire OnClosed synchronously; if the delegates
+		// are still bound they would re-enter OnWebSocketClosed during teardown,
+		// running the heartbeat-removal block a second time.  After Close() the
+		// client pointer is no longer usable, so we null it to prevent any
+		// subsequent Disconnect() call from operating on a dead object.
+		WebSocketClient->OnConnected.RemoveDynamic(this,    &UDiscordBridgeSubsystem::OnWebSocketConnected);
+		WebSocketClient->OnMessage.RemoveDynamic(this,      &UDiscordBridgeSubsystem::OnWebSocketMessage);
+		WebSocketClient->OnClosed.RemoveDynamic(this,       &UDiscordBridgeSubsystem::OnWebSocketClosed);
+		WebSocketClient->OnError.RemoveDynamic(this,        &UDiscordBridgeSubsystem::OnWebSocketError);
+		WebSocketClient->OnReconnecting.RemoveDynamic(this, &UDiscordBridgeSubsystem::OnWebSocketReconnecting);
+
+		// Clear bAutoReconnect before Close() so that the reconnect loop exits
+		// cleanly without queuing another attempt.
+		WebSocketClient->bAutoReconnect = false;
+		WebSocketClient->Close(1000, FString::Printf(TEXT("Terminal Discord close code %d"), StatusCode));
+		WebSocketClient = nullptr;
 	}
 
 	// Cancel heartbeat; it will be restarted on the next successful connection.
@@ -1879,8 +1888,8 @@ void UDiscordBridgeSubsystem::FollowUpInteraction(const FString& InteractionToke
 
 	// POST /webhooks/{application_id}/{token} — creates a follow-up message.
 	const FString Url = FString::Printf(
-		TEXT("https://discord.com/api/v10/webhooks/%s/%s"),
-		*BotUserId, *InteractionToken);
+		TEXT("%s/webhooks/%s/%s"),
+		*DiscordApiBase, *BotUserId, *InteractionToken);
 
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
 		FHttpModule::Get().CreateRequest();
@@ -2678,8 +2687,38 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 					? BanCfg->ChatFilterAutoWarnWindowMinutes : 10;
 				const FTimespan Window    = FTimespan::FromMinutes(EffectiveWindowMinutes);
 
+				// Resolve UID and PlayerController for this player once, upfront.
+				// Keying ChatFilterHits by UID (when available) prevents name-spoofing
+				// and ensures a reconnecting player cannot reset their hit count by
+				// rejoining with a slightly different display name.
+				FString Uid;
+				APlayerController* WarnTargetPC = nullptr;
+				if (W)
+				{
+					for (FConstPlayerControllerIterator It = W->GetPlayerControllerIterator(); It; ++It)
+					{
+						APlayerController* PC = It->Get();
+						if (!PC || !PC->PlayerState) continue;
+						if (!PC->PlayerState->GetPlayerName().Equals(PlayerName, ESearchCase::IgnoreCase)) continue;
+
+						const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
+						if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
+						{
+							Uid = UBanDatabase::MakeUid(
+								NetId.GetType().ToString().ToUpper(),
+								NetId.ToString().ToLower());
+						}
+						WarnTargetPC = PC;
+						break;
+					}
+				}
+
+				// Use the UID as the map key when available; fall back to display
+				// name for players whose network identity has not yet replicated.
+				const FString FilterKey = Uid.IsEmpty() ? PlayerName : Uid;
+
 				// Update the hit-count tracker.
-				FFilterHitRecord& Rec = ChatFilterHits.FindOrAdd(PlayerName);
+				FFilterHitRecord& Rec = ChatFilterHits.FindOrAdd(FilterKey);
 				Rec.HitTimestamps.Add(Now);
 				// Prune timestamps outside the window.
 				Rec.HitTimestamps.RemoveAll([&Now, &Window](const FDateTime& T){ return (Now - T) > Window; });
@@ -2693,30 +2732,6 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 				{
 					// Reset so they can be warned again after another full window of hits.
 					Rec.HitTimestamps.Empty();
-
-					// Derive UID and capture the PlayerController so we can
-					// notify the player in-game after issuing the auto-warn.
-					FString Uid;
-					APlayerController* WarnTargetPC = nullptr;
-					if (W)
-					{
-						for (FConstPlayerControllerIterator It = W->GetPlayerControllerIterator(); It; ++It)
-						{
-							APlayerController* PC = It->Get();
-							if (!PC || !PC->PlayerState) continue;
-							if (!PC->PlayerState->GetPlayerName().Equals(PlayerName, ESearchCase::IgnoreCase)) continue;
-
-							const FUniqueNetIdRepl& NetId = PC->PlayerState->GetUniqueId();
-							if (NetId.IsValid() && NetId.GetType() != FName(TEXT("NONE")))
-							{
-								Uid = UBanDatabase::MakeUid(
-									NetId.GetType().ToString().ToUpper(),
-									NetId.ToString().ToLower());
-								WarnTargetPC = PC;
-								break;
-							}
-						}
-					}
 
 					if (!Uid.IsEmpty())
 					{
@@ -3405,6 +3420,17 @@ void UDiscordBridgeSubsystem::OnLogout(AGameModeBase* /*GameMode*/, AController*
 					ChatFilterHits.Remove(CleanName);
 					PlayerStats.Remove(CleanName);
 				}
+
+				// Also remove ChatFilterHits keyed by UID (used when the network
+				// identity was available at the time the filter hit was recorded).
+				const FUniqueNetIdRepl& CleanNetId = CleanPS->GetUniqueId();
+				if (CleanNetId.IsValid() && CleanNetId.GetType() != FName(TEXT("NONE")))
+				{
+					const FString CleanUid = UBanDatabase::MakeUid(
+						CleanNetId.GetType().ToString().ToUpper(),
+						CleanNetId.ToString().ToLower());
+					ChatFilterHits.Remove(CleanUid);
+				}
 			}
 		}
 	}
@@ -3604,6 +3630,11 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 		}
 		else if (FWhitelistManager::RemovePlayer(Arg, TEXT(""), DiscordUsername))
 		{
+			// Clear any pending expiry warning for this player so that if they
+			// are re-added with a new expiry the warning fires correctly.
+			WarnedExpiryNames.Remove(Arg);
+			SaveWarnedExpiryNames();
+
 			Response = FString::Printf(TEXT(":red_circle: **%s** has been removed from the whitelist."), *Arg);
 			PostWhitelistEvent(
 				FString::Printf(TEXT("**%s** removed from the whitelist"), *Arg),
@@ -3675,8 +3706,8 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 			FString ExpiresStr;
 			if (E.ExpiresAt.GetTicks() > 0)
 				ExpiresStr = E.ExpiresAt.ToIso8601();
-			JsonOut += FString::Printf(TEXT("{\"name\":\"%s\",\"puid\":\"%s\",\"expires_at\":\"%s\"}"),
-				*JsonEscapeStr(E.Name), *JsonEscapeStr(E.EosPUID), *ExpiresStr);
+			JsonOut += FString::Printf(TEXT("{\"name\":\"%s\",\"puid\":\"%s\",\"group\":\"%s\",\"expires_at\":\"%s\"}"),
+				*JsonEscapeStr(E.Name), *JsonEscapeStr(E.EosPUID), *JsonEscapeStr(E.Group), *ExpiresStr);
 			if (i < AllEntries.Num() - 1) JsonOut += TEXT(",");
 		}
 		JsonOut += TEXT("]");
@@ -3728,10 +3759,12 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 							const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
 							if (Item->TryGetObject(ObjPtr) && ObjPtr)
 							{
-								FString IName, IPuid;
+								FString IName, IPuid, IGroup;
 								(*ObjPtr)->TryGetStringField(TEXT("name"), IName);
 								(*ObjPtr)->TryGetStringField(TEXT("puid"), IPuid);
-								if (FWhitelistManager::AddPlayer(IName, IPuid, DiscordUsername))
+								(*ObjPtr)->TryGetStringField(TEXT("group"), IGroup);
+								if (FWhitelistManager::AddPlayer(IName, IPuid, DiscordUsername,
+								                                 FDateTime(0), IGroup))
 									++Added;
 								else
 									++Skipped;
@@ -3910,13 +3943,13 @@ void UDiscordBridgeSubsystem::HandleWhitelistCommand(const FString& SubCommand,
 				TEXT("]")
 				TEXT("}]}"),
 				*AuthorDiscordId,
-				*Arg.Replace(TEXT("\""), TEXT("\\\"")),
+				*JsonEscapeStr(Arg),
 				*AuthorDiscordId,
 				*AuthorDiscordId);
 
 			const FString AppUrl = FString::Printf(
-				TEXT("https://discord.com/api/v10/channels/%s/messages"),
-				*WhitelistConfig.WhitelistApplicationChannelId);
+				TEXT("%s/channels/%s/messages"),
+				*DiscordApiBase, *WhitelistConfig.WhitelistApplicationChannelId);
 
 			TSharedRef<IHttpRequest, ESPMode::ThreadSafe> AppReq = FHttpModule::Get().CreateRequest();
 			AppReq->SetURL(AppUrl);
@@ -4706,13 +4739,13 @@ void UDiscordBridgeSubsystem::PostWhitelistEvent(const FString& Action, const FS
 		     "\"footer\":{\"text\":\"By %s\"},"
 		     "\"timestamp\":\"%s\"}]}"),
 		Color,
-		*Action.Replace(TEXT("\""), TEXT("\\\"")),
-		*AdminName.Replace(TEXT("\""), TEXT("\\\"")),
+		*JsonEscapeStr(Action),
+		*JsonEscapeStr(AdminName),
 		*Timestamp);
 
 	const FString Url = FString::Printf(
-		TEXT("https://discord.com/api/v10/channels/%s/messages"),
-		*WhitelistConfig.WhitelistEventsChannelId);
+		TEXT("%s/channels/%s/messages"),
+		*DiscordApiBase, *WhitelistConfig.WhitelistEventsChannelId);
 
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req = FHttpModule::Get().CreateRequest();
 	Req->SetURL(Url);
@@ -4903,7 +4936,9 @@ void UDiscordBridgeSubsystem::AddJoinReactions(const FString& MessageId,
 		PendingVotes.Add(MessageId, Vote);
 
 		// Schedule a check when the vote window expires.
-		const float DelaySeconds = static_cast<float>(Config.VoteWindowMinutes * 60);
+		// Clamp to a minimum of 1 second so that a zero/negative VoteWindowMinutes
+		// misconfiguration does not fire the ticker immediately (before any votes arrive).
+		const float DelaySeconds = FMath::Max(1.0f, static_cast<float>(Config.VoteWindowMinutes * 60));
 		FTSTicker::FDelegateHandle VoteHandle = FTSTicker::GetCoreTicker().AddTicker(
 			FTickerDelegate::CreateWeakLambda(this, [this, MessageId](float) -> bool
 			{
@@ -4927,8 +4962,10 @@ void UDiscordBridgeSubsystem::CheckVoteResult(const FString& MessageId)
 	PendingVotes.Remove(MessageId);
 
 	// Fetch reactions from the Discord REST API to count 👎.
+	// limit=100 is the maximum Discord allows per request; for typical
+	// VoteKickThreshold values this is more than sufficient.
 	const FString Url = FString::Printf(
-		TEXT("%s/channels/%s/messages/%s/reactions/%s"),
+		TEXT("%s/channels/%s/messages/%s/reactions/%s?limit=100"),
 		*DiscordApiBase, *ChannelCopy, *MessageId,
 		*FGenericPlatformHttp::UrlEncode(TEXT("👎")));
 
@@ -5023,6 +5060,7 @@ bool UDiscordBridgeSubsystem::AfkKickTick(float /*DeltaTime*/)
 		if (!PC || !PC->PlayerState || PC->IsLocalController()) continue;
 
 		const FString Name = PC->PlayerState->GetPlayerName();
+		if (Name.IsEmpty()) continue; // PlayerState not yet replicated — skip
 		FPlayerAfkState& State = AfkStates.FindOrAdd(Name);
 
 		// Use the building-built counter as the activity indicator.
@@ -5744,8 +5782,8 @@ void UDiscordBridgeSubsystem::RegisterSlashCommands()
 // The Discord bulk-overwrite endpoint replaces ALL guild application commands
 // atomically.  We register all command groups here.
 const FString Url = FString::Printf(
-TEXT("https://discord.com/api/v10/applications/%s/guilds/%s/commands"),
-*BotUserId, *GuildId);
+TEXT("%s/applications/%s/guilds/%s/commands"),
+*DiscordApiBase, *BotUserId, *GuildId);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
