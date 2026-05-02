@@ -394,6 +394,8 @@ bool UScheduledBanRegistry::SaveToFile() const
         Obj->SetStringField(TEXT("reason"),          E.Reason);
         Obj->SetStringField(TEXT("scheduledBy"),     E.ScheduledBy);
         Obj->SetStringField(TEXT("category"),        E.Category);
+        // int32 values — exactly representable in double; the int64-string
+        // convention only applies to IDs that could exceed 2^53.
         Obj->SetNumberField(TEXT("durationMinutes"), static_cast<double>(E.DurationMinutes));
         Obj->SetStringField(TEXT("effectiveAt"),     E.EffectiveAt.ToIso8601());
         Obj->SetStringField(TEXT("createdAt"),       E.CreatedAt.ToIso8601());

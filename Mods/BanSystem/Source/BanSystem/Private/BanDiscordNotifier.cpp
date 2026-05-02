@@ -192,6 +192,7 @@ void FBanDiscordNotifier::NotifyWarningIssued(const FString& Uid, const FString&
         Obj->SetStringField(TEXT("playerName"),    PlayerName);
         Obj->SetStringField(TEXT("reason"),        Reason);
         Obj->SetStringField(TEXT("warnedBy"),      WarnedBy);
+        // int32 value — exactly representable in double; string encoding not needed.
         Obj->SetNumberField(TEXT("totalWarnings"), static_cast<double>(TotalWarnings));
         UBanWebSocketPusher::PushEvent(TEXT("warn"), Obj);
     }
@@ -283,6 +284,7 @@ void FBanDiscordNotifier::NotifyAutoEscalationBan(const FBanEntry& Ban, int32 Wa
         TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
         Obj->SetStringField(TEXT("uid"),        Ban.Uid);
         Obj->SetStringField(TEXT("playerName"), Ban.PlayerName);
+        // int32 value — exactly representable in double; string encoding not needed.
         Obj->SetNumberField(TEXT("warnCount"),  static_cast<double>(WarnCount));
         Obj->SetBoolField  (TEXT("permanent"),  Ban.bIsPermanent);
         Obj->SetStringField(TEXT("reason"),     Ban.Reason);

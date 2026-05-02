@@ -224,6 +224,8 @@ namespace BanJson
         Obj->SetStringField(TEXT("reason"),     W.Reason);
         Obj->SetStringField(TEXT("warnedBy"),   W.WarnedBy);
         Obj->SetStringField(TEXT("warnDate"),   W.WarnDate.ToIso8601());
+        // int32 value — exactly representable in double; the int64-string
+        // convention applies only to ID fields that could exceed 2^53.
         Obj->SetNumberField(TEXT("points"),     static_cast<double>(W.Points > 0 ? W.Points : 1));
         return Obj;
     }
@@ -261,6 +263,7 @@ namespace BanJson
         Obj->SetStringField(TEXT("reason"),          S.Reason);
         Obj->SetStringField(TEXT("scheduledBy"),     S.ScheduledBy);
         Obj->SetStringField(TEXT("category"),        S.Category);
+        // int32 value — exactly representable in double; string encoding not needed.
         Obj->SetNumberField(TEXT("durationMinutes"), static_cast<double>(S.DurationMinutes));
         Obj->SetStringField(TEXT("effectiveAt"),     S.EffectiveAt.ToIso8601());
         Obj->SetStringField(TEXT("createdAt"),       S.CreatedAt.ToIso8601());

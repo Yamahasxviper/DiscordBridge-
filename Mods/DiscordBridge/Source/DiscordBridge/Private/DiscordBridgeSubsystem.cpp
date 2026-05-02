@@ -702,7 +702,9 @@ void UDiscordBridgeSubsystem::HandleGatewayPayload(const FString& RawJson)
 	case EDiscordGatewayOpcode::Dispatch:
 	{
 		// Update the sequence number first; it is used in heartbeats.
-		// TryGetNumberField only accepts double& in UE5's FJsonObject API.
+		// TryGetNumberField accepts double&, int32&, and int64& since UE5.3.2.
+		// We use double here to guard against a malformed gateway that sends a
+		// fractional or out-of-range value (see the range check below).
 		double Seq = -1.0;
 		if (Root->TryGetNumberField(TEXT("s"), Seq))
 		{
