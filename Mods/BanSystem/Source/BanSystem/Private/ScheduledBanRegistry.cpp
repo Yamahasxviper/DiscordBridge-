@@ -129,65 +129,91 @@ void UScheduledBanRegistry::Tick(float DeltaTime)
     AccumulatedSeconds -= TickIntervalSeconds;
 
     const FDateTime Now = FDateTime::UtcNow();
+
+    // Collect due entries without removing them from Pending yet.
+    // We apply first and only commit the Pending changes after we know the
+    // outcome of each apply — this eliminates the durability window that existed
+    // when entries were removed from the on-disk file before apply was attempted:
+    // if the server crashed between the two saves, failed entries were permanently
+    // lost from the file even though they had never been applied.
     TArray<FScheduledBanEntry> Due;
-
     {
         FScopeLock Lock(&Mutex);
-        for (int32 i = Pending.Num() - 1; i >= 0; --i)
+        for (const FScheduledBanEntry& E : Pending)
         {
-            if (Pending[i].EffectiveAt <= Now)
-            {
-                Due.Add(Pending[i]);
-                Pending.RemoveAt(i);
-            }
-        }
-        if (!Due.IsEmpty())
-        {
-            if (!SaveToFile())
-            {
-                UE_LOG(LogScheduledBanRegistry, Error,
-                    TEXT("ScheduledBanRegistry: failed to save after dequeuing %d due entry(ies) — re-queuing to prevent double-apply on restart"),
-                    Due.Num());
-                // Re-insert the entries so they survive a server restart.  They
-                // will be re-tried on the very next tick once the disk issue is
-                // resolved.  Without this, a save failure would wipe the entries
-                // from memory while leaving them on disk, causing them to fire
-                // again after the next restart.
-                Pending.Append(Due);
-                Due.Empty();
-            }
+            if (E.EffectiveAt <= Now)
+                Due.Add(E);
         }
     }
 
-    TArray<FScheduledBanEntry> Failed;
-    for (const FScheduledBanEntry& S : Due)
+    if (Due.IsEmpty()) return;
+
+    // Apply each due entry outside the lock (AddBan may do disk I/O).
+    // Track which entries were applied and which failed (with updated RetryCount).
+    TArray<int64>              AppliedIds;
+    TArray<FScheduledBanEntry> FailedEntries; // copies with incremented RetryCount
+
+    for (FScheduledBanEntry S : Due) // value copy so we can increment RetryCount
     {
-        if (!ApplyScheduledBan(S))
-            Failed.Add(S);
+        if (ApplyScheduledBan(S))
+        {
+            AppliedIds.Add(S.Id);
+        }
+        else
+        {
+            S.RetryCount++;
+            FailedEntries.Add(S);
+        }
     }
 
-    // Re-queue any entries that could not be applied due to a transient failure
-    // (e.g. UBanDatabase unavailable) so they are retried on the next tick and
-    // survive a server restart.  Entries that have failed more than 5 times are
-    // dropped to prevent indefinite re-queuing.
-    if (!Failed.IsEmpty())
+    // Under the lock: remove applied entries and entries that have exceeded the
+    // retry cap; update RetryCount in Pending for surviving failures; then save
+    // once so the persisted RetryCount survives the next restart.
     {
         FScopeLock Lock(&Mutex);
-        for (FScheduledBanEntry& FailedEntry : Failed)
+
+        // Build the set of IDs to remove entirely.
+        TArray<int64> IdsToRemove = AppliedIds;
+        for (const FScheduledBanEntry& FE : FailedEntries)
         {
-            FailedEntry.RetryCount++;
-            if (FailedEntry.RetryCount <= 5)
-                Pending.Add(FailedEntry);
-            else
+            if (FE.RetryCount > 5)
+            {
                 UE_LOG(LogScheduledBanRegistry, Error,
                     TEXT("ScheduledBanRegistry: dropping entry id=%lld after %d failed attempts"),
-                    FailedEntry.Id, FailedEntry.RetryCount);
+                    FE.Id, FE.RetryCount);
+                IdsToRemove.Add(FE.Id);
+            }
         }
+
+        // Walk Pending in reverse so RemoveAt indices stay valid.
+        for (int32 i = Pending.Num() - 1; i >= 0; --i)
+        {
+            const int64 Id = Pending[i].Id;
+
+            if (IdsToRemove.Contains(Id))
+            {
+                Pending.RemoveAt(i);
+            }
+            else
+            {
+                // If this entry failed, update its persisted RetryCount so the
+                // cap is honoured correctly after a server restart.
+                for (const FScheduledBanEntry& FE : FailedEntries)
+                {
+                    if (FE.Id == Id)
+                    {
+                        Pending[i].RetryCount = FE.RetryCount;
+                        break;
+                    }
+                }
+            }
+        }
+
         if (!SaveToFile())
         {
             UE_LOG(LogScheduledBanRegistry, Error,
-                TEXT("ScheduledBanRegistry: failed to re-save %d re-queued entry(ies) after apply failure"),
-                Failed.Num());
+                TEXT("ScheduledBanRegistry: failed to save after processing %d due entry(ies)"),
+                Due.Num());
         }
     }
 }
@@ -301,6 +327,10 @@ void UScheduledBanRegistry::LoadFromFile()
             if ((*ObjPtr)->TryGetNumberField(TEXT("durationMinutes"), DurDbl))
                 Entry.DurationMinutes = static_cast<int32>(DurDbl);
 
+            double RetryDbl = 0.0;
+            if ((*ObjPtr)->TryGetNumberField(TEXT("retryCount"), RetryDbl) && RetryDbl > 0.0)
+                Entry.RetryCount = static_cast<int32>(RetryDbl);
+
             FString EffStr, CreatedStr;
             bool bEffectiveAtValid = false;
             if ((*ObjPtr)->TryGetStringField(TEXT("effectiveAt"), EffStr))
@@ -367,6 +397,11 @@ bool UScheduledBanRegistry::SaveToFile() const
         Obj->SetNumberField(TEXT("durationMinutes"), static_cast<double>(E.DurationMinutes));
         Obj->SetStringField(TEXT("effectiveAt"),     E.EffectiveAt.ToIso8601());
         Obj->SetStringField(TEXT("createdAt"),       E.CreatedAt.ToIso8601());
+        // Persist retryCount so that the 5-attempt cap survives server restarts.
+        // Without this field the count resets to 0 on every restart, letting
+        // permanently-failing entries loop indefinitely across reboots.
+        if (E.RetryCount > 0)
+            Obj->SetNumberField(TEXT("retryCount"), static_cast<double>(E.RetryCount));
         Arr.Add(MakeShared<FJsonValueObject>(Obj));
     }
 

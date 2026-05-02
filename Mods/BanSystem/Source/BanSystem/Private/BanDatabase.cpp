@@ -606,13 +606,13 @@ bool UBanDatabase::RemoveBanByUid(const FString& Uid, FBanEntry& OutEntry, bool 
     return bRemoved;
 }
 
-bool UBanDatabase::RemoveBanById(int64 Id)
+bool UBanDatabase::RemoveBanById(int64 Id, bool bSilent)
 {
     FBanEntry Ignored;
-    return RemoveBanById(Id, Ignored);
+    return RemoveBanById(Id, Ignored, bSilent);
 }
 
-bool UBanDatabase::RemoveBanById(int64 Id, FBanEntry& OutEntry)
+bool UBanDatabase::RemoveBanById(int64 Id, FBanEntry& OutEntry, bool bSilent)
 {
     bool bRemoved = false;
     bool bSaveOk  = true;
@@ -642,7 +642,7 @@ bool UBanDatabase::RemoveBanById(int64 Id, FBanEntry& OutEntry)
 
     if (!bSaveOk) return false;
 
-    if (bRemoved)
+    if (bRemoved && !bSilent)
         OnBanRemoved.Broadcast(OutEntry.Uid, OutEntry.PlayerName);
 
     return bRemoved;

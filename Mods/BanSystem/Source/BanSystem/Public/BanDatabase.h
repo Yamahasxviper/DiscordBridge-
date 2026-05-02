@@ -96,8 +96,11 @@ public:
     /**
      * Remove a ban by its integer row ID.
      * Returns true if a row was found and deleted.
+     * When bSilent is true, OnBanRemoved is NOT broadcast after the removal
+     * (use this for internal bookkeeping operations that should not trigger
+     * external notifications, matching the bSilent behaviour of RemoveBanByUid).
      */
-    bool RemoveBanById(int64 Id);
+    bool RemoveBanById(int64 Id, bool bSilent = false);
 
     /**
      * Atomically look up and remove a ban by its integer row ID.
@@ -107,8 +110,9 @@ public:
      * details (e.g. UID, player name) for notifications — it eliminates the
      * TOCTOU window that exists when GetAllBans() + RemoveBanById() are called
      * separately.
+     * When bSilent is true, OnBanRemoved is NOT broadcast after the removal.
      */
-    bool RemoveBanById(int64 Id, FBanEntry& OutEntry);
+    bool RemoveBanById(int64 Id, FBanEntry& OutEntry, bool bSilent = false);
 
     /**
      * Delete all expired temporary bans.
