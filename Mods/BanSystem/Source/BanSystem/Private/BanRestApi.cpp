@@ -1141,7 +1141,7 @@ void UBanRestApi::RegisterRoutes()
                     {
                         // Only auto-ban if the player is not already banned.
                         FBanEntry ExistingBan;
-                        if (!DB->IsCurrentlyBanned(Uid, ExistingBan))
+                        if (!DB->IsCurrentlyBannedByAnyId(Uid, ExistingBan))
                         {
                             FBanEntry AutoBan;
                             AutoBan.Uid        = Uid;

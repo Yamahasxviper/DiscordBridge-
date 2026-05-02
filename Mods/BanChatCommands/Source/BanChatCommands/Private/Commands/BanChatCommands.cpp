@@ -1404,7 +1404,7 @@ EExecutionStatus ABanCheckChatCommand::ExecuteCommand_Implementation(
     }
 
     FBanEntry Entry;
-    if (DB->IsCurrentlyBanned(Uid, Entry))
+    if (DB->IsCurrentlyBannedByAnyId(Uid, Entry))
     {
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] BANNED — %s (%s)  "
@@ -2061,7 +2061,7 @@ EExecutionStatus AWarnChatCommand::ExecuteCommand_Implementation(
             // would silently overwrite the existing record with a lighter one.
             UBanDatabase* BanDB = GI->GetSubsystem<UBanDatabase>();
             FBanEntry ExistingAutobanEntry;
-            if (BanDB && BanDB->IsCurrentlyBanned(Uid, ExistingAutobanEntry))
+            if (BanDB && BanDB->IsCurrentlyBannedByAnyId(Uid, ExistingAutobanEntry))
             {
                 UE_LOG(LogBanChatCommands, Log,
                     TEXT("BanChatCommands: auto-ban skipped for '%s' (%s) — player is already banned."),
