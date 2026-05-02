@@ -1002,6 +1002,14 @@ EExecutionStatus ALinkBansChatCommand::ExecuteCommand_Implementation(
             FString::Printf(TEXT("[BanChatCommands] Linked %s ↔ %s. "
                 "A ban on either identity will now block both."), *UidA, *UidB),
             FLinearColor::Green);
+
+        UWorld* LWorld = GetWorld();
+        UGameInstance* LGI = LWorld ? LWorld->GetGameInstance() : nullptr;
+        if (UBanAuditLog* AuditLog = LGI ? LGI->GetSubsystem<UBanAuditLog>() : nullptr)
+            AuditLog->LogAction(TEXT("linkbans"), UidA, UidA,
+                                AdminUid, Sender->GetSenderName(),
+                                FString::Printf(TEXT("%s <-> %s"), *UidA, *UidB));
+
         return EExecutionStatus::COMPLETED;
     }
 
@@ -1051,6 +1059,14 @@ EExecutionStatus AUnlinkBansChatCommand::ExecuteCommand_Implementation(
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Removed link between %s and %s."), *UidA, *UidB),
             FLinearColor::Green);
+
+        UWorld* ULWorld = GetWorld();
+        UGameInstance* ULGI = ULWorld ? ULWorld->GetGameInstance() : nullptr;
+        if (UBanAuditLog* AuditLog = ULGI ? ULGI->GetSubsystem<UBanAuditLog>() : nullptr)
+            AuditLog->LogAction(TEXT("unlinkbans"), UidA, UidA,
+                                AdminUid, Sender->GetSenderName(),
+                                FString::Printf(TEXT("%s <-> %s"), *UidA, *UidB));
+
         return EExecutionStatus::COMPLETED;
     }
 

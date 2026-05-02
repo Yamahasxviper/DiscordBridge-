@@ -7,6 +7,8 @@
 #include "BanDatabase.h"
 #include "BanSystemConfig.h"
 #include "BanDiscordNotifier.h"
+#include "BanAuditLog.h"
+#include "BanEnforcer.h"
 #include "PlayerWarningRegistry.h"
 
 #include "Player/SMLRemoteCallObject.h"
@@ -430,8 +432,8 @@ void UDiscordBridgeSubsystem::Deinitialize()
 	InGameMessageTickerHandles.Empty();
 
 	// Cancel any pending vote-kick window timers.
-	for (FTSTicker::FDelegateHandle& H : VoteKickTimerHandles)
-		FTSTicker::GetCoreTicker().RemoveTicker(H);
+	for (auto& VotePair : VoteKickTimerHandles)
+		FTSTicker::GetCoreTicker().RemoveTicker(VotePair.Value);
 	VoteKickTimerHandles.Empty();
 
 	Disconnect();
@@ -1083,34 +1085,22 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 					}
 				}
 
-				if (EventType == TEXT("GUILD_MEMBER_ADD"))
+				if (EventType == TEXT("GUILD_MEMBER_UPDATE"))
+			{
+				if (bHasRole && !SyncUsername.IsEmpty())
 				{
-					if (bHasRole && !SyncUsername.IsEmpty())
+					if (FWhitelistManager::AddPlayer(SyncUsername, TEXT(""), TEXT("sync-role")))
 					{
-						if (FWhitelistManager::AddPlayer(SyncUsername, TEXT(""), TEXT("sync-role")))
-						{
-							PostWhitelistEvent(
-								FString::Printf(TEXT("**%s** added via Discord role sync (joined guild)"), *SyncUsername),
-								SyncUsername, TEXT("sync-role"), 3066993);
-						}
+						PostWhitelistEvent(
+							FString::Printf(TEXT("**%s** added via Discord role sync (role assigned)"), *SyncUsername),
+							SyncUsername, TEXT("sync-role"), 3066993);
 					}
 				}
-				else // GUILD_MEMBER_UPDATE
+				else if (!bHasRole && !SyncUsername.IsEmpty())
 				{
-					if (bHasRole && !SyncUsername.IsEmpty())
-					{
-						if (FWhitelistManager::AddPlayer(SyncUsername, TEXT(""), TEXT("sync-role")))
-						{
-							PostWhitelistEvent(
-								FString::Printf(TEXT("**%s** added via Discord role sync (role assigned)"), *SyncUsername),
-								SyncUsername, TEXT("sync-role"), 3066993);
-						}
-					}
-					else if (!bHasRole && !SyncUsername.IsEmpty())
-					{
-						FWhitelistManager::RemovePlayer(SyncUsername, TEXT(""), TEXT("sync-remove"));
-					}
+					FWhitelistManager::RemovePlayer(SyncUsername, TEXT(""), TEXT("sync-remove"));
 				}
+			}
 			}
 		}
 	}
@@ -2733,7 +2723,77 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 						WarnEntry.Points     = 1;
 
 						WarnReg->AddWarning(WarnEntry);
-						FBanDiscordNotifier::NotifyWarningIssued(Uid, PlayerName, WarnReason, TEXT("auto"), WarnReg->GetWarningCount(Uid));
+						const int32 AutoWarnCount  = WarnReg->GetWarningCount(Uid);
+						const int32 AutoWarnPoints = WarnReg->GetWarningPoints(Uid);
+						FBanDiscordNotifier::NotifyWarningIssued(Uid, PlayerName, WarnReason, TEXT("auto"), AutoWarnCount);
+
+						// Write to audit log so auto-warns appear alongside all other warn sources.
+						if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
+							AuditLog->LogAction(TEXT("warn"), Uid, PlayerName,
+							                    TEXT("auto"), TEXT("auto"), WarnReason);
+
+						// Auto-ban escalation — mirrors HandleWarnCommand, BanRestApi, and BanChatCommands.
+						{
+							const UBanSystemConfig* SysCfg = UBanSystemConfig::Get();
+							if (SysCfg)
+							{
+								int32 BanDurationMinutes = -1;
+								if (SysCfg->WarnEscalationTiers.Num() > 0)
+								{
+									int32 BestThreshold = -1;
+									for (const FWarnEscalationTier& Tier : SysCfg->WarnEscalationTiers)
+									{
+										const bool bHit = (Tier.PointThreshold > 0)
+											? (AutoWarnPoints >= Tier.PointThreshold)
+											: (AutoWarnCount  >= Tier.WarnCount);
+										const int32 ThisThreshold = (Tier.PointThreshold > 0)
+											? Tier.PointThreshold : Tier.WarnCount;
+										if (bHit && ThisThreshold > BestThreshold)
+										{
+											BestThreshold      = ThisThreshold;
+											BanDurationMinutes = Tier.DurationMinutes;
+										}
+									}
+								}
+								else if (SysCfg->AutoBanWarnCount > 0 && AutoWarnCount >= SysCfg->AutoBanWarnCount)
+								{
+									BanDurationMinutes = SysCfg->AutoBanWarnMinutes;
+								}
+
+								if (BanDurationMinutes >= 0)
+								{
+									if (UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>())
+									{
+										FBanEntry Existing;
+										if (!DB->IsCurrentlyBanned(Uid, Existing))
+										{
+											FBanEntry AutoBan;
+											AutoBan.Uid      = Uid;
+											UBanDatabase::ParseUid(Uid, AutoBan.Platform, AutoBan.PlayerUID);
+											AutoBan.PlayerName   = PlayerName;
+											AutoBan.Reason       = TEXT("Auto-banned: reached warning threshold");
+											AutoBan.BannedBy     = TEXT("auto");
+											const FDateTime AutoNow = FDateTime::UtcNow();
+											AutoBan.BanDate      = AutoNow;
+											AutoBan.bIsPermanent = (BanDurationMinutes <= 0);
+											AutoBan.ExpireDate   = AutoBan.bIsPermanent
+												? FDateTime(0)
+												: AutoNow + FTimespan::FromMinutes(BanDurationMinutes);
+											if (DB->AddBan(AutoBan))
+											{
+												if (UWorld* WBan = GI->GetWorld())
+													UBanEnforcer::KickConnectedPlayer(WBan, Uid, AutoBan.GetKickMessage());
+												FBanDiscordNotifier::NotifyBanCreated(AutoBan);
+												FBanDiscordNotifier::NotifyAutoEscalationBan(AutoBan, AutoWarnCount);
+												if (UBanAuditLog* AL = GI->GetSubsystem<UBanAuditLog>())
+													AL->LogAction(TEXT("ban"), Uid, PlayerName,
+													              TEXT("auto"), TEXT("auto"), AutoBan.Reason);
+											}
+										}
+									}
+								}
+							}
+						}
 
 						// Notify the player in-game so they are aware they have been warned.
 						if (WarnTargetPC)
@@ -2741,7 +2801,7 @@ void UDiscordBridgeSubsystem::HandleIncomingChatMessage(const FString& PlayerNam
 							WarnTargetPC->ClientMessage(FString::Printf(
 								TEXT("[Warning] You have been automatically warned for inappropriate language. "
 								     "(Warning #%d)"),
-								WarnReg->GetWarningCount(Uid)));
+								AutoWarnCount));
 						}
 					}
 				}
@@ -4839,10 +4899,11 @@ void UDiscordBridgeSubsystem::AddJoinReactions(const FString& MessageId,
 			FTickerDelegate::CreateWeakLambda(this, [this, MessageId](float) -> bool
 			{
 				CheckVoteResult(MessageId);
+				VoteKickTimerHandles.Remove(MessageId); // self-prune after firing
 				return false; // one-shot
 			}),
 			DelaySeconds);
-		VoteKickTimerHandles.Add(VoteHandle);
+		VoteKickTimerHandles.Add(MessageId, VoteHandle);
 	}
 }
 
