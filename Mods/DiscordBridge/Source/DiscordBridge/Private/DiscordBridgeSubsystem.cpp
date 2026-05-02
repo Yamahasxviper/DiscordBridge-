@@ -6576,12 +6576,12 @@ void UDiscordBridgeSubsystem::SaveWarnedExpiryNames() const
 		return;
 	}
 
-	PF.DeleteFile(*Path);
-	if (!PF.MoveFile(*Path, *TmpPath))
+	if (!IFileManager::Get().Move(*Path, *TmpPath, /*bReplace=*/true))
 	{
 		UE_LOG(LogDiscordBridge, Warning,
 			TEXT("DiscordBridge: failed to atomically rename '%s' → '%s' for WarnedExpiryNames"),
 			*TmpPath, *Path);
+		IFileManager::Get().Delete(*TmpPath);
 	}
 }
 

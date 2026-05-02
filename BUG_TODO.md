@@ -524,3 +524,23 @@ implementations in the codebase into alignment.
 
 *Last updated: 2026-04-30. All 2 round-8 bugs resolved.*
 
+---
+
+## Round 9 — Additional Scan (2026-05-02)
+
+### ✅ Fixed — `SaveWarnedExpiryNames()` non-atomic write: `DeleteFile` + `MoveFile` two-step (BUG-01)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/DiscordBridgeSubsystem.cpp`
+
+**Fix applied:** Replaced the `PF.DeleteFile(*Path)` + `PF.MoveFile(*Path, *TmpPath)` two-step
+with `IFileManager::Get().Move(*Path, *TmpPath, /*bReplace=*/true)`. The old two-step had a
+data-loss window: if `MoveFile` failed (disk-full, permission error, OS crash) after `DeleteFile`
+had already removed the live file, both the live file and the `.tmp` were gone — all
+`WarnedExpiryNames` state was lost. The new single `IFileManager::Move(bReplace=true)` call is
+an atomic OS-level rename/replace with no such window. On failure the `.tmp` file is cleaned up
+and the live file is never touched. This matches the identical pattern used by `SaveTicketState`,
+`SaveTicketBlacklist`, `BanDatabase::SaveToFile`, and every other registry in the codebase.
+
+---
+
+*Last updated: 2026-05-02. All 1 round-9 bugs resolved.*
+
