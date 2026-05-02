@@ -77,7 +77,8 @@ void UBanSyncClient::Deinitialize()
 
 void UBanSyncClient::BroadcastBan(const FString& Uid, const FString& PlayerName,
                                    const FString& Reason, const FString& BannedBy,
-                                   int32 DurationMinutes, const FString& Category)
+                                   int32 DurationMinutes, const FString& Category,
+                                   const TArray<FString>& Evidence, FDateTime BanDate)
 {
     TSharedPtr<FJsonObject> Msg = MakeShared<FJsonObject>();
     Msg->SetStringField(TEXT("type"),            TEXT("ban"));
@@ -87,6 +88,20 @@ void UBanSyncClient::BroadcastBan(const FString& Uid, const FString& PlayerName,
     Msg->SetStringField(TEXT("bannedBy"),        BannedBy);
     Msg->SetNumberField(TEXT("durationMinutes"), static_cast<double>(DurationMinutes));
     Msg->SetStringField(TEXT("category"),        Category);
+    // Transmit the original ban-creation timestamp so peers preserve when the ban
+    // was first placed rather than resetting BanDate to the sync timestamp.
+    if (BanDate.GetTicks() > 0)
+        Msg->SetStringField(TEXT("banDate"), BanDate.ToIso8601());
+    // Transmit evidence links so peers store the same proof as the origin server.
+    // Without this, any sync (including an update sync fired by OnBanUpdated) would
+    // silently overwrite the peer's evidence array with an empty one.
+    if (Evidence.Num() > 0)
+    {
+        TArray<TSharedPtr<FJsonValue>> EvidArr;
+        for (const FString& Ev : Evidence)
+            EvidArr.Add(MakeShared<FJsonValueString>(Ev));
+        Msg->SetArrayField(TEXT("evidence"), EvidArr);
+    }
 
     FString JsonStr;
     TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonStr);
@@ -162,7 +177,7 @@ void UBanSyncClient::OnLocalBanAdded(const FBanEntry& Entry)
         : FMath::Max(1, FMath::CeilToInt(RemainingMinutesDbl));
 
     BroadcastBan(Entry.Uid, Entry.PlayerName, Entry.Reason, Entry.BannedBy,
-                 DurationMinutes, Entry.Category);
+                 DurationMinutes, Entry.Category, Entry.Evidence, Entry.BanDate);
 }
 
 void UBanSyncClient::OnLocalBanRemoved(const FString& Uid, const FString& PlayerName)
@@ -208,6 +223,35 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
             ? static_cast<int32>(DurDbl)
             : 0;
 
+        // Parse the original ban-creation timestamp.  Fall back to UtcNow() so
+        // that messages from older peers (without the banDate field) still work.
+        FDateTime OriginalBanDate;
+        {
+            FString BanDateStr;
+            if (!Root->TryGetStringField(TEXT("banDate"), BanDateStr) ||
+                !FDateTime::ParseIso8601(*BanDateStr, OriginalBanDate) ||
+                OriginalBanDate.GetTicks() <= 0)
+            {
+                OriginalBanDate = FDateTime(0); // sentinel: will be set to Now below
+            }
+        }
+
+        // Parse the evidence array.  Empty arrays are silently accepted (no evidence
+        // was attached to this ban).
+        TArray<FString> IncomingEvidence;
+        {
+            const TArray<TSharedPtr<FJsonValue>>* EvidArr = nullptr;
+            if (Root->TryGetArrayField(TEXT("evidence"), EvidArr) && EvidArr)
+            {
+                for (const TSharedPtr<FJsonValue>& EvidVal : *EvidArr)
+                {
+                    FString Ev;
+                    if (EvidVal->TryGetString(Ev) && !Ev.IsEmpty())
+                        IncomingEvidence.Add(Ev);
+                }
+            }
+        }
+
         if (Uid.IsEmpty()) return;
 
         // If the player is already banned, check whether key fields differ.
@@ -230,7 +274,10 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
             const bool bExpiryMatch = Existing.bIsPermanent
                 ? true
                 : FMath::Abs((Existing.ExpireDate - IncomingExpiry).GetTotalSeconds()) < 60.0;
-            if (bPermanentMatch && bReasonMatch && bCategoryMatch && bExpiryMatch)
+            // Compare evidence arrays so that an update which only adds/removes evidence
+            // is not silently dropped (both arrays must have the same ordered elements).
+            const bool bEvidenceMatch = (Existing.Evidence == IncomingEvidence);
+            if (bPermanentMatch && bReasonMatch && bCategoryMatch && bExpiryMatch && bEvidenceMatch)
                 return; // Identical — nothing to update.
             // Fields changed — remove the stale record and fall through to re-add.
             // bSilent=true suppresses OnBanRemoved so BanDiscordSubsystem does NOT
@@ -249,12 +296,16 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
         Ban.Reason          = Reason.IsEmpty() ? TEXT("Synced ban from peer server") : Reason;
         Ban.BannedBy        = BannedBy.IsEmpty() ? TEXT("peer") : BannedBy;
         const FDateTime Now = FDateTime::UtcNow();
-        Ban.BanDate         = Now;
+        // Preserve the original ban-creation timestamp when the peer sent one;
+        // fall back to Now for messages from older peers that omit the field.
+        Ban.BanDate         = (OriginalBanDate.GetTicks() > 0) ? OriginalBanDate : Now;
         Ban.Category        = Category;
         Ban.bIsPermanent    = (DurationMinutes <= 0);
         Ban.ExpireDate      = Ban.bIsPermanent
             ? FDateTime(0)
             : Now + FTimespan::FromMinutes(DurationMinutes);
+        // Preserve evidence so peers store the same proof as the origin server.
+        Ban.Evidence        = IncomingEvidence;
 
         // Register the UID in PeerAppliedBanUids before calling AddBan() so that
         // OnLocalBanAdded suppresses re-broadcasting this peer-sourced ban.
