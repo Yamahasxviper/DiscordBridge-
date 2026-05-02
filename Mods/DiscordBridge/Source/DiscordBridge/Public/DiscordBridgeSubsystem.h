@@ -14,8 +14,45 @@
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerController.h"
 #include "Dom/JsonObject.h"
-#include "IDiscordBridgeProvider.h"
+#include "Dom/JsonValue.h"
 #include "DiscordBridgeSubsystem.generated.h"
+
+/**
+ * FModalField
+ *
+ * Describes a single text-input component for use in RespondWithMultiFieldModal().
+ * Each field is rendered as its own ACTION_ROW inside the modal (Discord allows
+ * up to 5 fields per modal).
+ */
+struct DISCORDBRIDGE_API FModalField
+{
+	/** Label shown above the text input field (max 45 characters). */
+	FString Label;
+
+	/** Unique custom_id for the field; used to retrieve the submitted value
+	 *  from the MODAL_SUBMIT components array. */
+	FString CustomId;
+
+	/** Greyed-out hint text displayed inside the empty field (optional). */
+	FString Placeholder;
+
+	/** Pre-filled default value shown in the field (optional). */
+	FString DefaultValue;
+
+	/** When true, the user must provide a non-empty value before submitting. */
+	bool bRequired = false;
+
+	/** When true, renders as a multi-line paragraph input (style 2).
+	 *  When false, renders as a single-line short input (style 1). */
+	bool bParagraph = false;
+
+	/** Minimum character count required.  0 means no minimum. */
+	int32 MinLength = 0;
+
+	/** Maximum character count allowed (clamped to Discord's 4000-char limit).
+	 *  0 defaults to 200. */
+	int32 MaxLength = 200;
+};
 
 // Forward-declared so the header does not pull in TicketSystem's full header chain.
 class UTicketSubsystem;
@@ -144,8 +181,7 @@ namespace EDiscordGatewayIntent
  *     SendGameMessageToDiscord() from your chat hooks.
  */
 UCLASS(BlueprintType)
-class DISCORDBRIDGE_API UDiscordBridgeSubsystem : public UGameInstanceSubsystem,
-                                                  public IDiscordBridgeProvider
+class DISCORDBRIDGE_API UDiscordBridgeSubsystem : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
 
@@ -235,18 +271,18 @@ public:
 	/** Returns the Discord bot token used for REST API authentication.
 	 *  Empty when the token is not yet configured. */
 	UFUNCTION(BlueprintPure, Category="Discord Bridge")
-	virtual const FString& GetBotToken() const override;
+	const FString& GetBotToken() const;
 
 	/** Returns the Discord guild (server) ID received from the READY event.
 	 *  Empty until the Gateway handshake is complete. */
 	UFUNCTION(BlueprintPure, Category="Discord Bridge")
-	virtual const FString& GetGuildId() const override;
+	const FString& GetGuildId() const;
 
 	/** Returns the Discord user ID of the guild owner.
 	 *  Populated after the first GUILD_CREATE event is received; may be empty
 	 *  on servers that only receive READY without a full GUILD_CREATE. */
 	UFUNCTION(BlueprintPure, Category="Discord Bridge")
-	virtual const FString& GetGuildOwnerId() const override;
+	const FString& GetGuildOwnerId() const;
 
 	/**
 	 * Post a plain-text message to any Discord channel via the REST API.
@@ -256,8 +292,8 @@ public:
 	 * @param TargetChannelId  Snowflake ID of the destination channel.
 	 * @param Message          Plain-text content (Discord markdown supported).
 	 */
-	virtual void SendDiscordChannelMessage(const FString& TargetChannelId,
-	                                       const FString& Message) override;
+	void SendDiscordChannelMessage(const FString& TargetChannelId,
+	                               const FString& Message);
 
 	/**
 	 * Respond to a Discord interaction (button click or modal submit) via the
@@ -274,22 +310,22 @@ public:
 	 * @param bEphemeral       When true the response is only visible to the
 	 *                         user who triggered the interaction.
 	 */
-	virtual void RespondToInteraction(const FString& InteractionId,
-	                                  const FString& InteractionToken,
-	                                  int32 ResponseType,
-	                                  const FString& Content,
-	                                  bool bEphemeral) override;
+	void RespondToInteraction(const FString& InteractionId,
+	                          const FString& InteractionToken,
+	                          int32 ResponseType,
+	                          const FString& Content,
+	                          bool bEphemeral);
 
-	virtual void RespondWithModal(const FString& InteractionId,
-	                              const FString& InteractionToken,
-	                              const FString& ModalCustomId,
-	                              const FString& Title,
-	                              const FString& Placeholder,
-	                              const FString& ComponentCustomId = TEXT("ticket_reason")) override;
+	void RespondWithModal(const FString& InteractionId,
+	                      const FString& InteractionToken,
+	                      const FString& ModalCustomId,
+	                      const FString& Title,
+	                      const FString& Placeholder,
+	                      const FString& ComponentCustomId = TEXT("ticket_reason"));
 
-	virtual void FollowUpInteraction(const FString& InteractionToken,
-	                                 const FString& Message,
-	                                 bool bEphemeral) override;
+	void FollowUpInteraction(const FString& InteractionToken,
+	                         const FString& Message,
+	                         bool bEphemeral);
 
 	/**
 	 * Send a pre-built JSON message body (content + optional components) to a
@@ -299,8 +335,8 @@ public:
 	 * @param TargetChannelId  Snowflake ID of the destination channel.
 	 * @param MessageBody      Fully constructed Discord message JSON object.
 	 */
-	virtual void SendMessageBodyToChannel(const FString& TargetChannelId,
-	                                      const TSharedPtr<FJsonObject>& MessageBody) override;
+	void SendMessageBodyToChannel(const FString& TargetChannelId,
+	                              const TSharedPtr<FJsonObject>& MessageBody);
 
 	/**
 	 * Delete a Discord channel via the REST API.
@@ -308,7 +344,7 @@ public:
 	 *
 	 * @param ChannelId  Snowflake ID of the channel to delete.
 	 */
-	virtual void DeleteDiscordChannel(const FString& ChannelId) override;
+	void DeleteDiscordChannel(const FString& ChannelId);
 
 	/**
 	 * Create a new guild text channel via the Discord REST API and invoke the
@@ -319,34 +355,32 @@ public:
 	 * @param PermissionOverwrites  JSON array of permission-overwrite objects.
 	 * @param OnCreated          Called on the game thread with the new channel ID.
 	 */
-	virtual void CreateDiscordGuildTextChannel(const FString& ChannelName,
-	                                           const FString& CategoryId,
-	                                           const TArray<TSharedPtr<FJsonValue>>& PermissionOverwrites,
-	                                           TFunction<void(const FString& NewChannelId)> OnCreated) override;
+	void CreateDiscordGuildTextChannel(const FString& ChannelName,
+	                                   const FString& CategoryId,
+	                                   const TArray<TSharedPtr<FJsonValue>>& PermissionOverwrites,
+	                                   TFunction<void(const FString& NewChannelId)> OnCreated);
 
 	/** Respond to a Discord interaction with a fully constructed message body
-	 *  (type 4 = CHANNEL_MESSAGE_WITH_SOURCE), supporting embeds and components.
-	 *  Implements IDiscordBridgeProvider::RespondToInteractionWithBody(). */
-	virtual void RespondToInteractionWithBody(const FString& InteractionId,
-	                                          const FString& InteractionToken,
-	                                          const TSharedPtr<FJsonObject>& MessageData,
-	                                          bool bEphemeral) override;
+	 *  (type 4 = CHANNEL_MESSAGE_WITH_SOURCE), supporting embeds and components. */
+	void RespondToInteractionWithBody(const FString& InteractionId,
+	                                  const FString& InteractionToken,
+	                                  const TSharedPtr<FJsonObject>& MessageData,
+	                                  bool bEphemeral);
 
 	/** Respond to a Discord button interaction by showing a multi-field modal popup
-	 *  (type 9 = MODAL).  Implements IDiscordBridgeProvider::RespondWithMultiFieldModal(). */
-	virtual void RespondWithMultiFieldModal(const FString& InteractionId,
-	                                        const FString& InteractionToken,
-	                                        const FString& ModalCustomId,
-	                                        const FString& Title,
-	                                        const TArray<FModalField>& Fields) override;
+	 *  (type 9 = MODAL). */
+	void RespondWithMultiFieldModal(const FString& InteractionId,
+	                                const FString& InteractionToken,
+	                                const FString& ModalCustomId,
+	                                const FString& Title,
+	                                const TArray<FModalField>& Fields);
 
 	/** Creates a public thread in @p ChannelId and calls @p OnCreated with the
-	 *  new thread ID (or an empty string if the Discord API request fails).
-	 *  Implements IDiscordBridgeProvider::CreateDiscordThread(). */
-	virtual void CreateDiscordThread(
+	 *  new thread ID (or an empty string if the Discord API request fails). */
+	void CreateDiscordThread(
 		const FString& ChannelId,
 		const FString& ThreadName,
-		TFunction<void(const FString& ThreadId)> OnCreated) override;
+		TFunction<void(const FString& ThreadId)> OnCreated);
 
 	/**
 	 * Called by OnGameChatMessageAdded every time a player-chat message lands
@@ -359,17 +393,18 @@ public:
 	 */
 	void HandleIncomingChatMessage(const FString& PlayerName, const FString& MessageText);
 
-	// ── IDiscordBridgeProvider ────────────────────────────────────────────────
-	// Subscribe/unsubscribe methods wrap the native multicast delegates above,
-	// exposing them through the provider interface used by TicketSystem.
+	// ── Delegate subscription helpers ────────────────────────────────────────
+	// These wrap the native multicast delegates above so external subsystems
+	// (UTicketSubsystem, UBanDiscordSubsystem) can subscribe without knowing
+	// the internal delegate field names.
 
-	virtual FDelegateHandle SubscribeInteraction(
-		TFunction<void(const TSharedPtr<FJsonObject>&)> Callback) override;
-	virtual void UnsubscribeInteraction(FDelegateHandle Handle) override;
+	FDelegateHandle SubscribeInteraction(
+		TFunction<void(const TSharedPtr<FJsonObject>&)> Callback);
+	void UnsubscribeInteraction(FDelegateHandle Handle);
 
-	virtual FDelegateHandle SubscribeRawMessage(
-		TFunction<void(const TSharedPtr<FJsonObject>&)> Callback) override;
-	virtual void UnsubscribeRawMessage(FDelegateHandle Handle) override;
+	FDelegateHandle SubscribeRawMessage(
+		TFunction<void(const TSharedPtr<FJsonObject>&)> Callback);
+	void UnsubscribeRawMessage(FDelegateHandle Handle);
 
 	// ── In-game slash command helpers (callable from SML command actors) ──────
 

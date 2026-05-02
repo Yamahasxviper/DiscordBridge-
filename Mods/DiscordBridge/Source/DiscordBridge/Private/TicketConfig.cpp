@@ -151,8 +151,6 @@ FTicketConfig FTicketConfig::Load()
 		FConfigFile Cfg;
 		Cfg.Read(PrimaryPath);
 
-		Config.BotToken                 = GetIniString(Cfg, TEXT("BotToken"));
-		Config.GuildId                  = GetIniString(Cfg, TEXT("GuildId"));
 		Config.TicketChannelId          = GetIniString(Cfg, TEXT("TicketChannelId"));
 		Config.TicketLogChannelId       = GetIniString(Cfg, TEXT("TicketLogChannelId"));
 		Config.bTicketWhitelistEnabled  = GetIniBool  (Cfg, TEXT("TicketWhitelistEnabled"),  true);
@@ -199,8 +197,6 @@ FTicketConfig FTicketConfig::Load()
 			FConfigFile BackupCfg;
 			BackupCfg.Read(BackupPath);
 
-			Config.BotToken                = GetIniString(BackupCfg, TEXT("BotToken"));
-			Config.GuildId                 = GetIniString(BackupCfg, TEXT("GuildId"));
 			Config.TicketChannelId         = GetIniString(BackupCfg, TEXT("TicketChannelId"));
 			Config.TicketLogChannelId      = GetIniString(BackupCfg, TEXT("TicketLogChannelId"));
 			Config.bTicketWhitelistEnabled = GetIniBool  (BackupCfg, TEXT("TicketWhitelistEnabled"), true);
@@ -252,8 +248,6 @@ FTicketConfig FTicketConfig::Load()
 	{
 		FString BackupContent;
 		BackupContent += TEXT("[TicketSystem]\n");
-		BackupContent += FString::Printf(TEXT("BotToken=%s\n"),               *Config.BotToken);
-		BackupContent += FString::Printf(TEXT("GuildId=%s\n"),                *Config.GuildId);
 		BackupContent += FString::Printf(TEXT("TicketChannelId=%s\n"),        *Config.TicketChannelId);
 		BackupContent += FString::Printf(TEXT("TicketLogChannelId=%s\n"),     *Config.TicketLogChannelId);
 		BackupContent += FString::Printf(TEXT("TicketWhitelistEnabled=%s\n"), Config.bTicketWhitelistEnabled ? TEXT("True") : TEXT("False"));
@@ -348,16 +342,6 @@ void FTicketConfig::RestoreDefaultConfigIfNeeded()
 		TEXT("#   <ServerRoot>/FactoryGame/Saved/DiscordBridge/TicketSystem.ini\n")
 		TEXT("# on every server start so settings survive primary file deletion.\n")
 		TEXT("#\n")
-		TEXT("# STANDALONE MODE: set BotToken to run without DiscordBridge.\n")
-		TEXT("# PAIRED MODE: leave BotToken empty — DiscordBridge will power the tickets.\n")
-		TEXT("\n")
-		TEXT("# -- STANDALONE DISCORD BOT (leave empty when using DiscordBridge) ------------\n")
-		TEXT("BotToken=\n")
-		TEXT("# Your Discord bot token. Required for standalone mode (without DiscordBridge).\n")
-		TEXT("# SECURITY: Keep private. Leave empty when DiscordBridge is installed.\n")
-		TEXT("\n")
-		TEXT("GuildId=\n")
-		TEXT("# Optional Discord guild (server) ID. Leave empty to auto-detect (recommended).\n")
 		TEXT("\n")
 		TEXT("# -- TICKET CHANNEL -----------------------------------------------------------\n")
 		TEXT("TicketChannelId=\n")

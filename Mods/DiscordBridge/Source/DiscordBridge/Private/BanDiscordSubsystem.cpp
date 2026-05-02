@@ -21,6 +21,7 @@
 
 // DiscordBridge config (ServerName for panel embed)
 #include "DiscordBridgeConfig.h"
+#include "DiscordBridgeSubsystem.h"
 #include "TicketSubsystem.h"
 #include "FGChatManager.h"
 
@@ -579,7 +580,7 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	}
 
 	UE_LOG(LogBanDiscord, Log,
-	       TEXT("BanDiscordSubsystem: Initialized. Waiting for Discord provider via SetProvider()."));
+	       TEXT("BanDiscordSubsystem: Initialized. Waiting for Discord bridge via SetBridge()."));
 }
 
 void UBanDiscordSubsystem::Deinitialize()
@@ -629,15 +630,15 @@ void UBanDiscordSubsystem::Deinitialize()
 		KickLoggedHandle.Reset();
 	}
 
-	SetProvider(nullptr);
+	SetBridge(nullptr);
 	Super::Deinitialize();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Provider injection
+// Bridge injection
 // ─────────────────────────────────────────────────────────────────────────────
 
-void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
+void UBanDiscordSubsystem::SetBridge(UDiscordBridgeSubsystem* InProvider)
 {
 	// Guard: no-op when setting the same provider twice.
 	if (InProvider == CachedProvider)

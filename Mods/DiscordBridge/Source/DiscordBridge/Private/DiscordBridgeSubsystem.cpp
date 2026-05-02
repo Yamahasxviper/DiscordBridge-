@@ -299,7 +299,7 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		if (UTicketSubsystem* Tickets = GI->GetSubsystem<UTicketSubsystem>())
 		{
 			CachedTicketSubsystem = Tickets;
-			Tickets->SetProvider(this);
+			Tickets->SetBridge(this);
 		}
 	}
 
@@ -313,7 +313,7 @@ void UDiscordBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		if (UBanDiscordSubsystem* BanDiscord = GI->GetSubsystem<UBanDiscordSubsystem>())
 		{
 			CachedBanDiscordSubsystem = BanDiscord;
-			BanDiscord->SetProvider(this);
+			BanDiscord->SetBridge(this);
 		}
 	}
 
@@ -334,14 +334,14 @@ void UDiscordBridgeSubsystem::Deinitialize()
 	// Detach from TicketSubsystem so it stops processing interactions after we shut down.
 	if (UTicketSubsystem* Tickets = CachedTicketSubsystem.Get())
 	{
-		Tickets->SetProvider(nullptr);
+		Tickets->SetBridge(nullptr);
 	}
 	CachedTicketSubsystem.Reset();
 
 	// Detach from BanDiscordSubsystem so ban commands stop firing after we shut down.
 	if (UBanDiscordSubsystem* BanDiscord = CachedBanDiscordSubsystem.Get())
 	{
-		BanDiscord->SetProvider(nullptr);
+		BanDiscord->SetBridge(nullptr);
 	}
 	CachedBanDiscordSubsystem.Reset();
 
@@ -4663,10 +4663,9 @@ void UDiscordBridgeSubsystem::PostWhitelistEvent(const FString& Action, const FS
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// IDiscordBridgeProvider – subscribe / unsubscribe helpers
-// These wrap the native multicast delegates so external modules (TicketSystem
-// and any other future mod built against the IDiscordBridgeProvider interface)
-// can subscribe without including DiscordBridgeSubsystem.h directly.
+// Delegate subscription helpers
+// These wrap the native multicast delegates so external subsystems (TicketSystem,
+// BanDiscordSubsystem) can subscribe without knowing the internal delegate names.
 // ─────────────────────────────────────────────────────────────────────────────
 
 FDelegateHandle UDiscordBridgeSubsystem::SubscribeInteraction(

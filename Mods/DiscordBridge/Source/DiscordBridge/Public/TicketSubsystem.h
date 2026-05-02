@@ -6,24 +6,25 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Dom/JsonObject.h"
 #include "Containers/Ticker.h"
-#include "IDiscordBridgeProvider.h"
 #include "TicketConfig.h"
 #include "TicketSubsystem.generated.h"
+
+// Forward-declared so the header does not pull in DiscordBridgeSubsystem's full header chain.
+class UDiscordBridgeSubsystem;
 
 /**
  * UTicketSubsystem
  *
  * A GameInstance-level subsystem that implements a button-based Discord support-ticket
- * panel.  The subsystem is standalone: it has no compile-time dependency on any
- * specific Discord mod.  Instead, any mod that implements IDiscordBridgeProvider can
- * wire itself in by calling SetProvider(this) during its own Initialize(), then
- * SetProvider(nullptr) during Deinitialize().
+ * panel.  Requires UDiscordBridgeSubsystem to be present in the same game instance.
+ * DiscordBridgeSubsystem calls SetBridge(this) during its own Initialize() and
+ * SetBridge(nullptr) during Deinitialize().
  *
  * How it works
  * ────────────
- *  1. On Initialize() the subsystem loads DefaultTickets.ini and waits for a provider
- *     to be injected via SetProvider().
- *  2. Once SetProvider() is called it subscribes to the provider's interaction and
+ *  1. On Initialize() the subsystem loads DefaultTickets.ini and waits for the bridge
+ *     to be injected via SetBridge().
+ *  2. Once SetBridge() is called it subscribes to the bridge's interaction and
  *     raw-message events.
  *  3. When a Discord member clicks a ticket button (or submits a ticket reason
  *     modal) the interaction payload is dispatched here via the subscribed callback.
@@ -32,7 +33,7 @@
  *     welcome message and a Close Ticket button, and optionally notifies the
  *     admin channel (TicketChannelId).
  *  5. When either the ticket opener or an admin clicks Close Ticket, the channel
- *     is deleted via the provider's DeleteDiscordChannel() method.
+ *     is deleted via the bridge's DeleteDiscordChannel() method.
  *
  * Slash commands (/ticket)
  * ========================
@@ -87,11 +88,10 @@ public:
 	virtual void Deinitialize() override;
 
 	/**
-	 * Inject (or clear) the Discord provider used to send and receive Discord
-	 * events.  Called by DiscordBridge during its own Initialize() and
-	 * Deinitialize().  Pass nullptr to detach the current provider.
+	 * Inject (or clear) the Discord bridge.  Called by UDiscordBridgeSubsystem
+	 * during its own Initialize() and Deinitialize().  Pass nullptr to detach.
 	 */
-	void SetProvider(IDiscordBridgeProvider* InProvider);
+	void SetBridge(UDiscordBridgeSubsystem* InBridge);
 
 	/**
 	 * Returns the active ticket channel ID for the given Discord opener user ID,
@@ -112,7 +112,7 @@ private:
 	// ── Interaction routing ───────────────────────────────────────────────────
 
 	/**
-	 * Bound to the provider's interaction event via SetProvider().
+	 * Bound to the bridge's interaction event via SetBridge().
 	 * Routes button clicks (type 3) and modal submits (type 5) to the
 	 * appropriate internal handler.
 	 */
@@ -226,8 +226,8 @@ private:
 	 */
 	void CloseTicketChannelInactive(const FString& ChannelId);
 
-	/** Return a pointer to IDiscordBridgeProvider (set via SetProvider()). */
-	IDiscordBridgeProvider* GetBridge() const;
+	/** Return a pointer to the Discord bridge (set via SetBridge()). */
+	UDiscordBridgeSubsystem* GetBridge() const;
 
 	// ── Ticket state persistence ──────────────────────────────────────────────
 
@@ -405,6 +405,6 @@ private:
 	/** Returns path to TicketStats.json. */
 	static FString GetStatsFilePath();
 
-	/** Injected Discord provider.  nullptr until SetProvider() is called. */
-	IDiscordBridgeProvider* CachedProvider = nullptr;
+	/** Injected Discord bridge.  nullptr until SetBridge() is called. */
+	UDiscordBridgeSubsystem* CachedProvider = nullptr;
 };

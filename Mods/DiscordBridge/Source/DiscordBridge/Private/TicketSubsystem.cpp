@@ -23,6 +23,7 @@
 #include "PlayerWarningRegistry.h"
 #include "MuteRegistry.h"
 #include "WhitelistManager.h"
+#include "DiscordBridgeSubsystem.h"
 #include "Containers/Ticker.h"
 
 DEFINE_LOG_CATEGORY(LogTicketSystem);
@@ -82,7 +83,7 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 					FString OpenerId;
 					PendingReopenOpener.RemoveAndCopyValue(ChanId, OpenerId);
 					ReopenedOnceChannels.Remove(ChanId);
-					IDiscordBridgeProvider* B = GetBridge();
+					UDiscordBridgeSubsystem* B = GetBridge();
 					if (B)
 					{
 						B->DeleteDiscordChannel(ChanId);
@@ -149,7 +150,7 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	}
 
 	UE_LOG(LogTicketSystem, Log,
-	       TEXT("TicketSystem: Initialized. Waiting for Discord provider to be injected via SetProvider()."));
+	       TEXT("TicketSystem: Initialized. Waiting for Discord bridge to be injected via SetBridge()."));
 
 	// Start the SLA warning ticker when enabled.
 	if (Config.TicketSlaWarningMinutes > 0)
@@ -161,7 +162,7 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				const FDateTime Now = FDateTime::UtcNow();
 				const FTimespan SlaThreshold = FTimespan::FromMinutes(
 					static_cast<double>(Config.TicketSlaWarningMinutes));
-				IDiscordBridgeProvider* SlaB = GetBridge();
+				UDiscordBridgeSubsystem* SlaB = GetBridge();
 				if (!SlaB) return true;
 
 				for (const TPair<FString, FString>& SLAPair : TicketChannelToOpener)
@@ -220,7 +221,7 @@ void UTicketSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				if (RNow >= RPair.Value)
 					FiredReminders.Add(RPair.Key);
 			}
-			IDiscordBridgeProvider* RemB = GetBridge();
+			UDiscordBridgeSubsystem* RemB = GetBridge();
 			for (const FString& RemChanId : FiredReminders)
 			{
 				TicketChannelToReminder.Remove(RemChanId);
@@ -315,7 +316,7 @@ void UTicketSubsystem::Deinitialize()
 	}
 
 	// Detach from the provider (unsubscribes delegates, clears CachedProvider).
-	SetProvider(nullptr);
+	SetBridge(nullptr);
 
 	if (ReopenExpiryTickHandle.IsValid())
 	{
@@ -351,23 +352,23 @@ void UTicketSubsystem::Deinitialize()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: get the Discord provider
+// Helper: get the Discord bridge
 // ─────────────────────────────────────────────────────────────────────────────
 
-IDiscordBridgeProvider* UTicketSubsystem::GetBridge() const
+UDiscordBridgeSubsystem* UTicketSubsystem::GetBridge() const
 {
 	return CachedProvider;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SetProvider – inject (or clear) the Discord bridge provider
+// SetBridge – inject (or clear) the Discord bridge
 // ─────────────────────────────────────────────────────────────────────────────
 
-void UTicketSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
+void UTicketSubsystem::SetBridge(UDiscordBridgeSubsystem* InProvider)
 {
-	// Idempotency: if the same non-null provider is already registered, do
-	// nothing.  Without this guard, calling SetProvider twice with the same
-	// provider would add a second subscription for both interactions and raw
+	// Idempotency: if the same non-null bridge is already registered, do
+	// nothing.  Without this guard, calling SetBridge twice with the same
+	// bridge would add a second subscription for both interactions and raw
 	// messages, causing every event to be dispatched to the handler twice.
 	if (InProvider && InProvider == CachedProvider)
 	{
@@ -410,12 +411,12 @@ void UTicketSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 			});
 
 		UE_LOG(LogTicketSystem, Log,
-		       TEXT("TicketSystem: Discord provider set. Subscribed to interaction and message events."));
+		       TEXT("TicketSystem: Discord bridge set. Subscribed to interaction and message events."));
 	}
 	else
 	{
 		UE_LOG(LogTicketSystem, Log,
-		       TEXT("TicketSystem: Discord provider cleared."));
+		       TEXT("TicketSystem: Discord bridge cleared."));
 	}
 }
 
@@ -661,7 +662,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 	       TEXT("TicketSystem: Ticket button '%s' clicked by '%s' (%s)"),
 	       *CustomId, *DiscordUsername, *DiscordUserId);
 
-	IDiscordBridgeProvider* Bridge = GetBridge();
+	UDiscordBridgeSubsystem* Bridge = GetBridge();
 	if (!Bridge)
 	{
 		return;
@@ -1245,7 +1246,7 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 			{
 				UTicketSubsystem* Self = WeakThis.Get();
 				if (!Self) return;
-				IDiscordBridgeProvider* B = Self->GetBridge();
+				UDiscordBridgeSubsystem* B = Self->GetBridge();
 				if (!B) return;
 
 				FString TranscriptText = FString::Printf(
@@ -1853,7 +1854,7 @@ void UTicketSubsystem::ShowTicketReasonModal(
 	const FString& Title,
 	const FString& Placeholder)
 {
-	IDiscordBridgeProvider* Bridge = GetBridge();
+	UDiscordBridgeSubsystem* Bridge = GetBridge();
 	if (!Bridge || InteractionId.IsEmpty() || InteractionToken.IsEmpty())
 	{
 		return;
@@ -1879,7 +1880,7 @@ void UTicketSubsystem::HandleTicketModalSubmit(
 	       TEXT("TicketSystem: Ticket modal '%s' submitted by '%s' (%s)"),
 	       *ModalCustomId, *DiscordUsername, *DiscordUserId);
 
-	IDiscordBridgeProvider* Bridge = GetBridge();
+	UDiscordBridgeSubsystem* Bridge = GetBridge();
 	if (!Bridge)
 	{
 		return;
@@ -2424,7 +2425,7 @@ void UTicketSubsystem::CreateTicketChannel(
 	const FString& DisplayDesc,
 	const FString& WlIgn)
 {
-	IDiscordBridgeProvider* Bridge = GetBridge();
+	UDiscordBridgeSubsystem* Bridge = GetBridge();
 	if (!Bridge)
 	{
 		return;
@@ -2735,7 +2736,7 @@ void UTicketSubsystem::CreateTicketChannel(
 			}
 
 			// Post the welcome message (plain text).
-			if (IDiscordBridgeProvider* B = Self->GetBridge())
+			if (UDiscordBridgeSubsystem* B = Self->GetBridge())
 			{
 				TSharedPtr<FJsonObject> WelcomeMsg = MakeShared<FJsonObject>();
 				WelcomeMsg->SetStringField(TEXT("content"), WelcomeContent);
@@ -2767,7 +2768,7 @@ void UTicketSubsystem::CreateTicketChannel(
 					ApproveBody->SetArrayField(TEXT("components"),
 						TArray<TSharedPtr<FJsonValue>>{MakeShared<FJsonValueObject>(ApproveRow)});
 
-					IDiscordBridgeProvider* B2 = Self->GetBridge();
+					UDiscordBridgeSubsystem* B2 = Self->GetBridge();
 					if (B2) B2->SendMessageBodyToChannel(NewChannelId, ApproveBody);
 				}
 
@@ -2803,7 +2804,7 @@ void UTicketSubsystem::CreateTicketChannel(
 					AppealActionsBody->SetArrayField(TEXT("components"),
 						TArray<TSharedPtr<FJsonValue>>{MakeShared<FJsonValueObject>(AppealActionsRow)});
 
-					IDiscordBridgeProvider* B3 = Self->GetBridge();
+					UDiscordBridgeSubsystem* B3 = Self->GetBridge();
 					if (B3) B3->SendMessageBodyToChannel(NewChannelId, AppealActionsBody);
 				}
 
@@ -2838,7 +2839,7 @@ void UTicketSubsystem::CreateTicketChannel(
 					MuteBody->SetArrayField(TEXT("components"),
 						TArray<TSharedPtr<FJsonValue>>{MakeShared<FJsonValueObject>(MuteRow)});
 
-					IDiscordBridgeProvider* BMute = Self->GetBridge();
+					UDiscordBridgeSubsystem* BMute = Self->GetBridge();
 					if (BMute) BMute->SendMessageBodyToChannel(NewChannelId, MuteBody);
 				}
 
@@ -2864,7 +2865,7 @@ void UTicketSubsystem::CreateTicketChannel(
 					WarnBody->SetArrayField(TEXT("components"),
 						TArray<TSharedPtr<FJsonValue>>{MakeShared<FJsonValueObject>(WarnRow)});
 
-					IDiscordBridgeProvider* BWarn = Self->GetBridge();
+					UDiscordBridgeSubsystem* BWarn = Self->GetBridge();
 					if (BWarn) BWarn->SendMessageBodyToChannel(NewChannelId, WarnBody);
 				}
 
@@ -2951,7 +2952,7 @@ void UTicketSubsystem::PostTicketPanel(
 	const FString& PanelChannelId,
 	const FString& ResponseChannelId)
 {
-	IDiscordBridgeProvider* Bridge = GetBridge();
+	UDiscordBridgeSubsystem* Bridge = GetBridge();
 	if (!Bridge)
 	{
 		return;
@@ -3175,7 +3176,7 @@ void UTicketSubsystem::HandleSlashTicketCommand(const TSharedPtr<FJsonObject>& D
 	}
 	if (SenderName.IsEmpty()) SenderName = TEXT("Staff");
 
-	IDiscordBridgeProvider* Bridge = GetBridge();
+	UDiscordBridgeSubsystem* Bridge = GetBridge();
 	if (!Bridge) return;
 
 	FString InteractionToken;
@@ -3285,7 +3286,7 @@ void UTicketSubsystem::OnRawDiscordMessage(const TSharedPtr<FJsonObject>& Messag
 	MessageObj->TryGetStringField(TEXT("content"), Content);
 	Content.TrimStartAndEndInline();
 
-	IDiscordBridgeProvider* Bridge = GetBridge();
+	UDiscordBridgeSubsystem* Bridge = GetBridge();
 
 	// ── Verify sender is staff (admin permission, support role, or guild owner) ─
 	auto SenderIsStaff = [&]() -> bool
@@ -4809,7 +4810,7 @@ FString UTicketSubsystem::GetTicketChannelForOpener(const FString& DiscordUserId
 void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
                                                    const FString& Resolution)
 {
-	IDiscordBridgeProvider* Bridge = GetBridge();
+	UDiscordBridgeSubsystem* Bridge = GetBridge();
 	if (!Bridge) return;
 
 	// When bAllowMultipleTicketTypes is enabled OpenerToTicketChannel holds only
@@ -4913,7 +4914,7 @@ void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
 			{
 				UTicketSubsystem* Self = WeakThis.Get();
 				if (!Self) return;
-				IDiscordBridgeProvider* B = Self->GetBridge();
+				UDiscordBridgeSubsystem* B = Self->GetBridge();
 				if (!B) return;
 
 				FString TranscriptText = FString::Printf(
@@ -4990,7 +4991,7 @@ void UTicketSubsystem::CloseAppealTicketForOpener(const FString& DiscordUserId,
 
 void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 {
-	IDiscordBridgeProvider* Bridge = GetBridge();
+	UDiscordBridgeSubsystem* Bridge = GetBridge();
 	if (!Bridge) return;
 
 	// Remove from all tracking maps.
@@ -5094,7 +5095,7 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 			{
 				UTicketSubsystem* Self = WeakThis.Get();
 				if (!Self) return;
-				IDiscordBridgeProvider* B = Self->GetBridge();
+				UDiscordBridgeSubsystem* B = Self->GetBridge();
 				if (!B) return;
 
 				FString TranscriptText = FString::Printf(

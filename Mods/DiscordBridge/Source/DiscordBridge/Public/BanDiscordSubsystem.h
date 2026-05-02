@@ -5,12 +5,12 @@
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Dom/JsonObject.h"
-#include "IDiscordBridgeProvider.h"
 #include "BanBridgeConfig.h"
 #include "BanDiscordSubsystem.generated.h"
 
 class AGameModeBase;
 class UMuteRegistry;
+class UDiscordBridgeSubsystem;
 
 /**
  * UBanDiscordSubsystem
@@ -54,8 +54,8 @@ class UMuteRegistry;
  *
  * Integration
  * ===========
- *  DiscordBridgeSubsystem calls SetProvider(this) during its own Initialize()
- *  and SetProvider(nullptr) during Deinitialize().
+ *  DiscordBridgeSubsystem calls SetBridge(this) during its own Initialize()
+ *  and SetBridge(nullptr) during Deinitialize().
  *
  * Configuration
  * =============
@@ -75,16 +75,16 @@ public:
 	virtual void Deinitialize() override;
 
 	/**
-	 * Inject (or clear) the Discord provider.
+	 * Inject (or clear) the Discord bridge.
 	 * Called by UDiscordBridgeSubsystem during its own Initialize() /
 	 * Deinitialize().  Pass nullptr to detach.
 	 */
-	void SetProvider(IDiscordBridgeProvider* InProvider);
+	void SetBridge(UDiscordBridgeSubsystem* InBridge);
 
 private:
 	// ── Interaction routing ──────────────────────────────────────────────────
 
-	/** Subscribed to the provider's INTERACTION_CREATE stream via SetProvider().
+	/** Subscribed to the bridge's INTERACTION_CREATE stream via SetBridge().
 	 *  Handles APPLICATION_COMMAND (type 2) slash command interactions for the
 	 *  ban/mod/warn/player/appeal/admin command groups.
 	 *  Also dispatches MESSAGE_COMPONENT (type 3) and MODAL_SUBMIT (type 5)
@@ -498,11 +498,10 @@ private:
 	 */
 	FString CachedBanEventsChannelId;
 
-	/** Injected Discord provider — nullptr until SetProvider() is called. */
-	IDiscordBridgeProvider* CachedProvider = nullptr;
+	/** Injected Discord bridge — nullptr until SetBridge() is called. */
+	UDiscordBridgeSubsystem* CachedProvider = nullptr;
 
-	/** Handle for the INTERACTION_CREATE subscription; valid while CachedProvider is set. */
-	FDelegateHandle InteractionDelegateHandle;
+	/** Handle for the INTERACTION_CREATE subscription; valid while CachedProvider is set. */	FDelegateHandle InteractionDelegateHandle;
 
 	/** Handle for the UBanAppealRegistry::OnBanAppealSubmitted subscription. */
 	FDelegateHandle AppealSubmittedDelegateHandle;
