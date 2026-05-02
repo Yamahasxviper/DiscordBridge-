@@ -155,8 +155,12 @@ static int32 ExtractIntField(const FString& Cleaned, const FString& FieldName, i
 	const FString Rest = Cleaned.Mid(Idx + Search.Len());
 	int32 Comma = INDEX_NONE;
 	if (Rest.FindChar(TEXT(','), Comma))
-		return FCString::Atoi(*Rest.Left(Comma).TrimStartAndEnd());
-	return FCString::Atoi(*Rest.TrimStartAndEnd());
+	{
+		const FString Val = Rest.Left(Comma).TrimStartAndEnd();
+		return Val.IsNumeric() ? FCString::Atoi(*Val) : Default;
+	}
+	const FString Val = Rest.TrimStartAndEnd();
+	return Val.IsNumeric() ? FCString::Atoi(*Val) : Default;
 }
 
 // -----------------------------------------------------------------------------
