@@ -598,7 +598,7 @@ bool FBanSystemModule::OnBackupTick(float DeltaTime)
             BackupAccumulatedSeconds -= IntervalSeconds;
 
             UGameInstance* GI = World->GetGameInstance();
-            if (!GI) break;
+            if (!GI) continue;
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
             if (!DB) break;
 
@@ -642,7 +642,7 @@ bool FBanSystemModule::OnPruneTick(float DeltaTime)
             PruneAccumulatedSeconds -= IntervalSeconds;
 
             UGameInstance* GI = World->GetGameInstance();
-            if (!GI) break;
+            if (!GI) continue;
             UBanDatabase* DB = GI->GetSubsystem<UBanDatabase>();
             if (!DB) break;
 
@@ -689,7 +689,7 @@ bool FBanSystemModule::OnSessionPruneTick(float DeltaTime)
             SessionPruneAccumulatedSeconds -= SessionPruneIntervalSeconds;
 
             UGameInstance* GI = World->GetGameInstance();
-            if (!GI) break;
+            if (!GI) continue;
             UPlayerSessionRegistry* Reg = GI->GetSubsystem<UPlayerSessionRegistry>();
             if (!Reg) break;
 
@@ -725,7 +725,7 @@ bool FBanSystemModule::OnScheduledBanTick(float DeltaTime)
             if (World->IsPaused()) return true;
 
             UGameInstance* GI = World->GetGameInstance();
-            if (!GI) break;
+            if (!GI) continue;
             UScheduledBanRegistry* Reg = GI->GetSubsystem<UScheduledBanRegistry>();
             if (Reg)
                 Reg->Tick(DeltaTime);

@@ -108,11 +108,16 @@ struct BANSYSTEM_API FScheduledBanEntry
     UPROPERTY(BlueprintReadWrite, Category = "Ban System")
     FString Category;
 
+    /** Number of times this entry has failed to apply and been re-queued. */
+    UPROPERTY(BlueprintReadWrite, Category = "Ban System")
+    int32 RetryCount = 0;
+
     FScheduledBanEntry()
         : Id(0)
-        , EffectiveAt(FDateTime::UtcNow())
-        , CreatedAt(FDateTime::UtcNow())
+        , EffectiveAt(int64(0))
+        , CreatedAt(int64(0))
         , DurationMinutes(0)
+        , RetryCount(0)
     {}
 };
 

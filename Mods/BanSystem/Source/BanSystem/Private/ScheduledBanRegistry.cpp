@@ -168,11 +168,21 @@ void UScheduledBanRegistry::Tick(float DeltaTime)
 
     // Re-queue any entries that could not be applied due to a transient failure
     // (e.g. UBanDatabase unavailable) so they are retried on the next tick and
-    // survive a server restart.
+    // survive a server restart.  Entries that have failed more than 5 times are
+    // dropped to prevent indefinite re-queuing.
     if (!Failed.IsEmpty())
     {
         FScopeLock Lock(&Mutex);
-        Pending.Append(Failed);
+        for (FScheduledBanEntry& FailedEntry : Failed)
+        {
+            FailedEntry.RetryCount++;
+            if (FailedEntry.RetryCount <= 5)
+                Pending.Add(FailedEntry);
+            else
+                UE_LOG(LogScheduledBanRegistry, Error,
+                    TEXT("ScheduledBanRegistry: dropping entry id=%lld after %d failed attempts"),
+                    FailedEntry.Id, FailedEntry.RetryCount);
+        }
         if (!SaveToFile())
         {
             UE_LOG(LogScheduledBanRegistry, Error,

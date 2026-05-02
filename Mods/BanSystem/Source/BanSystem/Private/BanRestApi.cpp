@@ -155,11 +155,14 @@ namespace BanJson
     static bool ConstantTimeEquals(const FString& A, const FString& B)
     {
         const FTCHARToUTF8 Au(*A), Bu(*B);
-        // Use uint32 so no bits are lost when lengths differ by a multiple of 256.
-        uint32 Diff = static_cast<uint32>(Au.Length() ^ Bu.Length());
-        const int32 N = FMath::Min(Au.Length(), Bu.Length());
+        uint8 Diff = static_cast<uint8>(Au.Length() ^ Bu.Length());
+        const int32 N = FMath::Max(Au.Length(), Bu.Length());
         for (int32 i = 0; i < N; ++i)
-            Diff |= static_cast<uint8>(Au.Get()[i]) ^ static_cast<uint8>(Bu.Get()[i]);
+        {
+            const uint8 ByteA = (i < Au.Length()) ? static_cast<uint8>(Au.Get()[i]) : 0;
+            const uint8 ByteB = (i < Bu.Length()) ? static_cast<uint8>(Bu.Get()[i]) : 0;
+            Diff |= ByteA ^ ByteB;
+        }
         return Diff == 0;
     }
 
@@ -2777,7 +2780,7 @@ void UBanRestApi::RegisterRoutes()
                 FBanEntry Ban;
                 Ban.Uid        = Uid;
                 UBanDatabase::ParseUid(Uid, Ban.Platform, Ban.PlayerUID);
-                Ban.PlayerName      = Uid;
+                Ban.PlayerName      = TEXT("");
                 Ban.Reason          = Reason;
                 Ban.BannedBy        = BannedBy;
                 Ban.BanDate         = BatchBanNow;

@@ -103,7 +103,7 @@ namespace BanDbJson
             OutEntry.BanDate = FDateTime::UtcNow();
         }
 
-        bool bPerm = true;
+        bool bPerm = false;
         Obj->TryGetBoolField(TEXT("isPermanent"), bPerm);
         OutEntry.bIsPermanent = bPerm;
 
@@ -570,6 +570,7 @@ bool UBanDatabase::RemoveBanByUid(const FString& Uid, bool bSilent)
 bool UBanDatabase::RemoveBanByUid(const FString& Uid, FBanEntry& OutEntry, bool bSilent)
 {
     bool bRemoved = false;
+    bool bSaveOk  = true;
 
     {
         FScopeLock Lock(&DbMutex);
@@ -588,13 +589,14 @@ bool UBanDatabase::RemoveBanByUid(const FString& Uid, FBanEntry& OutEntry, bool 
         {
             if (!SaveToFile())
             {
-                UE_LOG(LogBanDatabase, Error,
-                    TEXT("BanDatabase: failed to persist ban removal for uid='%s' — "
-                         "the record will reappear after a server restart if the disk issue persists"),
-                    *Uid);
+                UE_LOG(LogBanDatabase, Warning,
+                    TEXT("RemoveBanByUid: SaveToFile failed for Uid=%s"), *Uid);
+                bSaveOk = false;
             }
         }
     }
+
+    if (!bSaveOk) return false;
 
     if (bRemoved && !bSilent)
         OnBanRemoved.Broadcast(OutEntry.Uid, OutEntry.PlayerName);
@@ -611,6 +613,7 @@ bool UBanDatabase::RemoveBanById(int64 Id)
 bool UBanDatabase::RemoveBanById(int64 Id, FBanEntry& OutEntry)
 {
     bool bRemoved = false;
+    bool bSaveOk  = true;
 
     {
         FScopeLock Lock(&DbMutex);
@@ -628,13 +631,14 @@ bool UBanDatabase::RemoveBanById(int64 Id, FBanEntry& OutEntry)
         {
             if (!SaveToFile())
             {
-                UE_LOG(LogBanDatabase, Error,
-                    TEXT("BanDatabase: failed to persist ban removal for id=%lld — "
-                         "the record will reappear after a server restart if the disk issue persists"),
-                    Id);
+                UE_LOG(LogBanDatabase, Warning,
+                    TEXT("RemoveBanById: SaveToFile failed for Id=%lld"), Id);
+                bSaveOk = false;
             }
         }
     }
+
+    if (!bSaveOk) return false;
 
     if (bRemoved)
         OnBanRemoved.Broadcast(OutEntry.Uid, OutEntry.PlayerName);
