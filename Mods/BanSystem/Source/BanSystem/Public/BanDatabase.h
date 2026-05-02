@@ -54,6 +54,24 @@ public:
     bool AddBan(const FBanEntry& Entry);
 
     /**
+     * Atomically check for an existing permanent ban and, only if none is found,
+     * upsert the new entry — all within a single lock acquisition.
+     *
+     * This eliminates the TOCTOU window that exists when callers combine a
+     * separate IsCurrentlyBanned() call with a subsequent AddBan() call: between
+     * those two steps a concurrent operation (e.g. an incoming BanRestApi request
+     * processed on a background thread) could insert a permanent ban that would
+     * then be silently overwritten by the caller's AddBan().
+     *
+     * Returns false (and sets bOutSkippedPermanent = true) when a permanent ban
+     * already exists for the same UID — the caller should treat this as an
+     * intentional skip rather than a transient error.
+     * Returns false (bOutSkippedPermanent = false) only when SaveToFile fails.
+     * Fires OnBanAdded on success, identical to AddBan.
+     */
+    bool AddBanSkipIfPermanentExists(const FBanEntry& Entry, bool& bOutSkippedPermanent);
+
+    /**
      * Remove a ban by compound UID ("EOS:xxx").
      * Returns true if a row was found and deleted.
      * When bSilent is true, OnBanRemoved is NOT broadcast after the removal

@@ -24,7 +24,9 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBanSyncClient, Log, All);
  *
  * Incoming event format (JSON):
  *   { "type": "ban",   "uid": "EOS:xxx", "playerName": "Alice", "reason": "...",
- *     "bannedBy": "admin", "durationMinutes": 0, "category": "" }
+ *     "bannedBy": "admin", "durationMinutes": 0, "category": "",
+ *     "banDate": "2026-01-01T00:00:00Z",
+ *     "evidence": ["https://imgur.com/abc", "..."] }
  *   { "type": "unban", "uid": "EOS:xxx" }
  *
  * Configuration (DefaultBanSystem.ini):
@@ -43,10 +45,15 @@ public:
     /**
      * Broadcast a ban event to all peer servers.
      * Safe to call from any thread.
+     * Evidence and BanDate are optional but should always be supplied so peers
+     * store the original proof links and ban-creation timestamp rather than
+     * silently discarding them.
      */
     void BroadcastBan(const FString& Uid, const FString& PlayerName,
                       const FString& Reason, const FString& BannedBy,
-                      int32 DurationMinutes, const FString& Category = TEXT(""));
+                      int32 DurationMinutes, const FString& Category = TEXT(""),
+                      const TArray<FString>& Evidence = TArray<FString>(),
+                      FDateTime BanDate = FDateTime(0));
 
     /**
      * Broadcast an unban event to all peer servers.

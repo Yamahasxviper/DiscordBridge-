@@ -204,21 +204,21 @@ bool UScheduledBanRegistry::ApplyScheduledBan(const FScheduledBanEntry& Entry)
         ? FDateTime(0)
         : Now + FTimespan::FromMinutes(Entry.DurationMinutes);
 
-    // H1: Skip the scheduled ban if the player already has a permanent ban —
-    // a permanent ban should not be silently downgraded to a temp ban.
+    // Use AddBanSkipIfPermanentExists so the "permanent ban → skip" guard and
+    // the actual insert happen under a single DB lock.  The previous two-step
+    // pattern (IsCurrentlyBanned + AddBan as separate calls) had a TOCTOU window
+    // where a concurrent operation (e.g. an incoming REST API ban) could insert a
+    // permanent ban between the check and the upsert, silently overwriting it.
+    bool bSkippedPermanent = false;
+    if (!DB->AddBanSkipIfPermanentExists(Ban, bSkippedPermanent))
     {
-        FBanEntry Existing;
-        if (DB->IsCurrentlyBanned(Entry.Uid, Existing) && Existing.bIsPermanent)
+        if (bSkippedPermanent)
         {
             UE_LOG(LogScheduledBanRegistry, Log,
                 TEXT("ScheduledBanRegistry: skipping scheduled ban #%lld for %s — permanent ban already active"),
                 Entry.Id, *Entry.Uid);
             return true; // intentional skip — do not re-queue
         }
-    }
-
-    if (!DB->AddBan(Ban))
-    {
         UE_LOG(LogScheduledBanRegistry, Warning,
             TEXT("ScheduledBanRegistry: failed to apply scheduled ban #%lld for %s"),
             Entry.Id, *Entry.Uid);

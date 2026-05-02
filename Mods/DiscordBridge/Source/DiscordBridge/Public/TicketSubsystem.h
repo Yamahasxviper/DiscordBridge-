@@ -371,10 +371,10 @@ private:
 	/**
 	 * Channel IDs for which the SLA warning has already been sent.
 	 * Separate from TicketChannelStaffReplied so that firing the SLA alert does
-	 * not falsely mark the ticket as staff-replied (which would be persisted and
-	 * incorrectly suppress future first-reply DMs and metrics after a restart).
-	 * Not persisted — a restart resets the dedup set, but that is acceptable
-	 * (at worst a duplicate SLA warning is sent for one still-open ticket).
+	 * not falsely mark the ticket as staff-replied (which would incorrectly
+	 * suppress future first-reply DMs and metrics after a restart).
+	 * Persisted in SaveTicketState / LoadTicketState so that SLA warnings are
+	 * not re-sent for open tickets after a server restart.
 	 */
 	TSet<FString> SlaWarnedChannels;
 
