@@ -99,6 +99,13 @@ namespace
 		FString Value;
 		if (Cfg.GetString(ConfigSection, *Key, Value) && !Value.IsEmpty())
 		{
+			if (!Value.IsNumeric())
+			{
+				UE_LOG(LogDiscordBridge, Warning,
+					TEXT("DiscordBridgeConfig: '%s' = '%s' is not numeric, using default %d"),
+					*Key, *Value, Default);
+				return Default;
+			}
 			return FCString::Atoi(*Value);
 		}
 		return Default;
@@ -213,7 +220,15 @@ namespace
 	                         int32 Default)
 	{
 		const FString* Found = Raw.Find(Key);
-		return (Found && !Found->IsEmpty()) ? FCString::Atoi(**Found) : Default;
+		if (!Found || Found->IsEmpty()) return Default;
+		if (!Found->IsNumeric())
+		{
+			UE_LOG(LogDiscordBridge, Warning,
+				TEXT("DiscordBridgeConfig: raw key '%s' = '%s' is not numeric, using default %d"),
+				*Key, **Found, Default);
+			return Default;
+		}
+		return FCString::Atoi(**Found);
 	}
 
 	// Parses all values for a given key from a raw INI file content string.
@@ -514,9 +529,13 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						const FString Rest = Cleaned.Mid(Idx + Search.Len());
 						int32 Comma = INDEX_NONE;
 						if (Rest.FindChar(TEXT(','), Comma))
-							SA.IntervalMinutes = FCString::Atoi(*Rest.Left(Comma).TrimStartAndEnd());
+						const FString Left = Rest.Left(Comma).TrimStartAndEnd();
+						if (Left.IsNumeric())
+							SA.IntervalMinutes = FCString::Atoi(*Left);
 						else
-							SA.IntervalMinutes = FCString::Atoi(*Rest.TrimStartAndEnd());
+						const FString Trimmed = Rest.TrimStartAndEnd();
+						if (Trimmed.IsNumeric())
+							SA.IntervalMinutes = FCString::Atoi(*Trimmed);
 					}
 				}
 				// Extract Message

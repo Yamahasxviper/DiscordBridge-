@@ -215,7 +215,7 @@ void FBanBridgeConfig::RestoreDefaultConfigIfNeeded()
 					FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 			return;
 		}
-		if (Existing.Contains(TEXT("# ")))
+		if (Existing.Contains(TEXT("#")))
 			return;
 	}
 
