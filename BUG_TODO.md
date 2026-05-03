@@ -643,3 +643,242 @@ int64-string convention uniformly, these sites would need to be updated. No runt
 
 *Last updated: 2026-05-06. Round-11 audit complete. No actionable bugs found.*
 
+---
+
+## Round 12 — Proactive Bug Fix Pass (2026-05-03)
+
+Comprehensive sweep of all mods targeting crash-risk, security, and correctness issues.
+All items below were fixed in small, independent commits on `copilot/full-bug-audit-code`.
+
+---
+
+### ✅ Fixed — XSS in appeal portal HTML (BUG-R12-01)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanRestApi.cpp`
+
+**Root cause:** `ServerName` (derived from the database file-path base name) was injected directly
+into the `<title>` and `<p>` tags of the HTML appeal form without HTML-encoding. If the database
+path contained `<script>` or `&` characters the resulting HTML would be syntactically malformed.
+
+**Fix:** Added an inline `HtmlEscape` lambda that replaces `& < > " '` with their entity
+equivalents. The escaped `SafeServerName` is used in all two injection sites.
+
+---
+
+### ✅ Fixed — TOCTOU in appeal duplicate-check (BUG-R12-02)
+**File:** `Mods/BanSystem/Source/BanSystem/Public/BanAppealRegistry.h`,
+`Mods/BanSystem/Source/BanSystem/Private/BanAppealRegistry.cpp`,
+`Mods/BanSystem/Source/BanSystem/Private/BanRestApi.cpp`
+
+**Root cause:** `GetAllAppeals()` released the mutex before `AddAppeal()` was called, creating a
+window where two concurrent requests for the same UID could both pass the duplicate check.
+
+**Fix:** Added `AddAppealIfNoDuplicate()` that performs the check and insertion atomically under
+a single `FScopeLock`. The REST API endpoint now calls this method.
+
+---
+
+### ✅ Fixed — Appeal UID / reason / contactInfo not length-clamped (BUG-R12-03)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanRestApi.cpp`
+
+**Fix:** Added `Left(128)`, `Left(2000)`, and `Left(500)` clamps on the player-supplied `uid`,
+`reason`, and `contactInfo` fields before storing them, preventing database bloat.
+
+---
+
+### ✅ Fixed — int32 overflow in `totalPages` pagination calculation (BUG-R12-04)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanRestApi.cpp`
+
+**Root cause:** `(Total + Limit - 1)` was computed as `int32 + int32 - 1`, which overflows when
+`Total` is near `INT32_MAX`.
+
+**Fix:** Cast `Total` to `int64` before the addition.
+
+---
+
+### ✅ Fixed — Template double-substitution in kick/ban messages (BUG-R12-10)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanTypes.cpp`
+
+**Root cause:** `{reason}` was substituted first; if the admin-supplied reason contained the
+literal text `{expiry}` or `{appeal_url}`, those placeholders would be expanded in the second
+or third substitution pass.
+
+**Fix:** Reordered substitutions — `{expiry}` and `{appeal_url}` are applied first (their values
+are server-generated and safe), then `{reason}` last.
+
+---
+
+### ✅ Fixed — `ConstantTimeEquals` uint8 truncation (BUG-R12-50)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanRestApi.cpp`
+
+**Root cause:** `uint8 Diff = static_cast<uint8>(Au.Length() ^ Bu.Length())` truncates to 8 bits;
+strings whose lengths differ by exactly 256 bytes would compare as equal.
+
+**Fix:** Changed accumulator to `uint32` and used `Au.Length() != Bu.Length() ? 1 : 0` for the
+initial diff.
+
+---
+
+### ✅ Fixed — `/reputation/:uid` ignores LinkedUids for `bCurrentlyBanned` (BUG-R12-15)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanRestApi.cpp`
+
+**Root cause:** The loop used `B.Uid.Equals(Uid, ...)` which does not check the `LinkedUids`
+array of compound bans (e.g. IP counterpart).
+
+**Fix:** Changed to `B.MatchesUid(Uid)`.
+
+---
+
+### ✅ Fixed — `FDateTime(0)` sentinel collision in `ReloadIfChanged` (BUG-R12-07)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/BanDatabase.cpp`,
+`Mods/BanSystem/Source/BanSystem/Public/BanDatabase.h`
+
+**Root cause:** `LastKnownFileModTime = FDateTime(0)` was used to force a reload on the next
+tick, but `FDateTime(0)` is also what `IFileManager::GetTimeStamp` returns when the file does
+not exist — so the reset would suppress the next tick's reload if the file happened to be absent.
+
+**Fix:** Replaced the sentinel with a `bool bPendingForcedReload` flag that is consumed once per
+tick. `FDateTime(0)` now exclusively means "file not found".
+
+---
+
+### ✅ Fixed — TOCTOU on appeal entry after `ReviewAppeal` (BUG-R12-26)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/BanDiscordSubsystem.cpp`
+
+**Root cause:** Both the Approve and Deny handlers called `ReviewAppeal(...)` and then
+`GetAppealById(...)`. A concurrent delete between those two calls returned an empty
+(default-constructed) entry.
+
+**Fix:** `GetAppealById` is now called *before* `ReviewAppeal`. If the entry is not found the
+handler returns early. The pre-fetched entry is used for all subsequent operations.
+
+---
+
+### ✅ Fixed — Template variable used before declaration in `BanBridgeConfig.cpp` (BUG-R12-41)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/BanBridgeConfig.cpp`
+
+**Root cause:** `const FString Template = ...` was declared after an early-return block that
+referenced `Template`, causing undefined behaviour.
+
+**Fix:** Moved the `Template` declaration to the top of `RestoreDefaultConfigIfNeeded()`.
+
+---
+
+### ✅ Fixed — `PanelRateLimitSeconds = 0` pruning all map entries (BUG-R12-28)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/BanDiscordSubsystem.cpp`
+
+**Root cause:** When `PanelRateLimitSeconds == 0` the prune cutoff is `0 * 2 = 0 s`, causing
+every stored timestamp to be pruned on the first call and the rate-limit to never fire.
+
+**Fix:** Added an early check `PanelRateLimitSeconds > 0.0f`; the rate-limit block is skipped
+entirely when the value is zero (rate-limiting disabled).
+
+---
+
+### ✅ Fixed — Discord markdown injection in kick log and appeal submissions (BUG-R12-36)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/BanDiscordSubsystem.cpp`
+
+**Root cause:** Player names and ban reasons were inserted into Discord message strings without
+`EscapeMarkdown()`, allowing player-controlled names to break or inject Discord formatting.
+
+**Fix:** Added `EscapeMarkdown(PlayerName)` and `EscapeMarkdown(Reason)` at the two unguarded
+sites in the kick-log lambda and appeal-submission notification.
+
+---
+
+### ✅ Fixed — `int32` overflow in mute remaining-time calculation (BUG-R12-25)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/BanDiscordSubsystem.cpp`
+
+**Root cause:** `GetTotalMinutes()` returns `double`; the cast to `int32` overflows for mutes
+longer than ~1490 days.
+
+**Fix:** Compute in `int64`, clamp to `INT32_MAX`, then cast to `int32`.
+
+---
+
+### ✅ Fixed — Freeze/unfreeze UID set only updated when player is online (BUG-R12-27)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/BanDiscordSubsystem.cpp`
+
+**Root cause:** The `FrozenPlayerUids.Add/Remove` calls were guarded by `bMatchedFreeze /
+bMatchedUnfreeze`, which is `false` when the target is offline. The set was never updated for
+offline targets, making `/freeze` + disconnect + rejoin not work correctly.
+
+**Fix:** Moved the `Add`/`Remove` calls outside the online-player block so the persistent UID
+set is always updated.
+
+---
+
+### ✅ Fixed — `ScheduledBanRegistry` retry cap off-by-one (BUG-R12-13)
+**File:** `Mods/BanSystem/Source/BanSystem/Private/ScheduledBanRegistry.cpp`
+
+**Root cause:** `if (FE.RetryCount > 5)` dropped entries only after the 6th retry (7th attempt).
+
+**Fix:** Changed to `>= 5` to enforce the documented 5-attempt cap.
+
+---
+
+### ✅ Fixed — Missing braces around `IntervalMinutes` if/else in `DiscordBridgeConfig.cpp` (BUG-R12-16)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/DiscordBridgeConfig.cpp`
+
+**Root cause:** The `else` branch following an `if (Rest.FindChar(...))` was never attached to
+its body because the body was a bare statement on the next line without braces.
+
+**Fix:** Added explicit braces around both branches.
+
+---
+
+### ✅ Fixed — Non-ASCII characters passing through `SanitizeUsernameForChannel` (BUG-R12-33)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/TicketSubsystem.cpp`
+
+**Root cause:** `FChar::IsAlnum` returns `true` for non-ASCII alphanumeric characters (e.g.
+Cyrillic, accented Latin). Discord channel names allow only `[a-z0-9-]`, so these characters
+caused HTTP 400 errors.
+
+**Fix:** Replaced with an explicit ASCII-range check `(LC >= 'a' && LC <= 'z') || (C >= '0' && C <= '9')`.
+
+---
+
+### ✅ Fixed — Trailing dash introduced after `Left(40)` clamp (BUG-R12-32)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/TicketSubsystem.cpp`
+
+**Root cause:** The trailing-dash trim ran before the 40-char clamp. The clamp could
+re-introduce a trailing dash that was never trimmed.
+
+**Fix:** Moved the trailing-dash trim to immediately after the `Left(40)` call.
+
+---
+
+### ✅ Fixed — `OpenerToAppealId` not removed for non-Pending appeals on inactivity close (BUG-R12-35)
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/TicketSubsystem.cpp`
+
+**Root cause:** `OpenerToAppealId.Remove(RemovedOpener)` was inside `if (...Pending)` so a
+non-Pending entry would leak the opener→appeal mapping indefinitely.
+
+**Fix:** Moved the `Remove` call outside the `Pending` guard so it always fires when a matching
+appeal UID is found.
+
+---
+
+### ✅ Fixed — RFC 6455 WebSocket violations in `SMLWebSocketRunnable.cpp` (BUG-R12-44/45/46)
+**File:** `Mods/SMLWebSocket/Source/SMLWebSocket/Private/SMLWebSocketRunnable.cpp`
+
+**Fixes applied:**
+- **RSV bits (§5.2):** Non-zero RSV1/2/3 bits now trigger a Close(1002) and disconnect.
+- **Control frame validation (§5.5):** Control frames with `FIN=0` or payload >125 bytes now trigger a Close(1002) and disconnect.
+- **8-byte length MSB (§5.2):** The most-significant bit of the 8-byte extended length field is now validated to be zero.
+
+---
+
+### ✅ Fixed — RFC 6455 WebSocket violations in `SMLWebSocketServerRunnable.cpp` (BUG-R12-43/44/47/48)
+**File:** `Mods/SMLWebSocket/Source/SMLWebSocket/Private/SMLWebSocketServerRunnable.cpp`
+
+**Fixes applied:**
+- **Close echo (§5.5.1):** Server now echoes the client's Close frame before disconnecting.
+- **RSV bits (§5.2):** Non-zero RSV1/2/3 bits now drop the client with an error log.
+- **Unknown opcodes (§5.2):** Unknown/reserved opcodes now trigger a Close(1002) and disconnect.
+- **Control frame validation (§5.5):** Control frames with `FIN=0` or payload >125 bytes now trigger a Close(1002) and disconnect.
+
+---
+
+*Last updated: 2026-05-03. Round-12 fixes applied.*
+
+

@@ -432,9 +432,12 @@ FString UTicketSubsystem::SanitizeUsernameForChannel(const FString& Username)
 	FString Result;
 	for (TCHAR C : Username)
 	{
-		if (FChar::IsAlnum(C))
+		// Only allow ASCII letters and digits — Discord channel names require [a-z0-9\-_].
+		// FChar::IsAlnum() can accept non-ASCII (e.g. CJK, Cyrillic) causing HTTP 400.
+		const TCHAR LC = FChar::ToLower(C);
+		if ((LC >= TCHAR('a') && LC <= TCHAR('z')) || (C >= TCHAR('0') && C <= TCHAR('9')))
 		{
-			Result.AppendChar(FChar::ToLower(C));
+			Result.AppendChar(LC);
 		}
 		else if (C == TCHAR(' ') || C == TCHAR('_') || C == TCHAR('-'))
 		{
@@ -473,9 +476,12 @@ FString UTicketSubsystem::SanitizeUsernameForChannel(const FString& Username)
 	}
 
 	// Clamp to 40 chars so the full channel name fits within Discord's 100-char limit.
+	// Trim trailing dash AFTER clamping — Left(40) may cut right at a dash character.
 	if (Result.Len() > 40)
 	{
 		Result = Result.Left(40);
+		if (Result.EndsWith(TEXT("-")))
+			Result = Result.Left(Result.Len() - 1);
 	}
 
 	return Result.IsEmpty() ? TEXT("user") : Result;
@@ -5047,15 +5053,21 @@ void UTicketSubsystem::CloseTicketChannelInactive(const FString& ChannelId)
 			if (UBanAppealRegistry* AppealReg = GI->GetSubsystem<UBanAppealRegistry>())
 			{
 				const FString AppealUid = FString::Printf(TEXT("Discord:%s"), *RemovedOpener);
-				for (const FBanAppealEntry& E : AppealReg->GetAllAppeals())
+			for (const FBanAppealEntry& E : AppealReg->GetAllAppeals())
 				{
-					if (E.Uid == AppealUid && E.Status == EAppealStatus::Pending)
+					if (E.Uid == AppealUid)
 					{
-						AppealReg->DeleteAppeal(E.Id);
+						// Always remove the ID mapping, regardless of current appeal status.
+						// Without this, a reviewed (non-Pending) appeal's entry leaks and
+						// maps the player's next appeal to the wrong stale ID.
 						OpenerToAppealId.Remove(RemovedOpener);
-						UE_LOG(LogTicketSystem, Log,
-						       TEXT("TicketSystem: Auto-dismissed pending appeal id=%lld for Discord user %s on inactivity close."),
-						       E.Id, *RemovedOpener);
+						if (E.Status == EAppealStatus::Pending)
+						{
+							AppealReg->DeleteAppeal(E.Id);
+							UE_LOG(LogTicketSystem, Log,
+							       TEXT("TicketSystem: Auto-dismissed pending appeal id=%lld for Discord user %s on inactivity close."),
+							       E.Id, *RemovedOpener);
+						}
 						break;
 					}
 				}

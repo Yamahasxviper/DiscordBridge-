@@ -573,7 +573,8 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 				const FString KickMsg = FString::Printf(
 					TEXT("👢 Kicked **%s** (`%s`).\nReason: %s\nBy: %s"),
-					*PlayerName, *Uid, *Reason, *KickedBy);
+					*BanDiscordHelpers::EscapeMarkdown(PlayerName), *Uid,
+					*BanDiscordHelpers::EscapeMarkdown(Reason), *KickedBy);
 				Self->PostToPlayerModerationThread(PlayerName, Uid, KickMsg);
 			});
 	}
@@ -709,7 +710,9 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 					TEXT("**Submitted:** %s\n")
 					TEXT("**Reason:** %s\n\n")
 					TEXT("Use `/appeal approve %lld` to unban or `/appeal deny %lld` to dismiss."),
-					Entry.Id, *Entry.Uid, *Contact, *SubmittedStr, *Reason,
+					Entry.Id, *Entry.Uid,
+					*BanDiscordHelpers::EscapeMarkdown(Contact), *SubmittedStr,
+					*BanDiscordHelpers::EscapeMarkdown(Reason),
 					Entry.Id, Entry.Id);
 
 				Self->Respond(ChannelId, Message);
@@ -3256,7 +3259,8 @@ void UBanDiscordSubsystem::HandleMuteCheckCommand(const TArray<FString>& Args,
 	else
 	{
 		const FTimespan Remaining = Entry.ExpireDate - FDateTime::UtcNow();
-		const int32 TotalMins = FMath::Max(0, static_cast<int32>(Remaining.GetTotalMinutes()));
+		const int64 TotalMinsI64 = FMath::Max<int64>(0LL, static_cast<int64>(Remaining.GetTotalMinutes()));
+	const int32 TotalMins = static_cast<int32>(FMath::Min<int64>(TotalMinsI64, static_cast<int64>(INT32_MAX)));
 		ExpiryStr = FString::Printf(TEXT("for **%s** more (expires %s UTC)"),
 			*BanDiscordHelpers::FormatDuration(TotalMins),
 			*Entry.ExpireDate.ToString(TEXT("%Y-%m-%d %H:%M:%S")));
@@ -3781,6 +3785,16 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 		return;
 	}
 
+	// Capture the entry BEFORE calling ReviewAppeal — GetAppealById after ReviewAppeal
+	// can return a default-constructed empty entry if a concurrent delete races it.
+	const FBanAppealEntry Entry = Registry->GetAppealById(AppealId);
+	if (Entry.Uid.IsEmpty())
+	{
+		Respond(ChannelId,
+			FString::Printf(TEXT(":x: No appeal found with ID `%lld`."), AppealId));
+		return;
+	}
+
 	// Use the new ReviewAppeal workflow to record the decision with status/note.
 	if (!Registry->ReviewAppeal(AppealId, EAppealStatus::Approved, SenderName, ReviewNote))
 	{
@@ -3788,8 +3802,6 @@ void UBanDiscordSubsystem::HandleAppealApproveCommand(const TArray<FString>& Arg
 			FString::Printf(TEXT(":x: No appeal found with ID `%lld`."), AppealId));
 		return;
 	}
-
-	const FBanAppealEntry Entry = Registry->GetAppealById(AppealId);
 
 	// Auto-unban the player on approval.
 	// Use IsCurrentlyBannedByAnyId so that appeals submitted with a Discord:<id>
@@ -3900,6 +3912,16 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 		return;
 	}
 
+	// Capture the entry BEFORE calling ReviewAppeal to avoid a TOCTOU where
+	// GetAppealById after ReviewAppeal returns empty if a concurrent delete races it.
+	const FBanAppealEntry Entry = Registry->GetAppealById(AppealId);
+	if (Entry.Uid.IsEmpty())
+	{
+		Respond(ChannelId,
+			FString::Printf(TEXT(":x: No appeal found with ID `%lld`."), AppealId));
+		return;
+	}
+
 	// Use ReviewAppeal to record the denial with status/note.
 	if (!Registry->ReviewAppeal(AppealId, EAppealStatus::Denied, SenderName, ReviewNote))
 	{
@@ -3907,8 +3929,6 @@ void UBanDiscordSubsystem::HandleAppealDenyCommand(const TArray<FString>& Args,
 			FString::Printf(TEXT(":x: No appeal found with ID `%lld`."), AppealId));
 		return;
 	}
-
-	const FBanAppealEntry Entry = Registry->GetAppealById(AppealId);
 	const FString NoteStr = ReviewNote.IsEmpty() ? TEXT("") : FString::Printf(TEXT(" Note: %s"), *ReviewNote);
 	Respond(ChannelId,
 		FString::Printf(TEXT(":x: Appeal `#%lld` **denied**.%s"), AppealId, *NoteStr));
@@ -5290,8 +5310,9 @@ void UBanDiscordSubsystem::HandlePanelCommand(const FString& ChannelId,
 {
 	if (!CachedProvider) return;
 
-	// Feature 12: Per-user rate-limit.  Skip when AuthorId is empty (auto-post / tests).
-	if (!AuthorId.IsEmpty())
+	// Feature 12: Per-user rate-limit.  Skip when AuthorId is empty (auto-post / tests)
+	// or when PanelRateLimitSeconds == 0 (rate-limiting disabled).
+	if (!AuthorId.IsEmpty() && PanelRateLimitSeconds > 0.0f)
 	{
 		const FDateTime Now = FDateTime::UtcNow();
 
@@ -7013,10 +7034,11 @@ void UBanDiscordSubsystem::HandleFreezeCommand(const TArray<FString>& Args,
 			}
 		}
 		if (bMatchedUnfreeze)
-			AFreezeChatCommand::FrozenPlayerUids.Remove(Uid);
+			PC->SetIgnoreMoveInput(false); // controller found above
+		// Always remove from frozen set — if the player is offline the UID removal
+		// prevents them from being re-frozen on reconnect after an admin un-froze them.
+		AFreezeChatCommand::FrozenPlayerUids.Remove(Uid);
 		const FString ResultMsg = FString::Printf(
-			TEXT("🔓 **%s** (`%s`) has been **unfrozen** by **%s**."),
-			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
 		Respond(ChannelId, ResultMsg);
 		PostModerationLog(ResultMsg);
 		if (UGameInstance* GI2 = GetGameInstance())
@@ -7043,11 +7065,10 @@ void UBanDiscordSubsystem::HandleFreezeCommand(const TArray<FString>& Args,
 			}
 		}
 		if (bMatchedFreeze)
-			AFreezeChatCommand::FrozenPlayerUids.Add(Uid);
+			PC->SetIgnoreMoveInput(true); // controller found above
+		// Always add to frozen set — ensures offline players are frozen when they reconnect.
+		AFreezeChatCommand::FrozenPlayerUids.Add(Uid);
 		const FString ResultMsg = FString::Printf(
-			TEXT("❄️ **%s** (`%s`) has been **frozen** by **%s**."
-			     " Run `/mod freeze` again to unfreeze."),
-			*BanDiscordHelpers::EscapeMarkdown(DisplayName), *Uid, *SenderName);
 		Respond(ChannelId, ResultMsg);
 		PostModerationLog(ResultMsg);
 		if (UGameInstance* GI2 = GetGameInstance())
@@ -7128,7 +7149,7 @@ FString UBanDiscordSubsystem::ExecutePanelFreeze(const FString& PlayerArg,
 
 	if (bWasFrozen)
 	{
-		// D-2: only remove from FrozenPlayerUids when a matching controller was found
+		// D-2 fixed: always update FrozenPlayerUids regardless of online status
 		bool bMatchedUnfreeze = false;
 		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 		{
@@ -7143,8 +7164,8 @@ FString UBanDiscordSubsystem::ExecutePanelFreeze(const FString& PlayerArg,
 				break;
 			}
 		}
-		if (bMatchedUnfreeze)
-			AFreezeChatCommand::FrozenPlayerUids.Remove(Uid);
+		// Always remove from frozen set so offline players are not re-frozen on reconnect.
+		AFreezeChatCommand::FrozenPlayerUids.Remove(Uid);
 		UE_LOG(LogBanDiscord, Log,
 		       TEXT("BanDiscordSubsystem: [Panel] %s unfroze %s (%s)."),
 		       *SenderName, *DisplayName, *Uid);
@@ -7154,7 +7175,7 @@ FString UBanDiscordSubsystem::ExecutePanelFreeze(const FString& PlayerArg,
 	}
 	else
 	{
-		// D-2: only add to FrozenPlayerUids when a matching controller was found
+		// D-2 fixed: always update FrozenPlayerUids regardless of online status
 		bool bMatchedFreeze = false;
 		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 		{
@@ -7169,8 +7190,8 @@ FString UBanDiscordSubsystem::ExecutePanelFreeze(const FString& PlayerArg,
 				break;
 			}
 		}
-		if (bMatchedFreeze)
-			AFreezeChatCommand::FrozenPlayerUids.Add(Uid);
+		// Always add to frozen set so offline players are frozen when they reconnect.
+		AFreezeChatCommand::FrozenPlayerUids.Add(Uid);
 		UE_LOG(LogBanDiscord, Log,
 		       TEXT("BanDiscordSubsystem: [Panel] %s froze %s (%s)."),
 		       *SenderName, *DisplayName, *Uid);

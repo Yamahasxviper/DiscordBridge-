@@ -251,6 +251,13 @@ private:
      */
     mutable FDateTime    LastKnownFileModTime;
 
+    /**
+     * When true, ReloadIfChanged() will unconditionally reload on its next tick
+     * regardless of the file mtime.  Used instead of resetting LastKnownFileModTime
+     * to FDateTime(0) to avoid colliding with the "file not found" sentinel.
+     */
+    mutable bool         bPendingForcedReload = false;
+
     /** Protects all in-memory and file operations so the HTTP thread and
      *  game thread can both access the ban list safely. */
     mutable FCriticalSection DbMutex;

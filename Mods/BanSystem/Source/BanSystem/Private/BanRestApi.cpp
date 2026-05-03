@@ -155,7 +155,8 @@ namespace BanJson
     static bool ConstantTimeEquals(const FString& A, const FString& B)
     {
         const FTCHARToUTF8 Au(*A), Bu(*B);
-        uint8 Diff = static_cast<uint8>(Au.Length() ^ Bu.Length());
+        // Use uint32 so that length differences ≥ 256 are not masked by uint8 truncation.
+        uint32 Diff = static_cast<uint32>(Au.Length() != Bu.Length() ? 1 : 0);
         const int32 N = FMath::Max(Au.Length(), Bu.Length());
         for (int32 i = 0; i < N; ++i)
         {
@@ -1324,7 +1325,7 @@ void UBanRestApi::RegisterRoutes()
             Root->SetNumberField(TEXT("total"),      Total);
             Root->SetNumberField(TEXT("page"),       Page);
             Root->SetNumberField(TEXT("pageSize"),   Limit);
-            Root->SetNumberField(TEXT("totalPages"), (Total + Limit - 1) / FMath::Max(Limit, 1));
+            Root->SetNumberField(TEXT("totalPages"), (static_cast<int64>(Total) + Limit - 1) / FMath::Max(Limit, 1));
             Root->SetArrayField (TEXT("entries"),    Arr);
             Done(BanJson::Json(BanJson::ObjectToString(Root)));
             return true;
@@ -1854,25 +1855,23 @@ void UBanRestApi::RegisterRoutes()
                 Done(BanJson::Error(TEXT("uid is required")));
                 return true;
             }
+            // Clamp player-supplied strings to prevent database bloat / DoS.
+            Uid = Uid.Left(128).TrimStartAndEnd();
             Body->TryGetStringField(TEXT("reason"),      Reason);
             Body->TryGetStringField(TEXT("contactInfo"), ContactInfo);
+            Reason      = Reason.Left(2000).TrimStartAndEnd();
+            ContactInfo = ContactInfo.Left(500).TrimStartAndEnd();
             if (Reason.IsEmpty()) Reason = TEXT("No reason given");
 
-            // Reject duplicate appeals: only one Pending appeal per UID is allowed
-            // to prevent appeal-flooding that would fill disk and spam the mod channel.
+            // Reject duplicate appeals atomically: AddAppealIfNoDuplicate checks for an
+            // existing Pending entry and inserts the new one inside a single mutex lock,
+            // closing the TOCTOU window that existed when doing GetAllAppeals()+AddAppeal().
+            const FBanAppealEntry NewEntry = AppealsReg->AddAppealIfNoDuplicate(Uid, Reason, ContactInfo);
+            if (NewEntry.Id == 0)
             {
-                TArray<FBanAppealEntry> Existing = AppealsReg->GetAllAppeals();
-                for (const FBanAppealEntry& A : Existing)
-                {
-                    if (A.Uid.Equals(Uid, ESearchCase::IgnoreCase) && A.Status == EAppealStatus::Pending)
-                    {
-                        Done(BanJson::Error(TEXT("A pending appeal for this player already exists. Please wait for a response before submitting another.")));
-                        return true;
-                    }
-                }
+                Done(BanJson::Error(TEXT("A pending appeal for this player already exists. Please wait for a response before submitting another.")));
+                return true;
             }
-
-            const FBanAppealEntry NewEntry = AppealsReg->AddAppeal(Uid, Reason, ContactInfo);
 
             // AddAppeal() already broadcasts OnBanAppealSubmitted, which
             // BanDiscordSubsystem subscribes to when the bot is running.
@@ -2059,6 +2058,27 @@ void UBanRestApi::RegisterRoutes()
                     ? FPaths::GetBaseFilename(Cfg->DatabasePath) : TEXT("this server");
             }();
 
+            // HTML-escape ServerName before injecting into the page to prevent XSS.
+            auto HtmlEscape = [](const FString& S) -> FString
+            {
+                FString Out;
+                Out.Reserve(S.Len());
+                for (TCHAR C : S)
+                {
+                    switch (C)
+                    {
+                    case TCHAR('&'):  Out += TEXT("&amp;");  break;
+                    case TCHAR('<'):  Out += TEXT("&lt;");   break;
+                    case TCHAR('>'):  Out += TEXT("&gt;");   break;
+                    case TCHAR('"'):  Out += TEXT("&quot;"); break;
+                    case TCHAR('\''): Out += TEXT("&#x27;"); break;
+                    default:          Out.AppendChar(C);     break;
+                    }
+                }
+                return Out;
+            };
+            const FString SafeServerName = HtmlEscape(ServerName);
+
             const FString Html = FString::Printf(TEXT(R"HTML(<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2108,7 +2128,7 @@ void UBanRestApi::RegisterRoutes()
     });
   </script>
 </body>
-</html>)HTML"), *ServerName, *ServerName);
+</html>)HTML"), *SafeServerName, *SafeServerName);
 
             auto R = FHttpServerResponse::Create(Html, TEXT("text/html; charset=utf-8"));
             R->Code = EHttpServerResponseCodes::Ok;
@@ -2675,7 +2695,9 @@ void UBanRestApi::RegisterRoutes()
             {
                 for (const FBanEntry& B : DB->GetAllBans())
                 {
-                    if (B.Uid.Equals(Uid, ESearchCase::IgnoreCase))
+                    // MatchesUid checks both primary Uid and LinkedUids so that
+                    // compound bans (EOS + IP) are counted for either identifier.
+                    if (B.MatchesUid(Uid))
                     {
                         ++TotalBans;
                         if (!B.IsExpired()) bCurrentlyBanned = true;

@@ -1298,6 +1298,16 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 	const bool bMasked    = (Header[1] & 0x80) != 0; // server→client should NOT be masked
 	uint64 PayloadLen     = Header[1] & 0x7F;
 
+	// RFC 6455 §5.2: RSV1/RSV2/RSV3 must be zero when no extension is negotiated.
+	if (Header[0] & 0x70)
+	{
+		UE_LOG(LogSMLWebSocket, Error,
+		       TEXT("SMLWebSocket: Frame with nonzero RSV bits — closing connection"));
+		const uint8 ClosePayload[2] = { 0x03, 0xEA }; // 1002
+		SendWsFrame(WsOpcode::Close, ClosePayload, 2);
+		return false;
+	}
+
 	// Extended payload length
 	if (PayloadLen == 126)
 	{
@@ -1313,6 +1323,13 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 		for (int32 i = 0; i < 8; ++i)
 		{
 			PayloadLen = (PayloadLen << 8) | Ext[i];
+		}
+		// RFC 6455 §5.2: the most significant bit of the 8-byte extended length MUST be 0.
+		if (PayloadLen & (static_cast<uint64>(1) << 63))
+		{
+			UE_LOG(LogSMLWebSocket, Error,
+			       TEXT("SMLWebSocket: Frame has invalid 8-byte payload length (MSB set) — closing connection"));
+			return false;
 		}
 	}
 
@@ -1338,6 +1355,18 @@ bool FSMLWebSocketRunnable::ProcessIncomingFrame()
 	}
 
 	const int32 PayloadLen32 = static_cast<int32>(PayloadLen);
+
+	// RFC 6455 §5.5: control frames must have FIN=1 and payload ≤ 125 bytes.
+	const bool bIsControl = (Opcode == WsOpcode::Close || Opcode == WsOpcode::Ping || Opcode == WsOpcode::Pong);
+	if (bIsControl && (!bFin || PayloadLen32 > 125))
+	{
+		UE_LOG(LogSMLWebSocket, Error,
+		       TEXT("SMLWebSocket: Invalid control frame (FIN=%d, PayloadLen=%d) — closing connection"),
+		       (int)bFin, PayloadLen32);
+		const uint8 ClosePayload[2] = { 0x03, 0xEA }; // 1002
+		SendWsFrame(WsOpcode::Close, ClosePayload, 2);
+		return false;
+	}
 
 	// Read payload
 	TArray<uint8> Payload;

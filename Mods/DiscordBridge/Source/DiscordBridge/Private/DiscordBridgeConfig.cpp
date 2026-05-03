@@ -529,13 +529,19 @@ FDiscordBridgeConfig FDiscordBridgeConfig::LoadOrCreate()
 						const FString Rest = Cleaned.Mid(Idx + Search.Len());
 						int32 Comma = INDEX_NONE;
 						if (Rest.FindChar(TEXT(','), Comma))
-						const FString Left = Rest.Left(Comma).TrimStartAndEnd();
-						if (Left.IsNumeric())
-							SA.IntervalMinutes = FCString::Atoi(*Left);
+						{
+							// Value is followed by more fields — read up to the comma.
+							const FString Left = Rest.Left(Comma).TrimStartAndEnd();
+							if (Left.IsNumeric())
+								SA.IntervalMinutes = FCString::Atoi(*Left);
+						}
 						else
-						const FString Trimmed = Rest.TrimStartAndEnd();
-						if (Trimmed.IsNumeric())
-							SA.IntervalMinutes = FCString::Atoi(*Trimmed);
+						{
+							// Value is the only / last field — use the whole remainder.
+							const FString Trimmed = Rest.TrimStartAndEnd();
+							if (Trimmed.IsNumeric())
+								SA.IntervalMinutes = FCString::Atoi(*Trimmed);
+						}
 					}
 				}
 				// Extract Message
