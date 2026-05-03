@@ -2059,6 +2059,27 @@ void UBanRestApi::RegisterRoutes()
                     ? FPaths::GetBaseFilename(Cfg->DatabasePath) : TEXT("this server");
             }();
 
+            // HTML-escape ServerName before injecting into the page to prevent XSS.
+            auto HtmlEscape = [](const FString& S) -> FString
+            {
+                FString Out;
+                Out.Reserve(S.Len());
+                for (TCHAR C : S)
+                {
+                    switch (C)
+                    {
+                    case TCHAR('&'):  Out += TEXT("&amp;");  break;
+                    case TCHAR('<'):  Out += TEXT("&lt;");   break;
+                    case TCHAR('>'):  Out += TEXT("&gt;");   break;
+                    case TCHAR('"'):  Out += TEXT("&quot;"); break;
+                    case TCHAR('\''): Out += TEXT("&#x27;"); break;
+                    default:          Out.AppendChar(C);     break;
+                    }
+                }
+                return Out;
+            };
+            const FString SafeServerName = HtmlEscape(ServerName);
+
             const FString Html = FString::Printf(TEXT(R"HTML(<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2108,7 +2129,7 @@ void UBanRestApi::RegisterRoutes()
     });
   </script>
 </body>
-</html>)HTML"), *ServerName, *ServerName);
+</html>)HTML"), *SafeServerName, *SafeServerName);
 
             auto R = FHttpServerResponse::Create(Html, TEXT("text/html; charset=utf-8"));
             R->Code = EHttpServerResponseCodes::Ok;
@@ -2675,7 +2696,9 @@ void UBanRestApi::RegisterRoutes()
             {
                 for (const FBanEntry& B : DB->GetAllBans())
                 {
-                    if (B.Uid.Equals(Uid, ESearchCase::IgnoreCase))
+                    // MatchesUid checks both primary Uid and LinkedUids so that
+                    // compound bans (EOS + IP) are counted for either identifier.
+                    if (B.MatchesUid(Uid))
                     {
                         ++TotalBans;
                         if (!B.IsExpired()) bCurrentlyBanned = true;
