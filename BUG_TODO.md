@@ -943,8 +943,9 @@ silently ineffective (never matching a real player IP), would pollute the databa
 could confuse sync clients or Discord embeds.
 
 **Fix:** Added a two-step validation immediately after extracting `ipAddress`:
-1. **Length check:** reject strings longer than 45 characters (the maximum length of a
-   full IPv4-mapped IPv6 address: `ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255`).
+1. **Length check:** reject strings longer than 45 characters (generous limit that
+   accommodates any valid IPv4 (max 15 chars), standard IPv6 (max 39 chars), or
+   mixed IPv6/IPv4 uncompressed notation (max 45 chars)).
 2. **Character whitelist:** reject any string containing characters outside
    `[0-9a-fA-F:.]` — the only characters legal in IPv4 and IPv6 address literals.
 Both failure paths return HTTP 400 with `"ipAddress is invalid"`.
