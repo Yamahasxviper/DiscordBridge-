@@ -86,6 +86,8 @@ void UBanSyncClient::BroadcastBan(const FString& Uid, const FString& PlayerName,
     Msg->SetStringField(TEXT("playerName"),      PlayerName);
     Msg->SetStringField(TEXT("reason"),          Reason);
     Msg->SetStringField(TEXT("bannedBy"),        BannedBy);
+    // int32 value — exactly representable in double; string encoding not needed
+    // (the int64-string convention applies only to IDs that exceed 2^53).
     Msg->SetNumberField(TEXT("durationMinutes"), static_cast<double>(DurationMinutes));
     Msg->SetStringField(TEXT("category"),        Category);
     // Transmit the original ban-creation timestamp so peers preserve when the ban

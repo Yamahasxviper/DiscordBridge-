@@ -702,7 +702,9 @@ void UDiscordBridgeSubsystem::HandleGatewayPayload(const FString& RawJson)
 	case EDiscordGatewayOpcode::Dispatch:
 	{
 		// Update the sequence number first; it is used in heartbeats.
-		// TryGetNumberField only accepts double& in UE5's FJsonObject API.
+		// TryGetNumberField accepts double&, int32&, and int64& since UE5.3.2.
+		// We use double here to guard against a malformed gateway that sends a
+		// fractional or out-of-range value (see the range check below).
 		double Seq = -1.0;
 		if (Root->TryGetNumberField(TEXT("s"), Seq))
 		{
@@ -1111,6 +1113,21 @@ void UDiscordBridgeSubsystem::HandleDispatch(const FString& EventType, int32 Seq
 				else if (!bHasRole && !SyncUsername.IsEmpty())
 				{
 					FWhitelistManager::RemovePlayer(SyncUsername, TEXT(""), TEXT("sync-remove"));
+				}
+			}
+			else // GUILD_MEMBER_ADD
+			{
+				// A new member who already holds the whitelist role when they join
+				// must be auto-added immediately.  Role removal cannot happen via
+				// a join event, so only the add path is executed here.
+				if (bHasRole && !SyncUsername.IsEmpty())
+				{
+					if (FWhitelistManager::AddPlayer(SyncUsername, TEXT(""), TEXT("sync-role")))
+					{
+						PostWhitelistEvent(
+							FString::Printf(TEXT("**%s** added via Discord role sync (joined with role)"), *SyncUsername),
+							SyncUsername, TEXT("sync-role"), 3066993);
+					}
 				}
 			}
 			}

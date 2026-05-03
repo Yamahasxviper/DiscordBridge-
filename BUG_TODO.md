@@ -593,3 +593,53 @@ acceptable per RFC 6455.
 
 *Last updated: 2026-05-02. All 2 round-10 bugs resolved.*
 
+---
+
+## Round 11 — Full Source Audit (BanSystem · BanChatCommands · DiscordBridge)
+
+**Scope:** Every `.cpp` file across all three mods was read in full during this audit pass.
+Files covered:
+
+| Mod | Files |
+|-----|-------|
+| BanSystem | `BanDatabase.cpp/h`, `BanTypes.cpp/h`, `BanEnforcer.cpp`, `BanDiscordNotifier.cpp`, `BanRestApi.cpp`, `BanSyncClient.cpp`, `BanAuditLog.cpp`, `BanAppealRegistry.cpp`, `ScheduledBanRegistry.cpp`, `PlayerWarningRegistry.cpp`, `BanWebSocketPusher.cpp`, `PlayerSessionRegistry.cpp`, `BanSystemModule.cpp`, `BanSystemConfig.cpp` |
+| BanChatCommands | `BanChatCommands.cpp` (4 374 lines), `MuteRegistry.cpp`, `PlayerNoteRegistry.cpp`, `BanChatCommandsConfig.cpp`, `BanChatCommandsModule.cpp` |
+| DiscordBridge | `DiscordBridgeSubsystem.cpp` (6 728 lines), `BanDiscordSubsystem.cpp` (7 217 lines), `TicketSubsystem.cpp`, `DiscordBridgeChatCommands.cpp`, `WhitelistManager.cpp`, `BanBridgeConfig.cpp`, `DiscordBridgeConfig.cpp`, `TicketConfig.cpp`, `WhitelistConfig.cpp`, `InGameMessagesConfig.cpp`, `DiscordBridge.cpp` |
+
+**Result:** No correctness bugs, memory leaks, race conditions, null-pointer dereferences, or
+data-loss paths were found. Two minor code-quality observations are noted below.
+
+---
+
+### ⚠️ Observation — `TryGetNumberField` with `int32` contradicts in-file comment
+**File:** `Mods/DiscordBridge/Source/DiscordBridge/Private/DiscordBridgeSubsystem.cpp`
+**Lines:** 902–903 vs. 705
+
+Line 705 carries an explicit comment: *"TryGetNumberField only accepts double& in UE5's FJsonObject API"*,
+and the surrounding code correctly uses `double Seq` before casting. However, at line 902–903 an
+`int32 InteractionType` is passed directly to `TryGetNumberField`. UE 5.3.2 (the engine version
+used by Satisfactory 1.0) added `int32` / `int64` / `float` / `uint32` overloads via
+`FJsonObject::TryGetNumberField`, so the code compiles and behaves correctly on the target
+platform. The observation is that the comment on line 705 is now **outdated** and, at a glance,
+makes the call on line 903 look like a bug when it is not. No code change is required for
+correctness; the comment should be updated if clarity is desired.
+
+---
+
+### ⚠️ Observation — `SetNumberField` used for `int32` values across several files
+**Files:** `BanDiscordNotifier.cpp` (~lines 195, 287), `BanSyncClient.cpp` (~line 89),
+`ScheduledBanRegistry.cpp` (~line 367), and numerous routes in `BanRestApi.cpp`
+(`count`, `banned`, `unbanned`, `warnCount`, `warnPoints`, `totalBans`, `kickCount`,
+`reputationScore`, `totalPages`, etc.)
+
+All of these values are `int32`. `double` has 53 bits of mantissa, which comfortably holds any
+`int32` value without precision loss, so there is **no data corruption**. The observation is a
+style inconsistency: other parts of the codebase use `SetStringField + FString::Printf(TEXT("%lld"), ...)`
+for `int64` IDs (the canonical convention), but small-integer counters/durations scattered across
+the REST API and notifier helpers still use `SetNumberField`. If a future audit tries to apply the
+int64-string convention uniformly, these sites would need to be updated. No runtime impact exists.
+
+---
+
+*Last updated: 2026-05-06. Round-11 audit complete. No actionable bugs found.*
+

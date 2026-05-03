@@ -1311,8 +1311,10 @@ EExecutionStatus AUnbanNameChatCommand::ExecuteCommand_Implementation(
     const FPlayerSessionRecord& Rec = Results[0];
     bool bAnyRemoved = false;
 
-    // Remove the EOS PUID ban.
-    if (DB->RemoveBanByUid(Rec.Uid))
+    // Remove the EOS PUID ban, capturing the entry so LinkedUids can be
+    // consulted to remove every explicitly linked counterpart ban as well.
+    FBanEntry EosBanRecord;
+    if (DB->RemoveBanByUid(Rec.Uid, EosBanRecord))
     {
         Sender->SendChatMessage(
             FString::Printf(TEXT("[BanChatCommands] Removed EOS ban for '%s' (%s)."),
@@ -1322,6 +1324,12 @@ EExecutionStatus AUnbanNameChatCommand::ExecuteCommand_Implementation(
         if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
             AuditLog->LogAction(TEXT("unban"), Rec.Uid, Rec.DisplayName,
                 AdminId, Sender->GetSenderName(), TEXT(""));
+
+        // Remove every counterpart ban (linked UIDs + session-registry IP
+        // lookup) so that all identities for this player are unblocked in one
+        // command.  This matches the behaviour of /unban, which was already
+        // calling RemoveCounterpartBans but /unbanname was not.
+        BanChat::RemoveCounterpartBans(this, Sender, DB, Rec.Uid, EosBanRecord.LinkedUids);
     }
     else
     {
@@ -1329,30 +1337,6 @@ EExecutionStatus AUnbanNameChatCommand::ExecuteCommand_Implementation(
             FString::Printf(TEXT("[BanChatCommands] No active EOS ban found for '%s' (%s)."),
                 *Rec.DisplayName, *Rec.Uid),
             FLinearColor::Yellow);
-    }
-
-    // Remove the IP ban if there is a recorded IP address.
-    if (!Rec.IpAddress.IsEmpty())
-    {
-        const FString IpUid = UBanDatabase::MakeUid(TEXT("IP"), Rec.IpAddress);
-        if (DB->RemoveBanByUid(IpUid))
-        {
-            Sender->SendChatMessage(
-                FString::Printf(TEXT("[BanChatCommands] Also removed IP ban for %s."),
-                    *Rec.IpAddress),
-                FLinearColor::Green);
-            bAnyRemoved = true;
-            if (UBanAuditLog* AuditLog = GI->GetSubsystem<UBanAuditLog>())
-                AuditLog->LogAction(TEXT("unban"), IpUid, Rec.DisplayName,
-                    AdminId, Sender->GetSenderName(), TEXT(""));
-        }
-        else
-        {
-            Sender->SendChatMessage(
-                FString::Printf(TEXT("[BanChatCommands] No active IP ban found for %s."),
-                    *Rec.IpAddress),
-                FLinearColor::Yellow);
-        }
     }
 
     return bAnyRemoved ? EExecutionStatus::COMPLETED : EExecutionStatus::UNCOMPLETED;
