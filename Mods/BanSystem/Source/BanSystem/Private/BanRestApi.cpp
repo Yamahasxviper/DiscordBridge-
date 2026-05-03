@@ -155,7 +155,8 @@ namespace BanJson
     static bool ConstantTimeEquals(const FString& A, const FString& B)
     {
         const FTCHARToUTF8 Au(*A), Bu(*B);
-        uint8 Diff = static_cast<uint8>(Au.Length() ^ Bu.Length());
+        // Use uint32 so that length differences ≥ 256 are not masked by uint8 truncation.
+        uint32 Diff = static_cast<uint32>(Au.Length() != Bu.Length() ? 1 : 0);
         const int32 N = FMath::Max(Au.Length(), Bu.Length());
         for (int32 i = 0; i < N; ++i)
         {
