@@ -176,7 +176,7 @@ void UScheduledBanRegistry::Tick(float DeltaTime)
         TArray<int64> IdsToRemove = AppliedIds;
         for (const FScheduledBanEntry& FE : FailedEntries)
         {
-            if (FE.RetryCount > 5)
+            if (FE.RetryCount >= 5) // 5-attempt cap: drop after 5 failed retries
             {
                 UE_LOG(LogScheduledBanRegistry, Error,
                     TEXT("ScheduledBanRegistry: dropping entry id=%lld after %d failed attempts"),

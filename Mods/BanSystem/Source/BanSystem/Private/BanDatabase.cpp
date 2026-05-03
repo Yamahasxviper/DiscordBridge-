@@ -242,12 +242,20 @@ void UBanDatabase::ReloadIfChanged()
     // and our lock acquisition, causing us to store the stale T1 and then loop
     // on every subsequent call (T2 != T1 forever).
     FDateTime NewModTime;
+    bool bForcedThisTick = false;
     {
         FScopeLock Lock(&DbMutex);
+        bForcedThisTick = bPendingForcedReload;
+        bPendingForcedReload = false;
+
         NewModTime = IFileManager::Get().GetTimeStamp(*DbPath);
 
         // GetTimeStamp returns FDateTime(0) when the file does not exist.
-        if (NewModTime == FDateTime(0) || NewModTime == LastKnownFileModTime)
+        if (NewModTime == FDateTime(0))
+            return;
+
+        // If neither a forced reload was requested nor the mtime changed, skip.
+        if (!bForcedThisTick && NewModTime == LastKnownFileModTime)
             return;
 
         // Record the new mtime BEFORE releasing the lock and calling LoadFromFile().
@@ -285,11 +293,11 @@ void UBanDatabase::ReloadIfChanged()
     if (bConcurrentEditDuringLoad)
     {
         // SaveToFile (called by PruneExpiredBans) may have set LastKnownFileModTime
-        // to T3 > T2, permanently hiding the T2 edit.  Reset to FDateTime(0) so
-        // the next ReloadIfChanged tick sees T_current != FDateTime(0) and triggers
-        // another load, picking up any content that the prune write clobbered.
+        // to T3 > T2, permanently hiding the T2 edit.  Set bPendingForcedReload so
+        // the next tick unconditionally re-reads the file — this avoids using
+        // FDateTime(0) as a sentinel (which collides with "file not found").
         FScopeLock Lock(&DbMutex);
-        LastKnownFileModTime = FDateTime(0);
+        bPendingForcedReload = true;
     }
 
     UE_LOG(LogBanDatabase, Log,

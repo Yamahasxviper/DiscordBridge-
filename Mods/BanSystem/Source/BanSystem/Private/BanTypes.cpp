@@ -81,9 +81,12 @@ FString FBanEntry::GetKickMessage() const
             ? Cfg->AppealUrl
             : TEXT("(contact server admin)");
 
-        Tmpl = Tmpl.Replace(TEXT("{reason}"),      *Reason,        ESearchCase::IgnoreCase);
-        Tmpl = Tmpl.Replace(TEXT("{expiry}"),       *ExpiryStr,     ESearchCase::IgnoreCase);
-        Tmpl = Tmpl.Replace(TEXT("{appeal_url}"),   *AppealUrlStr,  ESearchCase::IgnoreCase);
+        // Apply substitutions: {expiry} and {appeal_url} first, {reason} last.
+        // This prevents a reason containing "{expiry}" or "{appeal_url}" from being
+        // expanded in a subsequent pass (double-substitution bug).
+        Tmpl = Tmpl.Replace(TEXT("{expiry}"),     *ExpiryStr,     ESearchCase::IgnoreCase);
+        Tmpl = Tmpl.Replace(TEXT("{appeal_url}"), *AppealUrlStr,  ESearchCase::IgnoreCase);
+        Tmpl = Tmpl.Replace(TEXT("{reason}"),     *Reason,        ESearchCase::IgnoreCase);
         return Tmpl;
     }
 

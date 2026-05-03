@@ -1324,7 +1324,7 @@ void UBanRestApi::RegisterRoutes()
             Root->SetNumberField(TEXT("total"),      Total);
             Root->SetNumberField(TEXT("page"),       Page);
             Root->SetNumberField(TEXT("pageSize"),   Limit);
-            Root->SetNumberField(TEXT("totalPages"), (Total + Limit - 1) / FMath::Max(Limit, 1));
+            Root->SetNumberField(TEXT("totalPages"), (static_cast<int64>(Total) + Limit - 1) / FMath::Max(Limit, 1));
             Root->SetArrayField (TEXT("entries"),    Arr);
             Done(BanJson::Json(BanJson::ObjectToString(Root)));
             return true;

@@ -201,26 +201,9 @@ void FBanBridgeConfig::RestoreDefaultConfigIfNeeded()
 	const FString PrimaryPath = GetConfigFilePath();
 	IPlatformFile& PF = FPlatformFileManager::Get().GetPlatformFile();
 
-	// Leave the file as-is if it already contains comment lines - that means
-	// it was either hand-edited or previously written by this function.
-	if (PF.FileExists(*PrimaryPath))
-	{
-		FString Existing;
-		const bool bReadOk = FFileHelper::LoadFileToString(Existing, *PrimaryPath);
-		if (!bReadOk)
-		{
-			// File absent or unreadable — write template only if file truly doesn't exist
-			if (!IFileManager::Get().FileExists(*PrimaryPath))
-				FFileHelper::SaveStringToFile(Template, *PrimaryPath,
-					FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
-			return;
-		}
-		if (Existing.Contains(TEXT("#")))
-			return;
-	}
-
-	// File is missing or was stripped of comments by Alpakit - write the
-	// annotated template so operators can see setting descriptions.
+	// Declare the template here — used both in the early-return fallback write
+	// (line ~215) and in the main write path below.  Declaring it after the
+	// early-return block (as it was previously) causes use-before-declaration UB.
 	// This content mirrors DefaultBanBridge.ini shipped in the repository.
 	const FString Template =
 		TEXT("# DiscordBridge - BanSystem integration settings\n")
@@ -266,6 +249,27 @@ void FBanBridgeConfig::RestoreDefaultConfigIfNeeded()
 		TEXT("#   - Regular messages posted to this channel by Discord staff are\n")
 		TEXT("#     relayed to all online admin/moderator players in-game.\n")
 		TEXT("# Leave empty to disable the staff-chat bridge (default).\n");
+
+	// Leave the file as-is if it already contains comment lines - that means
+	// it was either hand-edited or previously written by this function.
+	if (PF.FileExists(*PrimaryPath))
+	{
+		FString Existing;
+		const bool bReadOk = FFileHelper::LoadFileToString(Existing, *PrimaryPath);
+		if (!bReadOk)
+		{
+			// File absent or unreadable — write template only if file truly doesn't exist
+			if (!IFileManager::Get().FileExists(*PrimaryPath))
+				FFileHelper::SaveStringToFile(Template, *PrimaryPath,
+					FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+			return;
+		}
+		if (Existing.Contains(TEXT("#")))
+			return;
+	}
+
+	// File is missing or was stripped of comments by Alpakit - write the
+	// annotated template so operators can see setting descriptions.
 
 	PF.CreateDirectoryTree(*FPaths::GetPath(PrimaryPath));
 	if (FFileHelper::SaveStringToFile(Template, *PrimaryPath,

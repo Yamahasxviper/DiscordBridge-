@@ -504,6 +504,13 @@ bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClient
         const bool  bMasked = (B1 & 0x80) != 0;
         uint64 PayloadLen   = B1 & 0x7F;
 
+        // RFC 6455 §5.2: RSV1/RSV2/RSV3 must all be zero when no extension is negotiated.
+        if (B0 & 0x70)
+        {
+            UE_LOG(LogWSServer, Error, TEXT("WSServer: Frame with nonzero RSV bits — dropping client"));
+            return false;
+        }
+
         int32 HeaderSize = 2;
         if (PayloadLen == 126)
         {
@@ -542,8 +549,26 @@ bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClient
         const int32 TotalSize = HeaderSize + MaskSize + PayloadLen32;
         if (Buf.Num() < TotalSize) break;
 
+        // RFC 6455 §5.5: control frames (opcode 0x8/0x9/0xA) must have FIN=1 and payload ≤ 125.
+        const bool bIsControl = (Opcode == 0x8 || Opcode == 0x9 || Opcode == 0xA);
+        if (bIsControl && (!bFin || PayloadLen32 > 125))
+        {
+            UE_LOG(LogWSServer, Error,
+                TEXT("WSServer: Invalid control frame (FIN=%d, PayloadLen=%d) — dropping client"),
+                (int)bFin, PayloadLen32);
+            return false;
+        }
+
         if (Opcode == 0x8) // Close
         {
+            // RFC 6455 §5.5.1: echo a Close frame back before closing the connection.
+            TArray<uint8> CloseEcho;
+            CloseEcho.Add(0x88); // FIN=1, opcode=0x8
+            CloseEcho.Add(0x00); // no payload
+            FOutboundMsg Echo;
+            Echo.ClientId = ClientId;
+            Echo.Frame    = MoveTemp(CloseEcho);
+            OutboundQueue.Enqueue(MoveTemp(Echo));
             Buf.RemoveAt(0, TotalSize);
             return false;
         }
@@ -692,6 +717,13 @@ bool FSMLWebSocketServerRunnable::ProcessFrames(const FString& ClientId, FClient
                     Client.FragmentBuffer.Reset();
                 }
             }
+        }
+        else
+        {
+            // Unknown / reserved opcode — RFC 6455 §5.2 requires failing the connection.
+            UE_LOG(LogWSServer, Warning,
+                TEXT("WSServer: Unknown opcode 0x%02X — dropping client"), Opcode);
+            return false;
         }
 
         Buf.RemoveAt(0, TotalSize);
