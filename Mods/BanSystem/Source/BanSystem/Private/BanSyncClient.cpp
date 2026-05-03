@@ -269,14 +269,16 @@ void UBanSyncClient::OnPeerMessage(const FString& Message)
             const bool bPermanentMatch     = (Existing.bIsPermanent == (DurationMinutes <= 0));
             const bool bReasonMatch        = (Existing.Reason == IncomingReason);
             const bool bCategoryMatch      = (Existing.Category == Category);
-            // Also compare expiry so that duration-only updates are not silently dropped.
-            const FDateTime IncomingExpiry = (DurationMinutes <= 0)
-                ? FDateTime(0)
-                : FDateTime::UtcNow() + FTimespan::FromMinutes(DurationMinutes);
-            // Allow a 60-second tolerance to absorb transmission latency.
+            // Compare remaining lifetime of the existing ban against the incoming
+            // duration to detect duration-only updates.  Using remaining seconds
+            // avoids the systematic positive offset that occurred when IncomingExpiry
+            // was projected as UtcNow()+DurationMinutes after ceiling-rounding had
+            // already added up to 59 extra seconds.  Allow a 60-second tolerance to
+            // absorb transmission latency and sub-minute timing drift.
             const bool bExpiryMatch = Existing.bIsPermanent
                 ? true
-                : FMath::Abs((Existing.ExpireDate - IncomingExpiry).GetTotalSeconds()) < 60.0;
+                : FMath::Abs((Existing.ExpireDate - FDateTime::UtcNow()).GetTotalSeconds() -
+                              DurationMinutes * 60.0) < 60.0;
             // Compare evidence arrays so that an update which only adds/removes evidence
             // is not silently dropped (both arrays must have the same ordered elements).
             const bool bEvidenceMatch = (Existing.Evidence == IncomingEvidence);

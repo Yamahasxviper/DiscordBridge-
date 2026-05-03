@@ -461,7 +461,13 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 				if (!Self->PendingInteractionToken.IsEmpty()) return;
 				// Skip IP counterpart bans — they are implied by the primary EOS
 				// unban and posting them would produce duplicate moderation-log entries.
-				if (Uid.StartsWith(TEXT("IP:"))) return;
+				// Parse the UID to get the Platform so the check is consistent with
+				// BanAddedHandle and BanUpdatedHandle (which use Entry.Platform).
+				{
+					FString Platform, RawId;
+					UBanDatabase::ParseUid(Uid, Platform, RawId);
+					if (Platform == TEXT("IP")) return;
+				}
 
 				const FString DisplayName = PlayerName.IsEmpty() ? Uid : PlayerName;
 				const FString Msg = FString::Printf(

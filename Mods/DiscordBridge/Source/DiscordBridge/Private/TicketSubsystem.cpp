@@ -20,6 +20,7 @@
 #include "BanDiscordNotifier.h"
 #include "BanEnforcer.h"
 #include "BanSystemConfig.h"
+#include "PlayerSessionRegistry.h"
 #include "PlayerWarningRegistry.h"
 #include "MuteRegistry.h"
 #include "WhitelistManager.h"
@@ -839,19 +840,47 @@ void UTicketSubsystem::HandleTicketButtonInteraction(
 					&& BanDb->IsCurrentlyBannedByAnyId(*AppealEosUid, BanRecord);
 				if (bFoundBan)
 				{
-					if (BanDb->RemoveBanByUid(BanRecord.Uid))
+					// Use bSilent=true so OnBanRemoved is NOT broadcast.  The
+					// ticket handler posts its own "Appeal approved" message below;
+					// without bSilent=true the BanDiscordSubsystem BanRemovedHandle
+					// would fire a second, generic "✅ unbanned" post to the
+					// moderation-log channel at the same time (Bug #2 fix).
+					if (BanDb->RemoveBanByUid(BanRecord.Uid, /*bSilent=*/true))
 					{
 						bUnbanned = true;
 
-						// Also remove any linked counterpart bans (e.g. the matching
-						// IP ban that AddCounterpartBans created when the player was
-						// originally banned).  Without this the player remains
-						// effectively blocked via their IP ban even after approval.
+						// Also remove every counterpart ban.  We handle two categories:
+						// 1. Explicitly linked UIDs stored in BanRecord.LinkedUids
+						//    (created by AddCounterpartBans / /linkbans).
+						// 2. Unlinked IP counterpart — look up the session registry for
+						//    a matching IP ban that was never linked (e.g. REST-API ban).
+						//    Without this the player remains blocked via their IP ban
+						//    even after the appeal is approved (Bug #1 fix).
 						int32 ExtraRemoved = 0;
+
+						// 1. Explicitly linked bans.
 						for (const FString& LinkedUid : BanRecord.LinkedUids)
 						{
-							if (BanDb->RemoveBanByUid(LinkedUid))
+							if (BanDb->RemoveBanByUid(LinkedUid, /*bSilent=*/true))
 								++ExtraRemoved;
+						}
+
+						// 2. Unlinked IP counterpart via session-registry lookup.
+						if (UPlayerSessionRegistry* SessionReg = GI->GetSubsystem<UPlayerSessionRegistry>())
+						{
+							FString Platform, RawId;
+							UBanDatabase::ParseUid(BanRecord.Uid, Platform, RawId);
+							if (Platform == TEXT("EOS"))
+							{
+								FPlayerSessionRecord Rec;
+								if (SessionReg->FindByUid(BanRecord.Uid, Rec) && !Rec.IpAddress.IsEmpty())
+								{
+									const FString IpUid = UBanDatabase::MakeUid(TEXT("IP"), Rec.IpAddress);
+									if (!BanRecord.LinkedUids.Contains(IpUid) &&
+										BanDb->RemoveBanByUid(IpUid, /*bSilent=*/true))
+										++ExtraRemoved;
+								}
+							}
 						}
 
 						ApproveResponse = FString::Printf(

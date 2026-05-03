@@ -807,17 +807,20 @@ namespace BanChat
         const FString Key = CommandName + TEXT(":") + SenderUid;
         const FDateTime Now = FDateTime::UtcNow();
 
-        // Prune stale entries for players who have disconnected so the map
-        // doesn't grow for the entire server process lifetime.
-        // Use a generous 1-hour cutoff so we never prematurely evict entries
-        // that belong to a different command with a longer cooldown.
-        // The actual per-command expiry check below is what enforces the real
-        // cooldown; this loop is only a memory-management pass.
-        static const FTimespan PruneCutOff = FTimespan::FromHours(1);
-        for (auto It = CommandCooldowns.CreateIterator(); It; ++It)
+        // Prune stale entries at most once per minute so this map-sweep doesn't
+        // become O(players × commands) on every command invocation.  A 1-hour
+        // cutoff is still used as the expiry threshold so that a player with a
+        // long-cooldown command is never evicted before their actual window.
+        static FDateTime LastPruneTime;
+        if ((Now - LastPruneTime).GetTotalSeconds() >= 60.0)
         {
-            if ((Now - It.Value()) > PruneCutOff)
-                It.RemoveCurrent();
+            static const FTimespan PruneCutOff = FTimespan::FromHours(1);
+            for (auto It = CommandCooldowns.CreateIterator(); It; ++It)
+            {
+                if ((Now - It.Value()) > PruneCutOff)
+                    It.RemoveCurrent();
+            }
+            LastPruneTime = Now;
         }
 
         if (const FDateTime* Last = CommandCooldowns.Find(Key))
