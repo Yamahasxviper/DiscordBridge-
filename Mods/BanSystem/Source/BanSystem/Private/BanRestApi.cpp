@@ -1854,25 +1854,23 @@ void UBanRestApi::RegisterRoutes()
                 Done(BanJson::Error(TEXT("uid is required")));
                 return true;
             }
+            // Clamp player-supplied strings to prevent database bloat / DoS.
+            Uid = Uid.Left(128).TrimStartAndEnd();
             Body->TryGetStringField(TEXT("reason"),      Reason);
             Body->TryGetStringField(TEXT("contactInfo"), ContactInfo);
+            Reason      = Reason.Left(2000).TrimStartAndEnd();
+            ContactInfo = ContactInfo.Left(500).TrimStartAndEnd();
             if (Reason.IsEmpty()) Reason = TEXT("No reason given");
 
-            // Reject duplicate appeals: only one Pending appeal per UID is allowed
-            // to prevent appeal-flooding that would fill disk and spam the mod channel.
+            // Reject duplicate appeals atomically: AddAppealIfNoDuplicate checks for an
+            // existing Pending entry and inserts the new one inside a single mutex lock,
+            // closing the TOCTOU window that existed when doing GetAllAppeals()+AddAppeal().
+            const FBanAppealEntry NewEntry = AppealsReg->AddAppealIfNoDuplicate(Uid, Reason, ContactInfo);
+            if (NewEntry.Id == 0)
             {
-                TArray<FBanAppealEntry> Existing = AppealsReg->GetAllAppeals();
-                for (const FBanAppealEntry& A : Existing)
-                {
-                    if (A.Uid.Equals(Uid, ESearchCase::IgnoreCase) && A.Status == EAppealStatus::Pending)
-                    {
-                        Done(BanJson::Error(TEXT("A pending appeal for this player already exists. Please wait for a response before submitting another.")));
-                        return true;
-                    }
-                }
+                Done(BanJson::Error(TEXT("A pending appeal for this player already exists. Please wait for a response before submitting another.")));
+                return true;
             }
-
-            const FBanAppealEntry NewEntry = AppealsReg->AddAppeal(Uid, Reason, ContactInfo);
 
             // AddAppeal() already broadcasts OnBanAppealSubmitted, which
             // BanDiscordSubsystem subscribes to when the bot is running.

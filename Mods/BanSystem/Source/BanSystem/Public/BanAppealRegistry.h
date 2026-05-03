@@ -30,6 +30,16 @@ public:
     virtual void Deinitialize() override;
 
     /**
+     * Atomically checks whether a Pending appeal for Uid already exists and,
+     * only if none is found, inserts a new one.  Returns a valid entry (Id > 0)
+     * on success, or an empty entry (Id == 0) when a duplicate exists.
+     * This eliminates the check-then-act TOCTOU present in GetAllAppeals()+AddAppeal().
+     * Thread-safe.
+     */
+    FBanAppealEntry AddAppealIfNoDuplicate(const FString& Uid, const FString& Reason,
+                                           const FString& ContactInfo);
+
+    /**
      * Add a new ban appeal.
      * Returns the newly created entry (with auto-assigned Id).
      * Saves to disk immediately.

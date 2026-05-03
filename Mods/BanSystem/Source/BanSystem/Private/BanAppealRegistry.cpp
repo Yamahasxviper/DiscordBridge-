@@ -49,6 +49,53 @@ void UBanAppealRegistry::Deinitialize()
 //  Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
+FBanAppealEntry UBanAppealRegistry::AddAppealIfNoDuplicate(const FString& Uid,
+                                                            const FString& Reason,
+                                                            const FString& ContactInfo)
+{
+    FBanAppealEntry Entry;
+    bool bBroadcast = false;
+
+    {
+        FScopeLock Lock(&Mutex);
+
+        // Check for an existing Pending appeal inside the same lock that adds the new
+        // one — eliminates the check-then-act TOCTOU present in GetAllAppeals()+AddAppeal().
+        for (const FBanAppealEntry& A : Appeals)
+        {
+            if (A.Uid.Equals(Uid, ESearchCase::IgnoreCase) && A.Status == EAppealStatus::Pending)
+                return FBanAppealEntry{}; // duplicate — return empty entry (Id == 0)
+        }
+
+        if (NextId == 0)
+        {
+            UE_LOG(LogBanAppealRegistry, Error,
+                TEXT("BanAppealRegistry: all 64-bit IDs have been used — cannot add more appeals"));
+            return FBanAppealEntry{};
+        }
+        Entry.Id          = NextId;
+        NextId            = (NextId < INT64_MAX) ? NextId + 1 : 0;
+        Entry.Uid         = Uid;
+        Entry.Reason      = Reason;
+        Entry.ContactInfo = ContactInfo;
+        Entry.SubmittedAt = FDateTime::UtcNow();
+
+        Appeals.Add(Entry);
+        if (!SaveToFile())
+        {
+            UE_LOG(LogBanAppealRegistry, Error,
+                TEXT("BanAppealRegistry: failed to save after adding appeal id=%lld for uid='%s'"),
+                Entry.Id, *Entry.Uid);
+        }
+        bBroadcast = true;
+    }
+
+    if (bBroadcast)
+        OnBanAppealSubmitted.Broadcast(Entry);
+
+    return Entry;
+}
+
 FBanAppealEntry UBanAppealRegistry::AddAppeal(const FString& Uid,
                                                const FString& Reason,
                                                const FString& ContactInfo)

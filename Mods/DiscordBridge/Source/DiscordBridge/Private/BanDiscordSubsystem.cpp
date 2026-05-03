@@ -573,7 +573,8 @@ void UBanDiscordSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 				const FString KickMsg = FString::Printf(
 					TEXT("👢 Kicked **%s** (`%s`).\nReason: %s\nBy: %s"),
-					*PlayerName, *Uid, *Reason, *KickedBy);
+					*BanDiscordHelpers::EscapeMarkdown(PlayerName), *Uid,
+					*BanDiscordHelpers::EscapeMarkdown(Reason), *KickedBy);
 				Self->PostToPlayerModerationThread(PlayerName, Uid, KickMsg);
 			});
 	}
@@ -709,7 +710,9 @@ void UBanDiscordSubsystem::SetProvider(IDiscordBridgeProvider* InProvider)
 					TEXT("**Submitted:** %s\n")
 					TEXT("**Reason:** %s\n\n")
 					TEXT("Use `/appeal approve %lld` to unban or `/appeal deny %lld` to dismiss."),
-					Entry.Id, *Entry.Uid, *Contact, *SubmittedStr, *Reason,
+					Entry.Id, *Entry.Uid,
+					*BanDiscordHelpers::EscapeMarkdown(Contact), *SubmittedStr,
+					*BanDiscordHelpers::EscapeMarkdown(Reason),
 					Entry.Id, Entry.Id);
 
 				Self->Respond(ChannelId, Message);
@@ -5307,8 +5310,9 @@ void UBanDiscordSubsystem::HandlePanelCommand(const FString& ChannelId,
 {
 	if (!CachedProvider) return;
 
-	// Feature 12: Per-user rate-limit.  Skip when AuthorId is empty (auto-post / tests).
-	if (!AuthorId.IsEmpty())
+	// Feature 12: Per-user rate-limit.  Skip when AuthorId is empty (auto-post / tests)
+	// or when PanelRateLimitSeconds == 0 (rate-limiting disabled).
+	if (!AuthorId.IsEmpty() && PanelRateLimitSeconds > 0.0f)
 	{
 		const FDateTime Now = FDateTime::UtcNow();
 
